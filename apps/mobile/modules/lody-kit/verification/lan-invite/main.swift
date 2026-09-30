@@ -34,6 +34,7 @@ rejects("lody-lan://abc@hub:8788/\(String(repeating: "x", count: 41))", .invalid
 
 assert(LanInvite.isWorkspace(invite.workspaceId) && !LanInvite.isWorkspace("org_123"))
 let encoded = try JSONEncoder().encode(invite)
-assert(try JSONDecoder().decode(LanInvite.self, from: encoded) == invite)
+let decoded = try JSONDecoder().decode(LanInvite.self, from: encoded)
+assert(decoded == invite)
 
 print("PASS: invite parsing, Lody-compatible LAN ids, rejection of malformed invites")
