@@ -47,10 +47,19 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
     guard let self, let id = self.dataSource.sectionIdentifier(for: index.section),
           let section = self.sections.first(where: { $0.id == id }) else { return }
     var content = UIListContentConfiguration.header()
-    content.text = section.header
+    if section.headerValue.isEmpty {
+      content.text = section.header
+    } else {
+      let title = NSMutableAttributedString(string: section.header, attributes: [.font: content.textProperties.font, .foregroundColor: content.textProperties.color])
+      title.append(NSAttributedString(string: "  " + section.headerValue, attributes: [.font: UIFont.preferredFont(forTextStyle: .caption1), .foregroundColor: UIColor.tertiaryLabel]))
+      content.attributedText = title
+    }
     cell.contentConfiguration = content
     cell.backgroundConfiguration = .clear()
+    cell.isAccessibilityElement = true
+    cell.accessibilityLabel = [section.header, section.headerValue].filter { !$0.isEmpty }.joined(separator: ", ")
     cell.accessibilityTraits = .header
+    cell.accessibilityIdentifier = section.id
   }
 
   required init(appContext: AppContext? = nil) {
@@ -91,6 +100,13 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
       configuration.trailingSwipeActionsConfigurationProvider = { [weak self] in self?.swipes(at: $0, leading: false) }
       let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
       section.contentInsets = .init(top: 4, leading: 12, bottom: 8, trailing: 12)
+      // A row-less titled section heads the outline after it, such as a machine group.
+      let titles = { (model: LodyListSection?) in model.map { $0.rows.isEmpty && !$0.header.isEmpty } ?? false }
+      if titles(model) { section.contentInsets.bottom = 0 }
+      if index > 0, let previous = self.dataSource.sectionIdentifier(for: index - 1),
+         titles(self.sections.first(where: { $0.id == previous })) {
+        section.contentInsets.top = 0
+      }
       return section
     }
     collection.setCollectionViewLayout(layout, animated: false)

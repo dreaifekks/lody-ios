@@ -108,8 +108,9 @@ pnpm verify:ui --app /absolute/path/to/Lody.app --suite send-reliability --outpu
 ```
 
 `ipad-sidebar` verifies the relocated Workspace, view/settings and new-session
-actions independently, including long workspace names, view changes and workspace
-switching in both appearances.
+actions independently, including long workspace names, view changes (the By
+Machine title heading its project outline) and workspace switching in both
+appearances.
 
 The current `ipad-chrome` case leases an iPad Air 11-inch (M2), separately from
 phone batches. It exercises the production `PadHomeScreen`: independent native

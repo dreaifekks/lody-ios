@@ -38,10 +38,18 @@ assert fab['y'] > panel['y'] + panel['height'] - 110
 ui.capture('sidebar-glass-fab')
 
 tap_label(catalog.text('inbox.settings.section.view'))
-for key in ('view.projects', 'view.activity', 'view.chat', 'sort.name', 'sort.activity', 'sort.urgency'):
+for key in ('view.projects', 'view.machines', 'view.activity', 'view.chat', 'sort.name', 'sort.activity', 'sort.urgency'):
     labeled(catalog.text(f'inbox.settings.{key}'))
 ui.capture('sidebar-view-menu')
+tap_label(catalog.text('inbox.settings.view.machines'))
+machine = ui.element('machine:ui')['frame']
+project = ui.element('toggle:ui:local:lody')['frame']
+# The machine title heads its project outline without a section gap.
+assert machine['y'] + machine['height'] <= project['y'] < machine['y'] + machine['height'] + 12
+ui.capture('sidebar-machines')
+tap_label(catalog.text('inbox.settings.section.view'))
 tap_label(catalog.text('inbox.settings.view.activity'))
+ui.wait(lambda items: not any(item.get('AXUniqueId') == 'machine:ui' for item in items), 'Activity view retained the machine title')
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'toggle:ui:local:lody' for item in items), 'Activity view retained the project outline')
 tap_label(catalog.text('inbox.settings.section.view'))
 tap_label(catalog.text('inbox.settings.view.projects'))
