@@ -42,18 +42,23 @@ for key in ('view.projects', 'view.machines', 'view.activity', 'view.chat', 'sor
     labeled(catalog.text(f'inbox.settings.{key}'))
 ui.capture('sidebar-view-menu')
 tap_label(catalog.text('inbox.settings.view.machines'))
-machine = ui.element('machine:ui')['frame']
-project = ui.element('toggle:ui:local:lody')['frame']
+def button(identifier):
+    # An outline disclosure shares its row's identifier; the row itself is the button.
+    return ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == identifier and i.get('type') == 'Button'), None), f'Missing {identifier}')
+
+
+machine = button('machine:ui')['frame']
+project = button('toggle:ui:local:lody')['frame']
 # The machine title heads its project outline without a section gap.
 assert machine['y'] + machine['height'] <= project['y'] < machine['y'] + machine['height'] + 12
 ui.capture('sidebar-machines')
 # Tapping the machine title collapses its projects; tapping again restores them.
 ui.axe('tap', '-x', str(machine['x'] + machine['width'] / 2), '-y', str(machine['y'] + machine['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
-ui.wait(lambda items: not any(item.get('AXUniqueId') == 'toggle:ui:local:lody' for item in items), 'Collapsed machine kept its projects')
+ui.wait(lambda items: not any(item.get('AXUniqueId') == 'toggle:ui:local:lody' and item.get('type') == 'Button' for item in items), 'Collapsed machine kept its projects')
 ui.capture('sidebar-machine-collapsed')
-machine = ui.element('machine:ui')['frame']
+machine = button('machine:ui')['frame']
 ui.axe('tap', '-x', str(machine['x'] + machine['width'] / 2), '-y', str(machine['y'] + machine['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
-ui.element('toggle:ui:local:lody')
+button('toggle:ui:local:lody')
 tap_label(catalog.text('inbox.settings.section.view'))
 tap_label(catalog.text('inbox.settings.view.activity'))
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'machine:ui' for item in items), 'Activity view retained the machine title')
