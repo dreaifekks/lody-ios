@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import plistlib
 from pathlib import Path
 import signal
 import select
@@ -210,6 +211,10 @@ parser.add_argument(
     help='Require a captured run.mp4; --suite core defaults to off',
 )
 args = parser.parse_args()
+# The app under test names itself; batches and case scripts inherit it.
+info = args.app / 'Info.plist'
+BUNDLE_ID = plistlib.loads(info.read_bytes())['CFBundleIdentifier'] if info.exists() else 'app.innei.lody'
+os.environ['LODY_VERIFY_BUNDLE_ID'] = BUNDLE_ID
 if args.parallel and (args.udid or args.shared_metro or args.embedded):
     parser.error('--parallel owns three Simulator leases and its Metro; omit --udid, --shared-metro and --embedded')
 if args.embedded and args.shared_metro:
@@ -314,13 +319,13 @@ with metro_context:
                 try:
                     mode = (case in HOME_CASES, case in ('smooth-scroll', 'chat-performance'), case in ('camera-chat', 'camera-sheet'))
                     if case == 'chat-performance':
-                        container = Path(sim('get_app_container', args.udid, 'app.innei.lody', 'data').stdout.strip())
+                        container = Path(sim('get_app_container', args.udid, BUNDLE_ID, 'data').stdout.strip())
                         (container / 'tmp/lody-chat-loading.json').unlink(missing_ok=True)
                     restart = args.embedded or launch_mode != mode or case in HOME_CASES or case in ('quick-replies', 'appearance')
                     if restart:
                         result['appLifecycle'] = 'launch'
-                        sim('terminate', args.udid, 'app.innei.lody', check=False)
-                        launch = ['launch', args.udid, 'app.innei.lody', '--ui-verify']
+                        sim('terminate', args.udid, BUNDLE_ID, check=False)
+                        launch = ['launch', args.udid, BUNDLE_ID, '--ui-verify']
                         if case in HOME_CASES:
                             launch.append('--ui-verify-home')
                         if case in {'session-search', 'session-search-pad'}:
@@ -328,7 +333,7 @@ with metro_context:
                         if case in {'morph', 'mentions-production', 'home', 'ipad', 'ipad-chrome', 'ipad-sidebar'}:
                             launch.append('--ui-verify-mentions')
                         if mode[2]:
-                            sim('privacy', args.udid, 'reset', 'photos', 'app.innei.lody')
+                            sim('privacy', args.udid, 'reset', 'photos', BUNDLE_ID)
                             launch.append('--ui-verify-camera')
                         if mode[1]:
                             launch.append('--ui-verify-scroll')
@@ -369,7 +374,7 @@ with metro_context:
                             'expression': 'globalThis.__lodyUiVerifyReset()',
                         })
                     processes = sim('spawn', args.udid, 'launchctl', 'list').stdout.splitlines()
-                    result['appPid'] = next((line.split()[0] for line in processes if 'UIKitApplication:app.innei.lody[' in line), None)
+                    result['appPid'] = next((line.split()[0] for line in processes if f'UIKitApplication:{BUNDLE_ID}[' in line), None)
                     assert result['appPid'], 'Lody process is missing'
                     if result['appLifecycle'] == 'return-to-root':
                         assert result['appPid'] == app_pid, 'Returning to root unexpectedly replaced the App process'
@@ -559,6 +564,6 @@ with metro_context:
             if fail_fast and results and results[-1]['status'] != 'passed':
                 break
     finally:
-        sim('terminate', args.udid, 'app.innei.lody', check=False)
+        sim('terminate', args.udid, BUNDLE_ID, check=False)
 if not results or any(r['status'] != 'passed' for r in results):
     raise SystemExit(1)

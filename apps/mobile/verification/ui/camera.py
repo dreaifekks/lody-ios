@@ -3,7 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(*sys.argv[1:])
@@ -27,7 +27,7 @@ def count(value):
     expected = catalog.text('native.chat.attachment.addCount.' + ('one' if value == 1 else 'other'), count=value)
     assert ui.element('attachment-confirm')['AXLabel'] == expected
 
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 tap(source)
 ui.type_into(source, 'Keep my camera draft')
 ui.paste_file(source)
@@ -62,7 +62,7 @@ ui.capture('camera-collapsed')
 tap('attachment-camera')
 ui.axe('button', 'home')
 ui.wait(lambda _: json.loads(events_path.read_text())[-1] == 'stop', 'Backgrounding did not stop camera ownership')
-subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody'], check=True, timeout=30)
+subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID], check=True, timeout=30)
 ui.element('camera-shutter')
 ui.wait(lambda _: json.loads(events_path.read_text())[-1] == 'start', 'Foreground did not resume camera ownership')
 # Camera failures are injected at the capture service boundary, followed by the real retry UI.

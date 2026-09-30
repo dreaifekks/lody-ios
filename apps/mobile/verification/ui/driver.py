@@ -1,10 +1,14 @@
 """Small shared AXe helpers; every command is bounded and uses an explicit device."""
 import json
+import os
 import select
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+
+# run.py reads it from the app under test, so a fork signed with its own id verifies too.
+BUNDLE_ID = os.environ.get('LODY_VERIFY_BUNDLE_ID', 'app.innei.lody')
 
 
 def axe_session_dead(error):

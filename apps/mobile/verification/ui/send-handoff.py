@@ -4,7 +4,7 @@ import sys
 import subprocess
 import json
 from pathlib import Path
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 from send_motion import ThrowTrace
 ui = UI(*sys.argv[1:])
@@ -29,7 +29,7 @@ assert shiny['AXLabel'] == catalog.text('native.chat.transcript.status.confirmin
 assert draft == ui.element(turn + ':user')['AXLabel']
 assert ui.element('send-status')['AXLabel'] == 'Calls: 0 · waiting', 'Creation waited for network or dispatched offline'
 ui.capture('target-offline')
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 relay = json.loads((container / 'tmp/lody-production-composer-relay.json').read_text())
 assert relay['sameComposer'], 'The destination replaced the source composer'
 assert relay['inputBefore'] == relay['inputAfter'], 'Adoption changed focus, selection, or appearance'

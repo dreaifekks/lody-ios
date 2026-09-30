@@ -6,11 +6,11 @@ import statistics
 import subprocess
 import sys
 import time
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(sys.argv[1], sys.argv[2])
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 loading_path = container / 'tmp/lody-chat-loading.json'
 ui.capture('recent-messages')
 ui.element('perf-9998:user')

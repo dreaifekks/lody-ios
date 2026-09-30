@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 import subprocess
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(sys.argv[1], sys.argv[2])
@@ -47,8 +47,8 @@ def open_preview(identifier):
     assert 140 <= row['frame']['y'] <= 680, row['frame']
     ui.axe('tap', '--id', identifier, '--tap-style', 'physical', '--pre-delay', '.8', '--post-delay', '.8')
 
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
-prefs = container / 'Library/Preferences/app.innei.lody.plist'
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
+prefs = container / f'Library/Preferences/{BUNDLE_ID}.plist'
 def saved_color():
     return plistlib.loads(prefs.read_bytes()).get('accentColor', '')
 
@@ -62,8 +62,8 @@ ui.wait(lambda _: re.fullmatch(r'#[0-9A-F]{6}', saved_color()), 'Custom color wa
 custom = saved_color()
 ui.capture('custom-selected')
 # Cold launch proves both native and React startup restore the persisted choice.
-subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, 'app.innei.lody'], check=True)
-launch = ['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody', '--ui-verify']
+subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, BUNDLE_ID], check=True)
+launch = ['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID, '--ui-verify']
 metro = os.environ.get('LODY_UI_METRO_PORT')
 if metro:
     launch += ['--initialUrl', f'http://127.0.0.1:{metro}?disableOnboarding=1']

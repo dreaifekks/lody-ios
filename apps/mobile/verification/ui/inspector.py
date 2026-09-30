@@ -1,5 +1,6 @@
 """Send a CDP command only to the App on the named Simulator."""
 import json
+import os
 import subprocess
 
 
@@ -11,7 +12,7 @@ const WebSocket = require('ws');
 (async () => {
   const origin = `http://127.0.0.1:${process.argv[1]}`;
   const targets = await (await fetch(`${origin}/json/list`)).json();
-  const matches = targets.filter(t => t.deviceName === process.argv[2] && t.appId === 'app.innei.lody');
+  const matches = targets.filter(t => t.deviceName === process.argv[2] && t.appId === process.argv[5]);
   if (matches.length !== 1) throw new Error(`Expected one inspector for ${process.argv[2]}, found ${matches.length}`);
   const socket = new WebSocket(matches[0].webSocketDebuggerUrl, { origin });
   const timer = setTimeout(() => { socket.terminate(); process.exitCode = 1; }, 8000);
@@ -26,7 +27,7 @@ const WebSocket = require('ws');
   });
   socket.on('error', error => { clearTimeout(timer); console.error(error); process.exitCode = 1; });
 })().catch(error => { console.error(error); process.exitCode = 1; });
-""", str(port), name, method, json.dumps(params or {})], check=True, timeout=12, capture_output=True, text=True)
+""", str(port), name, method, json.dumps(params or {}), os.environ.get('LODY_VERIFY_BUNDLE_ID', 'app.innei.lody')], check=True, timeout=12, capture_output=True, text=True)
     response = json.loads(result.stdout)['result']
     if response.get('exceptionDetails'):
         raise RuntimeError(response['exceptionDetails'])
