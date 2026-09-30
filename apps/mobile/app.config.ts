@@ -1,6 +1,7 @@
 import type { ExpoConfig } from 'expo/config';
 
 const fixtureBuild = process.env.EXPO_PUBLIC_UI_VERIFY === '1';
+const bundleIdentifier = process.env.LODY_BUNDLE_ID ?? 'app.innei.lody';
 
 const config: ExpoConfig = {
   name: 'Lody',
@@ -13,11 +14,13 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   ios: {
     deploymentTarget: '26.0',
-    bundleIdentifier: 'app.innei.lody',
-    appleTeamId: 'KAMM5N88X3',
+    // A fork signs with its own team; extensions and the App Group derive from the bundle id.
+    bundleIdentifier,
+    appleTeamId: process.env.LODY_APPLE_TEAM_ID ?? 'KAMM5N88X3',
     supportsTablet: true,
     config: { usesNonExemptEncryption: false },
     infoPlist: {
+      LodyAppGroup: `group.${bundleIdentifier}`,
       // Clear the old continued-processing declarations on incremental prebuilds.
       BGTaskSchedulerPermittedIdentifiers: [],
       UIBackgroundModes: [],

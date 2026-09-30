@@ -28,6 +28,7 @@ def lody_share_extension(bundle_id)
     point_identifier: 'com.apple.share-services', display_name: 'Lody',
     swift_version: '6.0', principal_class: '$(PRODUCT_MODULE_NAME).ShareViewController',
     extra_plist: {
+      'LodyAppGroup' => "group.#{bundle_id}",
       'NSPhotoLibraryUsageDescription' => 'Choose photos to attach to a Lody message.',
       'NSCameraUsageDescription' => 'Take photos to attach to a Lody message.',
       'NSExtension' => {

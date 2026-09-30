@@ -30,7 +30,8 @@ struct ShareManifest: Codable, Equatable {
 
 // Never holds credentials or grants.
 enum ShareStore {
-  static let group = "group.app.innei.lody"
+  /// Derived from the bundle id at prebuild, so a fork signed by another team keeps its own group.
+  static let group = Bundle.main.object(forInfoDictionaryKey: "LodyAppGroup") as? String ?? "group.app.innei.lody"
   static let limits = (total: 16, images: 8, files: 8, textBytes: 64 * 1024)
   // Set once by the native check before any access.
   nonisolated(unsafe) private static var override: URL?
