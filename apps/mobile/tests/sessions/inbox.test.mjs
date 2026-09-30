@@ -416,6 +416,36 @@ test('project menus offer new session, open, and copy path except unassigned', a
   assert.equal(local.rows[1].menuActions[0].title, '重命名');
 });
 
+test('machine view titles each machine once and keeps the sort inside it', async () => {
+  const { projectSections } =
+    await import('../../src/features/sessions/inbox.ts');
+  const data = {
+    ...catalog(
+      [],
+      [
+        { id: 'a', machineId: 'm2', name: 'alpha', rootPath: '/a' },
+        { id: 'b', machineId: 'm1', name: 'beta', rootPath: '/b' },
+        { id: 'c', machineId: 'm2', name: 'gamma', rootPath: '/c' },
+        { id: 'd', machineId: 'm3', name: 'delta', rootPath: '/d' },
+      ],
+    ),
+    machineNames: { m1: 'Ubuntu', m2: 'homenucserver' },
+  };
+  const sections = projectSections(data, ACCENT, {}, now, 'name', [], true);
+  assert.deepEqual(
+    sections.map((section) => section.header ?? section.id),
+    ['homenucserver', 'a', 'c', 'm3', 'd', 'Ubuntu', 'b'],
+  );
+  assert.equal(sections[0].rows.length, 0);
+  assert.equal(sections[0].headerValue, '2 个项目');
+  assert.equal(
+    projectSections(data, ACCENT, {}, now, 'name').some(
+      (section) => section.header,
+    ),
+    false,
+  );
+});
+
 test('chat-only sessions form a trailing 对话 group instead of an unassigned project', async () => {
   const { projectSections, CHAT_SECTION_ID } =
     await import('../../src/features/sessions/inbox.ts');

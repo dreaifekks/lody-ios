@@ -464,6 +464,25 @@ function sessionGroup(
   return { id, rows };
 }
 
+const machineName = (catalog: Catalog, machineId: string) =>
+  catalog.machineNames?.[machineId] || machineId;
+
+/** Keeps the chosen sort inside each machine; machines follow their first project, or their name. */
+function machineOrder(
+  catalog: Catalog,
+  projects: Project[],
+  sort: ProjectSort,
+) {
+  const machines = [...new Set(projects.map((project) => project.machineId))];
+  if (sort === 'name')
+    machines.sort((left, right) =>
+      machineName(catalog, left).localeCompare(machineName(catalog, right)),
+    );
+  return machines.flatMap((machineId) =>
+    projects.filter((project) => project.machineId === machineId),
+  );
+}
+
 export function projectSections(
   catalog: Catalog,
   accent: string,
@@ -471,6 +490,7 @@ export function projectSections(
   now?: number,
   sort: ProjectSort = 'name',
   pinOrder: string[] = [],
+  byMachine = false,
 ): NativeListSection[] {
   const unpinned = catalog.sessions.filter(
     (session) => !session.pinned && !session.archived,
@@ -480,8 +500,9 @@ export function projectSections(
     pinOrder,
     activityAt,
   );
-  const projects = sortCatalogProjects(catalog.projects, unpinned, sort);
-  const sections: NativeListSection[] = projects.map((project) => {
+  const sorted = sortCatalogProjects(catalog.projects, unpinned, sort);
+  const projects = byMachine ? machineOrder(catalog, sorted, sort) : sorted;
+  const sections: NativeListSection[] = projects.flatMap((project, index) => {
     const sessions = unpinned
       .filter((s) => s.projectId === project.id)
       .sort(byActivity);
@@ -495,7 +516,22 @@ export function projectSections(
       now,
       catalog.sessions,
     );
-    return { ...group, headerExpanded: open };
+    const section = { ...group, headerExpanded: open };
+    if (!byMachine || projects[index - 1]?.machineId === project.machineId)
+      return [section];
+    // A card's outline hides its header, so the machine title is a row-less section.
+    const count = projects.filter(
+      (item) => item.machineId === project.machineId,
+    ).length;
+    return [
+      {
+        id: `machine:${project.machineId}`,
+        header: machineName(catalog, project.machineId),
+        headerValue: tp('inbox.machine.projects', count, { count }),
+        rows: [],
+      },
+      section,
+    ];
   });
   const chats = unpinned.filter(isChatSession).sort(byActivity);
   if (chats.length) {

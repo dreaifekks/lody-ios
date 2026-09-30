@@ -38,7 +38,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
   @JS
   var initialInboxView: Int {
     let value = UserDefaults.standard.integer(forKey: "inboxView")
-    return (0...2).contains(value) ? value : 0
+    return (0...3).contains(value) ? value : 0
   }
 
   @JS
@@ -153,7 +153,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
 
   @JS
   func saveInboxView(index: Int) {
-    UserDefaults.standard.set((0...2).contains(index) ? index : 0, forKey: "inboxView")
+    UserDefaults.standard.set((0...3).contains(index) ? index : 0, forKey: "inboxView")
   }
 
   @JS

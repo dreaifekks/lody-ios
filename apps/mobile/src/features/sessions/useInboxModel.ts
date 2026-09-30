@@ -34,6 +34,11 @@ import { listRowAction } from './sessionActions';
 
 export const inboxViews = [
   { mode: 0, key: 'inbox.settings.view.projects', icon: 'folder' },
+  {
+    mode: 3,
+    key: 'inbox.settings.view.machines',
+    icon: 'desktopcomputer',
+  },
   { mode: 1, key: 'inbox.settings.view.activity', icon: 'clock' },
   { mode: 2, key: 'inbox.settings.view.chat', icon: 'bubble.left' },
 ] as const;
@@ -129,7 +134,7 @@ export function useInboxModel() {
     saveInboxPinOrder(userId, workspaceId, pinOrder);
   }, [pinOrder, userId, workspaceId]);
   const sections = useMemo(() => {
-    if (mode === 0)
+    if (mode === 0 || mode === 3)
       return projectSections(
         catalog,
         colors.accent,
@@ -137,6 +142,7 @@ export function useInboxModel() {
         undefined,
         sort,
         pinOrder,
+        mode === 3,
       );
     return inboxSections(catalog, {
       accent: colors.accent,

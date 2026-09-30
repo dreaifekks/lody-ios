@@ -395,7 +395,7 @@ export const markSessionRead = (payload: string) =>
   native.markSessionRead(payload);
 export const renameSession = (payload: string) => native.renameSession(payload);
 
-export const initialInboxView = [0, 1, 2].includes(native.initialInboxView)
+export const initialInboxView = [0, 1, 2, 3].includes(native.initialInboxView)
   ? native.initialInboxView
   : 0;
 export const saveInboxView = (index: number) => native.saveInboxView(index);

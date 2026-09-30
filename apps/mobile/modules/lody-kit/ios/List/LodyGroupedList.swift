@@ -373,6 +373,10 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
         self?.swipeActions(at: indexPath, leading: false)
       }
       let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+      // A row-less titled section heads the cards after it, such as a machine group.
+      let titles = { (model: LodyListSection?) in model.map { $0.rows.isEmpty && !$0.header.isEmpty } ?? false }
+      if titles(model) { section.contentInsets.bottom = 0 }
+      if index > 0, titles(self?.section(at: index - 1)) { section.contentInsets.top = 0 }
       if outline {
         // The decoration spans the section frame including its insets; matching
         // them puts the card exactly under the rows.
