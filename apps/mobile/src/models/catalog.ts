@@ -35,7 +35,10 @@ export type Catalog = {
   sessions: Session[];
   machineIds: string[];
   machineNames?: Record<string, string>;
+  /** Where each LAN member accepts terminal connections; absent off a LAN. */
+  machineTerminals?: Record<string, LanTerminalEndpoint>;
 };
+export type LanTerminalEndpoint = { host: string; port: number };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };
 export type Connection = {
   state: 'live' | 'syncing' | 'offline';

@@ -693,6 +693,11 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       Prop("commandJSON") { (view: LodySimulatorView, value: String) in view.setCommand(value) }
     }
 
+    View(LodyTerminalView.self) {
+      Events("onState")
+      Prop("sourceJSON") { (view: LodyTerminalView, value: String) in view.setSource(value) }
+    }
+
     View(LodyChatView.self) {
       Prop("imageSharingEnabled") { (view: LodyChatView, value: Bool) in view.imageSharingEnabled = value }
       Prop("findRequestJSON") { (view: LodyChatView, value: String) in view.setFindRequest(value) }

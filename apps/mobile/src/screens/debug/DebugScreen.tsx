@@ -7,6 +7,7 @@ import { AgentErrorPreviewScreen } from './AgentErrorPreviewScreen';
 import { ProjectHistoryPreviewScreen } from './ProjectHistoryPreviewScreen';
 import { PullRequestPreviewScreen } from './PullRequestPreviewScreen';
 import { FilePreviewScreen } from './FilePreviewScreen';
+import { TerminalScreen } from '@/screens/TerminalScreen';
 import { showCommunityNotice } from '@/features/community/notice';
 import { openSendPreview } from './SendPreviewScreen';
 import { FreeTurnNoticePreviewScreen } from './FreeTurnNoticePreviewScreen';
@@ -148,6 +149,7 @@ function View() {
         },
         openRow('permission-preview', '权限验收', 'hand.raised'),
         openRow('file-preview', '文件预览验收', 'doc'),
+        openRow('terminal-preview', 'LAN 终端验收', 'apple.terminal'),
         openRow('onboarding-preview', '登录引导验收', 'hand.wave'),
         {
           id: 'community-notice',
@@ -309,6 +311,16 @@ function View() {
     'project-history-preview': () =>
       void present(ProjectHistoryPreviewScreen, {}),
     'pull-request-preview': () => void present(PullRequestPreviewScreen, {}),
+    // The fixture echoes locally; no LAN member, credential or network.
+    'terminal-preview': () =>
+      void present(TerminalScreen, {
+        workspaceId: 'fixture',
+        machineId: 'fixture',
+        sessionId: 'fixture',
+        host: '127.0.0.1',
+        port: 1,
+        fixture: true,
+      }),
     'project-picker-preview': () => void openCreateParity(),
     'settings-preview': () => void present(SettingsPreviewScreen, {}),
     'app-icon-failure-preview': () =>

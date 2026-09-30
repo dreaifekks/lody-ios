@@ -27,6 +27,13 @@ const PACKAGES = [
     url: 'https://github.com/Lakr233/Litext',
     version: '2.2.2',
   },
+  // 1.11+ adds a build-tool plugin and Metal resources cocoapods-spm cannot host.
+  {
+    name: 'SwiftTerm',
+    url: 'https://github.com/migueldeicaza/SwiftTerm',
+    version: '1.10.1',
+    products: ['SwiftTerm'],
+  },
 ];
 
 const header = `require 'cocoapods/project'

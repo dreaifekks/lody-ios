@@ -40,12 +40,22 @@ const diffOf = (value: unknown) => {
     del = stamp(change.del) ?? 0;
   return add || del ? { add, del } : undefined;
 };
+/** Mirrors Lody's `parseLanTerminalEndpoint`; `undefined` for a version this app cannot reach. */
+export function lanTerminalEndpoint(value: unknown) {
+  const { version, host, port } = object(value);
+  if (version !== 1 || typeof host !== 'string' || !host.trim()) return;
+  if (host.length > 255 || typeof port !== 'number') return;
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return;
+  return { host, port };
+}
+
 export function projectRows(rows: Row[], mode: string): Catalog {
   const agentUsage: NonNullable<Catalog['agentUsage']> = {};
   const projects: Project[] = [],
     sessions: Session[] = [],
     machineIds = new Set<string>(),
-    machineNames: Record<string, string> = {};
+    machineNames: Record<string, string> = {},
+    machineTerminals: NonNullable<Catalog['machineTerminals']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -93,6 +103,8 @@ export function projectRows(rows: Row[], mode: string): Catalog {
       machineIds.add(machineId);
       const name = text(value.name);
       if (name) machineNames[machineId] = name;
+      const terminal = lanTerminalEndpoint(value.lanTerminal);
+      if (terminal) machineTerminals[machineId] = terminal;
       // Match the CLI's legacy metadata + machine Flock project merge.
       for (const [localId, item] of Object.entries(
         object(value.localProjects),
@@ -164,6 +176,7 @@ export function projectRows(rows: Row[], mode: string): Catalog {
     sessions,
     machineIds: [...machineIds],
     machineNames,
+    ...(Object.keys(machineTerminals).length ? { machineTerminals } : {}),
     agentUsage,
   };
 }

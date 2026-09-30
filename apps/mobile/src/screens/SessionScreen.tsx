@@ -58,6 +58,7 @@ import { ItemDetailScreen } from '@/screens/ItemDetailScreen';
 import { basename } from '@/features/sessions/path';
 import { FileDiffScreen } from '@/screens/FileDiffScreen';
 import { FilesScreen } from '@/screens/FilesScreen';
+import { TerminalScreen } from '@/screens/TerminalScreen';
 import { DiffWebViewWarmer } from '@/features/diff/DiffWebViewWarmer';
 import { PermissionScreen } from '@/screens/PermissionScreen';
 import {
@@ -723,6 +724,24 @@ function View() {
         },
       ],
     });
+    // A LAN member that publishes an endpoint serves shells in its sessions' directories.
+    const terminal = account?.lan
+      ? catalog.machineTerminals?.[currentSession.machineId]
+      : undefined;
+    if (terminal && selected && !currentSession.archived)
+      items.push({
+        type: 'button',
+        icon: { type: 'sfSymbol', name: 'apple.terminal' },
+        accessibilityLabel: t('terminal.open'),
+        onPress: () =>
+          void present(TerminalScreen, {
+            workspaceId: selected.id,
+            machineId: currentSession.machineId,
+            sessionId: currentSession.id,
+            host: terminal.host,
+            port: terminal.port,
+          }),
+      });
     items.push({
       type: 'menu',
       icon: { type: 'sfSymbol', name: 'ellipsis' },

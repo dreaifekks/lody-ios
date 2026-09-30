@@ -118,6 +118,12 @@ const nativeComponents = [
     file: 'modules/lody-kit/licenses/Litext-LICENSE.txt',
   },
   {
+    name: 'SwiftTerm',
+    license: 'MIT',
+    url: 'https://github.com/migueldeicaza/SwiftTerm',
+    file: 'modules/lody-kit/licenses/SwiftTerm-LICENSE.txt',
+  },
+  {
     name: 'Material Icon Theme',
     license: 'MIT',
     url: 'https://github.com/material-extensions/vscode-material-icon-theme',
