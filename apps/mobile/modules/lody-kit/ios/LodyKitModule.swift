@@ -21,6 +21,10 @@ public final class LodyKitModule: Module, @unchecked Sendable {
           url.host?.hasSuffix(".trycloudflare.com") == true else { return nil }
     return url
   }
+  /// The code travels in the message; JS maps it to localized text.
+  private static func lanError(_ code: String) -> NSError {
+    NSError(domain: "LodyKit.LanHub", code: 1, userInfo: [NSLocalizedDescriptionKey: "lan_\(code)"])
+  }
   @MainActor private lazy var accentPicker = AccentColorPicker()
   @MainActor private lazy var workspaceIconPicker = WorkspaceIconPicker()
 
@@ -256,6 +260,34 @@ public final class LodyKitModule: Module, @unchecked Sendable {
         PushNotifications.shared.identify(nil)
         LiveActivities.shared.endAll()
         try AuthKeychain.clear()
+      }
+    }.runOnQueue(.main)
+    AsyncFunction("readLanHub") { () -> [String: String]? in
+      try LanHub.read().map(LanHub.summary)
+    }.runOnQueue(.main)
+    /// Validates the invite against the hub before it replaces any credential.
+    AsyncFunction("joinLanHub") { (text: String) async throws -> [String: String] in
+      let invite: LanInvite
+      do { invite = try LanInvite.parse(text) }
+      catch { throw Self.lanError("invalid_invite") }
+      do { try await LanHub.probe(invite) }
+      catch LanHub.Failure.unauthorized { throw Self.lanError("unauthorized") }
+      catch { throw Self.lanError("unreachable") }
+      try await MainActor.run {
+        self.dataRuntime.stop()
+        PushNotifications.shared.identify(nil)
+        LiveActivities.shared.endAll()
+        try AuthKeychain.clear()
+        try LanHub.save(invite)
+      }
+      return LanHub.summary(invite)
+    }
+    AsyncFunction("clearLanHub") {
+      try MainActor.assumeIsolated {
+        self.dataRuntime.stop()
+        PushNotifications.shared.identify(nil)
+        LiveActivities.shared.endAll()
+        try LanHub.clear()
       }
     }.runOnQueue(.main)
     AsyncFunction("openAuthBrowser") { (address: String) in

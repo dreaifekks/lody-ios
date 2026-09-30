@@ -990,4 +990,10 @@ Object.assign(globalThis, {
     },
   },
 });
+// A LAN runtime lives on the `lody-hub` origin; RPC ids and sealed payloads need Web Crypto there.
+send({
+  type: 'diagnostic',
+  stage: globalThis.isSecureContext ? 'secure_context' : 'insecure_context',
+  stream: location.origin,
+});
 send({ type: 'ready' });

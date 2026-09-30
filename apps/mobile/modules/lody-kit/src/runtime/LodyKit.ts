@@ -171,6 +171,9 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   showSessionBanner(title: string, kind: string): void;
   dismissSessionBanner(): void;
   readAuthToken(): Promise<string | null>;
+  readLanHub(): Promise<LanHubSummary | null>;
+  joinLanHub(invite: string): Promise<LanHubSummary>;
+  clearLanHub(): Promise<void>;
   saveAuthToken(token: string): Promise<void>;
   clearAuthToken(): Promise<void>;
   openAuthBrowser(url: string): Promise<void>;
@@ -272,6 +275,23 @@ export function addAppActiveListener(listener: () => void) {
 }
 
 export const readAuthToken = () => native.readAuthToken();
+/** A joined self-hosted LAN hub. Its credential stays in Keychain. */
+export type LanHubSummary = {
+  id: string;
+  name: string;
+  /** Hub origin, e.g. `http://100.64.0.1:8788`. */
+  url: string;
+  workspaceId: string;
+  userId: string;
+};
+export const readLanHub = () => native.readLanHub();
+/**
+ * Parses a `lody-lan://` invite and checks it against the hub before replacing
+ * the stored credential. Rejects with `lan_invalid_invite`, `lan_unauthorized`
+ * or `lan_unreachable` in the message.
+ */
+export const joinLanHub = (invite: string) => native.joinLanHub(invite);
+export const clearLanHub = () => native.clearLanHub();
 export const saveAuthToken = (token: string) => native.saveAuthToken(token);
 export const clearAuthToken = () => native.clearAuthToken();
 export const openAuthBrowser = (url: string) => native.openAuthBrowser(url);

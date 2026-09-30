@@ -65,7 +65,7 @@ const runtime = await build({
 });
 await writeFile(
   output + '/DataRuntime.html',
-  '<!doctype html><title>Lody Data Runtime</title><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; connect-src https:; script-src \'unsafe-inline\' \'wasm-unsafe-eval\'"><script type="module">' +
+  '<!doctype html><title>Lody Data Runtime</title><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; connect-src https: lody-hub:; script-src \'unsafe-inline\' \'wasm-unsafe-eval\'"><script type="module">' +
     runtime.outputFiles[0].text.replaceAll('</script', '<\\/script') +
     '</script>',
 );

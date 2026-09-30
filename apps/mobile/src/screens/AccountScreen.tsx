@@ -10,6 +10,8 @@ function View() {
   const auth = useAuth();
   const colors = usePalette();
   const { cancel } = usePageRuntime();
+  const lan = !!auth.account?.lan;
+  const signOutKey = lan ? 'lan.leave' : 'account.signOut';
   useEffect(() => {
     if (!auth.account) cancel();
   }, [auth.account, cancel]);
@@ -29,7 +31,9 @@ function View() {
                       id: 'name',
                       title: auth.account.user.name,
                       subtitle: auth.account.user.email,
-                      image: auth.account.user.image ?? 'person.crop.circle',
+                      image: lan
+                        ? 'network'
+                        : (auth.account.user.image ?? 'person.crop.circle'),
                     },
                   ],
                 },
@@ -39,9 +43,7 @@ function View() {
                   rows: [
                     {
                       id: 'logout',
-                      title: t(
-                        auth.busy ? 'account.signingOut' : 'account.signOut',
-                      ),
+                      title: t(auth.busy ? 'account.signingOut' : signOutKey),
                       destructive: true,
                       action: !auth.busy,
                     },
@@ -52,12 +54,12 @@ function View() {
         }
         onRowPress={() =>
           Alert.alert(
-            t('account.signOutConfirm.title'),
+            t(lan ? 'lan.leaveConfirm.title' : 'account.signOutConfirm.title'),
             t('account.signOutConfirm.message'),
             [
               { text: t('common.cancel'), style: 'cancel' },
               {
-                text: t('account.signOut'),
+                text: t(signOutKey),
                 style: 'destructive',
                 onPress: () => {
                   void auth.logout();

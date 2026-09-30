@@ -15,6 +15,10 @@ import {
   clearAuthToken,
   openAuthBrowser,
   closeAuthBrowser,
+  readLanHub,
+  joinLanHub,
+  clearLanHub,
+  type LanHubSummary,
 } from '@lody-ios/kit';
 import {
   AuthError,
@@ -38,7 +42,13 @@ import type { SavedCatalog } from '../../models/catalog.ts';
 import { t } from '../../lib/i18n/index.ts';
 import { uiVerify } from '@/lib/uiVerify';
 
-type Account = { token: string; user: User; workspaces: Workspace[] };
+/** `lan` is set when the account is a joined LAN hub instead of Lody Cloud. */
+type Account = {
+  token: string;
+  user: User;
+  workspaces: Workspace[];
+  lan?: LanHubSummary;
+};
 type AuthState = {
   account: Account | null;
   busy: boolean;
@@ -50,6 +60,7 @@ type AuthState = {
 };
 type AuthContextValue = AuthState & {
   login: () => Promise<void>;
+  joinLan: (invite: string) => Promise<void>;
   cancel: () => void;
   restore: () => Promise<void>;
   logout: () => Promise<void>;
@@ -61,6 +72,31 @@ type AuthContextValue = AuthState & {
   ) => Promise<string>;
 };
 const Context = createContext<AuthContextValue | null>(null);
+/** Every member of a LAN acts as the one user derived from its credential. */
+export function lanAccount(lan: LanHubSummary): Account {
+  return {
+    token: '',
+    lan,
+    user: {
+      id: lan.userId,
+      name: lan.name,
+      email: lan.url.replace(/^https?:\/\//, ''),
+    },
+    workspaces: [{ id: lan.workspaceId, name: lan.name, slug: 'lan' }],
+  };
+}
+const lanErrors = {
+  lan_invalid_invite: 'lan.error.invalidInvite',
+  lan_unauthorized: 'lan.error.unauthorized',
+  lan_unreachable: 'lan.error.unreachable',
+} as const;
+export function lanErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  const code = (Object.keys(lanErrors) as (keyof typeof lanErrors)[]).find(
+    (key) => message.includes(key),
+  );
+  return t(code ? lanErrors[code] : 'lan.error.joinFailed');
+}
 export function AuthProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState<AuthState>({
     account: null,
@@ -91,14 +127,25 @@ export function AuthProvider({ children }: PropsWithChildren) {
     update(signal, { busy: true, error: null });
     try {
       const localStarted = performance.now();
-      const [token, boot] = await Promise.all([
+      const [token, lan, boot] = await Promise.all([
         readAuthToken(),
+        readLanHub().catch(() => null),
         readLocalStartup().catch(
           () =>
             ({}) as { account?: string; workspace?: string; catalog?: string },
         ),
       ]);
       if (signal.aborted) return;
+      // A LAN needs no account service: the credential alone names the user and workspace.
+      if (lan) {
+        update(signal, {
+          account: lanAccount(lan),
+          localReady: true,
+          initialWorkspace: lan.workspaceId,
+          initialCatalog: parseLocal<SavedCatalog>(boot.catalog),
+        });
+        return;
+      }
       const saved = parseLocal<SavedAccount>(boot.account);
       if (token && saved?.user?.id && Array.isArray(saved.workspaces)) {
         const initialCatalog = parseLocal<SavedCatalog>(boot.catalog);
@@ -161,6 +208,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const account = await getAccount(token, signal);
       if (signal.aborted) throw new Error(t('common.cancelled'));
       await clearLocal();
+      await clearLanHub();
       await saveAuthToken(token);
       await writeLocal(accountKey, account).catch(() =>
         showToast(t('auth.toast.accountSaveFailed')),
@@ -180,6 +228,37 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     }
   }
+  async function joinLan(invite: string) {
+    if (uiVerify)
+      throw new Error(
+        'Joining a LAN is disabled during offline UI verification',
+      );
+    const signal = begin();
+    update(signal, { busy: true, code: null, error: null });
+    try {
+      // Native checks the credential against the hub, then replaces any Cloud sign-in.
+      const lan = await joinLanHub(invite);
+      if (signal.aborted) {
+        await clearLanHub();
+        return;
+      }
+      await clearLocal();
+      const account = lanAccount(lan);
+      await writeLocal(accountKey, {
+        user: account.user,
+        workspaces: account.workspaces,
+      }).catch(() => showToast(t('auth.toast.accountSaveFailed')));
+      update(signal, {
+        account,
+        initialCatalog: null,
+        initialWorkspace: lan.workspaceId,
+      });
+    } catch (error) {
+      update(signal, { error: lanErrorMessage(error) });
+    } finally {
+      update(signal, { busy: false, localReady: true });
+    }
+  }
   function cancel() {
     pending.current?.abort();
     void closeAuthBrowser();
@@ -187,11 +266,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }
   async function logout() {
     const token = state.account?.token,
+      lan = !!state.account?.lan,
       signal = begin();
     update(signal, { busy: true, error: null });
     try {
       update(signal, { account: null, code: null, initialCatalog: null });
-      await Promise.all([clearLocal(), clearAuthToken()]);
+      await Promise.all([clearLocal(), lan ? clearLanHub() : clearAuthToken()]);
       if (token) await authRequest('/sign-out', { token, body: {}, signal });
     } catch {
       update(signal, {
@@ -225,6 +305,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   async function updateWorkspace(workspaceId: string, name: string) {
     const account = state.account;
     if (!account) throw new Error(t('workspace.edit.signedOut'));
+    if (account.lan) throw new Error(t('lan.error.cloudOnly'));
     const updated = await updateWorkspaceRequest(
       account.token,
       workspaceId,
@@ -238,6 +319,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   ) {
     const account = state.account;
     if (!account) throw new Error(t('workspace.edit.signedOut'));
+    if (account.lan) throw new Error(t('lan.error.cloudOnly'));
     const image = await uploadWorkspaceIcon(account.token, workspaceId, file);
     const updated = await updateWorkspaceIconRequest(
       account.token,
@@ -261,6 +343,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       value={{
         ...state,
         login,
+        joinLan,
         cancel,
         restore,
         logout,

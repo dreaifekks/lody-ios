@@ -177,20 +177,25 @@ function View() {
         },
       ],
     },
-    {
-      id: 'notifications-section',
-      header: t('settings.notifications.title'),
-      rows: [
-        {
-          id: 'notifications',
-          title: t('settings.notifications.title'),
-          image: 'bell',
-          action: true,
-          disclosure: true,
-          navigates: true,
-        },
-      ],
-    },
+    // Push is sent by Lody Cloud; a LAN hub has no notification service.
+    ...(auth.account?.lan
+      ? []
+      : [
+          {
+            id: 'notifications-section',
+            header: t('settings.notifications.title'),
+            rows: [
+              {
+                id: 'notifications',
+                title: t('settings.notifications.title'),
+                image: 'bell',
+                action: true,
+                disclosure: true,
+                navigates: true,
+              },
+            ],
+          },
+        ]),
     {
       id: 'chat',
       header: t('settings.section.chat'),

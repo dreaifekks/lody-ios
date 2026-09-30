@@ -77,7 +77,7 @@ function RouterChrome({ model }: { model: InboxModel }) {
                 title: workspace.name,
                 selected: workspace.id === selected?.id,
               })),
-              ...(selected
+              ...(selected && !account.lan
                 ? [
                     {
                       id: workspaceEditActionId,

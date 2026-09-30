@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Platform,
   ScrollView,
@@ -165,17 +166,46 @@ function View() {
             {t('common.cancel')}
           </SheetButton>
         ) : (
-          <SheetButton
-            key="connect"
-            primary
-            testID="onboarding-connect"
-            onPress={() => void auth.login()}
-          >
-            {t(auth.error ? 'login.retry' : 'login.connect')}
-          </SheetButton>
+          <>
+            <SheetButton
+              key="connect"
+              primary
+              testID="onboarding-connect"
+              onPress={() => void auth.login()}
+            >
+              {t(auth.error ? 'login.retry' : 'login.connect')}
+            </SheetButton>
+            <SheetButton
+              key="lan"
+              testID="onboarding-join-lan"
+              onPress={() => promptLanInvite(auth.joinLan)}
+            >
+              {t('lan.join.action')}
+            </SheetButton>
+          </>
         )}
       </RNView>
     </RNView>
+  );
+}
+
+/** The invite carries the hub address and credential: `lody-lan://<token>@host:port/<name>`. */
+function promptLanInvite(join: (invite: string) => Promise<void>) {
+  Alert.prompt(
+    t('lan.join.title'),
+    t('lan.join.message'),
+    [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('lan.join.confirm'),
+        onPress: (value?: string) => {
+          if (value?.trim()) void join(value);
+        },
+      },
+    ],
+    'plain-text',
+    '',
+    'url',
   );
 }
 

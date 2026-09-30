@@ -221,6 +221,7 @@ export function HomePreviewProviders({ children }: PropsWithChildren) {
         code: null,
         error: null,
         login: noop,
+        joinLan: noop,
         cancel: noop,
         restore: noop,
         logout: noop,

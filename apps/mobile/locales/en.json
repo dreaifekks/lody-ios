@@ -998,5 +998,18 @@
   "native.simulator.button.volume-up": "Volume Up",
   "native.simulator.button.volume-down": "Volume Down",
   "native.simulator.button.power": "Side Button",
-  "simulator.chooseAnother": "Choose Another Simulator"
+  "simulator.chooseAnother": "Choose Another Simulator",
+  "lan.join.action": "Join a LAN",
+  "lan.join.title": "Join a LAN",
+  "lan.join.message": "Paste the lody-lan:// invite from Settings > LAN on a desktop member.",
+  "lan.join.confirm": "Join",
+  "lan.error.invalidInvite": "This isn't a valid lody-lan:// invite.",
+  "lan.error.unauthorized": "The LAN hub rejected this invite. Copy a new one from a desktop member.",
+  "lan.error.unreachable": "Can't reach the LAN hub. Check that this device is on the same network or Tailscale.",
+  "lan.error.joinFailed": "Couldn't join the LAN.",
+  "lan.error.cloudOnly": "Only available with Lody Cloud.",
+  "lan.leave": "Leave LAN",
+  "lan.leaveConfirm.title": "Leave this LAN?",
+  "native.attachment.error.lan": "Attachments aren't supported on a LAN yet",
+  "ios.info.localNetworkUsage": "Connect to your Lody LAN hub on the local network."
 }

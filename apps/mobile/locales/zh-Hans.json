@@ -998,5 +998,18 @@
   "native.simulator.button.volume-up": "音量加",
   "native.simulator.button.volume-down": "音量减",
   "native.simulator.button.power": "侧边按钮",
-  "simulator.chooseAnother": "选择其他模拟器"
+  "simulator.chooseAnother": "选择其他模拟器",
+  "lan.join.action": "加入局域网",
+  "lan.join.title": "加入局域网",
+  "lan.join.message": "粘贴桌面端“设置 > 局域网”中的 lody-lan:// 邀请链接。",
+  "lan.join.confirm": "加入",
+  "lan.error.invalidInvite": "这不是有效的 lody-lan:// 邀请链接。",
+  "lan.error.unauthorized": "局域网 hub 拒绝了这个邀请，请从桌面端重新复制。",
+  "lan.error.unreachable": "无法连接局域网 hub，请确认本机与它在同一网络或 Tailscale 中。",
+  "lan.error.joinFailed": "加入局域网失败。",
+  "lan.error.cloudOnly": "仅 Lody Cloud 可用。",
+  "lan.leave": "离开局域网",
+  "lan.leaveConfirm.title": "离开这个局域网？",
+  "native.attachment.error.lan": "局域网模式暂不支持附件",
+  "ios.info.localNetworkUsage": "连接本地网络中的 Lody 局域网 hub。"
 }

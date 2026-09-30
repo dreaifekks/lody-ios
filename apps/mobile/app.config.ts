@@ -21,6 +21,19 @@ const config: ExpoConfig = {
       // Clear the old continued-processing declarations on incremental prebuilds.
       BGTaskSchedulerPermittedIdentifiers: [],
       UIBackgroundModes: [],
+      // A Lody LAN hub is plain http by default. ATS covers IP literals since
+      // iOS 17, and NSAllowsLocalNetworking only reaches private ranges, so the
+      // tailnet (WireGuard-encrypted) needs its CIDR and MagicDNS names.
+      NSAppTransportSecurity: {
+        NSAllowsLocalNetworking: true,
+        NSExceptionDomains: {
+          '100.64.0.0/10': { NSExceptionAllowsInsecureHTTPLoads: true },
+          'ts.net': {
+            NSIncludesSubdomains: true,
+            NSExceptionAllowsInsecureHTTPLoads: true,
+          },
+        },
+      },
       UIApplicationSceneManifest: {
         UIApplicationSupportsMultipleScenes: false,
         UISceneConfigurations: {

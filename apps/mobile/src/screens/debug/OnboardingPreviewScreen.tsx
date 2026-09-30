@@ -42,6 +42,7 @@ function View() {
             : null,
         error: phase === 'error' ? t('auth.error.cancelledSignIn') : null,
         login: async () => setPhase(next[phase]),
+        joinLan: async () => setPhase(next[phase]),
         cancel: () => setPhase('error'),
         restore: noop,
         logout: noop,

@@ -7,6 +7,7 @@ const INFO_KEYS = {
   'ios.info.bundleDisplayName': 'CFBundleDisplayName',
   'ios.info.cameraUsage': 'NSCameraUsageDescription',
   'ios.info.photoLibraryUsage': 'NSPhotoLibraryUsageDescription',
+  'ios.info.localNetworkUsage': 'NSLocalNetworkUsageDescription',
 };
 
 function localesDir(projectRoot) {

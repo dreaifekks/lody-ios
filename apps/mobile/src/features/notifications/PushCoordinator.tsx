@@ -47,10 +47,12 @@ export function PushCoordinator() {
   }, []);
   useEffect(() => {
     if (uiVerify || !auth.localReady || auth.busy) return;
-    void setPushUser(auth.account?.user.id ?? null).catch(() =>
+    // A LAN user id is local; only Lody Cloud sends pushes to OneSignal ids.
+    const pushUser = auth.account?.lan ? null : auth.account?.user.id;
+    void setPushUser(pushUser ?? null).catch(() =>
       showToast(t('notifications.accountSyncFailed')),
     );
-  }, [auth.localReady, auth.busy, auth.account?.user.id]);
+  }, [auth.localReady, auth.busy, auth.account?.user.id, auth.account?.lan]);
   useEffect(() => {
     const userId = auth.account?.user.id;
     const pending: PushClick | null = link

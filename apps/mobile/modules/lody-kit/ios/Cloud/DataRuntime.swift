@@ -18,6 +18,9 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   private var attachmentTasks: [String: Task<Void, Never>] = [:]
   private var attachmentAttempts: [String: UUID] = [:]
   private var grantTask: URLSessionDataTask?
+  /// Set when the workspace is a joined LAN hub instead of Lody Cloud.
+  private var lan: LanInvite?
+  private var lanHandler: LanHubSchemeHandler?
   private var githubTasks: [String: Task<Void, Never>] = [:]
   private var shareTasks: [String: Task<Void, Never>] = [:]
   private var health = RuntimeHealth()
@@ -71,6 +74,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
     self.userId = userId; cacheErrorShown = false
     self.workspace = workspace; self.owner = owner; health = RuntimeHealth()
+    lan = LanHub.credential(for: workspace)
     workspaceSlug = slug; workspaceName = name
     backgrounded = UIApplication.shared.applicationState == .background
     if backgrounded { publish("background", reason: "paused") }
@@ -78,7 +82,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   }
   func stop(owner: String? = nil) {
     if let owner, self.owner != owner { return }
-    workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
+    workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; lan = nil; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
   }
   func status() -> [String: any Sendable] {
     var value: [String: any Sendable] = ["owner": owner, "generation": generation, "state": phase, "reason": reason, "acknowledgements": acknowledgements, "lastStartReason": lastStartReason]
@@ -103,6 +107,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
     config.userContentController.add(self, name: "dataRuntime")
+    if let lan, !backgroundProbe {
+      let handler = LanHubSchemeHandler(invite: lan)
+      config.setURLSchemeHandler(handler, forURLScheme: LanHubSchemeHandler.scheme)
+      lanHandler = handler
+    }
     let view = WKWebView(frame: .zero, configuration: config)
     #if DEBUG
     view.isInspectable = true
@@ -123,8 +132,9 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
     do {
       guard let url = Bundle(for: LodyKitModule.self).url(forResource: "DataRuntime", withExtension: "html") ?? Bundle.main.url(forResource: "DataRuntime", withExtension: "html") else { throw NSError(domain: "MissingDataRuntime", code: 1) }
-      // A bundled document with the official site's origin; no remote scripts are loaded.
-      view.loadHTMLString(try String(contentsOf: url, encoding: .utf8), baseURL: URL(string: "https://lody.ai"))
+      // A bundled document with the official site's origin, or the LAN hub's
+      // `lody-hub` origin; no remote scripts are loaded.
+      view.loadHTMLString(try String(contentsOf: url, encoding: .utf8), baseURL: URL(string: pageOrigin))
     } catch { disposeView(); publish("failed", reason: "missing_resource") }
   }
   private func disposeView() {
@@ -135,6 +145,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     for promise in commands.values { fail(promise, "runtime_replaced", LodyStrings.text("native.runtime.replaced")) }; commands.removeAll()
     timer?.invalidate(); timer = nil
     grantTask?.cancel(); grantTask = nil
+    lanHandler?.invalidate(); lanHandler = nil
     githubTasks.values.forEach { $0.cancel() }; githubTasks.removeAll()
     shareTasks.values.forEach { $0.cancel() }; shareTasks.removeAll()
     pingPending = false
@@ -373,6 +384,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
           let attachments = args.removeValue(forKey: "attachments") as? [[String: Any]], !attachments.isEmpty else {
       command(method, payload: payload, promise: promise, billing: billing); return
     }
+    // ponytail: a LAN hub has no blob store; hand files to the machine over Lody's LAN `files` service.
+    if lan != nil { promise.resolve(notSentJSON("native.attachment.error.lan")); return }
     guard health.ready, let workspace,
           let target = args["sessionId"] as? String, !target.isEmpty,
           attachmentTasks[target] == nil else {
@@ -632,8 +645,17 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       }
     }
   }
+  private var pageOrigin: String {
+    guard let lan, !backgroundProbe else { return "https://lody.ai/" }
+    return LanHubSchemeHandler.origin(lan) + "/"
+  }
   private func fetchGrant(view: WKWebView) {
     guard grantTask == nil, let workspace else { return }
+    if let lan {
+      // The hub credential never expires and stays native; the scheme handler supplies it.
+      deliverGrant(["token": "lan-hub", "gatewayBaseUrl": LanHubSchemeHandler.origin(lan), "expiresIn": 365.0 * 86400], view: view)
+      return
+    }
     do {
       guard let token = try AuthKeychain.read() else { throw NSError(domain: "MissingAuth", code: 1) }
       var request = URLRequest(url: URL(string: "https://backend.lody.ai/api/loro-streams/token")!, timeoutInterval: 15)
@@ -665,7 +687,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   }
   func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
     let url = navigationAction.request.url
-    let bundledLoad = navigationAction.navigationType == .other && (url?.absoluteString == "about:blank" || url?.absoluteString == "https://lody.ai/")
+    let bundledLoad = navigationAction.navigationType == .other && (url?.absoluteString == "about:blank" || url?.absoluteString == pageOrigin)
     decisionHandler(bundledLoad ? .allow : .cancel)
   }
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { if self.webView === webView { recover("process_terminated") } }

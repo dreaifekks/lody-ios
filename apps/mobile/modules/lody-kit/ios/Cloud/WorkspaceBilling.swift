@@ -8,6 +8,8 @@ import Foundation
   func clear() { cached = nil }
 
   func entitlement(workspace: String, user: String) async -> [String: Any]? {
+    // A LAN hub has no billing service.
+    if LanInvite.isWorkspace(workspace) { return nil }
     if let cached, cached.workspace == workspace, cached.user == user,
        cached.expiresAt > Date.timeIntervalSinceReferenceDate {
       return cached.value
