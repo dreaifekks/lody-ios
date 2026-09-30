@@ -7,7 +7,7 @@
     <img src="https://img.shields.io/badge/Platform-iOS%2026%2B-blue?style=flat-square&logo=apple" alt="Platform" />
     <img src="https://img.shields.io/badge/Expo-SDK%2057-000020?style=flat-square&logo=expo" alt="Expo SDK 57" />
     <img src="https://img.shields.io/badge/React%20Native-0.86-61dafb?style=flat-square&logo=react" alt="React Native 0.86" />
-    <img src="https://img.shields.io/badge/Swift-5.9-f05138?style=flat-square&logo=swift" alt="Swift 5.9" />
+    <img src="https://img.shields.io/badge/Swift-6.0-f05138?style=flat-square&logo=swift" alt="Swift 6.0" />
     <img src="https://img.shields.io/badge/CRDT-Loro%20%26%20Flock-orange?style=flat-square" alt="CRDT" />
     <img src="https://img.shields.io/badge/License-AGPL--3.0--only-blue?style=flat-square" alt="License: AGPL-3.0-only" />
   </p>
@@ -19,7 +19,7 @@
   </p>
 </div>
 
-https://github.com/user-attachments/assets/89374b82-3c82-42e2-a546-38f007ff9b38
+https://github.com/user-attachments/assets/0bc0ab48-6f12-44e9-ae13-07af9c6b780d
 
 ![Lody on iPad and iPhone](https://github.com/user-attachments/assets/e4b1b2ad-434d-4a47-bf62-c9a6bb5c5cc9)
 
