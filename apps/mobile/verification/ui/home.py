@@ -272,6 +272,26 @@ assert catalog.text('session.notRun') in str(chat), chat
 assert not any(i.get('AXUniqueId') == 'toggle:ui:local:lody' for i in ui.state())
 ui.capture('chat-view')
 ui.axe('tap', '--label', view_label, '--post-delay', '.8')
+ui.axe('tap', '--label', catalog.text('inbox.settings.view.machines'), '--post-delay', '.8')
+
+
+def tap_machine():
+    frame = ui.element('machine:ui')['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.8')
+
+
+machine = ui.element('machine:ui')
+assert machine['frame']['y'] < ui.element('toggle:ui:local:lody')['frame']['y']
+ui.capture('machines-view')
+# The machine title collapses and restores every project it heads.
+tap_machine()
+ui.wait(lambda items: not any(i.get('AXUniqueId') == 'toggle:ui:local:lody' for i in items), 'Collapsed machine kept its projects')
+ui.element('machine:ui')
+ui.element('toggle:chat')
+ui.capture('machine-collapsed')
+tap_machine()
+ui.element('toggle:ui:local:lody')
+ui.axe('tap', '--label', view_label, '--post-delay', '.8')
 ui.axe('tap', '--label', catalog.text('inbox.settings.sort.activity'), '--post-delay', '.8')
 ui.axe('tap', '--label', view_label, '--post-delay', '.8')
 ui.axe('tap', '--label', catalog.text('inbox.settings.view.projects'), '--post-delay', '.8')

@@ -446,6 +446,47 @@ test('machine view titles each machine once and keeps the sort inside it', async
   );
 });
 
+test('a collapsed machine keeps its title and hides only its own projects', async () => {
+  const { projectSections } =
+    await import('../../src/features/sessions/inbox.ts');
+  const data = {
+    ...catalog(
+      [],
+      [
+        { id: 'a', machineId: 'm2', name: 'alpha', rootPath: '/a' },
+        { id: 'b', machineId: 'm1', name: 'beta', rootPath: '/b' },
+        { id: 'c', machineId: 'm2', name: 'gamma', rootPath: '/c' },
+      ],
+    ),
+    machineNames: { m1: 'Ubuntu', m2: 'homenucserver' },
+  };
+  const open = projectSections(data, ACCENT, {}, now, 'name', [], true);
+  assert.equal(open[0].headerActionId, 'machine:m2');
+  assert.equal(open[0].headerExpanded, true);
+  const collapsed = projectSections(
+    data,
+    ACCENT,
+    { 'machine:m2': false },
+    now,
+    'name',
+    [],
+    true,
+  );
+  assert.deepEqual(
+    collapsed.map((section) => section.id),
+    ['machine:m2', 'machine:m1', 'b'],
+  );
+  assert.equal(collapsed[0].headerExpanded, false);
+  assert.equal(collapsed[0].headerValue, '2 个项目');
+  // The key means nothing outside the machine view.
+  assert.deepEqual(
+    projectSections(data, ACCENT, { 'machine:m2': false }, now, 'name').map(
+      (section) => section.id,
+    ),
+    ['a', 'b', 'c'],
+  );
+});
+
 test('chat-only sessions form a trailing 对话 group instead of an unassigned project', async () => {
   const { projectSections, CHAT_SECTION_ID } =
     await import('../../src/features/sessions/inbox.ts');

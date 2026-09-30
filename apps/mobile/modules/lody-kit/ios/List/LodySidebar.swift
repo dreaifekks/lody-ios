@@ -19,6 +19,13 @@ private final class SidebarAppearanceController: UIViewController {
   }
 }
 
+private final class SidebarHeaderTap: UITapGestureRecognizer {}
+
+private final class SidebarHeaderCell: UICollectionViewListCell {
+  var actionId = ""
+  let arrow = UIImageView(image: UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)))
+}
+
 /// Owns sidebar layout, outline expansion and persistent detail selection.
 /// The grouped host is deliberately not in this view's rendering path.
 final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
@@ -41,11 +48,15 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
   private lazy var registration = UICollectionView.CellRegistration<UICollectionViewListCell, LodyListRow> { [weak self] cell, _, row in
     self?.configure(cell, row: row)
   }
-  private lazy var headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+  private lazy var headerRegistration = UICollectionView.SupplementaryRegistration<SidebarHeaderCell>(
     elementKind: UICollectionView.elementKindSectionHeader
   ) { [weak self] cell, _, index in
     guard let self, let id = self.dataSource.sectionIdentifier(for: index.section),
           let section = self.sections.first(where: { $0.id == id }) else { return }
+    self.configureHeader(cell, section: section)
+  }
+
+  private func configureHeader(_ cell: SidebarHeaderCell, section: LodyListSection) {
     var content = UIListContentConfiguration.header()
     if section.headerValue.isEmpty {
       content.text = section.header
@@ -60,6 +71,42 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
     cell.accessibilityLabel = [section.header, section.headerValue].filter { !$0.isEmpty }.joined(separator: ", ")
     cell.accessibilityTraits = .header
     cell.accessibilityIdentifier = section.id
+    cell.accessibilityValue = nil
+    cell.actionId = section.headerActionId
+    cell.isUserInteractionEnabled = !section.headerActionId.isEmpty
+    guard !section.headerActionId.isEmpty else {
+      cell.accessories = []
+      return
+    }
+    // A title with an action toggles what it heads, such as a machine's projects.
+    cell.accessibilityTraits = [.header, .button]
+    if let expanded = section.headerExpanded {
+      cell.arrow.tintColor = .secondaryLabel
+      cell.arrow.bounds = CGRect(x: 0, y: 0, width: 16, height: 16)
+      cell.arrow.contentMode = .center
+      cell.accessories = [.customView(configuration: .init(customView: cell.arrow, placement: .trailing()))]
+      cell.arrow.transform = expanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
+      cell.accessibilityValue = LodyStrings.text(expanded ? "native.list.expanded" : "native.list.collapsed")
+    } else {
+      cell.accessories = [.disclosureIndicator()]
+    }
+    if !(cell.gestureRecognizers?.contains { $0 is SidebarHeaderTap } ?? false) {
+      cell.addGestureRecognizer(SidebarHeaderTap(target: self, action: #selector(headerPressed(_:))))
+    }
+  }
+
+  @objc private func headerPressed(_ gesture: UITapGestureRecognizer) {
+    guard let cell = gesture.view as? SidebarHeaderCell, !cell.actionId.isEmpty else { return }
+    onRowPress(["id": cell.actionId])
+  }
+
+  private func updateVisibleHeaders() {
+    for index in collection.indexPathsForVisibleSupplementaryElements(ofKind: UICollectionView.elementKindSectionHeader) {
+      guard let id = dataSource.sectionIdentifier(for: index.section),
+            let section = sections.first(where: { $0.id == id }),
+            let cell = collection.supplementaryView(forElementKind: UICollectionView.elementKindSectionHeader, at: index) as? SidebarHeaderCell else { continue }
+      configureHeader(cell, section: section)
+    }
   }
 
   required init(appContext: AppContext? = nil) {
@@ -101,9 +148,12 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
       let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
       section.contentInsets = .init(top: 4, leading: 12, bottom: 8, trailing: 12)
       // A row-less titled section heads the outline after it, such as a machine group.
-      let titles = { (model: LodyListSection?) in model.map { $0.rows.isEmpty && !$0.header.isEmpty } ?? false }
+      // A collapsed title heads nothing and keeps its gap.
+      let titles = { (model: LodyListSection?) in
+        model.map { $0.rows.isEmpty && !$0.header.isEmpty && $0.headerExpanded != false } ?? false
+      }
       if titles(model) { section.contentInsets.bottom = 0 }
-      if index > 0, let previous = self.dataSource.sectionIdentifier(for: index - 1),
+      if index > 0, !model.rows.isEmpty, let previous = self.dataSource.sectionIdentifier(for: index - 1),
          titles(self.sections.first(where: { $0.id == previous })) {
         section.contentInsets.top = 0
       }
@@ -216,7 +266,8 @@ final class LodySidebar: LodyAppearanceView, UICollectionViewDelegate {
     }
     // Reconfigure visible content independently of snapshot animation.
     updateVisibleRows()
-    placeholder.isHidden = !value.allSatisfy { $0.rows.isEmpty }
+    updateVisibleHeaders()
+    placeholder.isHidden = !value.allSatisfy { $0.rows.isEmpty && $0.headerActionId.isEmpty }
     collection.collectionViewLayout.invalidateLayout()
   }
 

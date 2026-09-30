@@ -467,6 +467,10 @@ function sessionGroup(
 const machineName = (catalog: Catalog, machineId: string) =>
   catalog.machineNames?.[machineId] || machineId;
 
+/** The machine title's section, header action and persisted expansion key. */
+export const machineSectionId = (machineId: string) => `machine:${machineId}`;
+export const isMachineSectionId = (id: string) => id.startsWith('machine:');
+
 /** Keeps the chosen sort inside each machine; machines follow their first project, or their name. */
 function machineOrder(
   catalog: Catalog,
@@ -503,6 +507,8 @@ export function projectSections(
   const sorted = sortCatalogProjects(catalog.projects, unpinned, sort);
   const projects = byMachine ? machineOrder(catalog, sorted, sort) : sorted;
   const sections: NativeListSection[] = projects.flatMap((project, index) => {
+    const machineId = machineSectionId(project.machineId);
+    const machineOpen = !byMachine || (expanded[machineId] ?? true);
     const sessions = unpinned
       .filter((s) => s.projectId === project.id)
       .sort(byActivity);
@@ -516,21 +522,24 @@ export function projectSections(
       now,
       catalog.sessions,
     );
-    const section = { ...group, headerExpanded: open };
+    // A collapsed machine keeps only its title.
+    const section = machineOpen ? [{ ...group, headerExpanded: open }] : [];
     if (!byMachine || projects[index - 1]?.machineId === project.machineId)
-      return [section];
+      return section;
     // A card's outline hides its header, so the machine title is a row-less section.
     const count = projects.filter(
       (item) => item.machineId === project.machineId,
     ).length;
     return [
       {
-        id: `machine:${project.machineId}`,
+        id: machineId,
         header: machineName(catalog, project.machineId),
         headerValue: tp('inbox.machine.projects', count, { count }),
+        headerActionId: machineId,
+        headerExpanded: machineOpen,
         rows: [],
       },
-      section,
+      ...section,
     ];
   });
   const chats = unpinned.filter(isChatSession).sort(byActivity);

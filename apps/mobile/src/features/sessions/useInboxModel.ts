@@ -23,6 +23,7 @@ import {
   activityAt,
   inboxSections,
   isChatSectionRow,
+  isMachineSectionId,
   projectSections,
   reconcilePinOrder,
   searchSections,
@@ -205,15 +206,22 @@ export function useInboxModel() {
           connected: true,
         })
       : listPlaceholder({ loading, connected }),
-    consumeRowPress: (id: string, expanded = true) => {
+    consumeRowPress: (id: string, rowExpanded = true) => {
       if (id === 'view:chat') {
         setView(2);
         return true;
       }
       if (id.startsWith('toggle:')) {
         const projectId = id.slice(7);
-        saveInboxExpansion(projectId, expanded);
-        setExpanded((previous) => ({ ...previous, [projectId]: expanded }));
+        saveInboxExpansion(projectId, rowExpanded);
+        setExpanded((previous) => ({ ...previous, [projectId]: rowExpanded }));
+        return true;
+      }
+      // A machine title reports only the tap; it toggles its projects together.
+      if (isMachineSectionId(id)) {
+        const open = !(expanded[id] ?? true);
+        saveInboxExpansion(id, open);
+        setExpanded((previous) => ({ ...previous, [id]: open }));
         return true;
       }
       return isChatSectionRow(id);
