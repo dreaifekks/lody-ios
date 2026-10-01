@@ -4,10 +4,16 @@ import UserNotifications
 import UIKit
 
 /// Process-owned listener: notification clicks can precede the React bridge.
+/// Lody Cloud pushes through OneSignal; a LAN pushes through its own hub
+/// (`LanPush`), and then this object is the notification center delegate.
 @MainActor
-final class PushNotifications: NSObject, OSNotificationClickListener, OSNotificationLifecycleListener, OSPushSubscriptionObserver, OSUserStateObserver {
+final class PushNotifications: NSObject, OSNotificationClickListener, OSNotificationLifecycleListener, OSPushSubscriptionObserver, OSUserStateObserver, UNUserNotificationCenterDelegate {
   static let shared = PushNotifications()
   private(set) var configured = false
+  /// A LAN hub delivers this device's pushes; OneSignal stays uninitialized.
+  private(set) var lanMode = false
+  /// Some provider can take Live Activity tokens.
+  var providerReady: Bool { configured || lanMode }
   private var userId: String?
   private var clicks = PushClickBuffer()
   var onClickAvailable: (() -> Void)?
@@ -20,6 +26,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
 
   func start(_ options: [UIApplication.LaunchOptionsKey: Any]?) {
     if LodyUIVerify.enabled || LodyUIVerify.offline { return }
+    if startLan() { return }
     guard !configured, let appId = Bundle.main.object(forInfoDictionaryKey: "LodyOneSignalAppId") as? String,
           UUID(uuidString: appId) != nil else { return }
     configured = true
@@ -33,6 +40,31 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     evaluateSubscription(OneSignal.User.pushSubscription.id)
     OneSignal.Notifications.addClickListener(self)
     OneSignal.Notifications.addForegroundLifecycleListener(self)
+  }
+
+  /// Switches this process to LAN push. OneSignal swizzles the delegate and
+  /// app delegate once initialized, so a process that started it keeps it
+  /// until the next launch.
+  @discardableResult
+  func startLan() -> Bool {
+    if LodyUIVerify.enabled || LodyUIVerify.offline { return false }
+    guard !configured, LanPush.shared.start() else { return false }
+    if !lanMode {
+      lanMode = true
+      // Set during launch so a click that launched the app is not lost.
+      UNUserNotificationCenter.current().delegate = self
+      PushPermissionLaunchRequest.perform {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+      }
+    }
+    LiveActivities.shared.start()
+    return true
+  }
+
+  func stopLan() {
+    guard lanMode else { return }
+    lanMode = false
+    clearDelivered()
   }
 
   nonisolated func onPushSubscriptionDidChange(state: OSPushSubscriptionChangedState) {
@@ -65,6 +97,19 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   #endif
 
   func identify(_ id: String?) {
+    if lanMode {
+      let previous = userId
+      userId = id
+      clicks.identify(id)
+      LiveActivities.shared.identify(id)
+      LanPush.shared.identify(id)
+      if id == nil || (previous != nil && previous != id) {
+        visibleRoute = ""
+        clearDelivered()
+      }
+      if id != nil { LiveActivities.shared.start() }
+      return
+    }
     guard configured else { return }
     let previous = userId ?? OneSignal.User.externalId
     userId = id
@@ -94,6 +139,12 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
       case .authorized, .provisional, .ephemeral: permission = "authorized"
       @unknown default: permission = "denied"
       }
+      if self.lanMode {
+        if permission == "authorized" { UIApplication.shared.registerForRemoteNotifications() }
+        let hub = LanPush.shared.hubState
+        completion(["configured": true, "permission": permission, "registered": hub == .ready, "hub": hub.rawValue])
+        return
+      }
       if self.configured, self.userId != nil, permission == "authorized" {
         OneSignal.User.pushSubscription.optIn()
       }
@@ -102,6 +153,15 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   }
 
   func request(_ completion: @escaping @MainActor (Bool) -> Void) {
+    if lanMode {
+      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { accepted, _ in
+        Task { @MainActor in
+          if accepted { UIApplication.shared.registerForRemoteNotifications() }
+          completion(accepted)
+        }
+      }
+      return
+    }
     guard configured, let requestedUser = userId else { completion(false); return }
     OneSignal.Notifications.requestPermission({ accepted in
       Task { @MainActor in
@@ -139,6 +199,48 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     }
   }
 
+  // MARK: LAN delivery. The hub puts `route` and `recipientUserId` at the top level.
+
+  nonisolated func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    let info = notification.request.content.userInfo
+    let route = info["route"] as? String
+    let recipient = info["recipientUserId"] as? String
+    nonisolated(unsafe) let completionHandler = completionHandler
+    Task { @MainActor in
+      // The session already on screen needs no banner.
+      guard self.userId != nil,
+            recipient == nil || recipient == self.userId,
+            route == nil || self.visibleRoute.isEmpty || route != self.visibleRoute else {
+        completionHandler([])
+        return
+      }
+      completionHandler([.banner, .list, .sound])
+    }
+  }
+
+  nonisolated func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    let id = response.notification.request.identifier
+    let opened = response.actionIdentifier == UNNotificationDefaultActionIdentifier
+    let info = response.notification.request.content.userInfo
+    let route = info["route"] as? String
+    let recipient = info["recipientUserId"] as? String
+    nonisolated(unsafe) let completionHandler = completionHandler
+    Task { @MainActor in
+      defer { completionHandler() }
+      guard opened, let route, let owner = recipient ?? self.userId, !owner.isEmpty else { return }
+      self.clicks.receive(id: id, route: route, userId: owner)
+      self.onClickAvailable?()
+    }
+  }
+
   private func clearDelivered() {
     UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     UNUserNotificationCenter.current().setBadgeCount(0)
@@ -155,5 +257,12 @@ public final class PushAppDelegateSubscriber: ExpoAppDelegateSubscriber {
     PushNotifications.shared.start(launchOptions)
     LiveActivities.shared.start()
     return true
+  }
+
+  public func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    MainActor.assumeIsolated {
+      guard PushNotifications.shared.lanMode else { return }
+      LanPush.shared.didRegister(deviceToken)
+    }
   }
 }

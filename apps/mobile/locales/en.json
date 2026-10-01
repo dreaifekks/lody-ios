@@ -355,6 +355,8 @@
   "notifications.hint.unsupported": "This build doesn't support notifications",
   "notifications.hint.authorized": "Notifications allowed",
   "notifications.hint.denied": "Notifications are off. Turn them on in System Settings",
+  "notifications.hint.lanNoKey": "The LAN host can't push yet. Run `lody lan push setup` on it",
+  "notifications.hint.lanUnreachable": "Couldn't reach the LAN host to register this device",
   "notifications.readFailed": "Couldn't read the notification settings",
   "notifications.changeFailed": "Couldn't change the notification settings",
   "notifications.accountSyncFailed": "Couldn't sync your notification account. Reopen Lody",

@@ -113,6 +113,10 @@ export function NotificationSettingsContent({
   if (!signedIn) subtitle = t('notifications.hint.signedOut');
   else if (!status) subtitle = t('notifications.hint.loading');
   else if (!status.configured) subtitle = t('notifications.hint.unsupported');
+  else if (status.permission === 'authorized' && status.hub === 'noKey')
+    subtitle = t('notifications.hint.lanNoKey');
+  else if (status.permission === 'authorized' && status.hub === 'unreachable')
+    subtitle = t('notifications.hint.lanUnreachable');
   else if (status.permission === 'authorized')
     subtitle = t('notifications.hint.authorized');
   else if (status.permission === 'denied')

@@ -296,3 +296,26 @@ precondition(!allFinished.isActive && allFinished.focus == nil && allFinished.di
 precondition(pushToStart.route(for: twoRunning).path == "/activity")
 precondition(pushToStart.route(for: oneRemaining).path == "/ws1/sessions/b")
 print("PASS: multiple turns, stable links, partial completion, stale awaiting cleanup, all-finished dismissal and overview routing")
+
+// A LAN host builds this payload from its members' summaries (Lody
+// `hub-push.ts`): the phone's own labels and copy, no relative time label.
+let hubState = decode("""
+{
+  "totalCount": 2,
+  "statusCounts": { "permission": 0, "question": 1, "running": 1, "unread": 0 },
+  "items": [
+    { "id": "s1", "status": "running", "statusLabel": "运行中", "agentLogoKind": "claude", "agentLogoText": "CC",
+      "title": "Fix the build", "updatedAt": 1800000000000, "updatedAtLabel": "" },
+    { "id": "s2", "status": "question", "statusLabel": "需要处理", "agentLogoKind": "codex", "agentLogoText": "CX",
+      "title": "Daily report", "updatedAt": 1800000000000, "updatedAtLabel": "" }
+  ],
+  "copy": { "stale": "已断开", "empty": "没有活跃会话", "others": "还有 {count} 个在跑", "lastSync": "上次同步", "openHint": "点按查看",
+            "runningSummary": "{count} 个运行中", "completedLabel": "已完成" }
+}
+""")
+precondition(hubState.isActive && hubState.needsAttention && hubState.focus?.id == "s2", "a question on another member takes focus")
+precondition(hubState.staleLabel == "已断开" && hubState.items[0].startedAt == nil)
+let hubAttributes = try! decoder.decode(LodyActivityAttributes.self, from: Data(#"{"activityId":"lody-conversations:v5:lw_abc:local:def","workspaceId":"lw_abc","workspaceSlug":"lan","workspaceName":"Home","userId":"local:def"}"#.utf8))
+precondition(hubAttributes.userId == "local:def" && hubAttributes.routeSlug == "lan", "a LAN user id contains a colon")
+precondition(hubAttributes.route(for: hubState).path == "/lan/sessions/s2")
+print("PASS: a LAN host's start and update payloads decode into the widget state")

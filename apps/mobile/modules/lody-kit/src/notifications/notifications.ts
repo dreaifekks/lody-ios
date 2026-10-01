@@ -3,6 +3,8 @@ export type PushStatus = {
   configured: boolean;
   registered: boolean;
   permission: 'notDetermined' | 'denied' | 'authorized';
+  /** LAN only: whether the LAN host took this device and can reach APNs. */
+  hub?: 'pending' | 'ready' | 'noKey' | 'unreachable';
 };
 export type PushClick = { id: string; route: string; userId: string };
 export const setPushUser = (id: string | null) => native.setPushUser(id);

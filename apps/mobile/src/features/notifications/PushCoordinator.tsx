@@ -47,9 +47,8 @@ export function PushCoordinator() {
   }, []);
   useEffect(() => {
     if (uiVerify || !auth.localReady || auth.busy) return;
-    // A LAN user id is local; only Lody Cloud sends pushes to OneSignal ids.
-    const pushUser = auth.account?.lan ? null : auth.account?.user.id;
-    void setPushUser(pushUser ?? null).catch(() =>
+    // On a LAN the native side registers with the hub instead of OneSignal.
+    void setPushUser(auth.account?.user.id ?? null).catch(() =>
       showToast(t('notifications.accountSyncFailed')),
     );
   }, [auth.localReady, auth.busy, auth.account?.user.id, auth.account?.lan]);

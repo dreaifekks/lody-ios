@@ -355,6 +355,8 @@
   "notifications.hint.unsupported": "当前版本暂不支持通知",
   "notifications.hint.authorized": "已允许通知",
   "notifications.hint.denied": "通知已关闭，请在系统设置中开启",
+  "notifications.hint.lanNoKey": "局域网主机还不能推送，请在主机上运行 lody lan push setup",
+  "notifications.hint.lanUnreachable": "暂时连不上局域网主机，无法登记这台设备",
   "notifications.readFailed": "暂时无法读取通知设置",
   "notifications.changeFailed": "暂时无法修改通知设置",
   "notifications.accountSyncFailed": "通知账号同步失败，请重新打开 App",

@@ -40,6 +40,7 @@ final class LiveActivities {
     get { defaults?.object(forKey: "liveActivitiesEnabled") as? Bool ?? true }
     set {
       defaults?.set(newValue, forKey: "liveActivitiesEnabled")
+      defer { LanPush.shared.sync() }
       if newValue {
         start()
         return
@@ -51,8 +52,13 @@ final class LiveActivities {
 
   func start() {
     // Offline Debug scenes must never initialize/register with OneSignal.
-    guard PushNotifications.shared.configured else { return }
-    if !identityResolved {
+    guard PushNotifications.shared.providerReady else { return }
+    if !identityResolved, PushNotifications.shared.lanMode {
+      // A LAN has one user, known before RN resolves the account; a background
+      // launch for a hub-started activity registers its token with it.
+      userId = LanPush.shared.invite?.userId
+      identityResolved = userId != nil
+    } else if !identityResolved {
       userId = OneSignal.User.externalId
       identityResolved = userId != nil
     }
@@ -87,23 +93,54 @@ final class LiveActivities {
   private func removePushToStart() {
     pushToStartTask?.cancel()
     pushToStartTask = nil
-    guard PushNotifications.shared.configured else { return }
-    OneSignal.LiveActivities.removePushToStartToken(LodyActivityAttributes.self)
+    publishPushToStart(nil)
   }
 
   private func registerPushToStart() {
-    guard PushNotifications.shared.configured, let owner = userId, !owner.isEmpty,
+    guard PushNotifications.shared.providerReady, let owner = userId, !owner.isEmpty,
           enabled, pushToStartTask == nil, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
     pushToStartTask = Task { @MainActor in
       guard !Task.isCancelled, enabled, userId == owner else { return }
       if let token = Activity<LodyActivityAttributes>.pushToStartToken {
-        OneSignal.LiveActivities.setPushToStartToken(LodyActivityAttributes.self, withToken: Self.hex(token))
+        publishPushToStart(token)
       }
       for await token in Activity<LodyActivityAttributes>.pushToStartTokenUpdates {
         guard !Task.isCancelled, enabled, userId == owner else { return }
-        OneSignal.LiveActivities.setPushToStartToken(LodyActivityAttributes.self, withToken: Self.hex(token))
+        publishPushToStart(token)
       }
     }
+  }
+
+  // MARK: Token delivery: OneSignal for Lody Cloud, the hub for a LAN.
+
+  private func publishPushToStart(_ token: Data?) {
+    if PushNotifications.shared.lanMode {
+      LanPush.shared.setPushToStart(token)
+      return
+    }
+    guard PushNotifications.shared.configured else { return }
+    if let token {
+      OneSignal.LiveActivities.setPushToStartToken(LodyActivityAttributes.self, withToken: Self.hex(token))
+    } else {
+      OneSignal.LiveActivities.removePushToStartToken(LodyActivityAttributes.self)
+    }
+  }
+
+  private func publishEnter(_ id: String, token: Data) {
+    if PushNotifications.shared.lanMode {
+      LanPush.shared.enter(id, token: token)
+      return
+    }
+    OneSignal.LiveActivities.enter(id, withToken: Self.hex(token))
+  }
+
+  private func publishExit(_ id: String) {
+    if PushNotifications.shared.lanMode {
+      LanPush.shared.exit(id)
+      return
+    }
+    guard PushNotifications.shared.configured else { return }
+    OneSignal.LiveActivities.exit(id)
   }
 
   func sync(catalogJSON: String, workspaceId: String, workspaceSlug: String, workspaceName: String, userId: String) {
@@ -217,7 +254,7 @@ final class LiveActivities {
       observation.task.cancel()
       observation.lifecycle.cancel()
     }
-    OneSignal.LiveActivities.exit(id)
+    publishExit(id)
   }
 
   func endAll() {
@@ -229,7 +266,7 @@ final class LiveActivities {
       $0.lifecycle.cancel()
     }
     tokenTasks = [:]
-    for id in ids { OneSignal.LiveActivities.exit(id) }
+    for id in ids { publishExit(id) }
     Self.endActivities()
     workStarts = [:]
   }
@@ -288,7 +325,7 @@ final class LiveActivities {
       }
       return
     }
-    guard PushNotifications.shared.configured,
+    guard PushNotifications.shared.providerReady,
           activity.activityState == .active || activity.activityState == .stale else { return }
     if let current = tokenTasks[id] {
       guard current.nativeId != activity.id else { return }
@@ -298,11 +335,11 @@ final class LiveActivities {
     let tokens = Task { @MainActor in
       guard !Task.isCancelled, enabled, userId == owner else { return }
       if let token = activity.pushToken {
-        OneSignal.LiveActivities.enter(id, withToken: Self.hex(token))
+        publishEnter(id, token: token)
       }
       for await token in activity.pushTokenUpdates {
         guard !Task.isCancelled, enabled, userId == owner else { return }
-        OneSignal.LiveActivities.enter(id, withToken: Self.hex(token))
+        publishEnter(id, token: token)
       }
     }
     let lifecycle = Task { @MainActor in
@@ -347,6 +384,18 @@ final class LiveActivities {
       waiting: LodyStrings.text("native.liveActivity.caption.waiting"),
       took: LodyStrings.text("native.liveActivity.caption.took")
     )
+  }
+
+  /// Widget copy for activities the LAN hub updates while the app sleeps.
+  var remoteCopy: [String: String] {
+    guard let data = try? JSONEncoder().encode(Self.widgetCopy),
+          let copy = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return [:] }
+    return copy
+  }
+
+  var remoteLabels: [String: String] {
+    let labels = Self.labels
+    return ["permission": labels.permission, "question": labels.permission, "running": labels.running, "unread": labels.completed]
   }
 
   private static func hex(_ token: Data) -> String {
@@ -434,11 +483,11 @@ final class LiveActivities {
       permissionAlert: permission
         ? .init(title: LodyStrings.text("native.liveActivity.debug.alertTitle"), body: "git push origin main --force")
         : nil,
-      copy: debugCopy
+      copy: widgetCopy
     )
   }
 
-  private nonisolated static var debugCopy: LodyActivityAttributes.ContentState.Copy {
+  private nonisolated static var widgetCopy: LodyActivityAttributes.ContentState.Copy {
     var copy = LodyActivityAttributes.ContentState.Copy(stale: labels.stale, empty: labels.empty, others: labels.others, lastSync: labels.lastSync, openHint: labels.openHint)
     copy.runningSummary = labels.runningSummary
     copy.completedSummary = labels.completedSummary

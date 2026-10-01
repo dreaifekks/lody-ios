@@ -61,9 +61,13 @@ const config: ExpoConfig = {
     [
       './plugins/withPushNotifications',
       {
+        // The hosted OneSignal app only pushes to the upstream bundle; a build
+        // under another bundle ID pushes through its LAN host instead.
         appId:
           process.env.LODY_ONESIGNAL_APP_ID ??
-          'e383bf31-7c8e-4641-b3f6-3486e77b9a82',
+          (bundleIdentifier === 'app.innei.lody'
+            ? 'e383bf31-7c8e-4641-b3f6-3486e77b9a82'
+            : ''),
       },
     ],
     './plugins/withShareExtension',

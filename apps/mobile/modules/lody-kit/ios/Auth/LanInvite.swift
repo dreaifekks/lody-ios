@@ -9,6 +9,8 @@ struct LanInvite: Codable, Equatable, Sendable {
 
   static let defaultName = "Lody LAN"
   static let workspacePrefix = "lw_"
+  /// The slug RN gives the LAN workspace; push routes use it.
+  static let workspaceSlug = "lan"
   static let userPrefix = "local:"
   static let nameLimit = 40
 

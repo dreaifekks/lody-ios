@@ -279,17 +279,21 @@ public final class LodyKitModule: Module, @unchecked Sendable {
         LiveActivities.shared.endAll()
         try AuthKeychain.clear()
         try LanHub.save(invite)
+        PushNotifications.shared.startLan()
       }
       return LanHub.summary(invite)
     }
-    AsyncFunction("clearLanHub") {
-      try MainActor.assumeIsolated {
+    AsyncFunction("clearLanHub") { () async throws in
+      // The hub must stop pushing here before the credential to tell it is gone.
+      await LanPush.shared.leave()
+      try await MainActor.run {
         self.dataRuntime.stop()
         PushNotifications.shared.identify(nil)
         LiveActivities.shared.endAll()
         try LanHub.clear()
+        PushNotifications.shared.stopLan()
       }
-    }.runOnQueue(.main)
+    }
     AsyncFunction("openAuthBrowser") { (address: String) in
       try MainActor.assumeIsolated {
         guard let url = URL(string: address), url.scheme == "https", url.host == "lody.ai",
