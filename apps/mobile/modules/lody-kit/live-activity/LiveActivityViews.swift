@@ -257,6 +257,8 @@ struct FocusText: View {
   let othersCount: Int
   let isStale: Bool
   let copy: LodyState
+  /// Lines the current reasoning may take in place of the running label.
+  var thoughtLines = 2
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
@@ -278,6 +280,17 @@ struct FocusText: View {
       .font(.subheadline)
       .foregroundStyle(.secondary)
       .lineLimit(1)
+    } else if focus.status == .running, let thought = focus.thought, !thought.isEmpty {
+      // The current stretch of reasoning says more than "Working".
+      HStack(alignment: .firstTextBaseline, spacing: 5) {
+        StatusSymbol(status: .running)
+        Text(thought)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(thoughtLines)
+          // The newest words are at the end; drop the start when it overflows.
+          .truncationMode(.head)
+      }
     } else if focus.status == .running {
       HStack(spacing: 5) {
         StatusSymbol(status: .running)
@@ -490,19 +503,13 @@ struct FocusTitle: View {
   }
 }
 
-/// What the agent is thinking and doing, as a LAN host last reported it.
+/// The step the agent is on, as a LAN host last reported it. Its reasoning
+/// is in the status line above.
 struct WorkDetail: View {
   let item: LodyItem
-  var thoughtLines = 2
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      if let thought = item.thought, !thought.isEmpty {
-        Text(thought)
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .lineLimit(thoughtLines)
-      }
       if let activity = item.activity, !activity.isEmpty {
         Label {
           Text(activity).lineLimit(1).truncationMode(.middle)
@@ -517,7 +524,7 @@ struct WorkDetail: View {
   }
 
   static func shows(_ item: LodyItem) -> Bool {
-    !(item.thought ?? "").isEmpty || !(item.activity ?? "").isEmpty
+    !(item.activity ?? "").isEmpty
   }
 }
 
@@ -526,23 +533,26 @@ struct WorkDetail: View {
 struct PermissionButtons: View {
   let focus: LodyItem
   let copy: LodyState
+  /// The expanded island has a fixed height; its buttons are smaller.
+  var compact = false
 
   var body: some View {
     if let requestId = focus.permissionRequestId, let allow = focus.allowOption {
       HStack(spacing: 8) {
         if let deny = focus.denyOption {
           Button(intent: LodyPermissionIntent(sessionId: focus.id, requestId: requestId, optionId: deny.id)) {
-            Text(copy.denyLabel).frame(maxWidth: .infinity, minHeight: 32)
+            Text(copy.denyLabel).frame(maxWidth: .infinity, minHeight: compact ? 24 : 32)
           }
           .buttonStyle(.bordered)
         }
         Button(intent: LodyPermissionIntent(sessionId: focus.id, requestId: requestId, optionId: allow.id)) {
-          Text(copy.allowLabel).frame(maxWidth: .infinity, minHeight: 32)
+          Text(copy.allowLabel).frame(maxWidth: .infinity, minHeight: compact ? 24 : 32)
         }
         .buttonStyle(.borderedProminent)
       }
-      .font(.subheadline.weight(.semibold))
-      .frame(minHeight: 44)
+      .font((compact ? Font.footnote : Font.subheadline).weight(.semibold))
+      .controlSize(compact ? .small : .regular)
+      .frame(minHeight: compact ? 32 : 44)
     }
   }
 
