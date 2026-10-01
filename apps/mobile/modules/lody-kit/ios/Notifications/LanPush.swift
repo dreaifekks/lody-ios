@@ -17,6 +17,10 @@ final class LanPush {
   private var activities: [String: String] = [:]
   private var userId: String?
   private var upload: Task<Void, Never>?
+  /// A push can wake the app just long enough to report a new activity token;
+  /// a short background allowance lets that report reach the hub.
+  private var uploadAllowance = UIBackgroundTaskIdentifier.invalid
+  private var uploadGeneration = 0
   private static let log = Logger(subsystem: "app.innei.lody", category: "lan-push")
 
   var active: Bool { invite != nil }
@@ -92,7 +96,16 @@ final class LanPush {
     guard let invite, let deviceToken, let userId, !userId.isEmpty else { return }
     upload?.cancel()
     let body = registration(invite: invite, deviceToken: deviceToken, userId: userId)
+    if uploadAllowance == .invalid {
+      uploadAllowance = UIApplication.shared.beginBackgroundTask(withName: "lan-push-registration") { [weak self] in
+        MainActor.assumeIsolated { self?.endUploadAllowance() }
+      }
+    }
+    uploadGeneration += 1
+    let generation = uploadGeneration
     upload = Task { @MainActor in
+      // Only the latest registration releases the allowance.
+      defer { if uploadGeneration == generation { endUploadAllowance() } }
       try? await Task.sleep(for: .milliseconds(300))
       guard !Task.isCancelled else { return }
       let state: HubState
@@ -106,6 +119,12 @@ final class LanPush {
       guard !Task.isCancelled, self.invite == invite else { return }
       hubState = state
     }
+  }
+
+  private func endUploadAllowance() {
+    guard uploadAllowance != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(uploadAllowance)
+    uploadAllowance = .invalid
   }
 
   private func registration(invite: LanInvite, deviceToken: String, userId: String) -> [String: Any] {

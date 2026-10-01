@@ -467,6 +467,53 @@ struct AttentionBlock: View {
   }
 }
 
+/// Apple Watch Smart Stack and CarPlay: who is working, on what, for how long.
+struct LodyCompactActivityView: View {
+  let state: LodyState
+  let isStale: Bool
+
+  var body: some View {
+    if let focus = state.focus {
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 6) {
+          if state.showsOverview {
+            JellyMark()
+          } else {
+            LeadGlyph(item: focus, size: 20)
+          }
+          Text(state.showsOverview ? state.runningSummary : focus.title)
+            .font(.headline)
+            .lineLimit(1)
+        }
+        HStack(spacing: 4) {
+          StatusSymbol(status: focus.status, isStale: isStale)
+          Text(isStale ? state.staleLabel : focus.statusLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+          Spacer(minLength: 4)
+          if state.showsTimer(for: focus, isStale: isStale) {
+            WorkTimer(item: focus, font: .caption.weight(.semibold).monospacedDigit(), width: 52)
+          }
+        }
+        if !state.showsOverview, state.othersCount > 0 {
+          Text(state.othersLabel(state.othersCount))
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .lodyStale(isStale)
+    } else {
+      Text(state.emptyLabel)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+}
+
 struct LodyLockScreenView: View {
   let state: LodyState
   let workspaceSlug: String
