@@ -387,10 +387,18 @@ struct IslandRow: View {
   var body: some View {
     HStack(spacing: 8) {
       LeadGlyph(item: item, size: 18)
-      Text(item.title)
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+      VStack(alignment: .leading, spacing: 1) {
+        FocusTitle(item: item)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+        if !item.isDone, let step = OthersList.step(of: item) {
+          Text(step)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        }
+      }
       Spacer(minLength: 4)
       if state.showsTimer(for: item, isStale: false) {
         WorkTimer(item: item)
@@ -412,10 +420,19 @@ struct OthersList: View {
         Link(destination: LodyActivityAttributes.route(workspaceSlug: workspaceSlug, sessionId: item.id)) {
           HStack(spacing: 8) {
             LeadGlyph(item: item, size: 20)
-            Text(item.title)
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+              FocusTitle(item: item)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+              // Several sessions at once: one line each of what it is doing.
+              if !isStale, !item.isDone, let step = Self.step(of: item) {
+                Text(step)
+                  .font(.caption2)
+                  .foregroundStyle(.tertiary)
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+              }
+            }
             Spacer(minLength: 4)
             if state.showsTimer(for: item, isStale: isStale) {
               WorkTimer(item: item)
@@ -429,6 +446,13 @@ struct OthersList: View {
     }
     .padding(.top, 4)
     .overlay(alignment: .top) { Divider().opacity(0.6) }
+  }
+
+  /// The current step, or else the latest reasoning, as a LAN host reported it.
+  static func step(of item: LodyItem) -> String? {
+    if let activity = item.activity, !activity.isEmpty { return activity }
+    if let thought = item.thought, !thought.isEmpty { return thought }
+    return nil
   }
 }
 
