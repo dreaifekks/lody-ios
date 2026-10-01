@@ -1,4 +1,5 @@
 import Foundation
+import os
 import UniformTypeIdentifiers
 
 /// Attachments on a LAN, which has no blob store. Like Lody's `LanFileHandoff`,
@@ -120,16 +121,36 @@ enum LanSessionFiles {
 /// thumbnail and its full-screen preview share one fetch.
 @MainActor
 enum LanKeptImages {
+  /// Posted with the digest in `userInfo["sha256"]` once a picture is cached,
+  /// so a thumbnail that failed earlier can show it.
+  static let didCache = Notification.Name("LanKeptImagesDidCache")
+  static let log = Logger(subsystem: "app.innei.lody", category: "lan-files")
   private static var loads: [String: Task<URL, Error>] = [:]
   private static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     .appendingPathComponent("lan-images", isDirectory: true)
 
+  private static func digest(_ image: ChatImage) -> String? {
+    guard let sha256 = image.sha256?.lowercased(), sha256.count == 64, sha256.allSatisfy(\.isHexDigit) else { return nil }
+    return sha256
+  }
+
+  private static func location(_ image: ChatImage, sha256: String) -> URL {
+    let suffix = (image.fileName as NSString).pathExtension.filter { $0.isLetter || $0.isNumber }
+    return directory.appendingPathComponent(suffix.isEmpty ? sha256 : "\(sha256).\(suffix)")
+  }
+
+  /// The picture if an earlier fetch already cached it.
+  static func cached(_ image: ChatImage) -> URL? {
+    guard let sha256 = digest(image) else { return nil }
+    let url = location(image, sha256: sha256)
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+  }
+
   static func file(_ image: ChatImage, session: String) async throws -> URL {
-    guard let sha256 = image.sha256?.lowercased(), sha256.count == 64, sha256.allSatisfy(\.isHexDigit) else {
+    guard let sha256 = digest(image) else {
       throw SessionAttachments.error(LodyStrings.text("native.attachment.error.invalid"))
     }
-    let suffix = (image.fileName as NSString).pathExtension.filter { $0.isLetter || $0.isNumber }
-    let cached = directory.appendingPathComponent(suffix.isEmpty ? sha256 : "\(sha256).\(suffix)")
+    let cached = location(image, sha256: sha256)
     if FileManager.default.fileExists(atPath: cached.path) { return cached }
     if let load = loads[sha256] { return try await load.value }
     let load = Task { @MainActor in
@@ -144,9 +165,15 @@ enum LanKeptImages {
         fileId: image.id, fileName: image.fileName, sizeBytes: image.sizeBytes, sha256: sha256, directory: scratch)
       try? FileManager.default.removeItem(at: cached)
       try FileManager.default.moveItem(at: fetched, to: cached)
+      NotificationCenter.default.post(name: didCache, object: nil, userInfo: ["sha256": sha256])
       return cached
     }
     loads[sha256] = load
-    return try await load.value
+    do {
+      return try await load.value
+    } catch {
+      log.error("kept picture \(image.id, privacy: .public) not fetched: \(error.localizedDescription, privacy: .public)")
+      throw error
+    }
   }
 }

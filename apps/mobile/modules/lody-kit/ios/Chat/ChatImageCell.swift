@@ -17,6 +17,9 @@ final class ChatImageCell: UICollectionViewCell {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
+    // Another view (such as the full-screen preview) may fetch a kept picture
+    // this thumbnail failed to; show it once it is cached.
+    NotificationCenter.default.addObserver(self, selector: #selector(keptImageCached(_:)), name: LanKeptImages.didCache, object: nil)
     photo.contentMode = .scaleAspectFit
     photo.backgroundColor = .lodyInset
     photo.layer.cornerRadius = 16
@@ -77,15 +80,7 @@ final class ChatImageCell: UICollectionViewCell {
       if !hadLocalImage { photo.image = nil }
       failure.isHidden = true
       spinner.startAnimating()
-      lanLoad = Task { [weak self, session] in
-        let url = try? await LanKeptImages.file(image, session: session)
-        let thumbnail = await Task.detached { url.flatMap(ChatAttachment.thumbnail) }.value
-        guard let self, self.requestID == requestID else { return }
-        self.lanLoad = nil
-        self.spinner.stopAnimating()
-        if let thumbnail { self.photo.image = thumbnail }
-        self.failure.isHidden = self.photo.image != nil
-      }
+      loadKept(image, session: session, requestID: requestID, attempt: 0)
       return
     }
     guard !workspace.isEmpty, !session.isEmpty, !image.id.isEmpty else {
@@ -108,6 +103,40 @@ final class ChatImageCell: UICollectionViewCell {
     failure.isHidden = true
     guard let token = try? AuthKeychain.read() else { failure.isHidden = false; return }
     fetch(thumbnail, fallback: original, requestID: requestID, token: token)
+  }
+
+  @objc private func keptImageCached(_ note: Notification) {
+    guard let image, let sha256 = image.sha256, sha256.lowercased() == note.userInfo?["sha256"] as? String,
+          requestURL == URL(string: "lody-lan-image:\(sha256)"), photo.image == nil else { return }
+    loadKept(image, session: session, requestID: requestID, attempt: 0)
+  }
+
+  /// A thumbnail can appear before the runtime can reach the machine (a cached
+  /// transcript, a return from the background), so a failed fetch is retried
+  /// a few times before the failure stays.
+  private func loadKept(_ image: ChatImage, session: String, requestID: UUID, attempt: Int) {
+    lanLoad?.cancel()
+    spinner.startAnimating()
+    lanLoad = Task { [weak self] in
+      if attempt > 0 { try? await Task.sleep(for: .seconds(1 << (2 * (attempt - 1)))) }
+      guard !Task.isCancelled else { return }
+      var url = LanKeptImages.cached(image)
+      if url == nil { url = try? await LanKeptImages.file(image, session: session) }
+      let thumbnail = await Task.detached { [url] in url.flatMap(ChatAttachment.thumbnail) }.value
+      guard let self, self.requestID == requestID, !Task.isCancelled else { return }
+      self.lanLoad = nil
+      if let thumbnail {
+        self.spinner.stopAnimating()
+        self.photo.image = thumbnail
+        self.failure.isHidden = true
+      } else if attempt < 3 {
+        self.loadKept(image, session: session, requestID: requestID, attempt: attempt + 1)
+      } else {
+        if url != nil { LanKeptImages.log.error("kept picture \(image.id, privacy: .public) is cached but cannot be decoded") }
+        self.spinner.stopAnimating()
+        self.failure.isHidden = self.photo.image != nil
+      }
+    }
   }
 
   private func fetch(_ url: URL, fallback: URL?, requestID: UUID, token: String) {
