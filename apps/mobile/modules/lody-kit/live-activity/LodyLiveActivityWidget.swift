@@ -44,10 +44,20 @@ struct LodyLiveActivityWidget: Widget {
             if !isStale, let focus {
               IslandRow(item: focus, state: state)
             }
+          } else if let focus, !isStale, PermissionButtons.shows(focus) {
+            // Room for the decision itself: what is asked and the two answers.
+            FocusTitle(item: focus)
+              .font(.subheadline.weight(.semibold))
+            if let command = focus.permissionCommand {
+              CommandStrip(command: command)
+            }
+            PermissionButtons(focus: focus, copy: state)
           } else if let focus {
             FocusText(focus: focus, othersCount: state.othersCount, isStale: isStale, copy: state)
             if !isStale, focus.status == .permission, let command = focus.permissionCommand {
               CommandStrip(command: command)
+            } else if !isStale, focus.status == .running, WorkDetail.shows(focus) {
+              WorkDetail(item: focus, thoughtLines: 1)
             }
           } else {
             Text(state.emptyLabel)

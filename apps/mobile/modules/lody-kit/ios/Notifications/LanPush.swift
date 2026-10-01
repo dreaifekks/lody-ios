@@ -148,8 +148,13 @@ final class LanPush {
     return body
   }
 
-  private static func send(invite: LanInvite, method: String, body: [String: Any]) async throws -> [String: Any] {
-    guard let url = URL(string: "\(invite.url)/push/devices") else { throw URLError(.badURL) }
+  private static func send(
+    invite: LanInvite,
+    method: String,
+    path: String = "/push/devices",
+    body: [String: Any]
+  ) async throws -> [String: Any] {
+    guard let url = URL(string: "\(invite.url)\(path)") else { throw URLError(.badURL) }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
     request.httpMethod = method
     request.setValue("Bearer \(invite.token)", forHTTPHeaderField: "Authorization")
@@ -164,6 +169,19 @@ final class LanPush {
     return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
   }
 
+  /// Hands a choice made on the Live Activity to the member that asked; the
+  /// agent goes on there. Throws when the hub cannot take it.
+  func respondPermission(sessionId: String, requestId: String, optionId: String) async throws {
+    guard let invite = invite ?? (try? LanHub.read()) else { throw URLError(.userAuthenticationRequired) }
+    let answer = try await Self.send(
+      invite: invite,
+      method: "POST",
+      path: "/push/permission",
+      body: ["sessionId": sessionId, "requestId": requestId, "optionId": optionId]
+    )
+    guard answer["ok"] as? Bool == true else { throw URLError(.cannotLoadFromNetwork) }
+  }
+
   static func hex(_ token: Data) -> String {
     token.map { String(format: "%02x", $0) }.joined()
   }
@@ -173,5 +191,17 @@ final class LanPush {
 private final class NoRedirects: NSObject, URLSessionTaskDelegate {
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? {
     nil
+  }
+}
+
+/// What a Live Activity's buttons do, for `LodyPermissionIntent`, which the app
+/// target compiles and LodyKit cannot see.
+public enum LodyLiveActivityActions {
+  public static func respondPermission(sessionId: String, requestId: String, optionId: String) async throws {
+    // The Debug fixture has no host to answer; it only shows the result.
+    if !sessionId.hasPrefix("debug-") {
+      try await LanPush.shared.respondPermission(sessionId: sessionId, requestId: requestId, optionId: optionId)
+    }
+    await LiveActivities.shared.markAnswered(sessionId: sessionId)
   }
 }

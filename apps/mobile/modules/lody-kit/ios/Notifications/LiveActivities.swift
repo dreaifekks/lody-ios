@@ -200,7 +200,8 @@ final class LiveActivities {
     for activity in existing {
       guard !Task.isCancelled else { return }
       if state.isActive {
-        await activity.update(content)
+        let detailed = LiveActivityCatalog.carryingRemoteDetail(summary, from: activity.content.state)
+        await activity.update(ActivityContent(state: detailed, staleDate: content.staleDate))
       } else {
         if !isDebug(attributes) { await shared.unregister(id) }
         let ended = completed(summary, previous: activity.content.state, failed: failed, at: now)
@@ -221,6 +222,30 @@ final class LiveActivities {
       }
     } catch {
       log.error("activity request failed: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// A request answered from the activity: drop its buttons at once rather than
+  /// waiting for the agent to resume and the host to say so.
+  func markAnswered(sessionId: String) {
+    let running = Self.labels.running
+    Task {
+      for activity in Activity<LodyActivityAttributes>.activities
+        where activity.activityState == .active || activity.activityState == .stale {
+        var state = activity.content.state
+        guard let index = state.items.firstIndex(where: { $0.id == sessionId && ($0.status == .permission || $0.status == .question) }) else { continue }
+        let previous = state.items[index].status
+        state.items[index].status = .running
+        state.items[index].statusLabel = running
+        state.items[index].permissionOptions = nil
+        state.items[index].permissionRequestId = nil
+        state.items[index].permissionCommand = nil
+        if previous == .permission { state.statusCounts.permission = max(0, state.statusCounts.permission - 1) }
+        if previous == .question { state.statusCounts.question = max(0, state.statusCounts.question - 1) }
+        state.statusCounts.running += 1
+        state.permissionAlert = nil
+        await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
+      }
     }
   }
 
@@ -382,7 +407,9 @@ final class LiveActivities {
       failedSummary: LodyStrings.text("native.liveActivity.failedSummary"),
       elapsed: LodyStrings.text("native.liveActivity.caption.elapsed"),
       waiting: LodyStrings.text("native.liveActivity.caption.waiting"),
-      took: LodyStrings.text("native.liveActivity.caption.took")
+      took: LodyStrings.text("native.liveActivity.caption.took"),
+      allow: LodyStrings.text("native.liveActivity.allow"),
+      deny: LodyStrings.text("native.liveActivity.deny")
     )
   }
 
@@ -445,9 +472,11 @@ final class LiveActivities {
     _ agent: String,
     _ updatedAt: Double,
     startedAgo: Double,
-    command: String? = nil
+    command: String? = nil,
+    activity: String? = nil,
+    thought: String? = nil
   ) -> LodyActivityAttributes.ContentState.Item {
-    return LodyActivityAttributes.ContentState.Item(
+    var item = LodyActivityAttributes.ContentState.Item(
       id: id,
       status: status,
       statusLabel: LodyStrings.text("native.liveActivity.status.\(status.rawValue)"),
@@ -460,6 +489,16 @@ final class LiveActivities {
       updatedAtLabel: LodyStrings.text("native.liveActivity.debug.updatedAt"),
       startedAt: updatedAt - startedAgo * 1000
     )
+    item.machineName = LodyStrings.text("native.liveActivity.debug.machine")
+    item.activity = activity
+    item.thought = thought
+    if command != nil {
+      item.permissionOptions = [
+        .init(id: "debug-allow", label: LodyStrings.text("native.liveActivity.allow"), kind: "allow_once"),
+        .init(id: "debug-deny", label: LodyStrings.text("native.liveActivity.deny"), kind: "reject_once"),
+      ]
+    }
+    return item
   }
 
   private nonisolated static func debugState(permission: Bool = false) -> LodyActivityAttributes.ContentState {
@@ -471,13 +510,24 @@ final class LiveActivities {
       "CX",
       now - 1000,
       startedAgo: 187,
-      command: permission ? "git push origin main --force" : nil
+      command: permission ? "git push origin main --force" : nil,
+      activity: LodyStrings.text("native.liveActivity.debug.activity2"),
+      thought: LodyStrings.text("native.liveActivity.debug.thought2")
     )
     return LodyActivityAttributes.ContentState(
       totalCount: 2,
       statusCounts: .init(permission: permission ? 1 : 0, running: permission ? 1 : 2),
       items: [
-        debugItem("debug-1", .running, LodyStrings.text("native.liveActivity.debug.title1"), "CC", now, startedAgo: 761),
+        debugItem(
+          "debug-1",
+          .running,
+          LodyStrings.text("native.liveActivity.debug.title1"),
+          "CC",
+          now,
+          startedAgo: 761,
+          activity: LodyStrings.text("native.liveActivity.debug.activity1"),
+          thought: LodyStrings.text("native.liveActivity.debug.thought1")
+        ),
         second,
       ],
       permissionAlert: permission
@@ -497,6 +547,8 @@ final class LiveActivities {
     copy.elapsed = labels.elapsed
     copy.waiting = labels.waiting
     copy.took = labels.took
+    copy.allow = labels.allow
+    copy.deny = labels.deny
     return copy
   }
 }

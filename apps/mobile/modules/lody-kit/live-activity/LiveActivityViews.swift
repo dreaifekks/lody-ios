@@ -260,9 +260,8 @@ struct FocusText: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
-      Text(focus.title)
+      FocusTitle(item: focus)
         .font(.headline)
-        .lineLimit(1)
       statusLine
     }
   }
@@ -451,6 +450,83 @@ struct CommandStrip: View {
   }
 }
 
+/// `machine / title` once a LAN host names the member running the session.
+struct FocusTitle: View {
+  let item: LodyItem
+
+  var body: some View {
+    Group {
+      if let machine = item.machineName, !machine.isEmpty {
+        Text(machine).foregroundStyle(.secondary) + Text(" / ").foregroundStyle(.tertiary) + Text(item.title)
+      } else {
+        Text(item.title)
+      }
+    }
+    .lineLimit(1)
+  }
+}
+
+/// What the agent is thinking and doing, as a LAN host last reported it.
+struct WorkDetail: View {
+  let item: LodyItem
+  var thoughtLines = 2
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      if let thought = item.thought, !thought.isEmpty {
+        Text(thought)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .lineLimit(thoughtLines)
+      }
+      if let activity = item.activity, !activity.isEmpty {
+        Label {
+          Text(activity).lineLimit(1).truncationMode(.middle)
+        } icon: {
+          Image(systemName: "chevron.forward.2")
+        }
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  static func shows(_ item: LodyItem) -> Bool {
+    !(item.thought ?? "").isEmpty || !(item.activity ?? "").isEmpty
+  }
+}
+
+/// Answers a permission request in place; the app forwards the choice once
+/// the device is unlocked.
+struct PermissionButtons: View {
+  let focus: LodyItem
+  let copy: LodyState
+
+  var body: some View {
+    if let requestId = focus.permissionRequestId, let allow = focus.allowOption {
+      HStack(spacing: 8) {
+        if let deny = focus.denyOption {
+          Button(intent: LodyPermissionIntent(sessionId: focus.id, requestId: requestId, optionId: deny.id)) {
+            Text(copy.denyLabel).frame(maxWidth: .infinity, minHeight: 32)
+          }
+          .buttonStyle(.bordered)
+        }
+        Button(intent: LodyPermissionIntent(sessionId: focus.id, requestId: requestId, optionId: allow.id)) {
+          Text(copy.allowLabel).frame(maxWidth: .infinity, minHeight: 32)
+        }
+        .buttonStyle(.borderedProminent)
+      }
+      .font(.subheadline.weight(.semibold))
+      .frame(minHeight: 44)
+    }
+  }
+
+  static func shows(_ item: LodyItem) -> Bool {
+    item.status == .permission && item.permissionRequestId != nil && item.allowOption != nil
+  }
+}
+
 struct AttentionBlock: View {
   let focus: LodyItem
   let copy: LodyState
@@ -460,9 +536,13 @@ struct AttentionBlock: View {
       if let command = focus.permissionCommand, focus.status == .permission {
         CommandStrip(command: command)
       }
-      Text(copy.openHintLabel)
-        .font(.caption)
-        .foregroundStyle(.tertiary)
+      if PermissionButtons.shows(focus) {
+        PermissionButtons(focus: focus, copy: copy)
+      } else {
+        Text(copy.openHintLabel)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+      }
     }
   }
 }
@@ -496,7 +576,13 @@ struct LodyCompactActivityView: View {
             WorkTimer(item: focus, font: .caption.weight(.semibold).monospacedDigit(), width: 52)
           }
         }
-        if !state.showsOverview, state.othersCount > 0 {
+        if !state.showsOverview, !isStale, let activity = focus.activity, !activity.isEmpty {
+          Text(activity)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        } else if !state.showsOverview, state.othersCount > 0 {
           Text(state.othersLabel(state.othersCount))
             .font(.caption2)
             .foregroundStyle(.tertiary)
@@ -578,6 +664,8 @@ struct LodyLockScreenView: View {
           }
           if !isStale, state.needsAttention {
             AttentionBlock(focus: focus, copy: state)
+          } else if !isStale, !focus.isDone, WorkDetail.shows(focus) {
+            WorkDetail(item: focus)
           }
         }
       }

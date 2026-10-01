@@ -107,4 +107,21 @@ def lody_live_activity_extension(bundle_id)
     display_name: 'Lody',
     swift_version: '6.0'
   )
+  lody_app_intents('modules/lody-kit/live-activity', ['LodyPermissionIntent.swift'])
+end
+
+# The system finds App Intents only in the targets it extracts metadata from,
+# and LodyKit is a static library. An intent a Live Activity button performs in
+# the app is therefore compiled into the app target as well.
+def lody_app_intents(source_dir, basenames)
+  root = __dir__ + '/../ios'
+  project = Xcodeproj::Project.open(Dir[File.join(root, '*.xcodeproj')].first)
+  app = project.targets.find { |t| t.product_type == 'com.apple.product-type.application' }
+  group = project.main_group.find_subpath(app.name, true)
+  basenames.each do |basename|
+    FileUtils.cp(File.join(__dir__, '..', source_dir, basename), File.join(root, app.name))
+    file = group.files.find { |f| f.path == basename } || group.new_file(basename)
+    app.source_build_phase.add_file_reference(file, true)
+  end
+  project.save
 end

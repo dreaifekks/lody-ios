@@ -319,3 +319,44 @@ let hubAttributes = try! decoder.decode(LodyActivityAttributes.self, from: Data(
 precondition(hubAttributes.userId == "local:def" && hubAttributes.routeSlug == "lan", "a LAN user id contains a colon")
 precondition(hubAttributes.route(for: hubState).path == "/lan/sessions/s2")
 print("PASS: a LAN host's start and update payloads decode into the widget state")
+
+// A LAN host adds what the agent is doing and the choices of a permission
+// request; the app's own catalog has neither.
+let detailed = decode("""
+{
+  "totalCount": 1,
+  "statusCounts": { "permission": 1 },
+  "items": [
+    { "id": "s1", "status": "permission", "statusLabel": "等待你处理", "agentLogoKind": "claude", "agentLogoText": "CC",
+      "title": "Deploy", "updatedAt": 1800000000000, "updatedAtLabel": "",
+      "machineName": "homenucserver", "activity": "Run git push", "thought": "Pushing the release branch.",
+      "permissionRequestId": "req-1", "permissionCommand": "git push origin main",
+      "permissionOptions": [
+        { "id": "always", "label": "Always allow", "kind": "allow_always" },
+        { "id": "once", "label": "Allow", "kind": "allow_once" },
+        { "id": "no", "label": "Reject", "kind": "reject_once" }
+      ] }
+  ],
+  "copy": { "stale": "已断开", "empty": "-", "others": "{count}", "lastSync": "-", "openHint": "-", "allow": "允许", "deny": "拒绝" }
+}
+""")
+let asked = detailed.items[0]
+precondition(asked.machineName == "homenucserver" && asked.activity == "Run git push")
+precondition(asked.allowOption?.id == "once", "a lock screen tap answers this request only")
+precondition(asked.denyOption?.id == "no")
+precondition(detailed.allowLabel == "允许" && detailed.denyLabel == "拒绝")
+precondition(tolerant.allowLabel == "Allow" && tolerant.denyLabel == "Deny", "older payloads fall back to English")
+
+var local = detailed
+local.items[0].machineName = nil
+local.items[0].activity = nil
+local.items[0].thought = nil
+local.items[0].permissionOptions = nil
+let kept = LiveActivityCatalog.carryingRemoteDetail(local, from: detailed)
+precondition(kept.items[0].thought == "Pushing the release branch." && kept.items[0].allowOption?.id == "once",
+             "a local refresh keeps what the host sent for a session in the same state")
+local.items[0].status = .running
+let moved = LiveActivityCatalog.carryingRemoteDetail(local, from: detailed)
+precondition(moved.items[0].permissionOptions == nil && moved.items[0].thought == nil,
+             "a session that moved on drops the old detail")
+print("PASS: host detail decodes, one-time choices win, local refreshes keep host detail")

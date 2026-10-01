@@ -25,6 +25,8 @@ enum LiveActivityCatalog {
     var elapsed: String = "elapsed"
     var waiting: String = "waiting"
     var took: String = "took"
+    var allow: String = "Allow"
+    var deny: String = "Deny"
   }
 
   static let runningStatuses: Set<String> = ["running", "initializing", "processing", "in_progress", "queued"]
@@ -51,6 +53,8 @@ enum LiveActivityCatalog {
     copy.elapsed = labels.elapsed
     copy.waiting = labels.waiting
     copy.took = labels.took
+    copy.allow = labels.allow
+    copy.deny = labels.deny
     return LodyActivityAttributes.ContentState(
       totalCount: items.count,
       statusCounts: counts,
@@ -58,6 +62,29 @@ enum LiveActivityCatalog {
       permissionAlert: nil,
       copy: copy
     )
+  }
+
+  /// The catalog the app reads holds no reasoning, current tool or permission
+  /// choices; a LAN host pushes them. A local refresh keeps what the host sent
+  /// for a session that is still in the same state.
+  static func carryingRemoteDetail(
+    _ state: LodyActivityAttributes.ContentState,
+    from previous: LodyActivityAttributes.ContentState
+  ) -> LodyActivityAttributes.ContentState {
+    var merged = state
+    let earlier = Dictionary(previous.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    for index in merged.items.indices {
+      guard let before = earlier[merged.items[index].id], before.status == merged.items[index].status else { continue }
+      merged.items[index].machineName = merged.items[index].machineName ?? before.machineName
+      merged.items[index].activity = merged.items[index].activity ?? before.activity
+      merged.items[index].thought = merged.items[index].thought ?? before.thought
+      if merged.items[index].permissionOptions == nil {
+        merged.items[index].permissionOptions = before.permissionOptions
+        merged.items[index].permissionRequestId = merged.items[index].permissionRequestId ?? before.permissionRequestId
+        merged.items[index].permissionCommand = merged.items[index].permissionCommand ?? before.permissionCommand
+      }
+    }
+    return merged
   }
 
   static func failedSessionIds(sessions: [[String: Any]]) -> Set<String> {

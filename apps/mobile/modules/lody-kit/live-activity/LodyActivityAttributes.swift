@@ -70,11 +70,38 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
       var updatedAtLabel: String
       var startedAt: Double?
       var completedAt: Double?
+      /// The member running the session, once a LAN has more than one.
+      var machineName: String?
+      /// What the agent is doing now, e.g. the title of its current tool call.
+      var activity: String?
+      /// The latest line of the agent's reasoning, already shortened.
+      var thought: String?
+      /// The choices of a pending permission request that can be answered here.
+      var permissionOptions: [PermissionOption]?
 
       var updatedDate: Date { Date(timeIntervalSince1970: updatedAt / 1000) }
       var startDate: Date { Date(timeIntervalSince1970: (startedAt ?? updatedAt) / 1000) }
       var completedDate: Date? { completedAt.map { Date(timeIntervalSince1970: $0 / 1000) } }
       var isDone: Bool { status == .unread || status == .failed }
+
+      /// The one-time choices, preferred over the remembered ones: a tap on a
+      /// lock screen answers this request, not every later one.
+      var allowOption: PermissionOption? { option(prefix: "allow") }
+      var denyOption: PermissionOption? { option(prefix: "reject") }
+
+      private func option(prefix: String) -> PermissionOption? {
+        let options = (permissionOptions ?? []).filter { $0.kind.hasPrefix(prefix) }
+        return options.first { $0.kind.hasSuffix("_once") } ?? options.first
+      }
+    }
+
+    struct PermissionOption: Codable, Hashable, Sendable {
+      var id: String
+      var label: String
+      /// ACP option kind: allow_once, allow_always, reject_once or reject_always.
+      var kind: String
+
+      var allows: Bool { kind.hasPrefix("allow") }
     }
 
     struct PermissionAlert: Codable, Hashable, Sendable {
@@ -98,6 +125,8 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
       var elapsed: String?
       var waiting: String?
       var took: String?
+      var allow: String?
+      var deny: String?
 
       init(stale: String, empty: String, others: String, lastSync: String, openHint: String) {
         self.stale = stale
@@ -122,6 +151,8 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
         elapsed = try container.decodeIfPresent(String.self, forKey: .elapsed)
         waiting = try container.decodeIfPresent(String.self, forKey: .waiting)
         took = try container.decodeIfPresent(String.self, forKey: .took)
+        allow = try container.decodeIfPresent(String.self, forKey: .allow)
+        deny = try container.decodeIfPresent(String.self, forKey: .deny)
       }
     }
 
@@ -152,6 +183,10 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
     var waitingCaption: String { copy?.waiting ?? "waiting" }
 
     var tookCaption: String { copy?.took ?? "took" }
+
+    var allowLabel: String { copy?.allow ?? "Allow" }
+
+    var denyLabel: String { copy?.deny ?? "Deny" }
 
     func completedSummary(_ count: Int) -> String {
       (copy?.completedSummary ?? "{count} tasks finished")
