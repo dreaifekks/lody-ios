@@ -55,6 +55,7 @@ ui.capture('sidebar-machines')
 # Tapping the machine title collapses its projects; tapping again restores them.
 ui.axe('tap', '-x', str(machine['x'] + machine['width'] / 2), '-y', str(machine['y'] + machine['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'toggle:ui:local:lody' and item.get('type') == 'Button' for item in items), 'Collapsed machine kept its projects')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'machine:ui' and i.get('AXValue') == catalog.text('native.list.collapsed') for i in items), 'Machine title still reads expanded')
 ui.capture('sidebar-machine-collapsed')
 machine = button('machine:ui')['frame']
 ui.axe('tap', '-x', str(machine['x'] + machine['width'] / 2), '-y', str(machine['y'] + machine['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')

@@ -24,6 +24,7 @@ view_label = catalog.text('inbox.settings.section.view')
 ui.axe('tap', '--label', view_label, '--post-delay', '.8')
 ui.axe('tap', '--label', catalog.text('inbox.settings.view.machines'), '--post-delay', '.8')
 machine = row('machine:ui')
+assert machine.get('AXValue') == catalog.text('native.list.expanded'), machine
 assert catalog.plural('inbox.machine.projects', 2) in machine.get('AXLabel', ''), machine
 project = row('toggle:ui:local:lody')['frame']
 # The title sits directly above the first card of its machine.
@@ -32,7 +33,8 @@ ui.capture('machines')
 
 tap_machine()
 ui.wait(lambda items: not rows(items, 'toggle:ui:local:lody') and not rows(items, 'project:ui:empty'), 'Collapsed machine kept its projects')
-row('machine:ui')
+# The disclosure turns with the state, not only the rows.
+ui.wait(lambda items: (max(rows(items, 'machine:ui'), key=lambda i: i['frame']['width'], default={}) or {}).get('AXValue') == catalog.text('native.list.collapsed'), 'Machine title still reads expanded')
 # Only that machine's projects go; pinned sessions and chats stay.
 row('toggle:pinned')
 row('toggle:chat')

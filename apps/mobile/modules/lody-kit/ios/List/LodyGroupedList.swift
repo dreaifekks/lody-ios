@@ -779,6 +779,13 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       guard let cell = collection.cellForItem(at: index) as? UICollectionViewListCell, let row = row(at: index) else { continue }
       configure(cell, row: displayed(row))
     }
+    // A kept section's header is not reloaded, so a header action (a machine
+    // title) needs its disclosure turned here.
+    for index in collection.indexPathsForVisibleSupplementaryElements(ofKind: UICollectionView.elementKindSectionHeader) {
+      guard let section = section(at: index.section),
+            let view = collection.supplementaryView(forElementKind: UICollectionView.elementKindSectionHeader, at: index) as? SectionSupplementaryCell else { continue }
+      configureSupplementary(view, section: section, header: true)
+    }
   }
 
   func setContentStyle(_ value: Bool) {
