@@ -11,6 +11,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
   private var safeTop: CGFloat = 0
   private var safeBottom: CGFloat = 0
   private var task: URLSessionDataTask?
+  private var lanLoad: Task<Void, Never>?
   private var requestID = UUID()
   private var laidOutSize = CGSize.zero
 
@@ -63,6 +64,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
 
   func reload() {
     task?.cancel()
+    lanLoad?.cancel(); lanLoad = nil
     retry.isHidden = true
     guard let item else { return }
     if let uri = item.localURI, let url = URL(string: uri), url.isFileURL {
@@ -83,6 +85,22 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     }
     if let remote = item.remoteURL {
       fetch(remote, fallback: nil)
+      return
+    }
+    if item.image.sha256 != nil {
+      // A LAN machine keeps this picture; show the whole file it sent.
+      let requestID = UUID(); self.requestID = requestID
+      spinner.startAnimating()
+      lanLoad = Task { [weak self, session] in
+        let url = try? await LanKeptImages.file(item.image, session: session)
+        let full = await Task.detached { url.flatMap { UIImage(contentsOfFile: $0.path)?.preparingForDisplay() } }.value
+        guard let self, self.requestID == requestID else { return }
+        self.lanLoad = nil
+        self.spinner.stopAnimating()
+        if let full { self.photo.image = full }
+        self.retry.isHidden = self.photo.image != nil
+        self.layoutImage()
+      }
       return
     }
     guard !workspace.isEmpty, !session.isEmpty, !item.image.id.isEmpty else {

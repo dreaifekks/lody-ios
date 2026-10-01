@@ -878,6 +878,21 @@ let mixedRows = [
     image: ChatImage(id: "two", fileName: "two.png", storageSessionId: nil, width: nil, height: nil)
   ),
 ]
+// A LAN keeps pictures as files on the machine; agent-readable ones show as pictures.
+let digest = String(repeating: "c", count: 64)
+var kept = ChatMessageAttachment(id: "file-1", fileName: "IMG_1.jpg", transport: "local", sizeBytes: 2048)
+kept.mimeType = "image/jpeg"; kept.machineId = "desk"; kept.sha256 = digest
+let keptPicture = kept.shownAsImage.image
+assert(keptPicture?.id == "file-1" && keptPicture?.machineId == "desk" && keptPicture?.sha256 == digest && keptPicture?.sizeBytes == 2048)
+var keptPDF = kept; keptPDF.mimeType = "application/pdf"
+var keptHuge = kept; keptHuge.sizeBytes = 11 * 1024 * 1024
+var cloudFile = kept; cloudFile.transport = "r2"
+var unkept = kept; unkept.sha256 = nil
+assert([keptPDF, keptHuge, cloudFile, unkept].allSatisfy { $0.shownAsImage.image == nil })
+assert(ChatImageGallery.items(from: [
+  ChatRow(id: "lan:user", entryID: "lan", kind: "attachments", text: "", attachments: [kept.shownAsImage, keptPDF.shownAsImage]),
+]).map(\.image.sha256) == [digest])
+
 let gallery = ChatImageGallery.items(from: mixedRows)
 assert(gallery.map(\.id) == ["turn:attachment:image1", "reply:photos:image:0", "reply:photos:image:1"])
 assert(gallery.map(\.image.id) == ["image1", "one", "two"])

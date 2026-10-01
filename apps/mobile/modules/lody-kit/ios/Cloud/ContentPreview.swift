@@ -85,14 +85,20 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
     let attempt = fixtureAttempt
     download = Task { [weak self, file, workspace, session, directory] in
       do {
-        guard file.transport == nil || file.transport == "r2" else {
-          throw SessionAttachments.error(LodyStrings.text("native.attachment.error.pending"))
-        }
         let url: URL
         if LodyUIVerify.enabled, session == "ui-verify-attachments" {
           try await Task.sleep(for: .milliseconds(file.id == "cancel" ? 4000 : 1200))
           url = try FilePreviewFixture.attachment(file.id, attempt: attempt, directory: directory)
+        } else if file.transport == "local", let runtime = DataRuntime.active, runtime.onLan {
+          // On a LAN the machine that ran the session keeps the file.
+          let lan = try await runtime.lanFileMachine(sessionId: file.machineId == nil ? session : nil,
+                                                     machineId: file.machineId)
+          url = try await LanSessionFiles.download(invite: lan.0, machine: lan.1, session: session, fileId: file.id,
+            fileName: file.fileName, sizeBytes: file.sizeBytes, sha256: file.sha256, directory: directory)
         } else {
+          guard file.transport == nil || file.transport == "r2" else {
+            throw SessionAttachments.error(LodyStrings.text("native.attachment.error.pending"))
+          }
           url = try await SessionAttachments.download(workspace: workspace, session: session, fileId: file.id,
             fileName: file.fileName, sizeBytes: file.sizeBytes, directory: directory)
         }
@@ -111,7 +117,7 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
         failed.secondaryText = error.localizedDescription
         failed.secondaryButton.title = LodyStrings.text("native.close")
         failed.secondaryButtonProperties.primaryAction = UIAction { [weak self] _ in self?.dismiss(animated: true) }
-        if file.transport != "local" {
+        if file.transport != "local" || DataRuntime.active?.onLan == true {
           failed.button.title = LodyStrings.text("native.attachment.preview.retry")
           failed.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.load() }
         }

@@ -50,6 +50,10 @@ struct ChatImage: Codable, Equatable {
   let storageSessionId: String?
   let width: Double?
   let height: Double?
+  /// Set for a picture a LAN machine keeps as a file instead of a Cloud image.
+  var machineId: String? = nil
+  var sha256: String? = nil
+  var sizeBytes: Int? = nil
 }
 
 struct ChatMessageAttachment: Decodable, Equatable {
@@ -61,6 +65,22 @@ struct ChatMessageAttachment: Decodable, Equatable {
   var storageSessionId: String? = nil
   var transport: String? = nil
   var sizeBytes: Int? = nil
+  var mimeType: String? = nil
+  /// The LAN machine that keeps a `local` file, with the digest it is checked against.
+  var machineId: String? = nil
+  var sha256: String? = nil
+
+  /// A LAN keeps a message's pictures as files; one an agent reads, small
+  /// enough to fetch on sight, shows as the picture.
+  var shownAsImage: ChatMessageAttachment {
+    guard image == nil, transport == "local", let machineId, let sha256, let sizeBytes,
+          sizeBytes <= 10 * 1024 * 1024,
+          ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mimeType ?? "") else { return self }
+    var picture = self
+    picture.image = ChatImage(id: id, fileName: fileName, storageSessionId: storageSessionId, width: nil, height: nil,
+                              machineId: machineId, sha256: sha256, sizeBytes: sizeBytes)
+    return picture
+  }
 }
 
 struct ChatItem: Decodable {
@@ -370,7 +390,7 @@ struct ChatTranscript {
           if let image = item.image, item.type == "image" {
             return ChatMessageAttachment(id: image.id, fileName: image.fileName, image: image)
           }
-          return item.type == "file" ? item.file : nil
+          return item.type == "file" ? item.file?.shownAsImage : nil
         }
         if !attachments.isEmpty {
           result.append(ChatRow(id: entry.id + ":user", entryID: entry.id, kind: "attachments", text: "", attachments: attachments))

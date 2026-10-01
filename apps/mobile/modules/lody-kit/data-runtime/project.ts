@@ -244,6 +244,16 @@ function summarizeItem(
         typeof raw.storageSessionId === 'string'
           ? raw.storageSessionId
           : undefined,
+      // A LAN machine gives a kept file back by id, checked against these.
+      ...(raw.transport === 'local' &&
+      typeof raw.machineId === 'string' &&
+      typeof raw.sha256 === 'string'
+        ? {
+            machineId: raw.machineId,
+            sha256: raw.sha256,
+            mimeType: typeof raw.mimeType === 'string' ? raw.mimeType : '',
+          }
+        : {}),
     };
     return {
       itemId,

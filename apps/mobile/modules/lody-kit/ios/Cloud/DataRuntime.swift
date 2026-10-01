@@ -40,12 +40,16 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   private let emitUploadProgress: ([String: Any]) -> Void
   private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
+  /// The module's runtime, for native views that fetch a LAN machine's files.
+  private(set) static weak var active: DataRuntime?
+
   init(localStore: LocalStore, emit: @escaping ([String: Any]) -> Void,
     emitUploadProgress: @escaping ([String: Any]) -> Void) {
     self.localStore = localStore
     self.emit = emit
     self.emitUploadProgress = emitUploadProgress
     super.init()
+    Self.active = self
     observers.add(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated {
         guard let self, self.workspace != nil else { return }
@@ -344,11 +348,20 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
                 let editID = block["editId"] as? String else { throw SessionAttachments.error("Invalid attachment") }
           let name = block["fileName"] as? String ?? (image ? "image.jpg" : "file")
           let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-          let url = try await SessionAttachments.download(workspace: workspace,
-            session: block["storageSessionId"] as? String ?? session, fileId: id, fileName: name,
-            sizeBytes: block["sizeBytes"] as? Int, directory: directory, image: image)
+          let storage = block["storageSessionId"] as? String ?? session
+          let url: URL
+          if block["transport"] as? String == "local" {
+            let (invite, machine) = try await lanFileMachine(machineId: block["machineId"] as? String)
+            url = try await LanSessionFiles.download(invite: invite, machine: machine, session: storage, fileId: id,
+              fileName: name, sizeBytes: block["sizeBytes"] as? Int, sha256: block["sha256"] as? String, directory: directory)
+          } else {
+            url = try await SessionAttachments.download(workspace: workspace, session: storage, fileId: id,
+              fileName: name, sizeBytes: block["sizeBytes"] as? Int, directory: directory, image: image)
+          }
           guard self.generation == generation, self.sessionId == session else { throw CancellationError() }
-          attachments.append(["id": editID, "name": name, "uri": url.absoluteString, "kind": image ? "image" : "file"])
+          // A LAN keeps images as files; the composer shows them as images again.
+          let picture = image || (block["mimeType"] as? String)?.hasPrefix("image/") == true
+          attachments.append(["id": editID, "name": name, "uri": url.absoluteString, "kind": picture ? "image" : "file"])
         }
         guard self.generation == generation, self.sessionId == session else { throw CancellationError() }
         draft["attachments"] = attachments
@@ -384,8 +397,6 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
           let attachments = args.removeValue(forKey: "attachments") as? [[String: Any]], !attachments.isEmpty else {
       command(method, payload: payload, promise: promise, billing: billing); return
     }
-    // ponytail: a LAN hub has no blob store; hand files to the machine over Lody's LAN `files` service.
-    if lan != nil { promise.resolve(notSentJSON("native.attachment.error.lan")); return }
     guard health.ready, let workspace,
           let target = args["sessionId"] as? String, !target.isEmpty,
           attachmentTasks[target] == nil else {
@@ -401,9 +412,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     let billingTier = billing?["effectivePlanTier"] as? String
     let checkoutPending = billing?["checkoutPending"] as? Bool
     attachmentAttempts[target] = attempt
+    let onLan = lan != nil
+    let machineID = args["machineId"] as? String
     attachmentTasks[target] = Task.detached { [weak self] in
       do {
-        args["attachmentBlocks"] = try await SessionAttachments.upload(attachments, workspace: workspace, session: target) { [weak self] attachmentID, phase, percent in
+        let progress: SessionAttachments.ProgressHandler = { [weak self] attachmentID, phase, percent in
           DispatchQueue.main.async { [weak self] in
             guard let self, self.generation == generation, self.workspace == workspace,
               self.attachmentAttempts[target] == attempt, self.attachmentTasks[target] != nil else { return }
@@ -412,6 +425,17 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
             if let percent { event["percent"] = percent }
             self.emitUploadProgress(event)
           }
+        }
+        if onLan {
+          // A LAN has no blob store: the machine that runs the session keeps the bytes.
+          guard let lan = try await self?.lanFileMachine(sessionId: target, machineId: machineID) else {
+            throw CancellationError()
+          }
+          args["attachmentBlocks"] = try await LanSessionFiles.upload(attachments, invite: lan.0, machine: lan.1,
+            session: target, onProgress: progress)
+        } else {
+          args["attachmentBlocks"] = try await SessionAttachments.upload(attachments, workspace: workspace,
+            session: target, onProgress: progress)
         }
         try Task.checkCancellation()
         let prepared = String(data: try JSONSerialization.data(withJSONObject: args), encoding: .utf8)!
@@ -441,6 +465,24 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       }
     }
   }
+  var onLan: Bool { lan != nil }
+
+  /// The LAN machine that keeps a session's files: the session's own machine,
+  /// or `machineId` for a session the runtime has not seen yet.
+  func lanFileMachine(sessionId: String? = nil, machineId: String?) async throws -> (LanInvite, LanSessionFiles.Machine) {
+    guard let lan, let workspace else { throw SessionAttachments.error(LodyStrings.text("native.runtime.notConnected")) }
+    var request: [String: Any] = ["workspaceId": workspace]
+    if let sessionId { request["sessionId"] = sessionId }
+    if let machineId { request["machineId"] = machineId }
+    let payload = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
+    let result = try await command("lanFileTarget", payload: payload)
+    guard let value = try JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any],
+          let machine = LanSessionFiles.machine(value) else {
+      throw SessionAttachments.error(LodyStrings.text("native.attachment.error.invalid"))
+    }
+    return (lan, machine)
+  }
+
   /// The command guard matches the payload's workspace, which a diagnostic has
   /// no way to know. Inject the runtime's own.
   func debugProbeSchema(promise: Promise) {

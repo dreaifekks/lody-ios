@@ -946,6 +946,27 @@ Object.assign(globalThis, {
     respondPermission,
     controlTurn,
     checkTurnQuota,
+    /** Where a LAN machine takes and keeps the files of its sessions. */
+    lanFileTarget(args: { sessionId?: string; machineId?: string }) {
+      if (!metaReplica) return {};
+      const meta = metaReplica.flock;
+      const field = (room: string, key: string) =>
+        meta.get(['m', room, key]) ??
+        (meta.get(['m', room]) as Record<string, unknown> | undefined)?.[key];
+      const owner = args.sessionId
+        ? field(`session-${args.sessionId}`, 'machineId')
+        : undefined;
+      const machineId =
+        typeof owner === 'string' && owner ? owner : args.machineId;
+      if (!machineId) return {};
+      const room = `machine-${machineId}`;
+      return {
+        machineId,
+        name: field(room, 'name'),
+        lanTerminal: field(room, 'lanTerminal'),
+        protocolCapabilities: field(room, 'protocolCapabilities'),
+      };
+    },
     editSession(args: Parameters<typeof editSession>[0]) {
       if (!metaReplica || unhealthy.size)
         return { state: 'not_sent', reason: 'metadata_not_ready' };

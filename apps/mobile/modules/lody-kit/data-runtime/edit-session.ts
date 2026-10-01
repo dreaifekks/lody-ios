@@ -55,6 +55,36 @@ function inputBlock(item: RecordValue): RecordValue {
   );
 }
 
+/**
+ * An attachment block native code produced. Cloud files live in R2; on a LAN
+ * the machine that runs the session keeps them (`transport: 'local'`).
+ */
+export function isAttachmentBlock(block: RecordValue): boolean {
+  if (!block || !['image', 'file'].includes(block.type)) return false;
+  const id = block[block.type === 'image' ? 'imageId' : 'fileId'];
+  if (
+    typeof id !== 'string' ||
+    !id ||
+    typeof block.mimeType !== 'string' ||
+    !Number.isInteger(block.sizeBytes) ||
+    block.sizeBytes <= 0
+  )
+    return false;
+  if (block.type === 'image') return true;
+  const stored =
+    block.transport === 'r2' ||
+    (block.transport === 'local' &&
+      typeof block.machineId === 'string' &&
+      block.machineId.length > 0);
+  return (
+    stored &&
+    typeof block.sha256 === 'string' &&
+    typeof block.fileName === 'string' &&
+    typeof block.textPreview === 'boolean' &&
+    typeof block.uploadedAt === 'number'
+  );
+}
+
 export function editableUserTurn(
   history: RecordValue[],
   meta: RecordValue,
@@ -124,25 +154,7 @@ export function replacementInput(
   )
     throw new Error('invalid_message');
   const original = editAttachments(turn);
-  if (
-    added.some(
-      (item) =>
-        !item ||
-        !['image', 'file'].includes(item.type) ||
-        typeof item[item.type === 'image' ? 'imageId' : 'fileId'] !==
-          'string' ||
-        !item[item.type === 'image' ? 'imageId' : 'fileId'] ||
-        typeof item.mimeType !== 'string' ||
-        !Number.isInteger(item.sizeBytes) ||
-        item.sizeBytes <= 0 ||
-        (item.type === 'file' &&
-          (item.transport !== 'r2' ||
-            typeof item.sha256 !== 'string' ||
-            typeof item.fileName !== 'string' ||
-            typeof item.textPreview !== 'boolean' ||
-            typeof item.uploadedAt !== 'number')),
-    )
-  )
+  if (added.some((item) => !isAttachmentBlock(item)))
     throw new Error('invalid_attachment');
   if (
     new Set(retainedIds).size !== retainedIds.length ||

@@ -1032,6 +1032,9 @@
   "lan.error.cloudOnly": "仅 Lody Cloud 可用。",
   "lan.leave": "离开局域网",
   "lan.leaveConfirm.title": "离开这个局域网？",
-  "native.attachment.error.lan": "局域网模式暂不支持附件",
+  "native.attachment.error.lanLimit": "局域网模式下每条消息最多 8 个附件",
+  "native.attachment.error.lanMachine": "{machine} 不接收这台设备的文件。请更新它上面的 Lody，并向局域网开放它的终端。",
+  "native.attachment.error.lanSend": "{machine} 没有收下文件：{reason}",
+  "native.attachment.error.lanRead": "无法从 {machine} 取回文件：{reason}",
   "ios.info.localNetworkUsage": "连接本地网络中的 Lody 局域网 hub。"
 }

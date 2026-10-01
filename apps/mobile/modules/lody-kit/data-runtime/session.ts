@@ -9,6 +9,7 @@ import { retrySessionRead } from './session-read';
 import {
   editableUserTurn,
   editAttachments,
+  isAttachmentBlock,
   replacementInput,
 } from './edit-session';
 import {
@@ -580,23 +581,7 @@ export async function sendTurn(
   if (
     !Array.isArray(attachments) ||
     attachments.length > 16 ||
-    attachments.some(
-      (block) =>
-        !block ||
-        !['image', 'file'].includes(block.type) ||
-        typeof block[block.type === 'image' ? 'imageId' : 'fileId'] !==
-          'string' ||
-        !block[block.type === 'image' ? 'imageId' : 'fileId'] ||
-        typeof block.mimeType !== 'string' ||
-        !Number.isInteger(block.sizeBytes) ||
-        block.sizeBytes <= 0 ||
-        (block.type === 'file' &&
-          (block.transport !== 'r2' ||
-            typeof block.sha256 !== 'string' ||
-            typeof block.fileName !== 'string' ||
-            typeof block.textPreview !== 'boolean' ||
-            typeof block.uploadedAt !== 'number')),
-    )
+    attachments.some((block) => !isAttachmentBlock(block))
   )
     return { state: 'not_sent', reason: '附件信息无效，请重新选择' };
   if (

@@ -1032,6 +1032,9 @@
   "lan.error.cloudOnly": "Only available with Lody Cloud.",
   "lan.leave": "Leave LAN",
   "lan.leaveConfirm.title": "Leave this LAN?",
-  "native.attachment.error.lan": "Attachments aren't supported on a LAN yet",
+  "native.attachment.error.lanLimit": "On a LAN a message can carry at most 8 attachments",
+  "native.attachment.error.lanMachine": "{machine} doesn't take files from this device. Update Lody on it and open its terminals to the LAN.",
+  "native.attachment.error.lanSend": "{machine} didn't take the files: {reason}",
+  "native.attachment.error.lanRead": "Couldn't get the file from {machine}: {reason}",
   "ios.info.localNetworkUsage": "Connect to your Lody LAN hub on the local network."
 }

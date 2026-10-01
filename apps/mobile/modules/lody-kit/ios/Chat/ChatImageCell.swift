@@ -13,6 +13,7 @@ final class ChatImageCell: UICollectionViewCell {
   private var requestURL: URL?
   private var requestID = UUID()
   private var task: URLSessionDataTask?
+  private var lanLoad: Task<Void, Never>?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -64,6 +65,27 @@ final class ChatImageCell: UICollectionViewCell {
       task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
       photo.image = Self.verifyBitmap()
       spinner.stopAnimating(); failure.isHidden = true
+      return
+    }
+    if let sha256 = image.sha256 {
+      // A LAN machine keeps this picture; it comes over the machine's `files` service.
+      let marker = URL(string: "lody-lan-image:\(sha256)")
+      if requestURL == marker && (lanLoad != nil || photo.image != nil) { return }
+      task?.cancel(); task = nil; lanLoad?.cancel()
+      let requestID = UUID(); self.requestID = requestID
+      requestURL = marker
+      if !hadLocalImage { photo.image = nil }
+      failure.isHidden = true
+      spinner.startAnimating()
+      lanLoad = Task { [weak self, session] in
+        let url = try? await LanKeptImages.file(image, session: session)
+        let thumbnail = await Task.detached { url.flatMap(ChatAttachment.thumbnail) }.value
+        guard let self, self.requestID == requestID else { return }
+        self.lanLoad = nil
+        self.spinner.stopAnimating()
+        if let thumbnail { self.photo.image = thumbnail }
+        self.failure.isHidden = self.photo.image != nil
+      }
       return
     }
     guard !workspace.isEmpty, !session.isEmpty, !image.id.isEmpty else {
@@ -120,6 +142,7 @@ final class ChatImageCell: UICollectionViewCell {
   override func prepareForReuse() {
     super.prepareForReuse()
     task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
+    lanLoad?.cancel(); lanLoad = nil
     photo.image = nil; spinner.stopAnimating(); failure.isHidden = true
   }
 

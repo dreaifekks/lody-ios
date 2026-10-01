@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   editableUserTurn,
+  isAttachmentBlock,
   replacementInput,
 } from '../../modules/lody-kit/data-runtime/edit-session.ts';
 import { openTestSession } from '../helpers.mjs';
@@ -115,6 +116,46 @@ test('edit eligibility fences history, automation and provider boundaries; attac
     ),
   );
   assert.equal(original.items.length, 3);
+});
+
+test('a LAN file is kept by the machine it names; R2 and LAN files carry the same digest fields', () => {
+  const lanFile = {
+    type: 'file',
+    fileId: 'file-lan',
+    fileName: 'photo.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 2048,
+    sha256: 'a'.repeat(64),
+    textPreview: false,
+    transport: 'local',
+    machineId: 'm1',
+    uploadedAt: 1,
+  };
+  assert.equal(isAttachmentBlock(lanFile), true);
+  assert.equal(isAttachmentBlock({ ...lanFile, machineId: '' }), false);
+  assert.equal(isAttachmentBlock({ ...lanFile, machineId: undefined }), false);
+  assert.equal(isAttachmentBlock({ ...lanFile, transport: 'blob' }), false);
+  assert.equal(isAttachmentBlock({ ...lanFile, sha256: undefined }), false);
+  assert.equal(
+    isAttachmentBlock({ ...lanFile, transport: 'r2', machineId: undefined }),
+    true,
+  );
+
+  const input = replacementInput(original, 'With a photo', [], [lanFile]);
+  assert.deepEqual(
+    input.inputBlocks.filter((block) => block.type === 'file'),
+    [lanFile],
+  );
+  assert.throws(
+    () =>
+      replacementInput(
+        original,
+        'Unkept',
+        [],
+        [{ ...lanFile, machineId: undefined }],
+      ),
+    /invalid_attachment/,
+  );
 });
 
 test('edit RPC leaves history server-owned, preserves failed drafts and never automatically replays uncertain writes', async () => {

@@ -748,6 +748,41 @@ test('MCP files retain their download target and update when local upload comple
   );
 });
 
+test('a LAN file names the machine that keeps it and the digest it is fetched against', async () => {
+  const { projectSession } = await loadProject();
+  const doc = new LoroDoc();
+  const entry = doc.getList('history').pushContainer(new LoroMap());
+  entry.set('id', 'lan');
+  entry.set('role', 'user');
+  const file = entry
+    .setContainer('items', new LoroList())
+    .pushContainer(new LoroMap());
+  for (const [key, value] of Object.entries({
+    type: 'file',
+    fileId: 'file-1',
+    fileName: 'photo.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 2048,
+    sha256: 'b'.repeat(64),
+    textPreview: false,
+    transport: 'local',
+    machineId: 'desk',
+    uploadedAt: 1,
+  }))
+    file.set(key, value);
+  doc.commit();
+  assert.deepEqual(projectSession(doc, 'live').entries[0].items[0].file, {
+    id: 'file-1',
+    fileName: 'photo.jpg',
+    transport: 'local',
+    sizeBytes: 2048,
+    storageSessionId: undefined,
+    machineId: 'desk',
+    sha256: 'b'.repeat(64),
+    mimeType: 'image/jpeg',
+  });
+});
+
 test('unchanged entries keep their summary objects; prose is coalesced, status is not', async () => {
   const { projectSession } = await loadProject();
   const doc = new LoroDoc();
