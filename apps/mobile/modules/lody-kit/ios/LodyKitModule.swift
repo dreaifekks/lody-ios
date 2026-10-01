@@ -460,6 +460,8 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     AsyncFunction("renameSession") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("renameSession", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("controlSessionTurn") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("controlTurn", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("sendSessionTurn") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.sendTurn(payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("confirmSessionCreation") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("confirmSession", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("confirmSessionTurn") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("confirmTurn", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("readSessionEdit") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("editSession", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("prepareSessionEdit") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.prepareSessionEdit(payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("sendSessionEdit") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.sendTurn(payload, promise: promise, method: "editSession") } }.runOnQueue(.main)

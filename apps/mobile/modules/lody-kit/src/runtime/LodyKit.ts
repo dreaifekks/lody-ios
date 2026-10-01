@@ -126,6 +126,8 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   previewSimulators(url: string): Promise<{ udid: string; name: string }[]>;
   openPreviewBrowser(url: string): Promise<void>;
   sendSessionTurn(payload: string): Promise<string>;
+  confirmSessionCreation(payload: string): Promise<string>;
+  confirmSessionTurn(payload: string): Promise<string>;
   readSessionEdit(payload: string): Promise<string>;
   prepareSessionEdit(payload: string): Promise<string>;
   sendSessionEdit(payload: string): Promise<string>;
@@ -344,6 +346,11 @@ export const controlSessionTurn = (payload: string) =>
   native.controlSessionTurn(payload);
 export const sendSessionTurn = (payload: string) =>
   native.sendSessionTurn(payload);
+/** Settle a send whose result was lost; neither call writes the message again. */
+export const confirmSessionCreation = (payload: string) =>
+  native.confirmSessionCreation(payload);
+export const confirmSessionTurn = (payload: string) =>
+  native.confirmSessionTurn(payload);
 export const readSessionEdit = (payload: string) =>
   native.readSessionEdit(payload);
 export const prepareSessionEdit = (payload: string) =>

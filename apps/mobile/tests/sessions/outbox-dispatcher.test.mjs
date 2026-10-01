@@ -127,7 +127,7 @@ async function load(hooks, native) {
                 'export const {useEffect,useRef,useState}=globalThis.__outboxHooks;',
               'react-native': 'export const Alert={alert(){}};',
               '@lody-ios/kit':
-                'export const {createSession,sendSessionTurn,ensureSession,releaseReserve}=globalThis.__outboxNative;',
+                'export const {createSession,sendSessionTurn,confirmSessionCreation,confirmSessionTurn,ensureSession,releaseReserve}=globalThis.__outboxNative;',
             }[path],
           }));
         },
@@ -345,12 +345,15 @@ test('unmount does not cancel an in-flight sendTurn', async () => {
   assert.equal(outbox.records[0].send.phase, 'accepted');
 });
 
-test('a preparation failure retains a retryable draft without dispatching or occupying an unknown slot', async () => {
+test('a background session that cannot open waits and goes again; three failures hand the draft back', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   let ready = false;
+  let ensures = 0;
   let sends = 0;
   const released = [];
-  const { outbox } = await setup([{ session, send: draft }], {
+  const { outbox, hooks } = await setup([{ session, send: draft }], {
     async ensureSession() {
+      ensures++;
       if (!ready) throw new Error('runtime_replaced');
     },
     async sendSessionTurn() {
@@ -365,6 +368,14 @@ test('a preparation failure retains a retryable draft without dispatching or occ
     },
   });
   await tick();
+  assert.equal(ensures, 1);
+  assert.equal(outbox.records[0].send.phase, 'sending');
+  for (const attempts of [2, 3]) {
+    t.mock.timers.tick(1500);
+    await tick();
+    await tick();
+    assert.equal(ensures, attempts);
+  }
   assert.equal(sends, 0);
   assert.equal(outbox.records[0].send.phase, 'failed');
   assert.equal(outbox.records[0].send.text, draft.text);
@@ -377,6 +388,39 @@ test('a preparation failure retains a retryable draft without dispatching or occ
   await tick();
   assert.equal(sends, 1);
   assert.equal(outbox.records[0].send.phase, 'accepted');
+  hooks.unmount();
+});
+
+test('a background send refused before writing goes again by itself and keeps its identity', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const replies = [
+    { state: 'not_sent', reason: 'session_not_ready' },
+    { state: 'not_sent', reason: 'starting', retryable: true },
+    { state: 'accepted' },
+  ];
+  const sent = [];
+  const { outbox, hooks } = await setup([{ session, send: draft }], {
+    async ensureSession() {},
+    async sendSessionTurn(payload) {
+      sent.push(JSON.parse(payload).id);
+      return JSON.stringify(replies[sent.length - 1]);
+    },
+    async createSession() {
+      throw new Error('unexpected');
+    },
+    async releaseReserve() {},
+  });
+  await tick();
+  for (const attempts of [2, 3]) {
+    assert.equal(outbox.records[0].send.phase, 'sending');
+    t.mock.timers.tick(1500);
+    await tick();
+    await tick();
+    assert.equal(sent.length, attempts);
+  }
+  assert.deepEqual(sent, [draft.id, draft.id, draft.id]);
+  assert.equal(outbox.records[0].send.phase, 'accepted');
+  hooks.unmount();
 });
 
 test('a guide submitted on the page keeps its intent when the background dispatcher takes over', async () => {
@@ -396,4 +440,156 @@ test('a guide submitted on the page keeps its intent when the background dispatc
   assert.equal(sent.length, 1);
   assert.equal(sent[0].guide, true);
   assert.equal(sent[0].queue, false);
+});
+
+test('a lost turn result is settled against the hub and never sent again by itself', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const retryId = 'AAAAAAAA-0000-4000-8000-000000000001';
+  const asked = [];
+  const released = [];
+  let verdict = { state: 'pending' };
+  let sends = 0;
+  const { outbox, hooks } = await setup(
+    [{ session, send: { ...draft, phase: 'unknown' } }],
+    {
+      async ensureSession() {},
+      async sendSessionTurn() {
+        sends++;
+        return JSON.stringify({ state: 'accepted' });
+      },
+      async createSession() {
+        throw Error('must not create');
+      },
+      async releaseReserve(id) {
+        released.push(id);
+      },
+      async confirmSessionCreation() {
+        throw Error('not a creation');
+      },
+      async confirmSessionTurn(payload) {
+        asked.push(JSON.parse(payload));
+        return JSON.stringify(verdict);
+      },
+    },
+  );
+  await tick();
+  assert.deepEqual(asked, [{ sessionId: 's1', id: draft.id }]);
+  assert.equal(outbox.records[0].send.phase, 'unknown');
+
+  verdict = { state: 'absent', retryId };
+  t.mock.timers.tick(5000);
+  await tick();
+  await tick();
+  assert.equal(asked.length, 2, 'an unsettled result is asked about again');
+  assert.equal(outbox.records[0].send.phase, 'failed');
+  assert.equal(outbox.records[0].send.id, retryId);
+  assert.equal(outbox.records[0].send.text, draft.text);
+  assert.deepEqual(released, ['s1']);
+  assert.equal(
+    sends,
+    0,
+    'only the user retries a message that was not delivered',
+  );
+  t.mock.timers.tick(5000);
+  await tick();
+  assert.equal(asked.length, 2, 'a settled result is not asked about again');
+
+  await outbox.put({ session, send: { ...draft, phase: 'unknown' } });
+  verdict = { state: 'uploaded', undispatched: false };
+  await tick();
+  await tick();
+  assert.equal(outbox.records[0].send.phase, 'uploaded');
+  assert.equal(outbox.records[0].send.id, draft.id);
+  assert.equal(sends, 0);
+  hooks.unmount();
+});
+
+test('a lost creation result is settled by the catalog replica', async () => {
+  const creation = JSON.stringify({ workspaceId: 'w1', sessionId: 's1' });
+  const asked = [];
+  const sent = [];
+  let verdict = { state: 'absent' };
+  const { outbox, hooks } = await setup(
+    [{ session, send: { ...draft, creation, phase: 'unknown' } }],
+    {
+      async ensureSession() {},
+      async sendSessionTurn(payload) {
+        sent.push(JSON.parse(payload));
+        return JSON.stringify({ state: 'accepted' });
+      },
+      async createSession() {
+        throw Error('only the user retries a creation');
+      },
+      async releaseReserve() {},
+      async confirmSessionCreation(payload) {
+        asked.push(payload);
+        return JSON.stringify(verdict);
+      },
+      async confirmSessionTurn() {
+        throw Error('the session does not exist yet');
+      },
+    },
+  );
+  await tick();
+  await tick();
+  assert.deepEqual(asked, [creation]);
+  assert.equal(outbox.records[0].send.phase, 'failed');
+  assert.equal(outbox.records[0].send.id, draft.id);
+  assert.equal(outbox.records[0].send.creation, creation);
+
+  verdict = { state: 'created' };
+  await outbox.put({ session, send: { ...draft, creation, phase: 'unknown' } });
+  await tick();
+  await tick();
+  await tick();
+  assert.equal(sent.length, 1, 'the first turn follows a confirmed creation');
+  assert.equal(sent[0].id, draft.id);
+  assert.equal(outbox.records[0].send.creation, undefined);
+  assert.equal(outbox.records[0].send.phase, 'accepted');
+  hooks.unmount();
+});
+
+test('an uploaded turn is asked about until its dispatch pointer is known, then left alone', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const asked = [];
+  let verdict = { state: 'pending' };
+  const { outbox, hooks } = await setup(
+    [{ session, send: { ...draft, phase: 'uploaded' } }],
+    {
+      async ensureSession() {},
+      async sendSessionTurn() {
+        throw Error('an uploaded turn is never sent again');
+      },
+      async createSession() {
+        throw Error('must not create');
+      },
+      async releaseReserve() {},
+      async confirmSessionCreation() {
+        throw Error('not a creation');
+      },
+      async confirmSessionTurn(payload) {
+        asked.push(JSON.parse(payload).id);
+        return JSON.stringify(verdict);
+      },
+    },
+  );
+  await tick();
+  assert.deepEqual(asked, [draft.id]);
+  verdict = { state: 'uploaded', undispatched: true };
+  t.mock.timers.tick(5000);
+  await tick();
+  assert.equal(asked.length, 2);
+  t.mock.timers.tick(5000);
+  await tick();
+  assert.equal(asked.length, 2, 'a published pointer is not asked about again');
+  assert.equal(outbox.records[0].send.phase, 'uploaded');
+  assert.equal(outbox.records[0].send.id, draft.id);
+  hooks.update({ serverSessions: [{ id: 's1', latestUserMsgId: draft.id }] });
+  await tick();
+  assert.equal(
+    outbox.records.length,
+    0,
+    'the catalog pointer retires the record',
+  );
+  hooks.unmount();
 });

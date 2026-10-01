@@ -82,6 +82,8 @@ export {
   ensureSession,
   releaseReserve,
   sendSessionTurn,
+  confirmSessionCreation,
+  confirmSessionTurn,
   readSessionEdit,
   prepareSessionEdit,
   sendSessionEdit,

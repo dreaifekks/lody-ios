@@ -282,6 +282,7 @@
   "send.alert.title": "消息尚未发送",
   "send.error.sessionNotCreated": "会话未创建，内容已恢复，请检查电脑配置后重试。",
   "send.error.notSent": "消息尚未发送，内容已恢复。",
+  "send.error.notDelivered": "消息没有送达，请点击消息重试。",
   "send.error.freeSessionLimit": "此免费工作区已达到 200 个会话上限。新会话未创建，草稿已保存。",
   "send.error.freeTurnLimit": "此免费会话已达到 30 轮用户对话上限。消息未发送，草稿已保存。",
   "chat.composer.freeTurnsRemaining.one": "免费会话 · 还可发送 {remaining} 条消息",

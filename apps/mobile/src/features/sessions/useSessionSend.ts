@@ -18,6 +18,12 @@ import { sessionState } from './status';
 import { resolveSessionMessageSubmitRoute } from './messageSubmitRoute';
 import { outboxInflight } from '../../cloud/send/outboxInflight';
 import { quotaError } from '../../cloud/send/quotaError';
+import {
+  notReady,
+  pause,
+  sessionOpened,
+  sessionOpenFailed,
+} from '../../cloud/send/notReady';
 import { t } from '../../lib/i18n/index.ts';
 
 export function pendingSendStatus(send: PendingSend, live: boolean) {
@@ -162,7 +168,7 @@ export function useSessionSend({
       return;
     }
     if (
-      ['accepted', 'queued'].includes(send.phase) &&
+      ['accepted', 'uploaded', 'queued'].includes(send.phase) &&
       cleared.current !== send.id
     ) {
       cleared.current = send.id;
@@ -173,6 +179,13 @@ export function useSessionSend({
     if (send.creation ? !connected : !live) return;
     working.current = true;
     outboxInflight.add(session.id);
+    // Released before a record returns to waiting, so the dispatcher can take
+    // it when this page has gone.
+    let held = true;
+    const release = () => {
+      if (held) outboxInflight.delete(session.id);
+      held = false;
+    };
     setDispatching(true);
     void (async () => {
       let started = false;
@@ -195,15 +208,17 @@ export function useSessionSend({
             await services.createSession(send.creation),
           );
           if (result.state === 'created') {
-            outboxInflight.delete(session.id);
+            release();
             await outbox.put({
               session: result.session,
               send: { ...send, creation: undefined, phase: 'waiting' },
             });
           } else if (result.state === 'rejected') {
-            await fail(
-              quotaError(result.reason, t('send.error.sessionNotCreated')),
-            );
+            if (notReady(result)) await again();
+            else
+              await fail(
+                quotaError(result.reason, t('send.error.sessionNotCreated')),
+              );
           } else {
             await outbox.put({
               ...record,
@@ -214,8 +229,11 @@ export function useSessionSend({
         }
         try {
           await services.ensureSession(session.id);
+          sessionOpened(send.id);
         } catch {
-          await fail(t('native.runtime.sessionNotSyncedRetry'));
+          // Nothing was written; the session may only be reconnecting.
+          if (sessionOpenFailed(send.id)) await again();
+          else await fail(t('native.runtime.sessionNotSyncedRetry'));
           return;
         }
         const route = resolveSessionMessageSubmitRoute({
@@ -254,7 +272,8 @@ export function useSessionSend({
           ),
         );
         if (result.state === 'not_sent') {
-          await fail(quotaError(result.reason, t('send.error.notSent')));
+          if (notReady(result)) await again();
+          else await fail(quotaError(result.reason, t('send.error.notSent')));
         } else {
           const phase = ['accepted', 'uploaded', 'queued'].includes(
             result.state,
@@ -277,8 +296,20 @@ export function useSessionSend({
         }
       } finally {
         working.current = false;
-        outboxInflight.delete(session.id);
+        release();
         setDispatching(false);
+      }
+      /** The runtime wrote nothing, so the send waits and is dispatched again. */
+      async function again() {
+        await pause();
+        const latest = outbox
+          .getSnapshot()
+          .records.find((item) => item.session.id === session.id)?.send;
+        if (latest?.id !== send.id || latest.phase === 'failed') return;
+        release();
+        await outbox
+          .put({ ...record!, send: { ...send, phase: 'waiting' } })
+          .catch(() => {});
       }
       async function fail(reason: string) {
         if (reason === 'mention_expansion_failed')

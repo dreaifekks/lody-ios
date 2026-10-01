@@ -67,7 +67,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         self.health.resume(at: self.now)
         self.pingPending = false
         if self.webView == nil { self.build(reason: "foreground") }
-        else { self.tick() }
+        else { self.lanHandler?.reconnect(); self.tick() }
       }
     })
   }
@@ -400,7 +400,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     guard health.ready, let workspace,
           let target = args["sessionId"] as? String, !target.isEmpty,
           attachmentTasks[target] == nil else {
-      promise.resolve(notSentJSON("native.runtime.sessionNotReady")); return
+      promise.resolve(notSentJSON("native.runtime.sessionNotReady", retryable: true)); return
     }
     if !backgrounded {
       args["backgroundTaskId"] = SessionBackgroundTasks.shared.begin(owner: owner)
@@ -589,7 +589,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     guard health.ready, let view = webView, let data = payload.data(using: .utf8), data.count <= 128 * 1024,
           var args = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       if method == "sendTurn" || method == "checkTurnQuota" {
-        sink.resolve(notSentJSON("native.runtime.sessionNotSyncedRetry"))
+        // Only a runtime that is still starting is worth waiting for.
+        sink.resolve(notSentJSON("native.runtime.sessionNotSyncedRetry", retryable: !health.ready || webView == nil))
+      } else if method == "createSession", !health.ready || webView == nil {
+        // A runtime that is still starting has created nothing; the creation waits for it.
+        sink.resolve(#"{"state":"rejected","reason":"metadata_not_ready"}"#)
       } else {
         fail(sink, "not_ready", LodyStrings.text("native.runtime.sessionNotSynced"))
       }
@@ -597,7 +601,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
     let sessionKey = args["sessionId"] as? String
     let allowed: Bool
-    if method == "sendTurn" || method == "checkTurnQuota" || method == "ensureSession" || method == "releaseReserve" {
+    if method == "sendTurn" || method == "checkTurnQuota" || method == "ensureSession" || method == "releaseReserve" || method == "confirmTurn" {
       allowed = workspace != nil && sessionKey?.isEmpty == false
     } else if Self.sessionCommands.contains(method) {
       allowed = sessionKey == sessionId
@@ -790,8 +794,10 @@ final class NotificationObservers {
   deinit { for token in tokens { NotificationCenter.default.removeObserver(token) } }
 }
 
-private func notSentJSON(_ key: String) -> String {
-  let payload: [String: Any] = ["state": "not_sent", "reason": LodyStrings.text(key)]
+/// `retryable` marks a send refused before anything was written, which goes again by itself.
+private func notSentJSON(_ key: String, retryable: Bool = false) -> String {
+  var payload: [String: Any] = ["state": "not_sent", "reason": LodyStrings.text(key)]
+  if retryable { payload["retryable"] = true }
   guard let data = try? JSONSerialization.data(withJSONObject: payload),
         let json = String(data: data, encoding: .utf8) else { return #"{"state":"not_sent"}"# }
   return json

@@ -51,6 +51,8 @@ export function frame(bytes) {
 
 export async function openTestSession({
   failAppend = () => false,
+  loseAck = () => false,
+  reachable = () => true,
   markDispatch = async () => {},
   onRpc,
 } = {}) {
@@ -59,6 +61,9 @@ export async function openTestSession({
   let sessionRead;
   let offset = 1;
   const appends = [];
+  const producers = [];
+  const probes = [];
+  const reads = [];
   const replies = new Map();
   globalThis.__sessionClient = class {
     constructor({ url }) {
@@ -73,30 +78,42 @@ export async function openTestSession({
         updates: [],
       });
     }
-    async readOnce() {
+    async readOnce(request) {
       if (this.url.includes(':rpc:res:') && onRpc) {
-        const request = replies.get(this.url.split('/ds/lody/')[1]);
-        const result = await onRpc(request);
+        const call = replies.get(this.url.split('/ds/lody/')[1]);
+        const result = await onRpc(call);
         return ok({
           nextOffset: '1',
           upToDate: true,
           closed: false,
           payload: {
             body: new TextEncoder().encode(
-              JSON.stringify({ id: request.id, ...result }),
+              JSON.stringify({ id: call.id, ...result }),
             ),
           },
         });
       }
+      reads.push(this.url);
       return new Promise((resolve) => {
         sessionRead = resolve;
+        // A restarted read reports the failure the real client would.
+        request?.signal?.addEventListener('abort', () =>
+          resolve({ ok: false, result: { code: 'network_error' } }),
+        );
       });
     }
     async create() {
       return ok({});
     }
-    async append({ part }) {
+    async head() {
+      probes.push(this.url);
+      if (!reachable(this.url))
+        return { ok: false, result: { code: 'timeout' } };
+      return ok({ nextOffset: String(offset) });
+    }
+    async append({ part, producer }) {
       appends.push(this.url);
+      producers.push(producer);
       if (failAppend(this.url))
         return { ok: false, result: { code: 'timeout' } };
       if (this.url.includes(':rpc:req:')) {
@@ -104,6 +121,8 @@ export async function openTestSession({
         replies.set(request.replyTo, request);
       } else if (!this.url.includes(':rpc:'))
         server.import(part.body.subarray(4));
+      // The write is durable; only its acknowledgement is lost.
+      if (loseAck(this.url)) return { ok: false, result: { code: 'timeout' } };
       return ok({ nextOffset: String(++offset) });
     }
   };
@@ -149,5 +168,16 @@ export async function openTestSession({
     runtime.stopSessions();
     delete globalThis.__sessionClient;
   };
-  return { runtime, server, pushUpdate, events, background, appends, close };
+  return {
+    runtime,
+    server,
+    pushUpdate,
+    events,
+    background,
+    appends,
+    producers,
+    probes,
+    reads,
+    close,
+  };
 }

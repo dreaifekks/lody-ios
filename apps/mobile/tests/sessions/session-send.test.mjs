@@ -547,7 +547,8 @@ test('explicit retry keeps the failed message identity and attachments, and cann
   }
 });
 
-test('foreground attachment sends reserve before upload and can retry a failed preparation', async () => {
+test('a session that cannot open yet makes the send wait and go again; three failures hand it back', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const calls = [];
   let ready = false;
   const { hooks, outbox } = await setup(draft, {
@@ -561,11 +562,73 @@ test('foreground attachment sends reserve before upload and can retry a failed p
     },
   });
   assert.deepEqual(calls, ['ensure:s1']);
+  assert.equal(
+    outbox.records[0].send.phase,
+    'sending',
+    'a reconnecting session is not a failed send',
+  );
+  for (const attempts of [2, 3]) {
+    t.mock.timers.tick(1500);
+    await tick();
+    await tick();
+    assert.equal(calls.length, attempts);
+  }
   assert.equal(outbox.records[0].send.phase, 'failed');
   assert.deepEqual(outbox.records[0].send.attachments, draft.attachments);
   ready = true;
   hooks.result.retry();
   await tick();
-  assert.deepEqual(calls, ['ensure:s1', 'ensure:s1', 'send:s1']);
+  assert.deepEqual(calls.slice(3), ['ensure:s1', 'send:s1']);
   assert.equal(outbox.records[0].send.phase, 'accepted');
+});
+
+test('a send or creation refused before anything was written waits and goes again by itself', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const replies = [
+    { state: 'not_sent', reason: 'session_not_ready' },
+    { state: 'not_sent', reason: 'metadata_not_ready' },
+    { state: 'not_sent', reason: 'starting', retryable: true },
+    { state: 'accepted' },
+  ];
+  let sends = 0;
+  const turn = await setup(draft, {
+    async sendSessionTurn() {
+      return JSON.stringify(replies[sends++]);
+    },
+  });
+  for (const attempts of [2, 3, 4]) {
+    assert.equal(turn.outbox.records[0].send.phase, 'sending');
+    t.mock.timers.tick(1500);
+    await tick();
+    await tick();
+    assert.equal(sends, attempts);
+  }
+  assert.equal(turn.outbox.records[0].send.phase, 'accepted');
+  assert.equal(turn.outbox.records[0].send.id, draft.id);
+  turn.hooks.unmount();
+
+  let creates = 0;
+  const creation = await setup(
+    { ...draft, creation: '{"sessionId":"s1"}' },
+    {
+      async createSession() {
+        creates++;
+        return JSON.stringify(
+          creates === 1
+            ? { state: 'rejected', reason: 'metadata_not_ready' }
+            : { state: 'created', session },
+        );
+      },
+      async sendSessionTurn() {
+        return JSON.stringify({ state: 'accepted' });
+      },
+    },
+  );
+  assert.equal(creation.outbox.records[0].send.phase, 'creating');
+  t.mock.timers.tick(1500);
+  await tick();
+  await tick();
+  assert.equal(creates, 2, 'a catalog that was still syncing is asked again');
+  assert.equal(creation.outbox.records[0].send.creation, undefined);
+  creation.hooks.unmount();
 });

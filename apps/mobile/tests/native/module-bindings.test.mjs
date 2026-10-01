@@ -21,6 +21,8 @@ test('LodyKit keeps asynchronous native calls on the queued module DSL', () => {
     'unwatchSession',
     'ensureSession',
     'releaseReserve',
+    'confirmSessionCreation',
+    'confirmSessionTurn',
     'readContentText',
     'previewContent',
     'openFile',

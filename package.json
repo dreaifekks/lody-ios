@@ -24,6 +24,7 @@
     "verify:build": "python3 apps/mobile/verification/build.py",
     "verify:ui": "python3 apps/mobile/verification/ui/run.py",
     "verify:native": "python3 apps/mobile/verification/native.py",
+    "verify:lan-hub": "node apps/mobile/verification/lan-hub/reconnect.mjs",
     "verify:simulator": "python3 apps/mobile/verification/simulator.py",
     "verify:clean": "python3 apps/mobile/verification/clean.py"
   },

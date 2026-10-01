@@ -19,6 +19,7 @@ import {
 import {
   creationOptions,
   createSession,
+  forgetCreation,
   type CreateSessionArgs,
 } from './create-session';
 import {
@@ -28,7 +29,7 @@ import {
   markSessionRead,
   renameSession,
 } from './archive-session';
-import { releaseDeletedSessions, sessionDoc } from './session';
+import { appendOnce, releaseDeletedSessions, sessionDoc } from './session';
 import { createPreview, previewTarget, revokePreview } from './preview';
 import { machineRpc } from './machine-rpc';
 import { remoteSettings } from './settings';
@@ -57,6 +58,7 @@ import {
   respondPermission,
   controlTurn,
   sendTurn as sendSessionTurn,
+  confirmTurn,
   checkTurnQuota,
   editSession,
 } from './session';
@@ -125,17 +127,25 @@ let metaReplica: { flock: Flock; client: StreamsClient } | undefined;
 let workspace = '';
 const machineReplicas = new Map<string, Flock>();
 let creating = false;
+// When the read behind the current meta replica was issued, and when each
+// creation attempt ended: only a later read can prove a session is missing.
+let metaReadAt = 0;
+const creationEnded = new Map<string, number>();
 let registering = false;
 const browsers = new Map<string, AbortController>();
 
 async function markDispatch(sessionId: string, turnId: string, queued = false) {
   if (!metaReplica) throw new Error('metadata_not_ready');
   const { flock, client } = metaReplica;
-  const version = flock.version();
+  // Stage separately: the catalog must never show a pointer the hub has not
+  // acknowledged, or the send it belongs to would be taken as delivered.
+  const staged = new Flock(`lody-ios-dispatch-${crypto.randomUUID()}`);
+  staged.importFile(flock.exportFile());
+  const version = staged.version();
   if (queued) {
     const key = ['m', `session-${sessionId}`, 'messageQueueUpdatedAt'];
-    const previous = flock.get(key);
-    flock.set(
+    const previous = staged.get(key);
+    staged.set(
       key,
       Math.max(
         Date.now(),
@@ -145,22 +155,20 @@ async function markDispatch(sessionId: string, turnId: string, queued = false) {
       ),
     );
   } else {
-    flock.set(['m', `session-${sessionId}`, 'latestUserMsgId'], turnId);
-    flock.set(
+    staged.set(['m', `session-${sessionId}`, 'latestUserMsgId'], turnId);
+    staged.set(
       ['m', `session-${sessionId}`, 'lastMissingHistoryUserMsgId'],
       undefined,
     );
   }
-  flock.commit();
-  const result = await client.append({
-    part: {
-      contentType: 'application/octet-stream',
-      body: encodeFrame(
-        new TextEncoder().encode(JSON.stringify(flock.exportJson(version))),
-      ),
-    },
+  staged.commit();
+  const update = staged.exportJson(version);
+  const result = await appendOnce(client, {
+    contentType: 'application/octet-stream',
+    body: encodeFrame(new TextEncoder().encode(JSON.stringify(update))),
   });
   if (!result.ok) throw new Error(result.result.code);
+  flock.importJson(update);
 }
 
 const watchers = new Map<string, AbortController>();
@@ -269,6 +277,7 @@ function watch(mode: string) {
           timeout: { connectTimeoutMs: 15000, pollTimeoutMs: 35000 },
         });
         send({ type: 'diagnostic', stage: 'bootstrap', stream: mode });
+        let readAt = Date.now();
         const initial = await client.bootstrap({ signal });
         send({
           type: 'diagnostic',
@@ -310,25 +319,50 @@ function watch(mode: string) {
           cursor = data.cursor,
           upToDate = data.upToDate;
         let pages = 0;
+        let stalled = 0;
         while (!signal.aborted) {
-          if (upToDate) {
-            if (mode === 'meta') metaReplica = { flock, client };
-            else machineReplicas.set(mode, flock);
+          if (upToDate && !stalled) {
+            if (mode === 'meta') {
+              metaReplica = { flock, client };
+              metaReadAt = readAt;
+            } else machineReplicas.set(mode, flock);
             unhealthy.delete(mode);
             catalogs.set(mode, projectRows(flock.scan(), mode));
             publish();
             failures = 0;
             pages = 0;
           }
+          const issuedAt = Date.now();
           const response = await client.readOnce({
             offset,
             cursor,
             signal,
             ...(upToDate ? { live: 'long-poll' as const } : {}),
           });
-          if (!response.ok) throw new Error(response.result.code);
-          const next = response.result;
           if (signal.aborted) return;
+          if (!response.ok) {
+            const { code } = response.result;
+            if (code !== 'timeout' && code !== 'network_error')
+              throw new Error(code);
+            // The replica is whole and only its tail is unknown: read on from
+            // the cursor instead of downloading every catalog again.
+            if (!stalled) {
+              unhealthy.add(mode);
+              send({
+                type: 'syncError',
+                reason: 'network_or_auth',
+                stream: mode,
+              });
+            }
+            await delay(
+              Math.min(30000, 500 * 2 ** Math.min(stalled++, 6)),
+              signal,
+            );
+            continue;
+          }
+          stalled = 0;
+          const next = response.result;
+          readAt = issuedAt;
           if (next.payload) {
             size += next.payload.body.length;
             if (size > 8 * 1024 * 1024) throw new Error('catalog_limit');
@@ -771,13 +805,10 @@ Object.assign(globalThis, {
       );
     },
     async createSession(args: CreateSessionArgs) {
-      if (
-        creating ||
-        args.workspaceId !== workspace ||
-        !metaReplica ||
-        unhealthy.size
-      )
-        return { state: 'rejected' };
+      if (args.workspaceId !== workspace) return { state: 'rejected' };
+      // A catalog that is still syncing refuses nothing for good.
+      if (creating || !metaReplica || unhealthy.size)
+        return { state: 'rejected', reason: 'metadata_not_ready' };
       const replica = metaReplica;
       creating = true;
       try {
@@ -793,15 +824,47 @@ Object.assign(globalThis, {
         }
         return result;
       } catch (error) {
-        return {
-          state:
-            error instanceof Error && error.message === 'session_already_exists'
-              ? 'unknown'
-              : 'rejected',
-        };
+        const reason = error instanceof Error ? error.message : '';
+        if (reason === 'session_already_exists') return { state: 'unknown' };
+        // An unreachable hub published nothing, so the creation can go again.
+        if (['timeout', 'network_error', 'metadata_not_ready'].includes(reason))
+          return { state: 'rejected', reason: 'metadata_not_ready' };
+        return { state: 'rejected' };
       } finally {
         creating = false;
+        creationEnded.set(args.sessionId, Date.now());
       }
+    },
+    /** Settles a creation whose result was lost: published, or provably never written. */
+    confirmSession(args: { workspaceId: string; sessionId: string }) {
+      if (creating || args.workspaceId !== workspace || !metaReplica)
+        return { state: 'pending' };
+      if (
+        metaReplica.flock.get(['e', `session-${args.sessionId}`]) !== undefined
+      )
+        return { state: 'created' };
+      if (metaReadAt <= (creationEnded.get(args.sessionId) ?? 0))
+        return { state: 'pending' };
+      forgetCreation(args.sessionId);
+      return { state: 'absent' };
+    },
+    /** Settles a turn whose result was lost, finishing a dispatch its send left half done. */
+    async confirmTurn(args: { sessionId: string; id: string }) {
+      const result = confirmTurn(args);
+      if (result.state === 'queued')
+        await markDispatch(args.sessionId, args.id, true);
+      if (result.state === 'uploaded' && result.undispatched) {
+        const room = `session-${args.sessionId}`;
+        const pointer =
+          metaReplica?.flock.get(['m', room, 'latestUserMsgId']) ??
+          (
+            metaReplica?.flock.get(['m', room]) as
+              Record<string, unknown> | undefined
+          )?.latestUserMsgId;
+        // The machine starts a turn from this pointer; the upload alone never wakes it.
+        if (pointer !== args.id) await markDispatch(args.sessionId, args.id);
+      }
+      return result;
     },
     async deleteSession(args: {
       workspaceId: string;

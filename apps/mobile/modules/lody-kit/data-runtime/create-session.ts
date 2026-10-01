@@ -16,7 +16,7 @@ import {
   validConfigValue,
 } from '../../../src/cloud/send/capability';
 import { encodeFrame } from '../decoder/frames';
-import { clientFor } from './session';
+import { appendOnce, clientFor } from './session';
 import {
   quotaReason,
   workspaceSessionCount,
@@ -222,6 +222,9 @@ export function creationOptions(
 }
 
 const attempted = new Set<string>();
+/** Lets a session be created again once its earlier attempt provably never published. */
+export const forgetCreation = (sessionId: string) =>
+  void attempted.delete(sessionId);
 
 export async function createSession(
   args: CreateSessionArgs,
@@ -326,11 +329,9 @@ export async function createSession(
   const update = write.exportJson();
   attempted.add(args.sessionId);
   try {
-    const result = await replica.client.append({
-      part: {
-        contentType: 'application/octet-stream',
-        body: encodeFrame(new TextEncoder().encode(JSON.stringify(update))),
-      },
+    const result = await appendOnce(replica.client, {
+      contentType: 'application/octet-stream',
+      body: encodeFrame(new TextEncoder().encode(JSON.stringify(update))),
     });
     if (!result.ok) throw new Error(result.result.code);
     replica.flock.importJson(update);

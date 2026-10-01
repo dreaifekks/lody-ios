@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
+import { LoroDoc } from 'loro-crdt/base64';
 
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
   const flock = new Flock('synthetic');
@@ -100,6 +101,7 @@ test('persistent runtime applies live increments to the existing replica and adv
       },
     ],
   });
+  globalThis.location = { origin: 'https://example.invalid' };
   await import(
     `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
   );
@@ -144,6 +146,354 @@ test('persistent runtime applies live increments to the existing replica and adv
   assert.equal(events.filter((e) => e.type === 'grant').length, 1);
   assert.equal(globalThis.dataRuntime.ping(), true);
   delete globalThis.webkit;
+  delete globalThis.location;
+  delete globalThis.__runtimeTestClient;
+  delete globalThis.dataRuntime;
+});
+
+test('lost results settle from reads issued after the attempt; an upload left undispatched gets its pointer', async () => {
+  const turnId = '22222222-2222-4222-8222-222222222222';
+  const flock = new Flock('synthetic');
+  flock.set(['e', 'session-s1'], true, 1);
+  flock.set(['e', 'machine-m1'], true, 1);
+  flock.set(['m', 'machine-m1'], { name: 'Synthetic Mac' }, 1);
+  flock.set(['m', 'session-s1'], { title: 'One', machineId: 'm1' }, 2);
+  const snapshot = flock.exportFile();
+  const rename = (title, clock) => {
+    const version = flock.version();
+    flock.set(['m', 'session-s1', 'title'], title, clock);
+    return new TextEncoder().encode(JSON.stringify(flock.exportJson(version)));
+  };
+  const history = new LoroDoc();
+  history
+    .getList('history')
+    .push({ id: turnId, role: 'user', status: 'pending', items: [] });
+  history.commit();
+  let nextEvent;
+  const catalogEvent = () =>
+    new Promise((resolve) => {
+      nextEvent = resolve;
+    });
+  let respond;
+  let reachable = true;
+  const pointers = [];
+  globalThis.__runtimeTestClient = class {
+    constructor({ url }) {
+      this.stream = decodeURIComponent(url).split('/ds/lody/')[1];
+    }
+    async bootstrap() {
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '1',
+          nextOffset: '1',
+          upToDate: true,
+          snapshot: {
+            body: this.stream.includes(':s:')
+              ? history.export({ mode: 'snapshot' })
+              : snapshot,
+          },
+          updates: [],
+        },
+      };
+    }
+    readOnce() {
+      if (!this.stream.endsWith(':meta')) return new Promise(() => {});
+      return new Promise((resolve) => {
+        respond = (body) =>
+          resolve({
+            ok: true,
+            result: {
+              nextOffset: '2',
+              upToDate: true,
+              closed: false,
+              payload: { body },
+            },
+          });
+      });
+    }
+    async append({ part }) {
+      assert.ok(
+        this.stream.endsWith(':meta'),
+        'a confirmation never writes history',
+      );
+      if (!reachable) return { ok: false, result: { code: 'timeout' } };
+      const update = JSON.parse(
+        new TextDecoder().decode(part.body.subarray(4)),
+      );
+      pointers.push(update.entries['["m","session-s1","latestUserMsgId"]']?.d);
+      return { ok: true, result: {} };
+    }
+  };
+  globalThis.webkit = {
+    messageHandlers: {
+      dataRuntime: {
+        postMessage(event) {
+          if (event.type === 'grant')
+            queueMicrotask(() =>
+              globalThis.dataRuntime.grant({
+                token: 'synthetic',
+                gatewayBaseUrl: 'https://example.invalid',
+                expiresIn: 3600,
+              }),
+            );
+          if (event.type === 'catalog') nextEvent?.(event);
+        },
+      },
+    },
+  };
+  globalThis.location = { origin: 'https://example.invalid' };
+  const bundle = await build({
+    entryPoints: ['apps/mobile/modules/lody-kit/data-runtime/index.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    plugins: [
+      {
+        name: 'synthetic-stream',
+        setup(build) {
+          build.onResolve({ filter: /^@loro-dev\/streams-client$/ }, () => ({
+            path: 'client',
+            namespace: 'test',
+          }));
+          build.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
+            contents:
+              'export const StreamsClient = globalThis.__runtimeTestClient;',
+          }));
+        },
+      },
+    ],
+  });
+  await import(
+    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text + '\n// settle').toString('base64')}`
+  );
+  const runtime = globalThis.dataRuntime;
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
+  const workspaceId = 'synthetic-workspace';
+  const missing = 'aaaaaaaa-0000-4000-8000-000000000002';
+  assert.deepEqual(
+    runtime.confirmSession({ workspaceId, sessionId: missing }),
+    { state: 'pending' },
+    'no catalog has been read yet',
+  );
+  const first = catalogEvent();
+  runtime.start(workspaceId);
+  await first;
+  assert.deepEqual(runtime.confirmSession({ workspaceId, sessionId: 's1' }), {
+    state: 'created',
+  });
+  assert.deepEqual(
+    runtime.confirmSession({ workspaceId, sessionId: 'other' }),
+    { state: 'absent' },
+    'a catalog read by this runtime postdates every earlier attempt',
+  );
+
+  await pause();
+  const attempt = await runtime.createSession({
+    workspaceId,
+    sessionId: missing,
+    machineId: 'm1',
+    agentConfigId: 'none',
+    userId: 'u1',
+    title: 'Lost',
+  });
+  assert.equal(attempt.state, 'rejected');
+  await pause();
+  const stale = catalogEvent();
+  respond(rename('Two', 3));
+  await stale;
+  assert.deepEqual(
+    runtime.confirmSession({ workspaceId, sessionId: missing }),
+    { state: 'pending' },
+    'a read issued before the attempt ended proves nothing',
+  );
+  const fresh = catalogEvent();
+  respond(rename('Three', 4));
+  await fresh;
+  assert.deepEqual(
+    runtime.confirmSession({ workspaceId, sessionId: missing }),
+    {
+      state: 'absent',
+    },
+  );
+
+  await runtime.ensureSession({ sessionId: 's1' });
+  const verdict = { state: 'uploaded', undispatched: true };
+  reachable = false;
+  await assert.rejects(runtime.confirmTurn({ sessionId: 's1', id: turnId }));
+  reachable = true;
+  assert.deepEqual(
+    await runtime.confirmTurn({ sessionId: 's1', id: turnId }),
+    verdict,
+  );
+  assert.deepEqual(
+    pointers,
+    [turnId],
+    'a pointer the hub refused is not remembered as published',
+  );
+  assert.deepEqual(
+    await runtime.confirmTurn({ sessionId: 's1', id: turnId }),
+    verdict,
+  );
+  assert.deepEqual(
+    pointers,
+    [turnId],
+    'a published pointer is not written twice',
+  );
+  delete globalThis.webkit;
+  delete globalThis.location;
+  delete globalThis.__runtimeTestClient;
+  delete globalThis.dataRuntime;
+});
+
+test('a catalog read that fails on the network resumes from its cursor instead of reading every catalog again', async () => {
+  const flock = new Flock('synthetic');
+  flock.set(['e', 'session-s1'], true, 1);
+  flock.set(['e', 'machine-m1'], true, 1);
+  flock.set(['m', 'machine-m1'], { name: 'Synthetic Mac' }, 1);
+  flock.set(['m', 'session-s1'], { title: 'Before', machineId: 'm1' }, 2);
+  const snapshot = flock.exportFile(),
+    version = flock.version();
+  flock.set(['m', 'session-s1', 'title'], 'After', 3);
+  const update = new TextEncoder().encode(
+    JSON.stringify(flock.exportJson(version)),
+  );
+  const events = [];
+  let nextEvent;
+  const catalogEvent = () =>
+    new Promise((resolve) => {
+      nextEvent = resolve;
+    });
+  const requests = [];
+  let bootstraps = 0;
+  let respond;
+  globalThis.__runtimeTestClient = class {
+    constructor({ url }) {
+      this.isMeta = decodeURIComponent(url).endsWith(':meta');
+    }
+    async bootstrap() {
+      bootstraps++;
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '1',
+          nextOffset: '1',
+          upToDate: true,
+          snapshot: { body: snapshot },
+          updates: [],
+        },
+      };
+    }
+    readOnce(request) {
+      if (!this.isMeta) return new Promise(() => {});
+      requests.push(request);
+      return new Promise((resolve) => {
+        respond = resolve;
+      });
+    }
+  };
+  globalThis.webkit = {
+    messageHandlers: {
+      dataRuntime: {
+        postMessage(event) {
+          events.push(event);
+          if (event.type === 'grant')
+            queueMicrotask(() =>
+              globalThis.dataRuntime.grant({
+                token: 'synthetic',
+                gatewayBaseUrl: 'https://example.invalid',
+                expiresIn: 3600,
+              }),
+            );
+          if (event.type === 'catalog') nextEvent?.(event);
+        },
+      },
+    },
+  };
+  globalThis.location = { origin: 'https://example.invalid' };
+  const bundle = await build({
+    entryPoints: ['apps/mobile/modules/lody-kit/data-runtime/index.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    plugins: [
+      {
+        name: 'synthetic-stream',
+        setup(build) {
+          build.onResolve({ filter: /^@loro-dev\/streams-client$/ }, () => ({
+            path: 'client',
+            namespace: 'test',
+          }));
+          build.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
+            contents:
+              'export const StreamsClient = globalThis.__runtimeTestClient;',
+          }));
+        },
+      },
+    ],
+  });
+  await import(
+    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text + '\n// resume').toString('base64')}`
+  );
+  const runtime = globalThis.dataRuntime;
+  const workspaceId = 'synthetic-workspace';
+  const first = catalogEvent();
+  runtime.start(workspaceId);
+  await first;
+  assert.equal(bootstraps, 2, 'the catalog and its one machine');
+  const errors = () => events.filter((event) => event.type === 'syncError');
+  assert.equal(errors().length, 0);
+
+  respond({ ok: false, result: { code: 'network_error' } });
+  for (let i = 0; i < 400 && requests.length < 2; i++)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(requests.length, 2, 'the read goes again after a short pause');
+  assert.equal(requests[1].offset, requests[0].offset);
+  assert.equal(bootstraps, 2, 'no catalog is downloaded again');
+  assert.deepEqual(
+    errors().map((event) => event.stream),
+    ['meta'],
+    'the stalled catalog is not reported as live',
+  );
+  assert.deepEqual(
+    runtime.confirmSession({ workspaceId, sessionId: 's1' }),
+    { state: 'created' },
+    'the replica is kept while its tail is unknown',
+  );
+  assert.deepEqual(
+    await runtime.createSession({
+      workspaceId,
+      sessionId: 'aaaaaaaa-0000-4000-8000-000000000003',
+    }),
+    { state: 'rejected', reason: 'metadata_not_ready' },
+    'a creation refused while reconnecting is refused as retryable',
+  );
+
+  const synced = events.filter((event) => event.type === 'synced').length;
+  const recovered = catalogEvent();
+  respond({
+    ok: true,
+    result: {
+      nextOffset: '2',
+      upToDate: true,
+      closed: false,
+      payload: { body: update },
+    },
+  });
+  assert.equal(
+    JSON.parse((await recovered).catalog).sessions[0].title,
+    'After',
+  );
+  assert.ok(
+    events.filter((event) => event.type === 'synced').length > synced,
+    'a read that succeeds reports the catalog live again',
+  );
+  assert.equal(bootstraps, 2);
+  assert.equal(errors().length, 1);
+  delete globalThis.webkit;
+  delete globalThis.location;
   delete globalThis.__runtimeTestClient;
   delete globalThis.dataRuntime;
 });

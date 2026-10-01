@@ -32,6 +32,10 @@ type SessionState = {
   doc: LoroDoc;
   client: StreamsClient;
   controller: AbortController;
+  /** The read in flight, so a failed probe can restart it. */
+  read?: AbortController;
+  /** When the hub last answered a read of this replica. */
+  readAt: number;
   ready: boolean;
   sending: boolean;
   working?: boolean;
@@ -248,6 +252,76 @@ export function stopSessions() {
   reserved.clear();
   active = undefined;
 }
+// Turn ids whose append result was lost. This runtime never writes them again.
+const uncertain = new Set<string>();
+/** Replaces a replica that holds a write the hub never acknowledged with a fresh read. */
+function resync(state: SessionState) {
+  if (sessions.get(state.id) !== state) return;
+  const foreground = active === state;
+  // The unacknowledged write must not be published as session history.
+  state.ready = false;
+  evict(state);
+  if (foreground) active = undefined;
+  void openSession(
+    state.id,
+    state.workspace,
+    state.getGrant,
+    state.emit,
+    state.markDispatch,
+    foreground,
+  );
+}
+/**
+ * Appends exactly once even when the request is sent twice: the hub drops a
+ * repeat of one producer tuple, so the client may retry a lost acknowledgement.
+ */
+export const appendOnce = (
+  client: StreamsClient,
+  part: { contentType: string; body: Uint8Array | string },
+) =>
+  client.append({
+    part,
+    producer: { producerId: crypto.randomUUID(), epoch: 0, seq: 0 },
+  });
+/** A replica is taken as connected for this long after the hub answered it. */
+export const REPLICA_FRESH_MS = 3000;
+/**
+ * Asks the hub before a write when the replica has not heard from it lately:
+ * a route that died silently is found while nothing has been written yet.
+ */
+async function reachable(state: SessionState) {
+  if (Date.now() - state.readAt < REPLICA_FRESH_MS) return true;
+  const probe = await state.client.head({ signal: AbortSignal.timeout(5000) });
+  if (probe.ok) return true;
+  // A stalled read would hold the replica until its own timeout; start it again.
+  state.read?.abort();
+  return false;
+}
+/**
+ * Settles a turn whose send result was lost. A ready replica was read after
+ * every write this runtime attempted, so a turn it lacks never reached the hub.
+ */
+export function confirmTurn(args: { sessionId: string; id: string }) {
+  const state = sessions.get(args.sessionId);
+  if (!state?.ready || state.sending) return { state: 'pending' as const };
+  const raw = state.doc.toJSON();
+  if (((raw.mq ?? []) as any[]).some((item) => item?.userTurnId === args.id))
+    return { state: 'queued' as const };
+  const history = (raw.history ?? []) as any[];
+  const index = history.findIndex((entry) => entry?.id === args.id);
+  if (index < 0)
+    // A late copy of the lost write must never share an id with the retry.
+    return { state: 'absent' as const, retryId: crypto.randomUUID() };
+  return {
+    state: 'uploaded' as const,
+    // Only the newest turn, still untouched by the machine, may need its pointer.
+    undispatched:
+      history[index].status === 'pending' &&
+      !history
+        .slice(index + 1)
+        .some((entry) => entry?.role === 'user' || entry?.role === 'assistant'),
+  };
+}
 export function unpack(bytes: Uint8Array) {
   return bytes[0] === 0x28 &&
     bytes[1] === 0xb5 &&
@@ -354,6 +428,7 @@ export async function openSession(
     doc: new LoroDoc(),
     client: undefined as unknown as StreamsClient,
     controller,
+    readAt: 0,
     ready: false,
     sending: false,
     status: 'syncing',
@@ -391,6 +466,7 @@ export async function openSession(
         retrying,
       );
       if (sessions.get(id) !== state) return;
+      state.readAt = Date.now();
       let size = 0;
       const consume = (bytes: Uint8Array, snapshot = false) => {
         size += bytes.length;
@@ -420,10 +496,12 @@ export async function openSession(
         const next = await retrySessionRead(
           controller.signal,
           async () => {
+            const read = new AbortController();
+            state.read = read;
             const result = await state.client.readOnce({
               offset,
               cursor,
-              signal: controller.signal,
+              signal: AbortSignal.any([controller.signal, read.signal]),
               ...(upToDate ? { live: 'long-poll' as const } : {}),
             });
             if (!result.ok) throw new Error(result.result.code);
@@ -432,6 +510,7 @@ export async function openSession(
           retrying,
         );
         if (sessions.get(id) !== state) return;
+        state.readAt = Date.now();
         if (next.result.payload) {
           consume(next.result.payload.body);
           changed = true;
@@ -528,6 +607,8 @@ export async function sendTurn(
   },
   expand: (text: string) => Promise<string> = async (text) => text,
 ) {
+  if (args.id && uncertain.has(args.id))
+    return { id: args.id, state: 'unknown', reason: 'turn_already_exists' };
   const state = sessions.get(args.sessionId);
   if (!state || !state.ready)
     return { state: 'not_sent', reason: 'session_not_ready' };
@@ -611,6 +692,8 @@ export async function sendTurn(
   let writeStarted = false;
   try {
     text = await expand(text);
+    // Everything below reads the replica, so the hub is asked first.
+    if (!(await reachable(state))) throw new Error('session_not_ready');
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
@@ -712,11 +795,9 @@ export async function sendTurn(
         guide ? 'pending_apply' : 'pending',
       );
     }
-    const result = await state.client.append({
-      part: {
-        contentType: 'application/octet-stream',
-        body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
-      },
+    const result = await appendOnce(state.client, {
+      contentType: 'application/octet-stream',
+      body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
     });
     if (!result.ok) throw new Error(result.result.code);
     uploaded = true;
@@ -775,28 +856,26 @@ export async function sendTurn(
       `${state.workspace}:rpc:req:${args.machineId}`,
       state.getGrant,
     );
-    const dispatched = await requestClient.append({
-      part: {
-        contentType: 'application/json',
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: requestId,
-          rpcVersion: '1',
-          workspaceId: state.workspace,
-          machineId: args.machineId,
-          replyTo,
-          sentAt: now,
-          expiresAt: now + 15000,
-          method: 'session/dispatch-turn',
-          params: {
-            sessionId: state.id,
-            userTurnId: id,
-            userId: args.userId,
-            timestamp,
-            inputConfig,
-          },
-        }),
-      },
+    const dispatched = await appendOnce(requestClient, {
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: requestId,
+        rpcVersion: '1',
+        workspaceId: state.workspace,
+        machineId: args.machineId,
+        replyTo,
+        sentAt: now,
+        expiresAt: now + 15000,
+        method: 'session/dispatch-turn',
+        params: {
+          sessionId: state.id,
+          userTurnId: id,
+          userId: args.userId,
+          timestamp,
+          inputConfig,
+        },
+      }),
     });
     if (!dispatched.ok) throw new Error(dispatched.result.code);
     const signal = AbortSignal.any([
@@ -834,6 +913,11 @@ export async function sendTurn(
     let delivery = 'not_sent';
     if (writeStarted) delivery = 'unknown';
     if (uploaded) delivery = 'uploaded';
+    if (delivery === 'unknown') {
+      // The replica now differs from the hub; later writes would depend on it.
+      uncertain.add(id);
+      resync(state);
+    }
     return {
       id,
       state: delivery,

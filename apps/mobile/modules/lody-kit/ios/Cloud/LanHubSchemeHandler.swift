@@ -23,6 +23,10 @@ final class LanHubSchemeHandler: NSObject, WKURLSchemeHandler {
     self.invite = invite
     super.init()
     relay.owner = self
+    session = makeSession()
+  }
+
+  private func makeSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     // Catalog, machine, session and RPC long-polls stay open together.
     configuration.httpMaximumConnectionsPerHost = 32
@@ -30,13 +34,25 @@ final class LanHubSchemeHandler: NSObject, WKURLSchemeHandler {
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
     configuration.urlCache = nil
     configuration.httpShouldSetCookies = false
-    session = URLSession(configuration: configuration, delegate: relay, delegateQueue: .main)
+    return URLSession(configuration: configuration, delegate: relay, delegateQueue: .main)
   }
 
   /// Called when the owning WebView is replaced; a URLSession retains its delegate until invalidated.
   func invalidate() {
     pending.removeAll(); tasks.removeAll()
     session?.invalidateAndCancel(); session = nil
+  }
+
+  /// Drops every connection after a suspension. One that crossed a tunnel
+  /// restart can stall for its whole timeout while a new one answers at once,
+  /// so the page's requests fail now and its reads go again on fresh sockets.
+  func reconnect() {
+    guard session != nil else { return }
+    let stale = Array(pending.values)
+    pending.removeAll(); tasks.removeAll()
+    session?.invalidateAndCancel()
+    session = makeSession()
+    for task in stale { task.didFailWithError(URLError(.networkConnectionLost)) }
   }
 
   func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
@@ -89,8 +105,10 @@ final class LanHubSchemeHandler: NSObject, WKURLSchemeHandler {
     task.didFinish()
   }
 
-  fileprivate func received(_ response: URLResponse, for task: URLSessionTask) -> Bool {
-    guard let schemeTask = pending[task.taskIdentifier], let url = schemeTask.request.url else { return false }
+  /// Task identifiers restart with each session, so a replaced session's late callbacks are ignored.
+  fileprivate func received(_ response: URLResponse, for task: URLSessionTask, in session: URLSession) -> Bool {
+    guard session === self.session,
+          let schemeTask = pending[task.taskIdentifier], let url = schemeTask.request.url else { return false }
     let upstream = response as? HTTPURLResponse
     var headers = Self.cors
     for (key, value) in upstream?.allHeaderFields ?? [:] {
@@ -104,12 +122,14 @@ final class LanHubSchemeHandler: NSObject, WKURLSchemeHandler {
     return true
   }
 
-  fileprivate func received(_ data: Data, for task: URLSessionTask) {
+  fileprivate func received(_ data: Data, for task: URLSessionTask, in session: URLSession) {
+    guard session === self.session else { return }
     pending[task.taskIdentifier]?.didReceive(data)
   }
 
-  fileprivate func completed(_ task: URLSessionTask, error: (any Error)?) {
-    guard let schemeTask = pending.removeValue(forKey: task.taskIdentifier) else { return }
+  fileprivate func completed(_ task: URLSessionTask, error: (any Error)?, in session: URLSession) {
+    guard session === self.session,
+          let schemeTask = pending.removeValue(forKey: task.taskIdentifier) else { return }
     tasks.removeValue(forKey: ObjectIdentifier(schemeTask as AnyObject))
     if let error { schemeTask.didFailWithError(error) } else { schemeTask.didFinish() }
   }
@@ -133,16 +153,16 @@ private final class Relay: NSObject, URLSessionDataDelegate, @unchecked Sendable
 
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
     completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
-    let accepted = MainActor.assumeIsolated { owner?.received(response, for: dataTask) ?? false }
+    let accepted = MainActor.assumeIsolated { owner?.received(response, for: dataTask, in: session) ?? false }
     completionHandler(accepted ? .allow : .cancel)
   }
 
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-    MainActor.assumeIsolated { owner?.received(data, for: dataTask) }
+    MainActor.assumeIsolated { owner?.received(data, for: dataTask, in: session) }
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
-    MainActor.assumeIsolated { owner?.completed(task, error: error) }
+    MainActor.assumeIsolated { owner?.completed(task, error: error, in: session) }
   }
 
   /// The hub never redirects; following one could carry the bearer elsewhere.
