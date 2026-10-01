@@ -1,7 +1,7 @@
 import AppIntents
 import Foundation
 #if canImport(LodyKit)
-import LodyKit
+internal import LodyKit
 #endif
 
 /// Answers a permission request from the Live Activity. The system performs it
