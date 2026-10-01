@@ -1,3 +1,4 @@
+import CoreText
 import ExpoModulesCore
 import SwiftTerm
 import UIKit
@@ -41,7 +42,7 @@ final class LodyTerminalView: ExpoView {
     terminal.accessibilityIdentifier = "terminal-view"
     terminal.isAccessibilityElement = true
     terminal.accessibilityLabel = LodyStrings.text("native.terminal.accessibility")
-    terminal.font = .monospacedSystemFont(ofSize: traitCollection.userInterfaceIdiom == .pad ? 14 : 12, weight: .regular)
+    Self.applyFont(to: terminal, size: traitCollection.userInterfaceIdiom == .pad ? 14 : 12)
     addSubview(terminal)
     keyboardLayoutGuide.followsUndockedKeyboard = true
     NSLayoutConstraint.activate([
@@ -209,7 +210,8 @@ final class LodyTerminalView: ExpoView {
 
   private func startFixture() {
     terminalId = "fixture"
-    feed("Lody LAN terminal fixture\r\n$ ")
+    // Powerline and Nerd Font glyphs, as a Powerlevel10k prompt draws them.
+    feed("Lody LAN terminal fixture \u{E0B0} \u{F07C} \u{E725}\r\n$ ")
     show(nil)
     emit(.ready, title: "fixture")
     _ = terminal.becomeFirstResponder()
@@ -232,6 +234,27 @@ final class LodyTerminalView: ExpoView {
   }
 
   // MARK: Presentation
+
+  /// Prompts such as Powerlevel10k draw Nerd Font and Powerline glyphs that
+  /// SF Mono lacks. The bundled MesloLGS NF carries them; CJK falls back to the
+  /// system font and SwiftTerm still lays it out across two cells.
+  private static let nerdFonts: Bool = ["MesloLGS-NF-Regular", "MesloLGS-NF-Bold"].allSatisfy { name in
+    guard let url = Bundle(for: LodyTerminalView.self).url(forResource: name, withExtension: "ttf")
+      ?? Bundle.main.url(forResource: name, withExtension: "ttf") else { return false }
+    var error: Unmanaged<CFError>?
+    // Registering twice reports "already registered"; the font is usable either way.
+    _ = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+    return UIFont(name: name, size: 12) != nil
+  }
+
+  private static func applyFont(to terminal: TerminalView, size: CGFloat) {
+    guard nerdFonts, let regular = UIFont(name: "MesloLGS-NF-Regular", size: size),
+          let bold = UIFont(name: "MesloLGS-NF-Bold", size: size) else {
+      terminal.font = .monospacedSystemFont(ofSize: size, weight: .regular)
+      return
+    }
+    terminal.setFonts(normal: regular, bold: bold, italic: regular, boldItalic: bold)
+  }
 
   private func feed(_ text: String) {
     terminal.feed(text: text)

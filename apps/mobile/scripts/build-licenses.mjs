@@ -118,6 +118,12 @@ const nativeComponents = [
     file: 'modules/lody-kit/licenses/Litext-LICENSE.txt',
   },
   {
+    name: 'MesloLGS NF',
+    license: 'Apache-2.0',
+    url: 'https://github.com/romkatv/powerlevel10k-media',
+    file: 'modules/lody-kit/licenses/MesloLGS-NF-LICENSE.txt',
+  },
+  {
     name: 'SwiftTerm',
     license: 'MIT',
     url: 'https://github.com/migueldeicaza/SwiftTerm',
