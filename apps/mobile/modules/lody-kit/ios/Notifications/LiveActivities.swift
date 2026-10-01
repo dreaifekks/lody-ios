@@ -354,6 +354,20 @@ final class LiveActivities {
           activity.activityState == .active || activity.activityState == .stale else { return }
     if let current = tokenTasks[id] {
       guard current.nativeId != activity.id else { return }
+      // One activity per workspace. A LAN host may start one while the app is
+      // starting its own; the one already followed stays and the newcomer goes.
+      let kept = current.nativeId
+      if Activity<LodyActivityAttributes>.activities.contains(where: {
+        $0.id == kept && ($0.activityState == .active || $0.activityState == .stale)
+      }) {
+        let duplicate = activity.id
+        Task.detached {
+          for extra in Activity<LodyActivityAttributes>.activities where extra.id == duplicate {
+            await extra.end(nil, dismissalPolicy: .immediate)
+          }
+        }
+        return
+      }
       unregister(id)
     }
     let stamp = UUID()
