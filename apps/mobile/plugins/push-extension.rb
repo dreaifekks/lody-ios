@@ -117,10 +117,18 @@ def lody_app_intents(source_dir, basenames)
   root = __dir__ + '/../ios'
   project = Xcodeproj::Project.open(Dir[File.join(root, '*.xcodeproj')].first)
   app = project.targets.find { |t| t.product_type == 'com.apple.product-type.application' }
-  group = project.main_group.find_subpath(app.name, true)
+  # Expo's app group has no path of its own; its files are named `<App>/<file>`.
+  delegate = app.source_build_phase.files_references.find { |f| f.path.to_s.end_with?('AppDelegate.swift') }
+  group = delegate.parent
+  prefix = File.dirname(delegate.path.to_s)
   basenames.each do |basename|
     FileUtils.cp(File.join(__dir__, '..', source_dir, basename), File.join(root, app.name))
-    file = group.files.find { |f| f.path == basename } || group.new_file(basename)
+    path = prefix == '.' ? basename : File.join(prefix, basename)
+    # Drop references an earlier run placed elsewhere.
+    app.source_build_phase.files_references
+      .select { |f| f.path.to_s.end_with?(basename) && f.path != path }
+      .each { |f| app.source_build_phase.remove_file_reference(f); f.remove_from_project }
+    file = group.files.find { |f| f.path == path } || group.new_reference(path).tap { |f| f.name = basename }
     app.source_build_phase.add_file_reference(file, true)
   end
   project.save
