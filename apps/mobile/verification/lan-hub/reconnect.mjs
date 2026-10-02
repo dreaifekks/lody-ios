@@ -187,6 +187,30 @@ async function hubHistory(id) {
     turns: (doc.toJSON().history ?? []).map((entry) => entry.id),
   };
 }
+/** What another client viewing the session writes when it shows a new turn. */
+async function markSeen(id, turnId) {
+  const data = must(await direct(`${workspace}:s:${id}`).bootstrap({}));
+  const doc = new LoroDoc();
+  for (const part of data.updates)
+    for (const update of frames(part.body)) doc.import(update);
+  const before = doc.version();
+  const history = doc.getList('history');
+  for (let i = 0; i < history.length; i++) {
+    const entry = history.get(i);
+    if (entry.get('id') !== turnId) continue;
+    entry.set('status', 'seen');
+    entry.set('read', true);
+  }
+  doc.commit();
+  must(
+    await direct(`${workspace}:s:${id}`).append({
+      part: {
+        contentType: 'application/octet-stream',
+        body: frame(doc.export({ mode: 'update', from: before })),
+      },
+    }),
+  );
+}
 async function hubPointer(id) {
   const data = must(await direct(`${workspace}:meta`).bootstrap({}));
   const flock = new Flock('verify-reader');
@@ -367,6 +391,21 @@ await check('pointer', async (id) => {
   assert.equal(sent.state, 'uploaded', 'the turn is on the hub, undispatched');
   assert.equal(await hubPointer(id), undefined);
   assert.ok(!dispatched.includes(sent.id));
+  // A desktop with the session open marks the turn read; the machine has not seen it.
+  await markSeen(id, sent.id);
+  await until(
+    () =>
+      events.some(
+        (event) =>
+          event.sessionId === id &&
+          typeof event.session === 'string' &&
+          JSON.parse(event.session).entries?.some(
+            (entry) => entry.id === sent.id && entry.status === 'seen',
+          ),
+      ),
+    10000,
+    'the replica to see the turn marked read',
+  );
   fault = () => undefined;
   assert.deepEqual(await runtime.confirmTurn({ sessionId: id, id: sent.id }), {
     state: 'uploaded',

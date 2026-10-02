@@ -315,8 +315,9 @@ export function confirmTurn(args: { sessionId: string; id: string }) {
   return {
     state: 'uploaded' as const,
     // Only the newest turn, still untouched by the machine, may need its pointer.
+    // Any client viewing the session marks it `seen`; only the machine moves it on.
     undispatched:
-      history[index].status === 'pending' &&
+      ['pending', 'seen'].includes(history[index].status) &&
       !history
         .slice(index + 1)
         .some((entry) => entry?.role === 'user' || entry?.role === 'assistant'),
