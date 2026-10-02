@@ -14,6 +14,8 @@ export async function machineRpc(
   params: unknown,
   getGrant: Grant,
   signal: AbortSignal,
+  /** Called as the request leaves, after its reply stream exists. */
+  onSend?: () => void,
 ): Promise<RpcReply> {
   const replyTo = `${workspaceId}:rpc:res:${machineId}:${crypto.randomUUID()}`;
   const response = await clientFor(replyTo, getGrant);
@@ -29,6 +31,7 @@ export async function machineRpc(
   );
   const id = crypto.randomUUID(),
     now = Date.now();
+  onSend?.();
   const sent = await client.append({
     part: {
       contentType: 'application/json',

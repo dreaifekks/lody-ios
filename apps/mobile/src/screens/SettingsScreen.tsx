@@ -6,6 +6,7 @@ import { QuickRepliesScreen } from './QuickRepliesScreen';
 import { useRouter } from 'expo-router';
 import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
 import { AccountScreen } from './AccountScreen';
+import { ConnectionScreen } from './ConnectionScreen';
 import { ArchivedSessionsScreen } from './ArchivedSessionsScreen';
 import { LicensesScreen } from './LicensesScreen';
 import { RemoteSettingsScreen, settingsTitle } from './RemoteSettingsScreen';
@@ -19,8 +20,10 @@ import {
   type NativeListSection,
 } from '@lody-ios/kit';
 import { useAuth } from '@/cloud/auth/AuthProvider';
-import { useCatalog } from '@/cloud/catalog/CatalogProvider';
 import { useConnection } from '@/cloud/catalog/connection';
+import { connectionService } from '@/cloud/catalog/machineStatus';
+import { accountSubtitle, connectionRow } from '@/features/settings/connection';
+import { useHubLatency } from '@/features/settings/useConnectionStatus';
 import { usePalette } from '@/lib/theme/palette';
 import {
   useAppearance,
@@ -34,15 +37,6 @@ import { definePage } from '@/lib/presentation';
 import type { RemoteSetting } from '@/models/settings';
 import { t, tp } from '../lib/i18n/index.ts';
 import { uiVerify } from '@/lib/uiVerify';
-
-const connectionRow = {
-  live: { symbol: 'circle.fill', label: 'settings.connection.live' },
-  syncing: { symbol: 'circle', label: 'settings.connection.syncing' },
-  offline: {
-    symbol: 'xmark.octagon.fill',
-    label: 'settings.connection.offline',
-  },
-} as const;
 
 function View() {
   const auth = useAuth();
@@ -73,7 +67,9 @@ function View() {
   const { queuedMessageBehavior, setQueuedMessageBehavior } =
     useQueuedMessageBehavior();
   const connection = useConnection();
-  const { refresh } = useCatalog();
+  const hubLatency = useHubLatency(
+    auth.account?.lan ? connectionService.hubLatency : undefined,
+  );
   const shape = connectionRow[connection.state];
   const synced = connection.syncedAt
     ? relativeTime(new Date(connection.syncedAt).toISOString())
@@ -88,8 +84,9 @@ function View() {
         {
           id: 'account',
           title: auth.account?.user.name ?? t('settings.account.welcome'),
-          subtitle:
-            auth.account?.user.email ?? t('settings.account.signInHint'),
+          subtitle: auth.account?.lan
+            ? accountSubtitle(auth.account.user.email, hubLatency)
+            : (auth.account?.user.email ?? t('settings.account.signInHint')),
           image: auth.account?.user.image ?? 'person.crop.circle',
           action: !!auth.account,
           disclosure: !!auth.account,
@@ -108,14 +105,14 @@ function View() {
           }),
           subtitle: [
             t(shape.label),
-            connection.state === 'offline'
-              ? t('settings.connection.tapToResync')
-              : synced && t('settings.connection.syncedAt', { time: synced }),
+            synced && t('settings.connection.syncedAt', { time: synced }),
           ]
             .filter(Boolean)
             .join(' · '),
           image: shape.symbol,
-          action: connection.state === 'offline',
+          action: !!auth.account,
+          disclosure: !!auth.account,
+          navigates: !!auth.account,
           imageTint: {
             live: colors.accent,
             offline: 'danger',
@@ -348,7 +345,8 @@ function View() {
         }
         if (nativeEvent.id === 'account' && auth.account)
           void push(AccountScreen);
-        if (nativeEvent.id === 'connection') refresh();
+        if (nativeEvent.id === 'connection' && auth.account)
+          void push(ConnectionScreen);
         if (nativeEvent.id === 'credit-flowdown')
           void Linking.openURL('https://github.com/Lakr233/FlowDown').catch(
             () => showToast(t('settings.toast.openProjectLinkFailed')),

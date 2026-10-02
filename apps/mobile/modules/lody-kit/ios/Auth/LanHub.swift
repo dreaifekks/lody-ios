@@ -44,4 +44,40 @@ enum LanHub {
     if status == 401 || status == 403 { throw Failure.unauthorized }
     guard (200..<300).contains(status) || status == 404 else { throw Failure.unreachable(status) }
   }
+
+  /// Keeps one connection to the hub, so successive measurements reuse it.
+  private static let latencySession: URLSession = {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.httpMaximumConnectionsPerHost = 1
+    configuration.timeoutIntervalForRequest = 5
+    return URLSession(configuration: configuration)
+  }()
+
+  /// Milliseconds from sending the probe's request to the hub's first byte,
+  /// leaving out connection setup; nil when the hub does not answer it.
+  static func latency(_ invite: LanInvite) async -> Int? {
+    let stream = "\(invite.workspaceId):meta".addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_.~"))) ?? ""
+    guard let url = URL(string: "\(invite.url)/ds/lody/\(stream)") else { return nil }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
+    request.httpMethod = "HEAD"
+    request.setValue("Bearer \(invite.token)", forHTTPHeaderField: "Authorization")
+    let metrics = LatencyMetrics()
+    var sent = Date()
+    guard let reply = try? await latencySession.data(for: request, delegate: metrics),
+          let status = (reply.1 as? HTTPURLResponse)?.statusCode,
+          (200..<300).contains(status) || status == 404 else { return nil }
+    var answered = Date()
+    if let start = metrics.transaction?.requestStartDate, let end = metrics.transaction?.responseStartDate {
+      sent = start
+      answered = end
+    }
+    return max(0, Int((answered.timeIntervalSince(sent) * 1000).rounded()))
+  }
+
+  private final class LatencyMetrics: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private(set) var transaction: URLSessionTaskTransactionMetrics?
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+      transaction = metrics.transactionMetrics.last
+    }
+  }
 }

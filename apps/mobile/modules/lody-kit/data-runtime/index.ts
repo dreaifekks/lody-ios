@@ -123,6 +123,8 @@ const delay = (ms: number, signal: AbortSignal) =>
     }, ms);
     signal.addEventListener('abort', abort, { once: true });
   });
+/** A machine that has not answered a ping by then is shown offline. */
+const MACHINE_PING_TIMEOUT_MS = 6000;
 let metaReplica: { flock: Flock; client: StreamsClient } | undefined;
 let workspace = '';
 const machineReplicas = new Map<string, Flock>();
@@ -590,6 +592,61 @@ Object.assign(globalThis, {
         getGrant,
         AbortSignal.timeout(35000),
       );
+    },
+    /**
+     * The workspace's machines, or how long one takes to answer `machine/ping`
+     * through the hub; a machine that does not answer in time is offline.
+     */
+    async machineStatus(args: {
+      workspaceId: string;
+      action: 'list' | 'ping';
+      machineId?: string;
+    }) {
+      if (args.workspaceId !== workspace || !metaReplica)
+        throw new Error('metadata_not_ready');
+      const meta = metaReplica.flock;
+      const machineIds = catalogs.get('meta')?.machineIds ?? [];
+      if (args.action === 'list') {
+        const text = (id: string, key: string) => {
+          const room = `machine-${id}`;
+          const value =
+            meta.get(['m', room, key]) ??
+            (meta.get(['m', room]) as Record<string, unknown> | undefined)?.[
+              key
+            ];
+          return typeof value === 'string' && value ? value : undefined;
+        };
+        return {
+          machines: machineIds.map((id) => ({
+            id,
+            name: text(id, 'name'),
+            alias: text(id, 'lanAlias'),
+            os: text(id, 'os'),
+            version: text(id, 'cliVersion'),
+          })),
+        };
+      }
+      const machineId = args.machineId;
+      if (!machineId || !machineIds.includes(machineId))
+        throw new Error('machine_unavailable');
+      let sentAt = 0;
+      const reply = await machineRpc(
+        workspace,
+        machineId,
+        'machine/ping',
+        { requestId: crypto.randomUUID() },
+        getGrant,
+        AbortSignal.timeout(MACHINE_PING_TIMEOUT_MS),
+        () => {
+          sentAt = performance.now();
+        },
+      );
+      if (
+        reply.error ||
+        (reply.result as { success?: unknown })?.success !== true
+      )
+        throw new Error('machine_ping_failed');
+      return { ms: Math.round(performance.now() - sentAt) };
     },
     /**
      * Development probe: reports the shape of the machine replicas so the client

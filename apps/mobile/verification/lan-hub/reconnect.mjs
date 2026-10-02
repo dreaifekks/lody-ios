@@ -19,6 +19,8 @@ if (!base) throw new Error('Set LODY_HUB_URL to a Streams hub');
 const token = process.env.LODY_HUB_TOKEN ?? 'loopback';
 const workspace = `lw_verify_${randomUUID().replaceAll('-', '')}`;
 const machine = 'verify-machine';
+// A computer whose agent service is not running: nothing answers its requests.
+const quiet = 'verify-quiet';
 const user = 'local:verify';
 
 // The network between the runtime and the hub. `fault` decides what happens to
@@ -106,7 +108,13 @@ const sessions = Object.fromEntries(
 );
 const seed = new Flock('verify-seed');
 seed.set(['e', `machine-${machine}`], true);
-seed.set(['m', `machine-${machine}`], { name: 'Verify' });
+seed.set(['m', `machine-${machine}`], { name: 'Verify', os: 'linux' });
+seed.set(['e', `machine-${quiet}`], true);
+seed.set(['m', `machine-${quiet}`], {
+  name: 'Quiet',
+  lanAlias: 'Q',
+  cliVersion: '1.0.0',
+});
 for (const [name, id] of Object.entries(sessions)) {
   seed.set(['e', `session-${id}`], true);
   seed.set(['m', `session-${id}`], {
@@ -132,16 +140,17 @@ must(
     },
   }),
 );
-must(
-  await direct(`${workspace}:rpc:req:${machine}`).create({
-    contentType: 'application/json',
-    ttlSeconds: 900,
-  }),
-);
+for (const id of [machine, quiet])
+  must(
+    await direct(`${workspace}:rpc:req:${id}`).create({
+      contentType: 'application/json',
+      ttlSeconds: 900,
+    }),
+  );
 for (const id of Object.values(sessions))
   must(await direct(`${workspace}:s:${id}`).create(octets));
 
-// A machine that acknowledges every dispatch request.
+// A machine that acknowledges every dispatch request and answers pings.
 const dispatched = [];
 void (async () => {
   const inbox = direct(`${workspace}:rpc:req:${machine}`);
@@ -158,14 +167,17 @@ void (async () => {
       new TextDecoder().decode(read.result.payload.body),
     );
     for (const call of Array.isArray(parsed) ? parsed : [parsed]) {
-      dispatched.push(call.params.userTurnId);
+      const ping = call.method === 'machine/ping';
+      if (!ping) dispatched.push(call.params.userTurnId);
       await direct(call.replyTo).append({
         part: {
           contentType: 'application/json',
           body: JSON.stringify({
             jsonrpc: '2.0',
             id: call.id,
-            result: { accepted: true },
+            result: ping
+              ? { type: 'machine/ping_response', success: true }
+              : { accepted: true },
           }),
         },
       });
@@ -447,6 +459,36 @@ await check('pointer', async (id) => {
   );
   assert.equal(bootstraps(), before, 'no catalog was downloaded again');
   console.log('ok  catalog resumes from its cursor');
+}
+
+// The connection page: the computers, and how each answers a ping.
+{
+  // As the bridge delivers it, in JSON.
+  const status = async (args) =>
+    JSON.parse(
+      JSON.stringify(
+        await runtime.machineStatus({ workspaceId: workspace, ...args }),
+      ),
+    );
+  const { machines } = await status({ action: 'list' });
+  assert.deepEqual(
+    machines.find((item) => item.id === machine),
+    { id: machine, name: 'Verify', os: 'linux' },
+  );
+  assert.deepEqual(
+    machines.find((item) => item.id === quiet),
+    { id: quiet, name: 'Quiet', alias: 'Q', version: '1.0.0' },
+  );
+  const { ms } = await status({ action: 'ping', machineId: machine });
+  assert.ok(ms >= 0 && ms < 5000, `answered in ${ms} ms`);
+  const started = Date.now();
+  await assert.rejects(status({ action: 'ping', machineId: quiet }));
+  assert.ok(Date.now() - started < 9000, 'a silent computer is given up on');
+  await assert.rejects(
+    status({ action: 'ping', machineId: 'missing' }),
+    /machine_unavailable/,
+  );
+  console.log(`ok  machine status (ping ${ms} ms)`);
 }
 
 console.log('LAN reconnect: all checks passed');

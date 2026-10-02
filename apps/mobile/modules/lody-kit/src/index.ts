@@ -1,6 +1,7 @@
 export {
   sessionSharingRaw,
   remoteSettingsRaw,
+  machineStatusRaw,
   runtimeInfo,
   initialAccentColor,
   showAccentColorPicker,
@@ -51,6 +52,7 @@ export {
   clearAuthToken,
   readLanHub,
   joinLanHub,
+  lanHubLatency,
   clearLanHub,
   type LanHubSummary,
   openAuthBrowser,

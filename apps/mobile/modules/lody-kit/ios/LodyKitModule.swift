@@ -283,6 +283,11 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       }
       return LanHub.summary(invite)
     }
+    /// The joined hub's request round trip in milliseconds, or nil when it does not answer.
+    AsyncFunction("lanHubLatency") { () async -> Int? in
+      guard let invite = try? LanHub.read() else { return nil }
+      return await LanHub.latency(invite)
+    }
     AsyncFunction("clearLanHub") { () async throws in
       // The hub must stop pushing here before the credential to tell it is gone.
       await LanPush.shared.leave()
@@ -449,6 +454,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     }.runOnQueue(.main)
     AsyncFunction("localProjects") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("localProjects", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("remoteSettings") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("remoteSettings", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("machineStatus") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("machineStatus", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("createSession") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.createSession(payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("workspaceBillingEntitlement") { (workspace: String, user: String, promise: Promise) in
       MainActor.assumeIsolated { self.dataRuntime.workspaceBillingEntitlement(workspace: workspace, user: user, promise: promise) }

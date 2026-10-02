@@ -1,4 +1,5 @@
 import { AppIconFailurePreviewScreen } from './AppIconFailurePreviewScreen';
+import { ConnectionPreviewScreen } from './ConnectionPreviewScreen';
 import { MessageSharePreviewScreen } from './MessageSharePreviewScreen';
 import { SessionSharePreviewScreen } from './SessionSharePreviewScreen';
 import { DiffScrollEdgePreviewScreen } from './DiffScrollEdgePreviewScreen';
@@ -163,6 +164,7 @@ function View() {
           'arrow.triangle.2.circlepath',
         ),
         openRow('settings-preview', '远程设置验收', 'gear'),
+        openRow('connection-preview', '连接状态验收', 'network'),
         openRow('app-icon-failure-preview', 'Icon failure', 'app.dashed'),
         openRow('appearance-preview', '外观验收', 'circle.lefthalf.filled'),
         openRow(
@@ -323,6 +325,7 @@ function View() {
       }),
     'project-picker-preview': () => void openCreateParity(),
     'settings-preview': () => void present(SettingsPreviewScreen, {}),
+    'connection-preview': () => void present(ConnectionPreviewScreen, {}),
     'app-icon-failure-preview': () =>
       void present(AppIconFailurePreviewScreen, {}),
     'appearance-preview': () => void present(SettingsScreen, {}),

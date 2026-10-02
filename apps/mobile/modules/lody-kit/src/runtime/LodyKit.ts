@@ -115,6 +115,7 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   shareRemove(id: string): void;
   localProjects(payload: string): Promise<string>;
   remoteSettings(payload: string): Promise<string>;
+  machineStatus(payload: string): Promise<string>;
   createSession(payload: string): Promise<string>;
   archiveSession(payload: string): Promise<string>;
   deleteSession(payload: string): Promise<string>;
@@ -175,6 +176,7 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   readAuthToken(): Promise<string | null>;
   readLanHub(): Promise<LanHubSummary | null>;
   joinLanHub(invite: string): Promise<LanHubSummary>;
+  lanHubLatency(): Promise<number | null>;
   clearLanHub(): Promise<void>;
   saveAuthToken(token: string): Promise<void>;
   clearAuthToken(): Promise<void>;
@@ -189,6 +191,8 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
 export const native = requireNativeModule<LodyKitNativeModule>('LodyKit');
 export const remoteSettingsRaw = (payload: string): Promise<string> =>
   native.remoteSettings(payload);
+export const machineStatusRaw = (payload: string): Promise<string> =>
+  native.machineStatus(payload);
 export const sessionSharingRaw = (payload: string): Promise<string> =>
   native.sessionSharing(payload);
 export const runtimeInfo = native.runtimeInfo;
@@ -293,6 +297,7 @@ export const readLanHub = () => native.readLanHub();
  * or `lan_unreachable` in the message.
  */
 export const joinLanHub = (invite: string) => native.joinLanHub(invite);
+export const lanHubLatency = () => native.lanHubLatency();
 export const clearLanHub = () => native.clearLanHub();
 export const saveAuthToken = (token: string) => native.saveAuthToken(token);
 export const clearAuthToken = () => native.clearAuthToken();
