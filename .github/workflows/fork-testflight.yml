@@ -1,0 +1,33 @@
+name: Fork TestFlight
+
+# Every push to lan-mode ships a TestFlight build, so the phone updates without
+# the Mac online. Runs only where the repository variable LODY_BUNDLE_ID is set.
+on:
+  push:
+    branches: [lan-mode]
+    paths-ignore:
+      - '**.md'
+      - 'apps/mobile/verification/**'
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Optional TestFlight notes'
+        required: false
+        type: string
+
+# A newer push replaces a still-pending one; a running archive is never cancelled.
+concurrency:
+  group: fork-testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  testflight:
+    if: ${{ vars.LODY_BUNDLE_ID != '' }}
+    uses: ./.github/workflows/release.yml
+    with:
+      notes: ${{ inputs.notes }}
+    secrets: inherit

@@ -28,8 +28,10 @@ permissions:
 
 env:
   MOBILE_DIR: apps/mobile
-  APPLE_TEAM_ID: KAMM5N88X3
-  LODY_BUNDLE_ID: app.innei.lody
+  # A fork sets these repository variables to sign under its own team and bundle ID.
+  APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'KAMM5N88X3' }}
+  LODY_APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'KAMM5N88X3' }}
+  LODY_BUNDLE_ID: ${{ vars.LODY_BUNDLE_ID || 'app.innei.lody' }}
   EXPO_USE_PRECOMPILED_MODULES: '0'
   ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
   ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -435,7 +437,7 @@ jobs:
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           text="$(printf '<b>%s</b>\n<b>提交</b>: <code>%s</code>\n<a href="%s">打开 GitHub Actions</a>' "$title" "$COMMIT" "$run_url")"
-          jq -n --arg text "$text" \
-            '{chat_id: "@order_usagi", text: $text, parse_mode: "HTML", disable_web_page_preview: true}' \
+          jq -n --arg text "$text" --arg chat "${{ vars.TELEGRAM_CHAT_ID || '@order_usagi' }}" \
+            '{chat_id: $chat, text: $text, parse_mode: "HTML", disable_web_page_preview: true}' \
             | curl -sS -f -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -H 'Content-Type: application/json' -d @-
