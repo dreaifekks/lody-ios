@@ -820,6 +820,7 @@
   "pr.commentsScope": "Issue comments only. View reviews and inline discussions on GitHub.",
   "pr.previousHead": "This check belongs to an earlier commit. Return to the checks list for the latest commit.",
   "pr.error.commentUnknown": "Could not confirm whether the comment was posted. Your draft is retained. Check GitHub before sending again to avoid duplicates.",
+  "pr.error.lanNoToken": "This LAN has no GitHub token. Run `lody-lan lan github setup` on the host, then try again.",
   "pr.error.authorization": "Sign in again or complete GitHub authorization in Lody.",
   "pr.error.forbidden": "Permission denied or GitHub temporarily limited the request. Check repository authorization and retry.",
   "pr.error.notFound": "This PR was not found or your account cannot access it.",
