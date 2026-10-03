@@ -341,13 +341,14 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         var attachments: [[String: Any]] = []
         let originals = draft["attachments"] as? [[String: Any]] ?? []
         guard originals.count <= 16 else { throw SessionAttachments.error(LodyStrings.text("native.attachment.error.limit")) }
+        let downloads = AttachmentDownloadBatch()
         // ponytail: download at most 16 originals for the shared local-file composer; use lazy remote previews if large attachments make editing slow.
         for block in originals {
           let image = block["type"] as? String == "image"
           guard let id = block[image ? "imageId" : "fileId"] as? String,
                 let editID = block["editId"] as? String else { throw SessionAttachments.error("Invalid attachment") }
           let name = block["fileName"] as? String ?? (image ? "image.jpg" : "file")
-          let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+          let directory = downloads.makeDirectory()
           let storage = block["storageSessionId"] as? String ?? session
           let url: URL
           if block["transport"] as? String == "local" {
@@ -365,7 +366,9 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         }
         guard self.generation == generation, self.sessionId == session else { throw CancellationError() }
         draft["attachments"] = attachments
-        promise.resolve(String(data: try JSONSerialization.data(withJSONObject: draft), encoding: .utf8)!)
+        let encoded = String(data: try JSONSerialization.data(withJSONObject: draft), encoding: .utf8)!
+        downloads.handOff()
+        promise.resolve(encoded)
       } catch { promise.reject("edit_prepare_failed", error.localizedDescription) }
     }
   }
@@ -661,7 +664,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         let value = try? result.get() as? String
         let data = value?.data(using: .utf8)
         let reply = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-        if reply?["state"] as? String != "accepted" {
+        if reply?["state"] as? String != "accepted" && reply?["awaitingGuide"] as? Bool != true {
           SessionBackgroundTasks.shared.finish(backgroundTaskId, success: reply?["state"] as? String == "queued")
         }
       }

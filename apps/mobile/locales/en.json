@@ -876,7 +876,7 @@
   "native.chat.error.authSummary": "Sign in to the agent on your computer, then continue.",
   "native.chat.error.accessSummary": "Ask the machine owner to grant access before continuing.",
   "native.chat.error.gitSummary": "Install Git on the connected computer, then continue.",
-  "native.chat.message.guide.confirming": "Confirming guidance…",
+  "native.chat.message.guide.confirming": "Steering…",
   "native.chat.message.guide.unknown": "Delivery unconfirmed",
   "native.chat.message.guide.waiting": "Waiting for the current reply to finish",
   "native.chat.message.guide.rejected": "Guidance not delivered",
@@ -1049,5 +1049,7 @@
   "native.attachment.error.lanMachine": "{machine} doesn't take files from this device. Update Lody on it and open its terminals to the LAN.",
   "native.attachment.error.lanSend": "{machine} didn't take the files: {reason}",
   "native.attachment.error.lanRead": "Couldn't get the file from {machine}: {reason}",
-  "ios.info.localNetworkUsage": "Connect to your Lody LAN hub on the local network."
+  "ios.info.localNetworkUsage": "Connect to your Lody LAN hub on the local network.",
+  "native.simulator.expand": "Expand Simulator preview",
+  "native.simulator.close": "Close Simulator preview"
 }

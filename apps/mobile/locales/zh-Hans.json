@@ -876,7 +876,7 @@
   "native.chat.error.authSummary": "请在电脑端完成 Agent 登录后继续。",
   "native.chat.error.accessSummary": "请联系机器所有者授予访问权限后继续。",
   "native.chat.error.gitSummary": "请在连接的电脑上安装 Git 后继续。",
-  "native.chat.message.guide.confirming": "正在确认引导…",
+  "native.chat.message.guide.confirming": "引导中…",
   "native.chat.message.guide.unknown": "投递尚未确认",
   "native.chat.message.guide.waiting": "等待当前回复结束",
   "native.chat.message.guide.rejected": "引导未投递",
@@ -1049,5 +1049,7 @@
   "native.attachment.error.lanMachine": "{machine} 不接收这台设备的文件。请更新它上面的 Lody，并向局域网开放它的终端。",
   "native.attachment.error.lanSend": "{machine} 没有收下文件：{reason}",
   "native.attachment.error.lanRead": "无法从 {machine} 取回文件：{reason}",
-  "ios.info.localNetworkUsage": "连接本地网络中的 Lody 局域网 hub。"
+  "ios.info.localNetworkUsage": "连接本地网络中的 Lody 局域网 hub。",
+  "native.simulator.expand": "展开模拟器预览",
+  "native.simulator.close": "关闭模拟器预览"
 }

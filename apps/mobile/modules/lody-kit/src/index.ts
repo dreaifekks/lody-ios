@@ -248,5 +248,5 @@ export { NativeAppIconGrid } from './appearance/NativeAppIconGrid';
 
 export { NativeSessionShare } from './session-share/NativeSessionShare';
 
-export { SimulatorView } from './simulator/SimulatorView';
+export { SimulatorView, type SimulatorSource } from './simulator/SimulatorView';
 export { TerminalView, type TerminalState } from './terminal/TerminalView';
