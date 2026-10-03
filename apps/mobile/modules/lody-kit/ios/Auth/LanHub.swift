@@ -45,6 +45,35 @@ enum LanHub {
     guard (200..<300).contains(status) || status == 404 else { throw Failure.unreachable(status) }
   }
 
+  /// The GitHub token the hub keeps for its members (`lody-lan lan github
+  /// setup`), asked at Lody's `/github/token` behind the LAN credential. nil
+  /// when the hub has none or predates it. The token stays in native memory.
+  static func githubToken(_ invite: LanInvite) async throws -> String? {
+    guard let url = URL(string: "\(invite.url)/github/token") else { throw Failure.unreachable(nil) }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+    request.setValue("Bearer \(invite.token)", forHTTPHeaderField: "Authorization")
+    let data: Data
+    let status: Int
+    do {
+      let reply = try await URLSession(configuration: .ephemeral, delegate: HubOnly(), delegateQueue: nil).data(for: request)
+      data = reply.0
+      status = (reply.1 as? HTTPURLResponse)?.statusCode ?? 0
+    } catch { throw Failure.unreachable(nil) }
+    if status == 404 { return nil }
+    if status == 401 || status == 403 { throw Failure.unauthorized }
+    guard (200..<300).contains(status) else { throw Failure.unreachable(status) }
+    let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    guard let token = body?["token"] as? String, !token.isEmpty else { return nil }
+    return token
+  }
+
+  /// The LAN credential is for the hub alone; never follow it elsewhere.
+  private final class HubOnly: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? {
+      nil
+    }
+  }
+
   /// Keeps one connection to the hub, so successive measurements reuse it.
   private static let latencySession: URLSession = {
     let configuration = URLSessionConfiguration.ephemeral

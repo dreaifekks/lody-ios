@@ -12,30 +12,25 @@ import Foundation
           let number = args["number"] as? Int, number > 0,
           let operation = args["operation"] as? String, ["read", "comment"].contains(operation)
     else { throw failure("invalid_request") }
-    guard let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure("unauthorized") }
     let writing = operation == "comment"
     let body = (args["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     if writing && (body.isEmpty || body.count > 65536) { throw failure("invalid_comment") }
-    let auth = try await request("https://backend.lody.ai/api/auth/convex/token", token: credential)
-    guard let jwt = auth["token"] as? String else { throw failure("unauthorized") }
-    try checkIdentity(credential)
-    let broker = try await request("https://convex.lody.ai/api/action", token: jwt, body: [
-      "path": "github:getOperationAccessTokenByRepoNameForClient", "format": "convex_encoded_json",
-      "args": [["workspaceId": workspace, "repoFullName": repo, "operation": writing ? "write" : "read"]]
-    ])
-    try checkIdentity(credential)
-    guard broker["status"] as? String == "success", let value = broker["value"] as? [String: Any],
-          value["success"] as? Bool == true, let token = value["token"] as? String, !token.isEmpty
-    else { throw failure("authorization_required") }
+    let token: String
+    let checkIdentity: () throws -> Void
+    if LanInvite.isWorkspace(workspace) {
+      (token, checkIdentity) = try await lanAccess(workspace: workspace)
+    } else {
+      (token, checkIdentity) = try await cloudAccess(workspace: workspace, repo: repo, writing: writing)
+    }
     let base = "https://api.github.com/repos/\(repo)"
     if writing {
       // A transport failure may follow a successful write. Never replay it.
       _ = try await request("\(base)/issues/\(number)/comments", token: token, body: ["body": body], mutation: true)
-      try checkIdentity(credential)
+      try checkIdentity()
       return "{}"
     }
     let pr = try await request("\(base)/pulls/\(number)", token: token)
-    try checkIdentity(credential)
+    try checkIdentity()
     guard let head = pr["head"] as? [String: Any], let sha = head["sha"] as? String,
           sha.range(of: #"^[0-9a-fA-F]{7,64}$"#, options: .regularExpression) != nil,
           let target = pr["base"] as? [String: Any]
@@ -67,7 +62,7 @@ import Foundation
       ] }
       result["checksTruncated"] = (checks["total_count"] as? Int ?? 0) > rows.count
     } catch { result["checksError"] = code(error) }
-    try checkIdentity(credential)
+    try checkIdentity()
     do {
       let response = try await request("\(base)/issues/\(number)/comments?per_page=100", token: token)
       guard let rows = response["rows"] as? [[String: Any]] else { throw failure("invalid_response") }
@@ -78,13 +73,47 @@ import Foundation
       ] }
       result["commentsTruncated"] = response["hasNext"] as? Bool ?? false
     } catch { result["commentsError"] = code(error) }
-    try checkIdentity(credential)
+    try checkIdentity()
     return String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
   }
 
-  private static func checkIdentity(_ credential: String) throws {
-    guard try AuthKeychain.read() == credential else { throw failure("unauthorized") }
-    try Task.checkCancellation()
+  /// A repository token from the official broker, and a check that the app
+  /// credential it was minted for is still the one signed in.
+  private static func cloudAccess(workspace: String, repo: String, writing: Bool) async throws -> (String, () throws -> Void) {
+    guard let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure("unauthorized") }
+    let checkIdentity = {
+      guard try AuthKeychain.read() == credential else { throw failure("unauthorized") }
+      try Task.checkCancellation()
+    }
+    let auth = try await request("https://backend.lody.ai/api/auth/convex/token", token: credential)
+    guard let jwt = auth["token"] as? String else { throw failure("unauthorized") }
+    try checkIdentity()
+    let broker = try await request("https://convex.lody.ai/api/action", token: jwt, body: [
+      "path": "github:getOperationAccessTokenByRepoNameForClient", "format": "convex_encoded_json",
+      "args": [["workspaceId": workspace, "repoFullName": repo, "operation": writing ? "write" : "read"]]
+    ])
+    try checkIdentity()
+    guard broker["status"] as? String == "success", let value = broker["value"] as? [String: Any],
+          value["success"] as? Bool == true, let token = value["token"] as? String, !token.isEmpty
+    else { throw failure("authorization_required") }
+    return (token, checkIdentity)
+  }
+
+  /// The one token a LAN host keeps for its members. Leaving or switching the
+  /// LAN while a request runs drops its result.
+  private static func lanAccess(workspace: String) async throws -> (String, () throws -> Void) {
+    guard let invite = LanHub.credential(for: workspace) else { throw failure("unauthorized") }
+    let checkIdentity = {
+      guard LanHub.credential(for: workspace) == invite else { throw failure("unauthorized") }
+      try Task.checkCancellation()
+    }
+    let token: String?
+    do { token = try await LanHub.githubToken(invite) }
+    catch LanHub.Failure.unauthorized { throw failure("unauthorized") }
+    catch { throw failure("unavailable") }
+    try checkIdentity()
+    guard let token else { throw failure("lan_github_not_configured") }
+    return (token, checkIdentity)
   }
   private static func failure(_ code: String) -> NSError {
     NSError(domain: "LodyKit.GitHubPullRequests", code: 1, userInfo: [NSLocalizedDescriptionKey: code])

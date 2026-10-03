@@ -5,6 +5,14 @@ enum AuthKeychain {
   static let token = OSAllocatedUnfairLock(initialState: "synthetic-app-token")
   static func read() throws -> String? { token.withLock { $0 } }
 }
+/// The hub's side of a LAN; its transport is LanHub's own concern.
+enum LanHub {
+  enum Failure: Error { case unauthorized, unreachable(Int?) }
+  static let invite = LanInvite(url: "http://hub.invalid", token: "synthetic-lan-credential", name: nil)
+  static let hubToken = OSAllocatedUnfairLock<String?>(initialState: "synthetic-repo-lan")
+  static func credential(for workspace: String) -> LanInvite? { workspace == invite.workspaceId ? invite : nil }
+  static func githubToken(_ invite: LanInvite) async throws -> String? { hubToken.withLock { $0 } }
+}
 
 final class GitHubProtocol: URLProtocol {
   static let urls = OSAllocatedUnfairLock(initialState: [String]())
@@ -116,6 +124,17 @@ final class GitHubProtocol: URLProtocol {
       catch { assert(error.localizedDescription == "github_unavailable") }
     }
     AuthKeychain.token.withLock { $0 = "synthetic-app-token" }
-    print("GitHub mentions: Issue/PR references, unconnected project, bounded listing, credential isolation and failure behavior passed")
+    // A LAN lists with its hub's token, and a hub without one lists nothing.
+    let lan = LanHub.invite.workspaceId
+    let cloudCalls = { GitHubProtocol.urls.withLock { $0.filter { !$0.hasPrefix("https://api.github.com/") }.count } }
+    let cloudBefore = cloudCalls()
+    let lanItems = try await GitHubMentions.load(workspace: lan, repo: "LodyAI/Lody")["items"] as! [[String: Any]]
+    assert(lanItems.count == 2, "A LAN lists issues and PRs with the hub's token")
+    LanHub.hubToken.withLock { $0 = nil }
+    let githubBefore = GitHubProtocol.urls.withLock { $0.count }
+    let noToken = try await GitHubMentions.load(workspace: lan, repo: "LodyAI/Lody")
+    assert((noToken["items"] as! [Any]).isEmpty && GitHubProtocol.urls.withLock { $0.count } == githubBefore)
+    assert(cloudCalls() == cloudBefore, "A LAN never asks the Cloud broker")
+    print("GitHub mentions: Issue/PR references, unconnected project, bounded listing, credential isolation, failure behavior and the LAN hub token passed")
   }
 }

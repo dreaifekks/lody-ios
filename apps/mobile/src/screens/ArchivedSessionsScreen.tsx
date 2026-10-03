@@ -8,6 +8,7 @@ import {
   byActivity,
   sessionRow,
   sessionTreeRows,
+  withoutSharing,
 } from '@/features/sessions/inbox';
 import { listRowAction } from '@/features/sessions/sessionActions';
 import { openCatalogRow } from '@/hooks/screens/openCatalogRow';
@@ -39,7 +40,10 @@ function View() {
         style={{ flex: 1 }}
         accent={colors.accent}
         contentStyle
-        sections={rows.length ? [{ id: 'archived', rows }] : []}
+        sections={withoutSharing(
+          rows.length ? [{ id: 'archived', rows }] : [],
+          !!account?.lan,
+        )}
         placeholder={
           loading ? t('common.loading') : t('settings.archived.empty')
         }

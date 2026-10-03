@@ -2,6 +2,14 @@ import Foundation
 import os
 
 enum AuthKeychain { static func read() throws -> String? { "synthetic-app-token" } }
+/// The hub's side of a LAN; its transport is LanHub's own concern.
+enum LanHub {
+  enum Failure: Error { case unauthorized, unreachable(Int?) }
+  static let invite = LanInvite(url: "http://hub.invalid", token: "synthetic-lan-credential", name: nil)
+  static let hubToken = OSAllocatedUnfairLock<String?>(initialState: "synthetic-repo-lan")
+  static func credential(for workspace: String) -> LanInvite? { workspace == invite.workspaceId ? invite : nil }
+  static func githubToken(_ invite: LanInvite) async throws -> String? { hubToken.withLock { $0 } }
+}
 final class PRProtocol: URLProtocol {
   static let calls = OSAllocatedUnfairLock(initialState: [(String, String)]())
   override class func canInit(with request: URLRequest) -> Bool { true }
@@ -75,6 +83,19 @@ final class PRProtocol: URLProtocol {
     let count = PRProtocol.calls.withLock { $0.count }
     do { _ = try await run("linked", repository: "x/.."); fatalError("Invalid repo accepted") } catch {}
     precondition(PRProtocol.calls.withLock { $0.count } == count)
-    print("PR read/write boundary: head-scoped checks, partial state, permission failure, comments, credential isolation and no write replay passed")
+    // A LAN reads and comments with its hub's token and never asks the Cloud broker.
+    let lan = LanHub.invite.workspaceId
+    let cloudCalls = { PRProtocol.calls.withLock { $0.filter { $0.0.hasPrefix("/api/") }.count } }
+    let cloudBefore = cloudCalls()
+    let lanRaw = try await run(lan)
+    precondition(!lanRaw.contains("synthetic"), "The hub's token must not leave native code")
+    let lanPR = try JSONSerialization.jsonObject(with: Data(lanRaw.utf8)) as! [String: Any]
+    precondition(lanPR["headSha"] as? String == "abcdef012345")
+    _ = try await run(lan, operation: "comment")
+    precondition(cloudCalls() == cloudBefore, "A LAN never asks the Cloud broker")
+    LanHub.hubToken.withLock { $0 = nil }
+    do { _ = try await run(lan); fatalError("A hub without a token read a PR") }
+    catch { precondition(error.localizedDescription == "lan_github_not_configured") }
+    print("PR read/write boundary: head-scoped checks, partial state, permission failure, comments, credential isolation, no write replay and the LAN hub token passed")
   }
 }

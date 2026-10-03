@@ -3,7 +3,12 @@ import { useCatalog } from '@/cloud/catalog/CatalogProvider';
 import { usePalette } from '@/lib/theme/palette';
 import { t } from '@/lib/i18n';
 import { useSessionListCatalog } from './useSessionListCatalog';
-import { byActivity, sessionRow, sessionTreeRows } from './inbox';
+import {
+  byActivity,
+  sessionRow,
+  sessionTreeRows,
+  withoutSharing,
+} from './inbox';
 import { requestNewSession } from './sessionNav';
 import { listRowAction } from './sessionActions';
 
@@ -26,17 +31,20 @@ export function useProjectModel(projectId: string) {
   const sessions = catalog.sessions
     .filter((s) => s.projectId === projectId)
     .sort(byActivity);
-  const sections = [false, true]
-    .map((archived) => ({
-      id: archived ? 'archived' : 'sessions',
-      header: archived ? t('session.state.archived') : undefined,
-      rows: sessionTreeRows(
-        sessions.filter((s) => s.archived === archived),
-        catalog.sessions,
-        (s) => sessionRow(s, colors.accent),
-      ),
-    }))
-    .filter((section) => section.rows.length);
+  const sections = withoutSharing(
+    [false, true]
+      .map((archived) => ({
+        id: archived ? 'archived' : 'sessions',
+        header: archived ? t('session.state.archived') : undefined,
+        rows: sessionTreeRows(
+          sessions.filter((s) => s.archived === archived),
+          catalog.sessions,
+          (s) => sessionRow(s, colors.accent),
+        ),
+      }))
+      .filter((section) => section.rows.length),
+    !!account?.lan,
+  );
   let placeholder = t('project.empty');
   if (loading) placeholder = t('common.loading');
   else if (!connected) placeholder = t('project.offline');

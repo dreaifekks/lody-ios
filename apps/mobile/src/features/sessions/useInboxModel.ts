@@ -28,6 +28,7 @@ import {
   reconcilePinOrder,
   searchSections,
   matchCatalog,
+  withoutSharing,
   type ProjectSort,
 } from './inbox';
 import { requestNewSession } from './sessionNav';
@@ -189,15 +190,18 @@ export function useInboxModel() {
     query,
     ready: localReady && !!account,
     searching,
-    sections: searching
-      ? searchSections(
-          catalog,
-          search?.key === searchKey
-            ? search.hits
-            : { projectIds: [], sessions: [] },
-          colors.accent,
-        )
-      : sections,
+    sections: withoutSharing(
+      searching
+        ? searchSections(
+            catalog,
+            search?.key === searchKey
+              ? search.hits
+              : { projectIds: [], sessions: [] },
+            colors.accent,
+          )
+        : sections,
+      !!account?.lan,
+    ),
     placeholder: searching
       ? searchPlaceholder({
           signedIn: true,

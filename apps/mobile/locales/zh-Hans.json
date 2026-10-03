@@ -820,6 +820,7 @@
   "pr.commentsScope": "普通评论；审查和行内讨论请在 GitHub 查看。",
   "pr.previousHead": "这是之前提交的检查，请返回检查列表查看最新提交。",
   "pr.error.commentUnknown": "无法确认评论是否已发布。草稿已保留，请先在 GitHub 核对，避免重复发送。",
+  "pr.error.lanNoToken": "这个局域网还没有 GitHub token。请在 hub 主机上运行 `lody-lan lan github setup` 后重试。",
   "pr.error.authorization": "需要重新登录或在 Lody 中完成 GitHub 授权。",
   "pr.error.forbidden": "没有权限，或 GitHub 暂时限制了请求。请检查仓库授权后重试。",
   "pr.error.notFound": "找不到这个 PR，或当前账号无权查看。",

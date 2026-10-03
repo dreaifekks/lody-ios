@@ -1,21 +1,32 @@
 import Foundation
 
-/// Official Cloud token broker + GitHub's bounded open issue/PR listing.
-/// Neither the login credential nor the repository token leaves native memory.
+/// Official Cloud token broker, or a LAN host's token, + GitHub's bounded open
+/// issue/PR listing. Neither credential nor repository token leaves native memory.
 @MainActor enum GitHubMentions {
+  static let empty: [String: Any] = ["items": [], "truncated": false, "incomplete": false]
+
   static func load(workspace: String, repo: String) async throws -> [String: Any] {
     guard GitHubCloud.validRepository(repo) else { throw GitHubCloud.failure() }
-    guard let result = try await GitHubCloud.call(
-      "action", path: "github:getAccessTokenByRepoNameForClient",
-      args: ["workspaceId": workspace, "repoFullName": repo]
-    ) as? [String: Any] else { throw GitHubCloud.failure() }
-    if result["success"] as? Bool != true {
-      if ["repo_not_linked", "installation_not_found", "repo_not_authorized"].contains(result["errorCode"] as? String ?? "") {
-        return ["items": [], "truncated": false, "incomplete": false]
+    let repositoryToken: String
+    if LanInvite.isWorkspace(workspace) {
+      guard let invite = LanHub.credential(for: workspace) else { throw GitHubCloud.failure() }
+      // A host without a GitHub token has nothing to list, like an unlinked repository.
+      guard let token = try await LanHub.githubToken(invite) else { return empty }
+      repositoryToken = token
+    } else {
+      guard let result = try await GitHubCloud.call(
+        "action", path: "github:getAccessTokenByRepoNameForClient",
+        args: ["workspaceId": workspace, "repoFullName": repo]
+      ) as? [String: Any] else { throw GitHubCloud.failure() }
+      if result["success"] as? Bool != true {
+        if ["repo_not_linked", "installation_not_found", "repo_not_authorized"].contains(result["errorCode"] as? String ?? "") {
+          return empty
+        }
+        throw GitHubCloud.failure()
       }
-      throw GitHubCloud.failure()
+      guard let token = result["token"] as? String, !token.isEmpty else { throw GitHubCloud.failure() }
+      repositoryToken = token
     }
-    guard let repositoryToken = result["token"] as? String, !repositoryToken.isEmpty else { throw GitHubCloud.failure() }
     var items: [[String: Any]] = []
     var seen = Set<Int>()
     var count = 0
