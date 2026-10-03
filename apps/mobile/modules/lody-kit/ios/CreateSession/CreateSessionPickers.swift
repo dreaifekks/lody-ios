@@ -156,7 +156,12 @@ final class CreateProjectPickerController: CreateListController {
       item.accessibilityLabel = LodyStrings.text("projectPicker.browse.accessibility")
       navigationItem.rightBarButtonItem = item
     }
-    list.setSegments([LodyStrings.text("projectPicker.local"), LodyStrings.text("projectPicker.github")])
+    // Without a repository source or a known repository there is nothing to pick on GitHub.
+    if loadRepositories != nil || !github.isEmpty {
+      list.setSegments([LodyStrings.text("projectPicker.local"), LodyStrings.text("projectPicker.github")])
+    } else {
+      segment = 0
+    }
     list.setSelectedSegment(segment)
     fetch()
     applySearch()

@@ -434,6 +434,16 @@ function machineFor(
     signal: AbortSignal.timeout(35000),
   };
 }
+// The GitHub repository the agent service found in a local project's Git
+// remote, which it keeps on the session's project.
+function localSessionRepository(sessionId: string) {
+  const key = ['m', `session-${sessionId}`];
+  const project = (metaReplica?.flock.get([...key, 'project']) ??
+    (metaReplica?.flock.get(key) as Record<string, unknown> | undefined)
+      ?.project) as Record<string, unknown> | undefined;
+  const repo = project?.kind === 'local' ? project.githubRepoFullName : null;
+  return typeof repo === 'string' && repo.trim() ? repo.trim() : undefined;
+}
 async function getMentions(
   args: MentionSource & { category: MentionCategory; userId: string },
 ) {
@@ -472,9 +482,11 @@ async function getMentions(
   )
     throw new Error('project_unavailable');
   if (args.category === 'issue' || args.category === 'pr') {
-    if (!projectId?.startsWith('github:'))
-      return { items: [], truncated: false, incomplete: false };
-    const result = await githubMentions(projectId.slice(7));
+    const repo = projectId?.startsWith('github:')
+      ? projectId.slice(7)
+      : session && localSessionRepository(session.id);
+    if (!repo) return { items: [], truncated: false, incomplete: false };
+    const result = await githubMentions(repo);
     return {
       ...result,
       items: result.items.filter((item) => item.kind === args.category),
