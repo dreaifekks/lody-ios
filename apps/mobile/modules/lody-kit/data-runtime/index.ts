@@ -30,7 +30,12 @@ import {
   renameSession,
 } from './archive-session';
 import { appendOnce, releaseDeletedSessions, sessionDoc } from './session';
-import { createPreview, previewTarget, revokePreview } from './preview';
+import {
+  createPreview,
+  iosSimulatorControl,
+  previewTarget,
+  revokePreview,
+} from './preview';
 import { machineRpc } from './machine-rpc';
 import { remoteSettings } from './settings';
 import type { SettingsRequest } from '../../../src/models/settings.ts';
@@ -44,7 +49,7 @@ import {
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
-import type { Catalog } from '../../../src/models/catalog.ts';
+import type { Catalog, Project } from '../../../src/models/catalog.ts';
 import { projectRows } from '../../../src/cloud/catalog/model.ts';
 import { mergeAgentQuotas } from '../../../src/cloud/catalog/agent-usage.ts';
 import {
@@ -206,6 +211,49 @@ const shareRuntime = createSharingRuntime({
   broker,
 });
 const unhealthy = new Set<string>();
+const gitRepos = new Map<string, string>();
+const gitStateAsked = new Set<string>();
+let gitStateQueue = Promise.resolve();
+let runtimeUserId = '';
+// ponytail: one ask per project per runtime; an offline machine keeps its last repo through the saved catalog until restart.
+function askGitState(project: Project) {
+  const localProjectId = project.id.split(':local:')[1];
+  if (
+    project.repoFullName ||
+    !localProjectId ||
+    !runtimeUserId ||
+    gitStateAsked.has(project.id)
+  )
+    return;
+  gitStateAsked.add(project.id);
+  gitStateQueue = gitStateQueue.then(() =>
+    machineRpc(
+      workspace,
+      project.machineId,
+      'local-project/git-state',
+      { localProjectId, requestedByUserId: runtimeUserId },
+      getGrant,
+      AbortSignal.timeout(20000),
+    ).then(
+      (reply) => {
+        const result = reply.result as
+          | {
+              success?: boolean;
+              state?: { git?: boolean; githubRepoFullName?: unknown };
+            }
+          | undefined;
+        const repo =
+          result?.success && result.state?.git
+            ? String(result.state.githubRepoFullName ?? '').trim()
+            : '';
+        if (!repo) return;
+        gitRepos.set(project.id, repo);
+        publish();
+      },
+      () => {},
+    ),
+  );
+}
 let revision = 0;
 let lastPublished = '';
 function publish() {
@@ -225,7 +273,13 @@ function publish() {
   if (unhealthy.size || meta.machineIds.some((id) => !catalogs.has(id))) return;
   const projects = new Map(meta.projects.map((p) => [p.id, p]));
   for (const id of meta.machineIds)
-    for (const p of catalogs.get(id)!.projects) projects.set(p.id, p);
+    for (const p of catalogs.get(id)!.projects)
+      projects.set(p.id, { ...projects.get(p.id), ...p });
+  for (const [id, p] of projects) {
+    const repo = gitRepos.get(id);
+    if (repo && !p.repoFullName) projects.set(id, { ...p, repoFullName: repo });
+    else askGitState(p);
+  }
   const catalog = JSON.stringify({
     ...meta,
     agentUsage: Object.fromEntries(
@@ -434,6 +488,26 @@ function machineFor(
     signal: AbortSignal.timeout(35000),
   };
 }
+function previewControl(sessionId: string, userId: string) {
+  const { workspaceId, machineId, getGrant } = machineFor(sessionId, '/');
+  return {
+    workspaceId,
+    machineId,
+    sessionId,
+    userId,
+    rpc: (method: string, params: object, timeoutMs: number) =>
+      machineRpc(
+        workspaceId,
+        machineId,
+        method,
+        params,
+        getGrant,
+        AbortSignal.timeout(timeoutMs),
+      ),
+    mintToken: (intent: object) =>
+      broker('previewToken', { intent }).catch(() => undefined),
+  };
+}
 async function getMentions(
   args: MentionSource & { category: MentionCategory; userId: string },
 ) {
@@ -547,30 +621,31 @@ Object.assign(globalThis, {
       const doc = sessionDoc(args.sessionId);
       const target = doc && previewTarget(doc);
       if (!target) return { error: 'unavailable' };
-      const { workspaceId, machineId, getGrant } = machineFor(
-        args.sessionId,
-        '/',
-      );
-      const control = {
-        workspaceId,
-        machineId,
-        sessionId: args.sessionId,
-        userId: args.userId,
-        rpc: (method: string, params: object, timeoutMs: number) =>
-          machineRpc(
-            workspaceId,
-            machineId,
-            method,
-            params,
-            getGrant,
-            AbortSignal.timeout(timeoutMs),
-          ),
-        mintToken: (intent: object) =>
-          broker('previewToken', { intent }).catch(() => undefined),
-      };
+      const control = previewControl(args.sessionId, args.userId);
       return args.action === 'revoke'
         ? revokePreview(control)
         : createPreview({ ...control, target });
+    },
+    async iosSimulatorControl(args: {
+      workspaceId: string;
+      sessionId: string;
+      userId: string;
+      command: { action: string };
+    }) {
+      if (args.workspaceId !== workspace) throw new Error('metadata_not_ready');
+      const control = previewControl(args.sessionId, args.userId);
+      const room = `machine-${control.machineId}`;
+      const capabilities = (metaReplica!.flock.get([
+        'm',
+        room,
+        'protocolCapabilities',
+      ]) ??
+        (metaReplica!.flock.get(['m', room]) as Record<string, unknown>)
+          ?.protocolCapabilities) as Record<string, number> | undefined;
+      // Older CLIs drop unknown methods without replying.
+      if (!((capabilities?.iosSimulator ?? 0) >= 1))
+        return { error: 'unsupported', capabilities };
+      return iosSimulatorControl({ ...control, command: args.command });
     },
     shareResult(id: string, value: unknown, failed: boolean) {
       const reply = shareReplies.get(id);
@@ -1115,8 +1190,9 @@ Object.assign(globalThis, {
         ),
       );
     },
-    start(id: string) {
+    start(id: string, userId?: string) {
       workspace = id;
+      runtimeUserId = userId ?? '';
       watch('meta');
     },
     grant(value: Grant | null) {

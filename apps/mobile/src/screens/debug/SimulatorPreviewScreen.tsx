@@ -1,20 +1,76 @@
-import { NativeChat } from '@lody-ios/kit';
+import { useEffect, useState } from 'react';
+import {
+  NativeChat,
+  type IosSimulatorDevice,
+  type IosSimulatorPreview,
+} from '@lody-ios/kit';
+import {
+  setSimulatorControl,
+  simulatorControl,
+  stopSimulator,
+} from '@/features/simulator/operations';
 import { definePage } from '@/lib/presentation';
-import { useSessionPreview } from '@/hooks/screens/useSessionPreview';
+import { useSessionSimulator } from '@/hooks/screens/useSessionSimulator';
 
-const service = {
-  sessionPreview: async () => ({ url: 'lody-simulator-fixture://stream' }),
-  previewSimulators: async () => [
-    { udid: 'ui-verify-simulator', name: 'iPhone Simulator' },
-    { udid: 'ui-verify-simulator-two', name: 'Second Simulator' },
-  ],
+const SESSION = 'ui-verify-simulator-session';
+const device = (udid: string, name: string): IosSimulatorDevice => ({
+  udid,
+  name,
+  runtime: 'iOS 27.0',
+  deviceType: 'iPhone 18 Pro',
+  state: 'Booted',
+  available: true,
+  occupancy: 'available',
+});
+const devices = [
+  device('ui-verify-simulator', 'iPhone Simulator'),
+  device('ui-verify-simulator-two', 'Second Simulator'),
+];
+const preview = (operationId: string, udid: string): IosSimulatorPreview => ({
+  operationId,
+  udid,
+  phase: 'ready',
+  transport: 'remote',
+  viewerUrl: 'lody-simulator-fixture://stream',
+});
+let starts = 0;
+let daemon: IosSimulatorPreview | undefined;
+const fixture: typeof simulatorControl = async (
+  _workspace,
+  _session,
+  command,
+) => {
+  if (command.action === 'list') return { success: true, devices };
+  if (command.action === 'start') {
+    starts += 1;
+    daemon = preview(`fixture-${starts}`, command.udid);
+    return { success: true, preview: daemon };
+  }
+  const matches =
+    !('operationId' in command) ||
+    !command.operationId ||
+    command.operationId === daemon?.operationId;
+  if (command.action === 'stop' && matches) daemon = undefined;
+  if (command.action === 'status' && matches)
+    return { success: true, preview: daemon };
+  return { success: true };
 };
 
 function View() {
-  const preview = useSessionPreview(
-    'ui-verify-simulator-session',
-    { label: 'Simulator', active: true },
-    service,
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    setSimulatorControl(fixture);
+    void stopSimulator(SESSION).then(() => {
+      daemon = preview('agent-1', 'ui-verify-simulator-two');
+      setReady(true);
+    });
+    return () => setSimulatorControl();
+  }, []);
+  const simulator = useSessionSimulator(
+    'ui-verify',
+    SESSION,
+    'available',
+    'agent-1',
   );
   return (
     <NativeChat
@@ -48,7 +104,9 @@ function View() {
           ],
         },
       ])}
-      simulatorPreviewJSON={preview.simulatorPreviewJSON}
+      titleMenuJSON={JSON.stringify(ready ? [simulator.titleItem] : [])}
+      onTitleMenu={() => void simulator.open()}
+      simulatorPreviewJSON={simulator.previewJSON}
       composerJSON={JSON.stringify({
         editable: true,
         canSend: true,
@@ -56,11 +114,14 @@ function View() {
         notice: '',
         reconnect: false,
         placeholder: 'Message',
-        preview: preview.chip,
+        preview: ready ? simulator.chip : undefined,
       })}
       clearDraftToken={0}
       emptyText=""
-      onPreview={({ nativeEvent }) => preview.onPreview(nativeEvent.action)}
+      onPreview={({ nativeEvent }) => {
+        if (!simulator.onPreview(nativeEvent.action))
+          simulator.onChip(nativeEvent.action);
+      }}
       onSend={() => {}}
       onReconnect={() => {}}
       onActivityPress={() => {}}

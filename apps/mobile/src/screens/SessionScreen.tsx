@@ -19,6 +19,8 @@ import { useCatalog } from '@/cloud/catalog/CatalogProvider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View as RNView, Alert } from 'react-native';
 import { useSessionPreview } from '@/hooks/screens/useSessionPreview';
+import { useSessionSimulator } from '@/hooks/screens/useSessionSimulator';
+import { composerContext } from '@/hooks/screens/composerContext';
 import { showToast } from '@/ui/toast';
 import { usePalette } from '@/lib/theme/palette';
 import {
@@ -500,8 +502,29 @@ function View() {
     present,
   );
   const preview = useSessionPreview(session.id, snapshot.preview);
+  const simulator = useSessionSimulator(
+    selected?.id,
+    session.id,
+    // LAN members do not serve the Simulator gateway.
+    account?.lan
+      ? undefined
+      : catalog.machineSimulators?.[currentSession.machineId],
+    currentSession.iosSimulatorPreviewRequestId,
+  );
+  const context = composerContext([
+    {
+      chip: preview.chip,
+      onChip: preview.onPreview,
+      openTitle: (chip) => t('session.preview.open', { target: chip.label }),
+    },
+    {
+      chip: simulator.chip,
+      onChip: simulator.onChip,
+      openTitle: (chip) => t('simulator.chip.open', { target: chip.label }),
+    },
+  ]);
   const composerJSON = JSON.stringify({
-    preview: preview.chip,
+    preview: context.chip,
     editable: !currentSession.archived && !deleting && !quotaLocked,
     canSend: send.canSend && !errorRetry.pending && !deleting && !quotaLocked,
     sending: send.sending,
@@ -582,6 +605,7 @@ function View() {
           },
         ]
       : []),
+    ...(simulator.titleItem ? [simulator.titleItem] : []),
     {
       id: 'rename',
       title: t('session.action.rename'),
@@ -601,6 +625,7 @@ function View() {
   ]);
   const onTitleMenu = (id: string) => {
     if (id === 'files') openProjectFiles();
+    if (id === 'simulator') void simulator.open();
     if (id === 'branch' && currentSession.branchName) {
       copyText(currentSession.branchName);
       showToast(t('session.title.branchCopied'), 'info');
@@ -768,7 +793,7 @@ function View() {
       <NativeNavigationHeader items={headerItems} />
       <DiffWebViewWarmer />
       <NativeChat
-        simulatorPreviewJSON={preview.simulatorPreviewJSON}
+        simulatorPreviewJSON={simulator.previewJSON}
         turnInfoEnabled
         onTurnInfoPress={({ nativeEvent }) =>
           openMessageDetails(nativeEvent.entryId)
@@ -803,7 +828,10 @@ function View() {
         onTitlePress={showDetails}
         titleMenuJSON={navigationTitleHidden ? '[]' : titleMenuJSON}
         onTitleMenu={({ nativeEvent }) => onTitleMenu(nativeEvent.id)}
-        onPreview={({ nativeEvent }) => preview.onPreview(nativeEvent.action)}
+        onPreview={({ nativeEvent }) => {
+          if (!simulator.onPreview(nativeEvent.action))
+            context.onPreview(nativeEvent.action);
+        }}
         style={{ flex: 1 }}
         attachmentContextJSON={JSON.stringify({
           workspaceId: selected?.id,

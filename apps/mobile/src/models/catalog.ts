@@ -3,6 +3,7 @@ export type Project = {
   machineId: string;
   name: string;
   rootPath: string;
+  repoFullName?: string;
 };
 export type Session = {
   lastModel?: { modelId?: string; name?: string } | null;
@@ -26,6 +27,7 @@ export type Session = {
   lastRunningSeen?: number;
   awaitingUserSince?: number;
   branchName?: string;
+  iosSimulatorPreviewRequestId?: string;
   pullRequests?: import('./pull-request').PullRequestReference[];
   diff?: { add: number; del: number };
 };
@@ -37,6 +39,7 @@ export type Catalog = {
   machineNames?: Record<string, string>;
   /** Where each LAN member accepts terminal connections; absent off a LAN. */
   machineTerminals?: Record<string, LanTerminalEndpoint>;
+  machineSimulators?: Record<string, 'available' | 'upgrade-required'>;
 };
 export type LanTerminalEndpoint = { host: string; port: number };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };

@@ -183,7 +183,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       guard !health.ready, let workspace else { return }
       health.acknowledged(at: now)
       publish("syncing", reason: "runtime_ready")
-      view.callAsyncJavaScript("globalThis.dataRuntime.start(workspace)", arguments: ["workspace": workspace], in: nil, in: .page) { [weak self, weak view] result in
+      view.callAsyncJavaScript("globalThis.dataRuntime.start(workspace, userId)", arguments: ["workspace": workspace, "userId": userId], in: nil, in: .page) { [weak self, weak view] result in
         guard let self, let view, self.webView === view else { return }
         if case .failure = result { self.recover("start_failed") }
         else {
@@ -623,7 +623,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       args["billingEntitlement"] = billing ?? NSNull()
     }
     if method == "remoteSettings" || method == "localProjects" || method == "mentionCatalog" { args["userId"] = userId }
-    if method == "editSession" || method == "sessionPreview" { args["userId"] = userId }
+    if method == "editSession" || method == "sessionPreview" || method == "iosSimulatorControl" { args["userId"] = userId }
     let id = UUID(); commands[id] = sink
     if (method == "sendTurn" || (method == "editSession" && args["action"] as? String == "send")), args["backgroundTaskId"] == nil, !backgrounded {
       args["backgroundTaskId"] = SessionBackgroundTasks.shared.begin(owner: owner)
@@ -633,6 +633,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     if method == "editSession" { timeout = 130 }
     if method == "sessionSharing" { timeout = 130 }
     if method == "sessionPreview" { timeout = 330 }
+    if method == "iosSimulatorControl" { timeout = 100 }
     if method == "localProjects" && args["action"] as? String == "history" { timeout = 130 }
     // Catalog expansion precedes the durable send and has its own bounded read.
     if method == "sendTurn", let text = args["text"] as? String,
