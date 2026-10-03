@@ -1,13 +1,10 @@
 name: Fork TestFlight
 
-# Every push to lan-mode ships a TestFlight build, so the phone updates without
-# the Mac online. Runs only where the repository variable LODY_BUNDLE_ID is set.
+# Pushing a tf-* tag ships a TestFlight build, so the phone updates without the
+# Mac online. Runs only where the repository variable LODY_BUNDLE_ID is set.
 on:
   push:
-    branches: [lan-mode]
-    paths-ignore:
-      - '**.md'
-      - 'apps/mobile/verification/**'
+    tags: ['tf-*']
   workflow_dispatch:
     inputs:
       notes:
