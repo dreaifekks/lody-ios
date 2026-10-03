@@ -581,56 +581,258 @@ struct AttentionBlock: View {
   }
 }
 
-/// Apple Watch Smart Stack and CarPlay: who is working, on what, for how long.
+/// Apple Watch Smart Stack and CarPlay: the expanded island's content in the
+/// card's few lines. A tap on the watch shows this same view full screen, and its
+/// buttons run their intents on the paired iPhone.
 struct LodyCompactActivityView: View {
   let state: LodyState
   let isStale: Bool
 
+  /// How much of a state to draw, fullest first: `full` is for the full screen a
+  /// tap opens, the rest for the card's sizes.
+  private enum Detail: CaseIterable {
+    case full, roomy, compact, minimal
+  }
+
   var body: some View {
-    if let focus = state.focus {
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 6) {
-          if state.showsOverview {
-            JellyMark()
-          } else {
-            LeadGlyph(item: focus, size: 20)
-          }
-          Text(state.showsOverview ? state.runningSummary : focus.title)
-            .font(.headline)
-            .lineLimit(1)
-        }
-        HStack(spacing: 4) {
-          StatusSymbol(status: focus.status, isStale: isStale)
-          Text(isStale ? state.staleLabel : focus.statusLabel)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-          Spacer(minLength: 4)
-          if state.showsTimer(for: focus, isStale: isStale) {
-            WorkTimer(item: focus, font: .caption.weight(.semibold).monospacedDigit(), width: 52)
+    Group {
+      if let focus = state.focus {
+        // The card is 152x69.5 to 191x81.5 pt by watch size, and watchOS text runs
+        // larger than iOS, so each state offers fuller and tighter layouts and the
+        // first that fits the height on offer is drawn. The full screen a tap opens
+        // gets the fullest one.
+        ViewThatFits(in: .vertical) {
+          ForEach(Detail.allCases, id: \.self) { detail in
+            VStack(alignment: .leading, spacing: 2) {
+              content(focus: focus, detail: detail)
+            }
           }
         }
-        if !state.showsOverview, !isStale, let activity = focus.activity, !activity.isEmpty {
-          Text(activity)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+      } else {
+        Text(state.emptyLabel)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .lodyStale(isStale)
+  }
+
+  @ViewBuilder
+  private func content(focus: LodyItem, detail: Detail) -> some View {
+    if isStale {
+      header(focus: focus, detail: detail)
+      HStack(spacing: 4) {
+        StatusSymbol(status: focus.status, isStale: true)
+        Text(state.lastSyncLabel) + Text(" ") + Text(focus.updatedDate, style: .relative)
+      }
+      .font(.footnote)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+    } else if state.showsOverview {
+      header(focus: focus, detail: detail)
+      // One line per session with its step under it as room allows; the header
+      // already counts the rest.
+      let rows = detail == .minimal ? Array(state.visibleItems.prefix(1)) : state.visibleItems
+      ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
+        overviewRow(item: item, showsStep: detail == .full || (detail == .roomy && index == 0))
+      }
+    } else if PermissionButtons.shows(focus) {
+      // The decision needs the command and both answers; the title gives way first.
+      // Fuller layouts wrap the command so it can be read before answering, and
+      // keep the title to one line to leave it the room.
+      switch detail {
+      case .full, .roomy: header(focus: focus, detail: .roomy)
+      case .compact:
+        Text(focus.title)
+          .font(.footnote.weight(.semibold))
+          .lineLimit(1)
+      case .minimal: EmptyView()
+      }
+      withTimer(focus) {
+        Text(focus.permissionCommand ?? focus.statusLabel)
+          .font(.footnote.monospaced())
+          .foregroundStyle(.orange)
+          .lineLimit(Self.commandLines[detail] ?? 1)
+          .truncationMode(.middle)
+      }
+      WatchPermissionButtons(focus: focus, copy: state)
+    } else if focus.status == .running {
+      header(focus: focus, detail: detail)
+      runningDetail(focus: focus, detail: detail)
+    } else {
+      header(focus: focus, detail: detail)
+      statusLine(focus: focus)
+      if detail != .minimal {
+        if focus.status == .permission, let command = focus.permissionCommand {
+          Text(command)
+            .font(.footnote.monospaced())
+            .foregroundStyle(.orange)
             .lineLimit(1)
             .truncationMode(.middle)
-        } else if !state.showsOverview, state.othersCount > 0 {
-          Text(state.othersLabel(state.othersCount))
-            .font(.caption2)
+        } else if !focus.isDone {
+          Text(state.openHintLabel)
+            .font(.footnote)
             .foregroundStyle(.tertiary)
             .lineLimit(1)
         }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .lodyStale(isStale)
-    } else {
-      Text(state.emptyLabel)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
+  }
+
+  private static let thoughtLines: [Detail: Int] = [.full: 5, .roomy: 2, .compact: 1]
+  private static let commandLines: [Detail: Int] = [.full: 6, .roomy: 3]
+
+  private func header(focus: LodyItem, detail: Detail) -> some View {
+    HStack(spacing: 6) {
+      if state.showsOverview {
+        JellyMark()
+        Text(isStale ? state.staleLabel : state.runningSummary)
+          .font(.headline)
+          .lineLimit(1)
+      } else {
+        LeadGlyph(item: focus, size: 18)
+        // The card is too narrow for the machine prefix or a timer beside the
+        // title, so the title has the row to itself and the timer goes below.
+        Text(focus.title)
+          .font(.headline)
+          .lineLimit(detail == .full ? 2 : 1)
+      }
+      Spacer(minLength: 0)
+    }
+  }
+
+  /// A line of detail with the focus's timer at its trailing edge.
+  private func withTimer(_ focus: LodyItem, @ViewBuilder _ content: () -> some View) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 4) {
+      content()
+      Spacer(minLength: 2)
+      if state.showsTimer(for: focus, isStale: isStale) {
+        WorkTimer(item: focus, font: .footnote.weight(.semibold).monospacedDigit(), width: 44)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private func overviewRow(item: LodyItem, showsStep: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 5) {
+        LeadGlyph(item: item, size: 14)
+        Text(item.title)
+          .font(.footnote)
+          .lineLimit(1)
+        Spacer(minLength: 2)
+        if state.showsTimer(for: item, isStale: false) {
+          WorkTimer(item: item, font: .footnote.monospacedDigit(), width: 44)
+            .foregroundStyle(.secondary)
+        }
+      }
+      if showsStep, let step = OthersList.step(of: item) {
+        Text(step)
+          .font(.footnote)
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .padding(.leading, 19)
+      }
+    }
+  }
+
+  /// The reasoning in place of "Working", then the step or who else runs, with
+  /// the timer on whichever line ends the card.
+  @ViewBuilder
+  private func runningDetail(focus: LodyItem, detail: Detail) -> some View {
+    if let thought = focus.thought, !thought.isEmpty, detail != .minimal {
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        StatusSymbol(status: .running)
+        Text(thought)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .lineLimit(Self.thoughtLines[detail] ?? 1)
+          .truncationMode(.head)
+      }
+      withTimer(focus) { runningFooter(focus: focus) }
+    } else if focus.thought?.isEmpty == false {
+      // Tightest: the step alone, or else the newest words of the reasoning.
+      withTimer(focus) {
+        if WorkDetail.shows(focus) {
+          runningFooter(focus: focus)
+        } else {
+          Text(focus.thought ?? "")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.head)
+        }
+      }
+    } else {
+      statusLine(focus: focus)
+      if detail != .minimal {
+        runningFooter(focus: focus)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func runningFooter(focus: LodyItem) -> some View {
+    if let activity = focus.activity, !activity.isEmpty {
+      Label {
+        Text(activity).lineLimit(1).truncationMode(.middle)
+      } icon: {
+        Image(systemName: "chevron.forward.2")
+      }
+      .font(.footnote)
+      .foregroundStyle(.tertiary)
+    } else if state.othersCount > 0 {
+      Text(state.othersLabel(state.othersCount))
+        .font(.footnote)
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
+    }
+  }
+
+  private func statusLine(focus: LodyItem) -> some View {
+    withTimer(focus) {
+      StatusSymbol(status: focus.status)
+      Text(focus.statusLabel)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+  }
+}
+
+/// The watch card's answers: short capsules instead of watchOS's full-height
+/// buttons, which alone would fill the card.
+private struct WatchPermissionButtons: View {
+  let focus: LodyItem
+  let copy: LodyState
+
+  var body: some View {
+    if let requestId = focus.permissionRequestId, let allow = focus.allowOption {
+      HStack(spacing: 6) {
+        if let deny = focus.denyOption {
+          Button(intent: LodyPermissionIntent(sessionId: focus.id, requestId: requestId, optionId: deny.id)) {
+            pill(copy.denyLabel, prominent: false)
+          }
+          .buttonStyle(.plain)
+        }
+        Button(intent: LodyPermissionIntent(sessionId: focus.id, requestId: requestId, optionId: allow.id)) {
+          pill(copy.allowLabel, prominent: true)
+        }
+        .buttonStyle(.plain)
+      }
+    }
+  }
+
+  private func pill(_ label: String, prominent: Bool) -> some View {
+    Text(label)
+      .font(.footnote.weight(.semibold))
+      .lineLimit(1)
+      .foregroundStyle(prominent ? Color.white : Color.primary)
+      .frame(maxWidth: .infinity, minHeight: 28)
+      .background(Capsule().fill(prominent ? Color.blue : Color.gray.opacity(0.3)))
+      .contentShape(Capsule())
   }
 }
 

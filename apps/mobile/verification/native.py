@@ -62,6 +62,7 @@ checks = {
     ],
     'chat-title': ['LodyUIVerify.swift', 'Chrome/LodyNavigationHeader.swift', 'Chat/ChatNavigationTitle.swift'],
     'live-activity': ['../live-activity/LodyActivityAttributes.swift', '../live-activity/LiveActivityCatalog.swift'],
+    'watch-card': ['../live-activity/LodyActivityAttributes.swift', '../live-activity/LiveActivityCatalog.swift', '../live-activity/LodyPermissionIntent.swift', '../live-activity/LiveActivityViews.swift'],
     'page-progress': ['List/LodyPageProgress.swift'],
     'create-session': ['LodyStrings.swift', 'CreateSession/CreateSessionModels.swift', 'CreateSession/CreateSessionLogic.swift', 'CreateSession/CreateSessionForm.swift'],
     'share-ingest': ['LodyStrings.swift', 'Chat/ChatAttachments.swift', 'CreateSession/CreateSessionModels.swift', 'CreateSession/CreateSessionLogic.swift', 'CreateSession/CreateSessionForm.swift', 'CreateSession/ShareStore.swift', '../share-extension/ShareIngest.swift'],
@@ -141,7 +142,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'banner', 'chat-title', 'live-activity', 'chat-chrome']
+        simulator = name in ['share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'banner', 'chat-title', 'live-activity', 'watch-card', 'chat-chrome']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
         if simulator:
@@ -152,7 +153,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             command += ['-parse-as-library']
         if name == 'inline-diff':
             command += ['-framework', 'UIKit']
-        if name in ['chat-render', 'composer', 'chat-title']:
+        if name in ['chat-render', 'composer', 'chat-title', 'watch-card']:
             command += ['-framework', 'SwiftUI']
         main = kit / 'verification' / name / 'main.swift'
         package_sources = [kit / 'ios' / file for file in files] + [main]

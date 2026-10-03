@@ -168,6 +168,10 @@ References: [OneSignal manual Live Activity registration](https://documentation.
 - `pnpm check`, `pnpm test`, `pnpm bundle`, signed iOS Simulator build.
 - `pnpm verify:native --case live-activity` exercises the exact Convex start
   attributes, identity rejection, content decoding and local catalog behavior.
+- `pnpm verify:native --case watch-card` lays out the Apple Watch Smart Stack view
+  in every HIG card size and the full screen a tap opens: no state may spill past
+  a card, and the full screen must show more than a card. A paired watch Simulator
+  does not receive the iPhone Simulator's activity, so the card is checked here.
 - `pnpm verify:ui --app <Debug.app> --case live-activity` exercises the shared
   Widget using attributes decoded from the Convex schema, without contacting APNs.
 - `pnpm verify:ui --app <Debug.app> --case notifications`.
