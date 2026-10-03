@@ -225,6 +225,26 @@ const shareAction = () => ({
   title: t('session.action.share'),
   symbol: 'square.and.arrow.up',
 });
+// A LAN has no sharing service, so its rows offer no share action.
+export function withoutSharing<S extends { rows: NativeListRow[] }>(
+  sections: S[],
+  lan: boolean,
+): S[] {
+  if (!lan) return sections;
+  return sections.map((section) => ({
+    ...section,
+    rows: section.rows.map((row) =>
+      row.menuActions
+        ? {
+            ...row,
+            menuActions: row.menuActions.filter(
+              (action) => action.id !== 'share',
+            ),
+          }
+        : row,
+    ),
+  }));
+}
 const sessionMenu = (session: Session) => ({
   menuActions: [
     renameAction(),

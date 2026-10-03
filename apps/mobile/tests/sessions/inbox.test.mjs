@@ -5,6 +5,7 @@ import {
   inboxSections,
   PINNED_SECTION_ID,
   reconcilePinOrder,
+  withoutSharing,
 } from '../../src/features/sessions/inbox.ts';
 import { listPlaceholder, searchPlaceholder } from '../../src/ui/listState.ts';
 import { draftTitle } from '../../src/features/sessions/draftTitle.ts';
@@ -927,4 +928,19 @@ test('project view lifts every pin into an uncapped outline above projects', asy
     sections[1].rows.slice(1).map((row) => row.id),
     ['stay'],
   );
+});
+
+test('a LAN offers no share action on session rows, and the Cloud keeps it', () => {
+  const sections = build(catalog([session('s1', 'idle')]));
+  const actions = (list) =>
+    list.flatMap((section) =>
+      section.rows.flatMap((row) =>
+        (row.menuActions ?? []).map((action) => action.id),
+      ),
+    );
+  assert.ok(actions(sections).includes('share'));
+  assert.equal(withoutSharing(sections, false), sections);
+  const lan = actions(withoutSharing(sections, true));
+  assert.ok(!lan.includes('share'));
+  assert.ok(lan.includes('rename') && lan.includes('delete'));
 });

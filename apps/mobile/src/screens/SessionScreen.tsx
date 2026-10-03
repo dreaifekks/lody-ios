@@ -499,7 +499,11 @@ function View() {
       : undefined,
     present,
   );
-  const preview = useSessionPreview(session.id, snapshot.preview);
+  // Previews open through the hosted preview service, which a LAN lacks.
+  const preview = useSessionPreview(
+    session.id,
+    account?.lan ? undefined : snapshot.preview,
+  );
   const composerJSON = JSON.stringify({
     preview: preview.chip,
     editable: !currentSession.archived && !deleting && !quotaLocked,
@@ -670,14 +674,19 @@ function View() {
             open: true,
           })),
       },
-      {
-        type: 'action',
-        title: t('session.action.share'),
-        icon: { type: 'sfSymbol', name: 'square.and.arrow.up' },
-        onPress: () => {
-          if (selected) shareSession(selected, currentSession.id);
-        },
-      },
+      // A LAN has no sharing service.
+      ...(account?.lan
+        ? []
+        : [
+            {
+              type: 'action' as const,
+              title: t('session.action.share'),
+              icon: { type: 'sfSymbol' as const, name: 'square.and.arrow.up' },
+              onPress: () => {
+                if (selected) shareSession(selected, currentSession.id);
+              },
+            },
+          ]),
       {
         type: 'action',
         title: t(
