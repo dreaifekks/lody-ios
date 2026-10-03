@@ -45,7 +45,10 @@ enum LodyAccentChoice: Equatable, RawRepresentable {
   }
 
   // The Share Extension has its own standard defaults; the app mirrors the accent here.
-  static var shared: UserDefaults? { UserDefaults(suiteName: ShareStore.group) }
+  // Reads the group as ShareStore.group does, so native checks can compile this file alone.
+  static var shared: UserDefaults? {
+    UserDefaults(suiteName: Bundle.main.object(forInfoDictionaryKey: "LodyAppGroup") as? String ?? "group.app.innei.lody")
+  }
 
   static var current: Self {
     #if LODY_SHARE_EXTENSION
