@@ -22,6 +22,7 @@ export const NativeChat: ComponentType<
       event: NativeSyntheticEvent<{ entryId: string }>,
     ) => void;
     imageSharingEnabled?: boolean;
+    composerHidden?: boolean;
     onShareImage?: (
       event: NativeSyntheticEvent<{ contentJSON: string }>,
     ) => void;

@@ -3,7 +3,7 @@ import UIKit
 extension LodyChatView {
   var composerInset: CGFloat {
     // Retiring glass keeps its drawing space, not the transcript's scroll space.
-    processEntryID.isEmpty ? max(0, bounds.maxY - composer.frame.minY - composer.retiringQueueHeight - collection.safeAreaInsets.bottom) + 8 : 0
+    !hidesComposer ? max(0, bounds.maxY - composer.frame.minY - composer.retiringQueueHeight - collection.safeAreaInsets.bottom) + 8 : 0
   }
 
   @discardableResult

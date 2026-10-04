@@ -20,7 +20,7 @@ extension LodyChatView {
     processEntryID = id
     deferredRows.removeAll()
     backgroundColor = !id.isEmpty && traitCollection.userInterfaceIdiom == .phone ? .clear : .lodyBackground
-    composer.isHidden = !id.isEmpty || composerRetired
+    composer.isHidden = hidesComposer || composerRetired
     edgeFade.isHidden = !id.isEmpty
     setNeedsLayout()
     applyRows()
@@ -159,7 +159,7 @@ extension LodyChatView {
     overlay.slot = ChatOverlay.slot(
       connection: composer.connection,
       tasks: transcript.liveSubagentItems().map {
-        ChatOverlay.Task(id: $0.itemId, actor: $0.actor, lastToolName: $0.lastToolName)
+        ChatOverlay.Task(id: $0.itemId, actor: $0.actor, lastToolName: ChatSubagentCard.latestStep($0.run) ?? $0.lastToolName)
       }
     )
   }
