@@ -1649,6 +1649,85 @@ test(
   },
 );
 
+test(
+  'a read below the start of a compacted stream bootstraps a fresh replica instead of retrying the offset',
+  { timeout: 8000 },
+  async (t) => {
+    const bootstraps = [];
+    const reads = [];
+    const events = [];
+    const history = new LoroDoc();
+    let recovered;
+    const recovery = new Promise((resolve) => {
+      recovered = resolve;
+    });
+    globalThis.__sessionClient = class {
+      async bootstrap() {
+        const offset = bootstraps.length ? '20' : '7';
+        bootstraps.push(offset);
+        return {
+          ok: true,
+          result: {
+            snapshotOffset: offset,
+            snapshot: { body: history.export({ mode: 'snapshot' }) },
+            updates: [],
+            nextOffset: offset,
+            cursor: `cursor-${offset}`,
+            upToDate: true,
+          },
+        };
+      }
+      async readOnce(request) {
+        reads.push(request.offset);
+        if (request.offset === '7')
+          return { ok: false, result: { code: 'gone' } };
+        recovered();
+        return new Promise((resolve, reject) => {
+          request.signal.addEventListener(
+            'abort',
+            () => reject(request.signal.reason),
+            { once: true },
+          );
+        });
+      }
+      append() {
+        assert.fail('read recovery must never append');
+      }
+    };
+    const runtime = await loadRuntime();
+    runtime.appendUserTurn(
+      history,
+      'saved-turn',
+      'Existing message',
+      'u1',
+      {},
+      '2026-09-11T00:00:00Z',
+    );
+    t.after(() => {
+      runtime.stopSessions();
+      delete globalThis.__sessionClient;
+    });
+    await runtime.openSession(
+      'compacted',
+      'w1',
+      async () => ({
+        token: 'synthetic',
+        gatewayBaseUrl: 'https://x.invalid',
+      }),
+      (event) => events.push(JSON.parse(event.session)),
+      async () => {
+        assert.fail('read recovery must never dispatch');
+      },
+    );
+    await recovery;
+    assert.deepEqual(bootstraps, ['7', '20']);
+    assert.deepEqual(reads, ['7', '20']);
+    assert.equal(events.at(-1).status, 'live');
+    assert.equal(events.at(-1).entries.length, 1);
+    assert.ok(events.every((event) => event.status !== 'offline'));
+  },
+);
+
 test('busy turns use the OSS FIFO queue, durable before watermark; lost ACK is never replayed', async () => {
   let fail = false;
   const watermarks = [];

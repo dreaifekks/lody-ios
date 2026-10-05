@@ -505,12 +505,19 @@ export async function openSession(
               signal: AbortSignal.any([controller.signal, read.signal]),
               ...(upToDate ? { live: 'long-poll' as const } : {}),
             });
+            // The hub compacted below this offset or restarted from a standby
+            // copy: the offset will never be readable again.
+            if (!result.ok && result.result.code === 'gone') return undefined;
             if (!result.ok) throw new Error(result.result.code);
             return result;
           },
           retrying,
         );
         if (sessions.get(id) !== state) return;
+        if (!next) {
+          resync(state);
+          return;
+        }
         state.readAt = Date.now();
         if (next.result.payload) {
           consume(next.result.payload.body);
