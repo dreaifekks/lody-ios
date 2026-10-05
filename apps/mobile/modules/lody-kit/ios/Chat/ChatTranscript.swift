@@ -525,6 +525,12 @@ struct ChatTranscript {
           row.actionable = false
         case "file":
           guard let file = item.file else { continue }
+          // A LAN keeps a picture an agent sends as a file of an image type.
+          if file.image == nil, let image = file.shownAsImage.image {
+            result.append(ChatRow(id: entry.id + ":" + item.itemId + ":image:0",
+              entryID: entry.id, kind: "image", text: "", itemID: item.itemId, image: image))
+            continue
+          }
           row.file = file
           row.text = file.fileName
           row.symbol = "doc"
@@ -552,7 +558,7 @@ struct ChatTranscript {
         let model = entry.modelInfo?.title ?? ""
         let finishedAt = ChatMetaTime.label(entry.endedAt, now: now)
         let meta = [model, finishedAt].filter { !$0.isEmpty }.joined(separator: " · ")
-        if !meta.isEmpty || entry.items.contains(where: { $0.type == "text" || $0.isImage }) {
+        if !meta.isEmpty || entry.items.contains(where: { $0.type == "text" || $0.isImage || $0.file?.shownAsImage.image != nil }) {
           var row = ChatRow(id: entry.id + ":meta", entryID: entry.id, kind: "meta", text: meta)
           row.imageAsset = LodyAgentIcon.asset(
             modelId: entry.modelInfo?.modelId, name: entry.modelInfo?.name
