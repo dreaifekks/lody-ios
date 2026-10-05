@@ -7,6 +7,8 @@ export type UsageWindow = {
 export type AgentQuota = {
   id: string;
   provider: string;
+  /** The provider (agent config) whose account the quota belongs to; absent on legacy rows. */
+  configId?: string;
   name?: string;
   windows: UsageWindow[];
 };

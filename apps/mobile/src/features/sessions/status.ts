@@ -28,6 +28,7 @@ export function sessionState(
 }
 
 const agentNames: Record<string, string> = {
+  'antigravity-acp': 'Antigravity',
   claude: 'Claude Code',
   codex: 'Codex',
   kimi: 'Kimi Code',
@@ -53,6 +54,7 @@ const agentIconKinds = new Set([
   'openai',
 ]);
 const agentIconAliases: Record<string, string> = {
+  'antigravity-acp': 'gemini',
   'claude-p': 'claude',
   'kimi-code': 'kimi',
 };

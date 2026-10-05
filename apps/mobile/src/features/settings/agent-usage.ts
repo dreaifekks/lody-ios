@@ -1,5 +1,6 @@
 import type { NativeListRow } from '@lody-ios/kit';
 import type { AgentUsage } from '../../models/agent-usage.ts';
+import { ANTIGRAVITY } from '../../cloud/catalog/agent-usage.ts';
 import type { RemoteSetting } from '../../models/settings.ts';
 import { t, tp, currentLocale } from '../../lib/i18n/index.ts';
 
@@ -9,8 +10,17 @@ export function agentUsageRows(
 ): NativeListRow[] {
   const config = usage?.configs.find((c) => c.id === item.id);
   if (!config?.eligible) return [];
-  const rows = usage!.quotas
-    .filter((q) => q.provider === config.provider)
+  // A provider shows what it reported itself; older machines wrote one
+  // quota per agent type instead.
+  const scoped = usage!.quotas.filter((q) => q.configId === config.id);
+  const quotas = scoped.length
+    ? scoped
+    : usage!.quotas.filter(
+        (q) => !q.configId && q.provider === config.provider,
+      );
+  // Antigravity's Claude/GPT group always reads full, so Lody shows only Gemini.
+  const rows = quotas
+    .filter((q) => config.provider !== ANTIGRAVITY || q.id === 'gemini')
     .flatMap((q) =>
       q.windows.map((w, i) => {
         let duration = t('settings.usage.window');

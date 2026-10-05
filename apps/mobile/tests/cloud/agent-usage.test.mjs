@@ -149,3 +149,61 @@ test('legacy Claude ratios and timestamps migrate while current windows and inde
   ).agentUsage.m1.quotas;
   assert.equal(claude[0].windows[0].usedPercent, 0.5);
 });
+
+test('a provider shows the quota it reported itself, and Antigravity only its Gemini group', () => {
+  const machine = new Flock('usage-provider-scoped');
+  for (const [id, cliType, agentType] of [
+    ['work', 'builtin', 'claude'],
+    ['home', 'builtin', 'claude'],
+    ['ag', 'registry', 'antigravity-acp'],
+  ])
+    machine.set(['agentConfig', id], {
+      id,
+      machineId: 'm1',
+      name: id,
+      cliType,
+      agentType,
+    });
+  const snapshot = (limitId, percent) => ({
+    limitId,
+    scope: { providerId: 'claude' },
+    windows: [
+      {
+        usedPercent: percent,
+        windowDurationSeconds: 18000,
+        resetsAtEpochSeconds: 1,
+      },
+    ],
+  });
+  machine.set(['rateLimit', 'claude', 'claude'], snapshot('claude', 5));
+  machine.set(
+    ['rateLimit', 'work', 'claude', 'claude'],
+    snapshot('claude', 64),
+  );
+  machine.set(
+    ['rateLimit', 'ag', 'antigravity-acp', 'gemini'],
+    snapshot('gemini', 30),
+  );
+  machine.set(
+    ['rateLimit', 'ag', 'antigravity-acp', 'third-party'],
+    snapshot('third-party', 0),
+  );
+  machine.commit();
+  const usage = projectRows(machine.scan(), 'm1').agentUsage.m1;
+  const merged = { ...usage, quotas: mergeAgentQuotas([], usage.quotas) };
+  const rows = (id) =>
+    agentUsageRows({ id, kind: 'agent', machineId: 'm1' }, merged);
+  assert.deepEqual(
+    rows('work').map((row) => row.progress),
+    [0.64],
+  );
+  // A provider that has not reported yet keeps the machine's legacy quota.
+  assert.deepEqual(
+    rows('home').map((row) => row.progress),
+    [0.05],
+  );
+  assert.deepEqual(
+    rows('ag').map((row) => row.progress),
+    [0.3],
+  );
+});

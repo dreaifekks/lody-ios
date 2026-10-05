@@ -5,6 +5,7 @@ import type {
 } from '../../models/agent-usage.ts';
 
 type Row = { key: unknown[]; value?: unknown };
+export const ANTIGRAVITY = 'antigravity-acp';
 const object = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -78,6 +79,20 @@ export function projectAgentUsage(rows: Row[], machineId: string): AgentUsage {
     ) {
       quotas.push(quota(text(row.key[1]), text(row.key[2]), row.value));
     }
+    // Lody scopes a quota to the provider that reported it:
+    // ['rateLimit', agentConfigId, agentType, limitId].
+    if (
+      row.key[0] === 'rateLimit' &&
+      row.key.length === 4 &&
+      text(row.key[1]) &&
+      text(row.key[2]) &&
+      text(row.key[3])
+    ) {
+      quotas.push({
+        ...quota(text(row.key[2]), text(row.key[3]), row.value),
+        configId: text(row.key[1]),
+      });
+    }
     if (
       row.key[0] !== 'agentConfig' ||
       row.key.length !== 2 ||
@@ -92,10 +107,11 @@ export function projectAgentUsage(rows: Row[], machineId: string): AgentUsage {
       name: text(value.name),
       provider,
       eligible:
-        value.cliType === 'builtin' &&
-        ['codex', 'claude', 'grok', 'kimi'].includes(provider) &&
-        !text(value.brandId) &&
-        Object.keys(object(value.env)).length === 0,
+        provider === ANTIGRAVITY ||
+        (value.cliType === 'builtin' &&
+          ['codex', 'claude', 'grok', 'kimi'].includes(provider) &&
+          !text(value.brandId) &&
+          Object.keys(object(value.env)).length === 0),
     });
   }
   return { configs, quotas };
@@ -114,7 +130,10 @@ export function mergeAgentQuotas(
   legacy: AgentQuota[],
   current: AgentQuota[],
 ): AgentQuota[] {
-  const providers = new Set(current.map((q) => q.provider));
+  const providers = new Set(
+    current.filter((q) => !q.configId).map((q) => q.provider),
+  );
+  const key = (q: AgentQuota) => `${q.configId ?? ''}::${q.provider}::${q.id}`;
   const merged = new Map(
     legacy
       .filter(
@@ -122,10 +141,12 @@ export function mergeAgentQuotas(
           !providers.has(q.provider) ||
           (q.id !== q.provider && q.id.startsWith(q.provider)),
       )
-      .map((q) => [`${q.provider}::${q.id}`, q]),
+      .map((q) => [key(q), q]),
   );
-  for (const q of current) merged.set(`${q.provider}::${q.id}`, q);
+  for (const q of current) merged.set(key(q), q);
   return [...merged.values()].sort((a, b) =>
-    `${a.provider}:${a.id}`.localeCompare(`${b.provider}:${b.id}`),
+    `${a.provider}:${a.id}:${a.configId ?? ''}`.localeCompare(
+      `${b.provider}:${b.id}:${b.configId ?? ''}`,
+    ),
   );
 }
