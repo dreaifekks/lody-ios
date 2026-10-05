@@ -146,6 +146,23 @@ let locallyTimedReplyRows = ChatTranscript(entries: emptyReplyEntries).rows(
 assert(locallyTimedReplyRows.last?.workDurationMs == 3_000,
   "The locally published submission clock must survive authoritative takeover")
 
+let operationReplyJSON = """
+[{"id":"ask","role":"user","status":"handled","finished":true,"startedAt":1000,
+"items":[{"itemId":"prompt","type":"text","text":"spawn"}]},
+{"id":"assistant:ask","role":"assistant","status":"completed","finished":true,"endedAt":2000,
+"userTurnId":"ask","items":[{"itemId":"a1","type":"text","text":"started"}]},
+{"id":"operation-progress:s:op","role":"system","status":"pending","finished":true,"items":[]},
+{"id":"operation-completion:s:op","role":"system","status":"pending","finished":true,"startedAt":5000,"items":[]},
+{"id":"assistant:operation-completion:s:op","role":"assistant","status":"completed","finished":true,
+"endedAt":6000,"userTurnId":"operation-completion:s:op","items":[{"itemId":"a2","type":"text","text":"done"}]}]
+"""
+let operationReplyRows = ChatTranscript(entries: try JSONDecoder().decode(
+  [ChatEntry].self, from: Data(operationReplyJSON.utf8))).rows(now: 9_000)
+assert(Set(operationReplyRows.map(\.id)).count == operationReplyRows.count,
+  "A Lody Operation reply must not repeat the previous user turn's row identities")
+assert(operationReplyRows.first { $0.entryID == "assistant:operation-completion:s:op" && $0.kind == "duration" }?
+  .workDurationMs == 1_000, "An Operation reply is timed from its completion turn")
+
 let finishedDurationJSON = """
 [{"id":"timed-finished","role":"assistant","status":"completed","finished":true,
 "timestamp":"1970-01-01T00:00:00.000Z","endedAt":125000,

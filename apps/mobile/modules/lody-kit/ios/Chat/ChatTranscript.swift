@@ -459,7 +459,10 @@ struct ChatTranscript {
       var result: [ChatRow] = []
       var absorbedProcess = false
       if entry.role == "assistant", !processOnly {
-        let turn = entries[..<entryIndex].last { $0.role == "user" }
+        // A Lody Operation reply answers a system completion turn. Borrowing the
+        // user turn before it would repeat that turn's duration row identity.
+        let operationTurn = entries[..<entryIndex].last { $0.id == entry.userTurnId && $0.role == "system" }
+        let turn = operationTurn ?? entries[..<entryIndex].last { $0.role == "user" }
         let turnID = turn?.id ?? entry.id
         let start = turnStartedAt[turnID] ?? turn.flatMap(ChatWorkDuration.startMilliseconds)
         if let duration = ChatWorkDuration.milliseconds(for: entry, now: now, startOverride: start) {
