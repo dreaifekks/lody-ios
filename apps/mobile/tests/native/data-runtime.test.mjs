@@ -446,16 +446,29 @@ test('a catalog read that fails on the network resumes from its cursor instead o
   const errors = () => events.filter((event) => event.type === 'syncError');
   assert.equal(errors().length, 0);
 
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  const readsAfter = async (count) => {
+    for (let i = 0; i < 400 && requests.length < count; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(requests.length, count, 'the read goes again after a pause');
+  };
   respond({ ok: false, result: { code: 'network_error' } });
-  for (let i = 0; i < 400 && requests.length < 2; i++)
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.equal(requests.length, 2, 'the read goes again after a short pause');
+  await readsAfter(2);
   assert.equal(requests[1].offset, requests[0].offset);
+  assert.equal(bootstraps, 2, 'no catalog is downloaded again');
+  assert.equal(errors().length, 0, 'one dropped read does not flap the sync');
+
+  skew = 16_000;
+  respond({ ok: false, result: { code: 'network_error' } });
+  await readsAfter(3);
+  assert.equal(requests[2].offset, requests[0].offset);
   assert.equal(bootstraps, 2, 'no catalog is downloaded again');
   assert.deepEqual(
     errors().map((event) => event.stream),
     ['meta'],
-    'the stalled catalog is not reported as live',
+    'a catalog that stays unreadable is not reported as live',
   );
   assert.deepEqual(
     runtime.confirmSession({ workspaceId, sessionId: 's1' }),
@@ -470,6 +483,7 @@ test('a catalog read that fails on the network resumes from its cursor instead o
     { state: 'rejected', reason: 'metadata_not_ready' },
     'a creation refused while reconnecting is refused as retryable',
   );
+  Date.now = realNow;
 
   const synced = events.filter((event) => event.type === 'synced').length;
   const recovered = catalogEvent();
@@ -492,6 +506,25 @@ test('a catalog read that fails on the network resumes from its cursor instead o
   );
   assert.equal(bootstraps, 2);
   assert.equal(errors().length, 1);
+
+  // Days of live updates outgrow the 8 MiB ceiling: the catalog reads its
+  // compacted snapshot again instead of stopping for good.
+  const reads = requests.length;
+  for (let i = 0; i < 400 && requests.length === reads; i++)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  respond({
+    ok: true,
+    result: {
+      nextOffset: '3',
+      upToDate: true,
+      closed: false,
+      payload: { body: new Uint8Array(8 * 1024 * 1024 + 1) },
+    },
+  });
+  for (let i = 0; i < 400 && bootstraps < 3; i++)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(bootstraps, 3, 'the catalog bootstraps again');
+  assert.equal(errors().length, 1, 'and is never reported offline for it');
   delete globalThis.webkit;
   delete globalThis.location;
   delete globalThis.__runtimeTestClient;

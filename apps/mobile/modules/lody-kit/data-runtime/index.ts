@@ -226,6 +226,12 @@ const shareRuntime = createSharingRuntime({
   broker,
 });
 const unhealthy = new Set<string>();
+/**
+ * How long a catalog stream may fail to read before it is reported. A dropped
+ * request is retried within a second, and its replica stays whole meanwhile.
+ */
+const STALL_GRACE_MS = 15_000;
+const CATALOG_LIMIT = 8 * 1024 * 1024;
 const gitRepos = new Map<string, string>();
 const gitStateAsked = new Set<string>();
 let gitStateQueue = Promise.resolve();
@@ -371,7 +377,7 @@ function watch(mode: string) {
         if (data.snapshotOffset !== '-1' && data.snapshot) {
           const bytes = data.snapshot.body;
           size += bytes.length;
-          if (size > 8 * 1024 * 1024) throw new Error('catalog_limit');
+          if (size > CATALOG_LIMIT) throw new Error('catalog_limit');
           flock.importFile(
             bytes[0] === 0x28 &&
               bytes[1] === 0xb5 &&
@@ -383,7 +389,7 @@ function watch(mode: string) {
         }
         for (const part of data.updates) {
           size += part.body.length;
-          if (size > 8 * 1024 * 1024) throw new Error('catalog_limit');
+          if (size > CATALOG_LIMIT) throw new Error('catalog_limit');
           apply(flock, part.body);
         }
         let offset = data.nextOffset,
@@ -391,8 +397,11 @@ function watch(mode: string) {
           upToDate = data.upToDate;
         let pages = 0;
         let stalled = 0;
+        let stalledSince = 0;
+        let live = false;
         while (!signal.aborted) {
           if (upToDate && !stalled) {
+            live = true;
             if (mode === 'meta') {
               metaReplica = { flock, client };
               metaReadAt = readAt;
@@ -416,8 +425,13 @@ function watch(mode: string) {
             if (code !== 'timeout' && code !== 'network_error')
               throw new Error(code);
             // The replica is whole and only its tail is unknown: read on from
-            // the cursor instead of downloading every catalog again.
-            if (!stalled) {
+            // the cursor instead of downloading every catalog again. Only a
+            // stream that stays unreadable takes the workspace offline.
+            stalledSince ||= Date.now();
+            if (
+              !unhealthy.has(mode) &&
+              Date.now() - stalledSince >= STALL_GRACE_MS
+            ) {
               unhealthy.add(mode);
               send({
                 type: 'syncError',
@@ -432,11 +446,15 @@ function watch(mode: string) {
             continue;
           }
           stalled = 0;
+          stalledSince = 0;
           const next = response.result;
           readAt = issuedAt;
           if (next.payload) {
             size += next.payload.body.length;
-            if (size > 8 * 1024 * 1024) throw new Error('catalog_limit');
+            // Days of live updates outgrow the ceiling too; the replica that
+            // served them stays until one from the compacted snapshot is ready.
+            if (size > CATALOG_LIMIT && live) break;
+            if (size > CATALOG_LIMIT) throw new Error('catalog_limit');
             apply(flock, next.payload.body);
           }
           if (next.nextOffset === offset && !next.upToDate)
