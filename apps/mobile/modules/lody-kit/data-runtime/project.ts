@@ -457,7 +457,7 @@ function summarizeEntry(
       projection,
       `entry/${id}`,
       summarizedItems.map((i) => `${i.itemId}:${i.rev}`).join(',') +
-        `|${entry?.status}|${entry?.finished}|${JSON.stringify(fileDiffs)}|${JSON.stringify(modelInfo)}|${JSON.stringify(metadata)}`,
+        `|${entry?.status}|${entry?.finished}|${entry?.inputConfig?._lodyDeliveryKind === 'continue'}|${JSON.stringify(fileDiffs)}|${JSON.stringify(modelInfo)}|${JSON.stringify(metadata)}`,
     ),
     role: String(entry?.role ?? 'assistant'),
     status: entry?.status ?? (entry?.read ? 'seen' : 'pending'),
@@ -468,6 +468,10 @@ function summarizeEntry(
     permissionWaitMs: entry?.permissionWaitMs,
     modelInfo: modelInfo.name || modelInfo.modelId ? modelInfo : undefined,
     userTurnId: entry?.userTurnId,
+    deliveryKind:
+      entry?.inputConfig?._lodyDeliveryKind === 'continue'
+        ? ('continue' as const)
+        : undefined,
     items: summarizedItems,
     ...(fileDiffs.length ? { fileDiffs } : {}),
   };

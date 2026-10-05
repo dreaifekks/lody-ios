@@ -6,6 +6,7 @@ const recoverable = new Set([
   'acp_internal_error',
   'acp_unknown_error',
   'agent_disconnected',
+  'daemon_restart',
   'agent_no_output',
   'acp_not_ready',
 ]);
@@ -37,6 +38,22 @@ export const capacityContinuation =
   'Continue working from where you left off. The previous turn stopped because the selected model was at capacity.';
 export const errorContinuation =
   'Continue working from where you left off. The previous turn stopped because of an agent error.';
+// Lody's Continue after a turn cut off by a restart or a lost agent.
+const interruptedContinuation =
+  'Continue from where you left off. The previous turn was cut off before it finished; check the current state before repeating anything that may already have been done.';
+const interruptions = new Set(['daemon_restart', 'agent_disconnected']);
+
+/** The turn a retry sends; an interruption is resumed as Lody's Continue. */
+export function retryTurn(reason: string): {
+  text: string;
+  deliveryKind?: 'continue';
+} {
+  if (interruptions.has(reason))
+    return { text: interruptedContinuation, deliveryKind: 'continue' };
+  if (reason === 'acp_provider_overloaded')
+    return { text: capacityContinuation };
+  return { text: errorContinuation };
+}
 export type RetryAttempt = ErrorTarget & {
   sendId: string;
   phase: 'pending' | 'accepted' | 'failed' | 'unknown';

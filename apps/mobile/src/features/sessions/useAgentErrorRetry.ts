@@ -3,10 +3,9 @@ import { sendSessionTurn } from '@lody-ios/kit';
 import { t } from '@/lib/i18n';
 import type { EntrySummary } from '@/models/session';
 import {
-  capacityContinuation,
   createAgentErrorRetry,
-  errorContinuation,
   latestRetryableError,
+  retryTurn,
 } from './agentErrorRetry';
 
 export function useAgentErrorRetry({
@@ -38,10 +37,7 @@ export function useAgentErrorRetry({
               attachments: [],
               queue: false,
               guide: false,
-              text:
-                target.reason === 'acp_provider_overloaded'
-                  ? capacityContinuation
-                  : errorContinuation,
+              ...retryTurn(target.reason),
             }),
           ),
       ),

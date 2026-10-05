@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   createAgentErrorRetry,
   latestRetryableError,
+  retryTurn,
 } from '../../src/features/sessions/agentErrorRetry.ts';
 
 const failure = (reason = 'acp_provider_overloaded', id = 'failure') => ({
@@ -33,6 +34,19 @@ test('only the latest recoverable failure before newer user input can retry', ()
     latestRetryableError([{ role: 'user', id: 'user', items: [] }, failure()]),
     target,
   );
+});
+
+test('a turn cut off by a Lody restart retries as a Continue turn', () => {
+  const restart = latestRetryableError([failure('daemon_restart')]);
+  assert.equal(restart?.reason, 'daemon_restart');
+  for (const reason of ['daemon_restart', 'agent_disconnected']) {
+    const turn = retryTurn(reason);
+    assert.equal(turn.deliveryKind, 'continue');
+    assert.match(turn.text, /cut off before it finished/);
+  }
+  assert.equal(retryTurn('acp_provider_overloaded').deliveryKind, undefined);
+  assert.match(retryTurn('acp_provider_overloaded').text, /at capacity/);
+  assert.equal(retryTurn('acp_internal_error').deliveryKind, undefined);
 });
 
 test('a retry is fenced while pending and after ACK; stale targets and disabled sessions do not dispatch', async () => {

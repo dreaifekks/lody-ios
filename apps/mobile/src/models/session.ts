@@ -74,6 +74,8 @@ export type EntrySummary = TurnMetadata & {
   finished: boolean;
   canSteer?: boolean;
   userTurnId?: string;
+  /** A turn sent to resume an interrupted one. */
+  deliveryKind?: 'continue';
   executionId?: string;
   executionFinished?: boolean;
   steerCount?: number;

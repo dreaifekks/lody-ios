@@ -100,6 +100,50 @@ test('independent configuration reaches durable history before RPC, inherits on 
   }
 });
 
+test('a Continue turn carries Lody’s delivery marker into history and the projection', async () => {
+  const calls = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      calls.push(request);
+      return { result: { accepted: true } };
+    },
+  });
+  const args = {
+    sessionId: 's1',
+    machineId: 'm1',
+    userId: 'u1',
+    cliType: 'builtin',
+    agentType: 'claude',
+  };
+  try {
+    assert.equal(
+      (
+        await fixture.runtime.sendTurn({
+          ...args,
+          text: 'Continue from where you left off.',
+          deliveryKind: 'continue',
+        })
+      ).state,
+      'accepted',
+    );
+    assert.equal(
+      (await fixture.runtime.sendTurn({ ...args, text: 'Plain turn' })).state,
+      'queued',
+    );
+    const raw = fixture.server.toJSON();
+    assert.equal(raw.history[0].inputConfig._lodyDeliveryKind, 'continue');
+    assert.equal(calls[0].params.inputConfig._lodyDeliveryKind, 'continue');
+    assert.equal(raw.mq[0].acpSessionConfig._lodyDeliveryKind, undefined);
+    const [entry] = fixture.runtime.projectSession(
+      fixture.server,
+      'live',
+    ).entries;
+    assert.equal(entry.deliveryKind, 'continue');
+  } finally {
+    fixture.close();
+  }
+});
+
 test('a Role session keeps its Role while the run configuration is unchanged and records None once a control moves', async () => {
   const calls = [];
   const fixture = await openTestSession({

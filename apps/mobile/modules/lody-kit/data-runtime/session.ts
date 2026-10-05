@@ -598,6 +598,8 @@ export async function sendTurn(
     backgroundTaskId?: string;
     queue?: boolean;
     guide?: boolean;
+    /** `continue` marks a turn that resumes an interrupted one, as Lody's composer does. */
+    deliveryKind?: 'continue';
     sessionId: string;
     machineId: string;
     userId: string;
@@ -774,6 +776,9 @@ export async function sendTurn(
       taskToolsEnabled: previous.taskToolsEnabled ?? false,
       ...agentRole,
       resume: args.resume,
+      ...(args.deliveryKind === 'continue'
+        ? { _lodyDeliveryKind: 'continue' }
+        : {}),
     };
     const raw = state.doc.toJSON();
     const history = (raw.history ?? []) as any[];

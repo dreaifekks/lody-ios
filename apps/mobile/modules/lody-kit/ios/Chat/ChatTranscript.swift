@@ -40,6 +40,8 @@ struct ChatEntry: Decodable {
   var delivery: String? = nil
   var holdOpen: Bool? = nil
   var canSteer: Bool? = nil
+  /// `continue` for a turn sent to resume an interrupted one, as Lody's composer marks it.
+  var deliveryKind: String? = nil
   var isRunning: Bool { role == "assistant" && !finished }
   var isQueued: Bool { role == "user" && status == "queued" }
 }
@@ -392,6 +394,12 @@ struct ChatTranscript {
       if processOnly && entry.id != processEntryID { return [] }
       if entry.role == "user" {
         if processOnly || entry.isQueued { return [] }
+        // Lody draws a Continue turn as a marker, not its long prompt. One whose
+        // delivery is unsettled keeps the ordinary rows so it can be resent.
+        if entry.deliveryKind == "continue", entry.delivery == nil, entry.status != "delivery_unknown" {
+          return [ChatRow(id: entry.id + ":user", entryID: entry.id, kind: "continued",
+            text: LodyStrings.text("native.chat.message.continued"), symbol: "play.circle")]
+        }
         var result: [ChatRow] = []
         let attachments = entry.items.compactMap { item -> ChatMessageAttachment? in
           if let image = item.image, item.type == "image" {
@@ -859,7 +867,7 @@ enum ChatFailure {
     if meta?.code == "git_executable_not_found" {
       return LodyStrings.text("native.chat.error.git_executable_not_found")
     }
-    let known: Set<String> = ["unknown", "session_archived", "agent_type_mismatch", "session_init_failed", "session_restore_failed", "session_not_found", "memory_pressure", "acp_not_ready", "agent_disconnected", "agent_no_output", "turn_pre_prompt_failed", "message_delivery_failed", "machine_access_denied", "acp_auth_required", "acp_internal_error", "acp_upstream_api_error", "acp_provider_overloaded", "acp_session_storage_incompatible", "acp_resource_not_found", "acp_request_cancelled", "acp_method_not_found", "acp_invalid_params", "acp_invalid_request", "acp_parse_error", "acp_unknown_error"]
+    let known: Set<String> = ["unknown", "session_archived", "agent_type_mismatch", "session_init_failed", "session_restore_failed", "session_not_found", "memory_pressure", "acp_not_ready", "agent_disconnected", "agent_no_output", "turn_pre_prompt_failed", "message_delivery_failed", "machine_access_denied", "acp_auth_required", "acp_internal_error", "acp_upstream_api_error", "acp_provider_overloaded", "acp_session_storage_incompatible", "acp_resource_not_found", "acp_request_cancelled", "acp_method_not_found", "acp_invalid_params", "acp_invalid_request", "acp_parse_error", "acp_unknown_error", "daemon_restart"]
     let reason = meta?.reason ?? "unknown"
     return LodyStrings.text("native.chat.error." + (known.contains(reason) ? reason : "unknown"))
   }
