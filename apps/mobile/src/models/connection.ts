@@ -6,10 +6,12 @@ export type WorkspaceMachine = {
   alias?: string;
   os?: string;
   version?: string;
+  /** Whether its presence heartbeat is fresh; undefined while the presence channel is not synced. */
+  online?: boolean;
 };
 
-/** How a computer answered its last ping through the hub. */
+/** Whether a computer is online, and how long its last ping took when it answered one. */
 export type MachineReach =
   | { state: 'checking' }
-  | { state: 'online'; ms: number }
+  | { state: 'online'; ms?: number }
   | { state: 'offline' };

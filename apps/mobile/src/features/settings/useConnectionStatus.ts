@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { addAppActiveListener } from '@lody-ios/kit';
 import type { ConnectionService } from '@/cloud/catalog/machineStatus';
 import type { MachineReach, WorkspaceMachine } from '@/models/connection';
+import { reachOf } from './connection.ts';
 import { t } from '../../lib/i18n/index.ts';
 
 export const HUB_LATENCY_INTERVAL_MS = 10_000;
@@ -68,7 +69,7 @@ export function useMachineStatus(
             Object.fromEntries(
               list.map((machine) => [
                 machine.id,
-                old[machine.id] ?? { state: 'checking' },
+                reachOf(machine, undefined, old[machine.id]),
               ]),
             ),
           );
@@ -76,12 +77,15 @@ export function useMachineStatus(
             void service
               .ping(workspaceId, machine.id)
               .then(
-                (ms): MachineReach => ({ state: 'online', ms }),
-                (): MachineReach => ({ state: 'offline' }),
+                (ms) => ms,
+                () => null,
               )
-              .then((next) => {
+              .then((ms) => {
                 if (current())
-                  setReach((old) => ({ ...old, [machine.id]: next }));
+                  setReach((old) => ({
+                    ...old,
+                    [machine.id]: reachOf(machine, ms),
+                  }));
               });
         },
         () => {

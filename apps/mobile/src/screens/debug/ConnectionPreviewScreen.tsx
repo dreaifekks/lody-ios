@@ -14,12 +14,22 @@ const service: ConnectionService = {
       alias: 'NUC',
       os: 'linux',
       version: '0.103.0',
+      online: true,
     },
-    { id: 'mac', name: 'MacBook Air', os: 'darwin', version: '0.103.0' },
-    { id: 'n100', name: 'Ubuntu-N100', os: 'linux' },
+    {
+      id: 'mac',
+      name: 'MacBook Air',
+      os: 'darwin',
+      version: '0.103.0',
+      online: true,
+    },
+    // Its heartbeat is fresh, but its ping misses the deadline.
+    { id: 'mini', name: 'Mac mini', os: 'darwin', online: true },
+    { id: 'n100', name: 'Ubuntu-N100', os: 'linux', online: false },
   ],
   ping: async (_, machineId) => {
-    if (machineId === 'n100') throw new Error('no answer');
+    if (machineId === 'n100' || machineId === 'mini')
+      throw new Error('no answer');
     return machineId === 'mac' ? 227 : 18;
   },
   hubLatency: async () => 12,
@@ -28,7 +38,7 @@ const service: ConnectionService = {
 function View() {
   const [connection, setConnection] = useState<Connection>({
     state: 'offline',
-    machines: 3,
+    machines: 4,
     syncedAt: Date.now() - 60_000,
   });
   return (
@@ -37,7 +47,7 @@ function View() {
       hub={{ name: 'Home', address: '100.92.194.31:8788' }}
       connection={connection}
       onResync={() =>
-        setConnection({ state: 'live', machines: 3, syncedAt: Date.now() })
+        setConnection({ state: 'live', machines: 4, syncedAt: Date.now() })
       }
       service={service}
     />

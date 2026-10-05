@@ -42,9 +42,32 @@ export function accountSubtitle(
 
 export const machineRowId = (id: string) => `machine:${id}`;
 
+/**
+ * Like Lody, a computer is online while its presence heartbeat is fresh; a ping
+ * adds its latency. A missed ping makes it offline only when presence is not
+ * synced, so a phone that cannot finish a ping in time never hides a live computer.
+ * `ping` is the answer in ms, null for no answer, or undefined while one is pending.
+ */
+export function reachOf(
+  machine: WorkspaceMachine,
+  ping: number | null | undefined,
+  previous?: MachineReach,
+): MachineReach {
+  if (typeof ping === 'number') return { state: 'online', ms: ping };
+  if (machine.online) {
+    if (ping === undefined && previous?.state === 'online') return previous;
+    return { state: 'online' };
+  }
+  if (machine.online === false || ping === null) return { state: 'offline' };
+  return previous ?? { state: 'checking' };
+}
+
 function reachValue(reach: MachineReach | undefined): Partial<NativeListRow> {
   if (reach?.state === 'online') {
-    const text = latencyText(reach.ms);
+    const text =
+      reach.ms === undefined
+        ? t('settings.connection.machineOnline')
+        : latencyText(reach.ms);
     return { value: text, accessibilityValue: text };
   }
   if (reach?.state === 'offline') {

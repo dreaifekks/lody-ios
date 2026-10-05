@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   accountSubtitle,
   connectionSections,
+  reachOf,
 } from '../../src/features/settings/connection.ts';
 
 const machines = [
@@ -102,4 +103,41 @@ test('a sync that went offline offers a resync, and a failed list a retry', () =
     ),
     'computers already shown stay without a retry row',
   );
+});
+
+test('a fresh heartbeat keeps a computer online when its ping misses the deadline', () => {
+  const live = { id: 'home', online: true };
+  assert.deepEqual(reachOf(live, null), { state: 'online' });
+  assert.deepEqual(reachOf(live, 18), { state: 'online', ms: 18 });
+  assert.deepEqual(
+    reachOf(live, undefined, { state: 'online', ms: 18 }),
+    { state: 'online', ms: 18 },
+    'a pending ping keeps the last latency',
+  );
+  assert.deepEqual(reachOf(live, undefined, { state: 'offline' }), {
+    state: 'online',
+  });
+
+  const silent = { id: 'mac', online: false };
+  assert.deepEqual(reachOf(silent, undefined), { state: 'offline' });
+  assert.deepEqual(
+    reachOf(silent, 30),
+    { state: 'online', ms: 30 },
+    'an answered ping proves it online',
+  );
+
+  const unknown = { id: 'new' };
+  assert.deepEqual(reachOf(unknown, undefined), { state: 'checking' });
+  assert.deepEqual(
+    reachOf(unknown, null),
+    { state: 'offline' },
+    'without presence a missed ping is all there is',
+  );
+
+  const [row] = rowsOf(
+    sections({ machines: [machines[0]], reach: { home: { state: 'online' } } }),
+    'machines',
+  );
+  assert.ok(row.value && !/\d/.test(row.value), 'online without a latency');
+  assert.equal(row.imageTint, '#0A84FF');
 });

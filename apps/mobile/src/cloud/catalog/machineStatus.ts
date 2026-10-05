@@ -26,6 +26,7 @@ async function machines(workspaceId: string) {
       alias: text(item.alias),
       os: text(item.os),
       version: text(item.version),
+      online: typeof item.online === 'boolean' ? item.online : undefined,
     }));
 }
 

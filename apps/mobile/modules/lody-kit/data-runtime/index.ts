@@ -68,6 +68,7 @@ import {
   editSession,
 } from './session';
 import { decodeFrames, encodeFrame } from '../decoder/frames';
+import { createPresence } from './presence';
 
 type Grant = { token: string; gatewayBaseUrl: string; expiresIn: number };
 const host = (globalThis as any).webkit.messageHandlers.dataRuntime;
@@ -130,6 +131,20 @@ const delay = (ms: number, signal: AbortSignal) =>
   });
 /** A machine that has not answered a ping by then is shown offline. */
 const MACHINE_PING_TIMEOUT_MS = 6000;
+// Machines are online by their heartbeat on the meta stream's presence channel, as in Lody.
+const presence = createPresence(async (signal) => {
+  const { gatewayBaseUrl, token } = await getGrant();
+  return fetch(
+    `${gatewayBaseUrl.replace(/\/$/, '')}/ds/lody/${encodeURIComponent(`${workspace}:meta`)}?ephemeral=presence&live=sse`,
+    {
+      headers: {
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${token}`,
+      },
+      signal,
+    },
+  );
+});
 let metaReplica: { flock: Flock; client: StreamsClient } | undefined;
 let workspace = '';
 const machineReplicas = new Map<string, Flock>();
@@ -695,6 +710,7 @@ Object.assign(globalThis, {
       const meta = metaReplica.flock;
       const machineIds = catalogs.get('meta')?.machineIds ?? [];
       if (args.action === 'list') {
+        const online = await presence.online();
         const text = (id: string, key: string) => {
           const room = `machine-${id}`;
           const value =
@@ -711,6 +727,7 @@ Object.assign(globalThis, {
             alias: text(id, 'lanAlias'),
             os: text(id, 'os'),
             version: text(id, 'cliVersion'),
+            online: online?.has(id),
           })),
         };
       }

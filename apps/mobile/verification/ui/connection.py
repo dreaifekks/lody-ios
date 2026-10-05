@@ -1,4 +1,4 @@
-"""The connection page shows the hub and each computer with how it answers, from a fixture service."""
+"""The connection page shows the hub and each computer by its heartbeat and ping, from a fixture service."""
 import json
 import sys
 from driver import UI
@@ -19,6 +19,8 @@ answered('hub', catalog.text('settings.connection.latency', ms=12))
 answered('machine:nuc', catalog.text('settings.connection.latency', ms=18))
 answered('machine:mac', catalog.text('settings.connection.latency', ms=227))
 answered('machine:n100', catalog.text('settings.connection.machineOffline'))
+# A fresh heartbeat keeps a computer online when its ping misses the deadline.
+answered('machine:mini', catalog.text('settings.connection.machineOnline'))
 nuc = label('machine:nuc')
 assert 'NUC' in nuc and 'homenucserver' in nuc, 'The short name leads and the machine name follows'
 assert catalog.text('settings.connection.offline') in label('sync')
@@ -28,4 +30,4 @@ ui.capture('connection')
 ui.axe('tap', '--id', 'sync', '--post-delay', '.5')
 answered('sync', catalog.text('settings.connection.live'))
 ui.capture('resynced')
-print(json.dumps({'hubMs': 12, 'online': ['nuc', 'mac'], 'offline': ['n100'], 'resynced': True}))
+print(json.dumps({'hubMs': 12, 'online': ['nuc', 'mac', 'mini'], 'offline': ['n100'], 'resynced': True}))
