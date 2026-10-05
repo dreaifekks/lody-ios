@@ -118,6 +118,10 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     disposeView(); lastStartReason = reason; generation += 1; health.started(at: now); acknowledgements = 0
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
+    // The view never joins a window, and iOS suspends a detached web view by
+    // default: its reads then advance only when the heartbeat wakes it, and a
+    // machine ping's three requests miss their deadline.
+    config.preferences.inactiveSchedulingPolicy = .none
     config.userContentController.add(self, name: "dataRuntime")
     if let lan, !backgroundProbe {
       let handler = LanHubSchemeHandler(invite: lan)
