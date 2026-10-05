@@ -100,6 +100,92 @@ test('independent configuration reaches durable history before RPC, inherits on 
   }
 });
 
+test('a Role session keeps its Role while the run configuration is unchanged and records None once a control moves', async () => {
+  const calls = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      calls.push(request);
+      return { result: { accepted: true } };
+    },
+  });
+  const args = {
+    sessionId: 's1',
+    machineId: 'm1',
+    userId: 'u1',
+    cliType: 'acp',
+    agentType: 'claude',
+    text: 'Synthetic Role follow-up',
+  };
+  const finish = async () => {
+    fixture.server.getList('history').push({
+      id: `reply-${calls.length}`,
+      role: 'assistant',
+      finished: true,
+      items: [],
+    });
+    fixture.server.commit();
+    await fixture.pushUpdate();
+  };
+  try {
+    fixture.server.getList('history').push({
+      id: 'role-turn',
+      role: 'user',
+      finished: true,
+      items: [],
+      inputConfig: {
+        modeId: 'auto',
+        modelId: 'opus',
+        configOptionValues: { effort: 'high', fast: false },
+        agentRoleId: 'role-1',
+        agentRoleRevision: 4,
+      },
+    });
+    await finish();
+    assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
+    assert.equal(calls[0].params.inputConfig.agentRoleId, 'role-1');
+    assert.equal(calls[0].params.inputConfig.agentRoleRevision, 4);
+    assert.equal(
+      fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
+      'role-1',
+      'The durable turn names the Role it ran as',
+    );
+    await finish();
+    assert.equal(
+      (
+        await fixture.runtime.sendTurn({
+          ...args,
+          modelId: 'opus',
+          reasoningEffort: 'high',
+          reasoningEffortConfigId: 'effort',
+        })
+      ).state,
+      'accepted',
+      'Restating the Role values is not a change',
+    );
+    assert.equal(calls[1].params.inputConfig.agentRoleId, 'role-1');
+    await finish();
+    assert.equal(
+      (await fixture.runtime.sendTurn({ ...args, modelId: 'sonnet' })).state,
+      'accepted',
+    );
+    assert.equal(calls[2].params.inputConfig.agentRoleId, null);
+    assert.equal(calls[2].params.inputConfig.agentRoleRevision, undefined);
+    assert.equal(
+      fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
+      null,
+    );
+    await finish();
+    assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
+    assert.equal(
+      calls[3].params.inputConfig.agentRoleId,
+      null,
+      'Once None, a later turn does not return to the Role',
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
 test('reply metadata preserves each recorded model and updates when it arrives after completion', async () => {
   const { projectSession } = await loadProject();
   const doc = new LoroDoc();

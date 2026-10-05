@@ -698,12 +698,14 @@ export async function sendTurn(
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
-    const previous =
-      (state.doc.toJSON().history as any[] | undefined)?.findLast(
-        (entry) => entry.role === 'user',
-      )?.inputConfig ?? {};
-    if (previous.agentRoleId)
-      throw new Error('agent_role_requires_configuration');
+    const userTurns = (
+      (state.doc.toJSON().history as any[] | undefined) ?? []
+    ).filter((entry) => entry.role === 'user');
+    const previous = userTurns.at(-1)?.inputConfig ?? {};
+    // Lody keeps a Role sticky from the newest turn that names one, or None.
+    const roleTurn = userTurns.findLast(
+      (entry) => entry.inputConfig?.agentRoleId !== undefined,
+    )?.inputConfig;
     const configOptionValues = {
       ...(previous.configOptionValues &&
       typeof previous.configOptionValues === 'object' &&
@@ -717,21 +719,53 @@ export async function sendTurn(
       if (args.reasoningEffort === null) delete configOptionValues[id];
       else configOptionValues[id] = args.reasoningEffort;
     }
+    // An explicit pick wins; otherwise the turn inherits what the session
+    // already used, and an unset value leaves the machine on its default.
+    const modeId = args.modeId ?? previous.modeId;
+    const modelId =
+      args.modelId === null ? undefined : (args.modelId ?? previous.modelId);
+    // A Role names the run configuration it pinned. The turn keeps naming it
+    // while nothing changed and records an explicit None once the user moves a
+    // control, as Lody's composer does; the instruction belongs to the first
+    // turn only and is not replayed.
+    let agentRole: { agentRoleId?: string | null; agentRoleRevision?: number } =
+      {};
+    if (typeof roleTurn?.agentRoleId === 'string') {
+      const before =
+        previous.configOptionValues &&
+        typeof previous.configOptionValues === 'object'
+          ? previous.configOptionValues
+          : {};
+      const unchanged =
+        modeId === previous.modeId &&
+        modelId === previous.modelId &&
+        [
+          ...new Set([
+            ...Object.keys(before),
+            ...Object.keys(configOptionValues),
+          ]),
+        ].every((key) => before[key] === configOptionValues[key]);
+      agentRole = { agentRoleId: null };
+      if (unchanged) {
+        agentRole = { agentRoleId: roleTurn.agentRoleId };
+        if (Number.isInteger(roleTurn.agentRoleRevision))
+          agentRole.agentRoleRevision = roleTurn.agentRoleRevision;
+      }
+    } else if (roleTurn?.agentRoleId === null)
+      agentRole = { agentRoleId: null };
     const inputConfig = {
       cliType: args.cliType,
       agentType: args.agentType,
       prompt: text,
       inputBlocks: [...(text ? [{ type: 'text', text }] : []), ...attachments],
-      // An explicit pick wins; otherwise the turn inherits what the session
-      // already used, and an unset value leaves the machine on its default.
-      modeId: args.modeId ?? previous.modeId,
-      modelId:
-        args.modelId === null ? undefined : (args.modelId ?? previous.modelId),
+      modeId,
+      modelId,
       configOptionValues: Object.keys(configOptionValues).length
         ? configOptionValues
         : undefined,
       mcpServerIds: previous.mcpServerIds ?? [],
       taskToolsEnabled: previous.taskToolsEnabled ?? false,
+      ...agentRole,
       resume: args.resume,
     };
     const raw = state.doc.toJSON();
