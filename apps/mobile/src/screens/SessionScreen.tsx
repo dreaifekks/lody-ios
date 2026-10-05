@@ -24,7 +24,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { View as RNView, Alert } from 'react-native';
+import { View as RNView, Alert, Linking } from 'react-native';
 import { useSessionPreview } from '@/hooks/screens/useSessionPreview';
 import { useSessionSimulator } from '@/hooks/screens/useSessionSimulator';
 import { composerContext } from '@/hooks/screens/composerContext';
@@ -47,6 +47,8 @@ import {
   isSessionDeleting,
 } from '@/features/sessions/sessionActions';
 import { useSessionViewed } from '@/features/sessions/useSessionViewed';
+import { messageLinkAction } from '@/features/sessions/messageLink';
+import { requestOpenSession } from '@/features/sessions/sessionNav';
 import { sessionDebugText } from '@/features/sessions/sessionDebug';
 import { useAuth } from '@/cloud/auth/AuthProvider';
 import type { Session } from '@/models/catalog';
@@ -499,6 +501,31 @@ function View() {
     [snapshot.entries, preparedHistory],
   );
   const openFile = useOpenFile(session.id);
+  const openMessageLink = (href: string) => {
+    const action = messageLinkAction(href, {
+      sessions: catalog.sessions,
+      machineHost: account?.lan
+        ? catalog.machineTerminals?.[currentSession.machineId]?.host
+        : undefined,
+    });
+    switch (action.kind) {
+      case 'session':
+        void requestOpenSession(action.session);
+        return;
+      case 'missingSession':
+        showToast(t('chat.link.sessionMissing'), 'info');
+        return;
+      case 'file':
+        void openFile(action.path, action.line);
+        return;
+      case 'url':
+        void Linking.openURL(action.url);
+        return;
+      case 'loopback':
+        showToast(t('chat.link.loopback'), 'info');
+        return;
+    }
+  };
   const openMessageDetails = useMessageDetailsSheet(entriesJSON);
   const openProcess = useProcessSheet(entriesJSON, onActivityPress, session.id);
   const taskSource = useMemo(() => createProcessSource(entriesJSON), []);
@@ -918,6 +945,7 @@ function View() {
         onFilePress={({ nativeEvent }) =>
           void openFile(nativeEvent.path, nativeEvent.line)
         }
+        onLinkPress={({ nativeEvent }) => openMessageLink(nativeEvent.href)}
         onTurnChangesPress={({ nativeEvent }) =>
           onTurnChangesPress(nativeEvent.entryId, nativeEvent.path)
         }

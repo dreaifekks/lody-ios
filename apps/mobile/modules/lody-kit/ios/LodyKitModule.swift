@@ -723,7 +723,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
         view.performanceProbe?.stop()
         view.performanceProbe = ChatPerformanceProbe(view)
       }
-      Events("onStop", "onSteer", "onSend", "onEditMessage", "onShareImage", "onTurnInfoPress", "onActivityPress", "onFilePress", "onTurnChangesPress", "onErrorRetry", "onRetrySend", "onReconnect", "onTitlePress", "onComposerOptionChange", "onMentionBrowse", "onPreview", "onTitleMenu")
+      Events("onStop", "onSteer", "onSend", "onEditMessage", "onShareImage", "onTurnInfoPress", "onActivityPress", "onFilePress", "onLinkPress", "onTurnChangesPress", "onErrorRetry", "onRetrySend", "onReconnect", "onTitlePress", "onComposerOptionChange", "onMentionBrowse", "onPreview", "onTitleMenu")
       Prop("editableMessageId") { (view: LodyChatView, value: String) in view.editableMessageID = value }
       Prop("editedMessageId") { (view: LodyChatView, value: String) in view.editedMessageID = value }
       Prop("navigationTitle") { (view: LodyChatView, value: String) in view.setNavigationTitle(value) }

@@ -417,6 +417,8 @@
   "chat.notice.syncStopped": "Sync stopped · This may be out of date",
   "chat.empty.prompt": "What would you like to do next?\nMessages sync with your computer, so you can pick up any time.",
   "chat.empty.loading": "Fetching the conversation…",
+  "chat.link.sessionMissing": "That session is not in this workspace",
+  "chat.link.loopback": "This address is on the computer running the session, and that computer has no LAN address to reach it by",
   "create.title": "New Session",
   "create.machineConfig.loading": "Reading the computer setup…",
   "create.machineConfig.ready": "Each model remembers your effort and mode selections. New selections use full access when available.",

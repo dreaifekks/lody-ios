@@ -82,6 +82,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   let onShareImage = EventDispatcher()
   var imageSharingEnabled = false
   let onFilePress = EventDispatcher()
+  let onLinkPress = EventDispatcher()
   let onTurnChangesPress = EventDispatcher()
   let onReconnect = EventDispatcher()
   let onRetrySend = EventDispatcher()
@@ -699,9 +700,18 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     if let target = ChatFileLink(href) {
       onFilePress(["path": target.path, "line": target.line ?? 0])
-    } else if let url = URL(string: href), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+    } else if let url = URL(string: href), ["http", "https", "mailto", "tel"].contains(url.scheme?.lowercased() ?? ""),
+              !Self.isLoopback(url) {
       UIApplication.shared.open(url)
+    } else {
+      // `session://` mentions, `file://` paths and the session machine's own
+      // loopback address need the catalog to resolve.
+      onLinkPress(["href": href])
     }
+  }
+  static func isLoopback(_ url: URL) -> Bool {
+    guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host?.lowercased() else { return false }
+    return ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"].contains(host)
   }
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     // Row actions own their tap. Dismissing the keyboard first moves the row

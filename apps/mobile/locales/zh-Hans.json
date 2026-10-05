@@ -417,6 +417,8 @@
   "chat.notice.syncStopped": "同步已停止 · 内容可能不是最新",
   "chat.empty.prompt": "想继续做些什么？\n消息会与电脑同步，随时接着聊。",
   "chat.empty.loading": "正在取回对话…",
+  "chat.link.sessionMissing": "这个会话不在当前工作区里",
+  "chat.link.loopback": "这个地址在运行会话的电脑上，而这台电脑没有可从手机访问的 LAN 地址",
   "create.title": "新建会话",
   "create.machineConfig.loading": "正在读取电脑配置…",
   "create.machineConfig.ready": "每个模型会记住推理强度和权限模式；首次选择时优先使用完全访问权限。",
