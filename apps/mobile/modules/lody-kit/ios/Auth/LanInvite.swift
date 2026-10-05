@@ -18,6 +18,14 @@ struct LanInvite: Codable, Equatable, Sendable {
   let url: String
   let token: String
   let name: String?
+  /// The hub term this device follows (`lan-hub-terms.json` on a desktop);
+  /// absent until the hub moved once.
+  var term: Int? = nil
+
+  /// The same LAN at the address its hub moved to.
+  func moved(to url: String, term: Int) -> LanInvite {
+    LanInvite(url: url, token: token, name: name, term: term)
+  }
 
   var id: String { Self.digest("lody-lan-hub:workspace:\(token)") }
   var workspaceId: String { Self.workspacePrefix + id }

@@ -70,13 +70,14 @@ final class LanFileChannel: @unchecked Sendable {
 
   // MARK: - Session
 
-  /// Connects and exchanges hellos for the `files` service.
-  func open() async throws {
+  /// Connects and exchanges hellos for the `files` service, or for another
+  /// service that answers one JSON line per request, such as `hub`.
+  func open(service: String = "files") async throws {
     try await withTaskCancellationHandler {
       try await connect()
       armIdleTimeout()
       try await writeLine(["type": "hello", "version": LanTerminalProtocol.version,
-                           "machineId": machineId, "service": "files"])
+                           "machineId": machineId, "service": service])
       let line = try await readLine(maxBytes: LanFileProtocol.helloMaxBytes, deadline: LanTerminalProtocol.handshakeTimeout)
       let answer = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
       if answer?["type"] as? String == "error" {
@@ -86,9 +87,22 @@ final class LanFileChannel: @unchecked Sendable {
         throw Failure(code: "remote_unreachable", message: "another machine answered")
       }
       // A build from before services answers every hello as a terminal.
-      guard (answer?["service"] as? String ?? "terminal") == "files" else {
-        throw Failure(code: "remote_unreachable", message: "the machine serves no files; update it")
+      guard (answer?["service"] as? String ?? "terminal") == service else {
+        throw Failure(code: "remote_unreachable", message: "the machine serves no \(service); update it")
       }
+    } onCancel: { close() }
+  }
+
+  /// Sends one request line and reads its answer line, within `timeout`.
+  func request(_ value: [String: Any], timeout: TimeInterval) async throws -> [String: Any] {
+    try await withTaskCancellationHandler {
+      try await writeLine(value)
+      let line = try await readLine(maxBytes: LanFileProtocol.answerMaxBytes, deadline: timeout)
+      guard let answer = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw Self.unexpected }
+      if answer["type"] as? String == "error" {
+        throw Failure(code: "remote_unreachable", message: answer["message"] as? String ?? "the machine refused")
+      }
+      return answer
     } onCancel: { close() }
   }
 

@@ -21,6 +21,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   /// Set when the workspace is a joined LAN hub instead of Lody Cloud.
   private var lan: LanInvite?
   private var lanHandler: LanHubSchemeHandler?
+  private var followTask: Task<Void, Never>?
+  private var followedAt: TimeInterval = -.infinity
+  /// The newest projected catalog; its machine endpoints find the LAN's members
+  /// while the hub is away.
+  private var lastCatalog: String?
   private var githubTasks: [String: Task<Void, Never>] = [:]
   private var shareTasks: [String: Task<Void, Never>] = [:]
   private var health = RuntimeHealth()
@@ -68,6 +73,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         self.pingPending = false
         if self.webView == nil { self.build(reason: "foreground") }
         else { self.lanHandler?.reconnect(); self.tick() }
+        self.followHub(force: true)
       }
     })
   }
@@ -80,12 +86,14 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     self.workspace = workspace; self.owner = owner; health = RuntimeHealth()
     lan = LanHub.credential(for: workspace)
     workspaceSlug = slug; workspaceName = name
+    lastCatalog = nil
     backgrounded = UIApplication.shared.applicationState == .background
     if backgrounded { publish("background", reason: "paused") }
-    else { build(reason: "subscribe") }
+    else { build(reason: "subscribe"); followHub(force: true) }
   }
   func stop(owner: String? = nil) {
     if let owner, self.owner != owner { return }
+    followTask?.cancel(); followTask = nil; lastCatalog = nil
     workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; lan = nil; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
   }
   func status() -> [String: any Sendable] {
@@ -261,6 +269,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     case "grant": fetchGrant(view: view)
     case "catalog":
       guard let catalog = body["catalog"] as? String, catalog.utf8.count <= 12 * 1024 * 1024 else { return }
+      lastCatalog = catalog
       publish("live", reason: "catalog", extra: ["catalog": catalog, "revision": body["revision"] ?? 0])
       LiveActivities.shared.sync(
         catalogJSON: catalog,
@@ -271,8 +280,47 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       )
     case "synced":
       if phase != "live" { publish("live", reason: "synced") }
-    case "syncError": publish("offline", reason: body["reason"] as? String ?? "sync_failed")
+    case "syncError":
+      publish("offline", reason: body["reason"] as? String ?? "sync_failed")
+      followHub()
     default: break
+    }
+  }
+  /// Asks where the LAN's hub is now. A hub that was handed over or failed
+  /// over is followed with the same credential, and the runtime starts again
+  /// at its address; push registers there again.
+  private func followHub(force: Bool = false) {
+    guard let lan, !backgroundProbe, followTask == nil, force || now - followedAt >= 60 else { return }
+    followedAt = now
+    let workspace = self.workspace, members = lanMembers()
+    followTask = Task { [weak self] in
+      let next = await LanHubFollower.locate(lan, members: members)
+      guard let self, !Task.isCancelled else { return }
+      self.followTask = nil
+      guard let next, self.workspace == workspace, self.lan == lan else { return }
+      try? LanHub.save(next)
+      self.lan = next
+      guard next.url != lan.url else { return }
+      if self.backgrounded { self.disposeView(); self.publish("background", reason: "hub_moved") }
+      else { self.build(reason: "hub_moved") }
+      LanPush.shared.start()
+    }
+  }
+
+  /// The machines whose members accept connections, read only once the hub
+  /// does not answer: from the newest catalog, or before this runtime
+  /// projected one, the catalog RN restored at launch.
+  private func lanMembers() -> @Sendable () async -> [LanHubFollower.Member] {
+    let catalog = lastCatalog, key = "catalog:\(userId):\(workspace ?? "")", store = localStore
+    return {
+      let text: String?
+      if let catalog { text = catalog }
+      else {
+        text = await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+          LocalStore.queue.async { continuation.resume(returning: try? store.read(key)) }
+        }
+      }
+      return LanHubFollower.members(catalog: text)
     }
   }
   func openSession(_ id: String) {

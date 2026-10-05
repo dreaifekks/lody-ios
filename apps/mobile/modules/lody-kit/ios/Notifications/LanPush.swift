@@ -34,6 +34,8 @@ final class LanPush {
     if changed {
       hubState = .pending
       userId = invite.userId
+      // A hub that moved knows no tokens yet; the APNs token itself is unchanged.
+      sync()
     }
     UIApplication.shared.registerForRemoteNotifications()
     return true
