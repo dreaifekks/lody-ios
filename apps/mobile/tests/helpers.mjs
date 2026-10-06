@@ -42,6 +42,36 @@ export async function loadRuntime() {
   );
 }
 
+/** The projection alone, sharing the test's Loro so it can read its containers. */
+export async function loadProject() {
+  const bundle = await build({
+    entryPoints: [
+      new URL('../modules/lody-kit/data-runtime/project.ts', import.meta.url)
+        .pathname,
+    ],
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    write: false,
+    plugins: [
+      {
+        name: 'loro',
+        setup(b) {
+          b.onResolve({ filter: /^loro-crdt\/base64$/ }, () => ({
+            path: pathToFileURL(
+              createRequire(import.meta.url).resolve('loro-crdt/base64'),
+            ).href,
+            external: true,
+          }));
+        },
+      },
+    ],
+  });
+  return import(
+    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+  );
+}
+
 export function frame(bytes) {
   const result = new Uint8Array(bytes.length + 4);
   new DataView(result.buffer).setUint32(0, bytes.length, false);

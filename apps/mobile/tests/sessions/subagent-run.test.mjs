@@ -4,6 +4,8 @@ import {
   runEntries,
   runMeta,
   liveTask,
+  runComplete,
+  withRunItems,
 } from '../../src/features/sessions/subagentRun.ts';
 import { setLocale } from '../../src/lib/i18n/index.ts';
 
@@ -88,5 +90,51 @@ test('the open detail follows the live task by item id', () => {
       JSON.stringify(entries),
     ).run.state,
     'running',
+  );
+});
+
+test('a run from the session envelope is completed by the steps its sheet read', () => {
+  const latest = { ...items[2], rev: 2, text: 'Six callers, two misordered.' };
+  const envelope = task(
+    { state: 'running', items: [latest], itemCount: 3 },
+    { rev: 5 },
+  );
+  assert.equal(runComplete(envelope), false);
+  assert.equal(runComplete(task({ state: 'running', items })), true);
+  assert.equal(
+    withRunItems(envelope, undefined),
+    envelope,
+    'Before the read lands the sheet shows the latest step',
+  );
+  const read = { itemId: 'task-1', rev: 4, items };
+  const merged = withRunItems(envelope, read);
+  assert.deepEqual(
+    merged.run.items.map((item) => [item.itemId, item.text ?? item.title]),
+    [
+      ['run-0', 'Trace it.'],
+      ['grep', 'Grep verifyToken'],
+      ['run-2', 'Six callers, two misordered.'],
+    ],
+    'A newer latest step replaces its older copy',
+  );
+  assert.equal(runComplete(merged), true);
+  const next = { itemId: 'run-3', rev: 1, type: 'text', text: 'Done.' };
+  assert.deepEqual(
+    withRunItems(
+      task({ state: 'running', items: [next], itemCount: 4 }, { rev: 6 }),
+      read,
+    ).run.items.map((item) => item.itemId),
+    ['run-0', 'grep', 'run-2', 'run-3'],
+    'A step the read has not seen yet is appended',
+  );
+  assert.deepEqual(
+    withRunItems(envelope, { ...read, rev: 9 }).run.items.at(-1).text,
+    'Six callers.',
+    'An envelope older than the read never rolls a step back',
+  );
+  assert.equal(
+    withRunItems(envelope, { ...read, itemId: 'other' }),
+    envelope,
+    'A read of another task is ignored',
   );
 });

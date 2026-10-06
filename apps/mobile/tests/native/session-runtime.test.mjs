@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
-import { openTestSession, loadRuntime, frame } from '../helpers.mjs';
+import {
+  openTestSession,
+  loadRuntime,
+  loadProject,
+  frame,
+} from '../helpers.mjs';
 
 test('independent configuration reaches durable history before RPC, inherits on later turns and rejects malformed overrides', async () => {
   const calls = [];
@@ -678,24 +683,6 @@ test('send persists user before dispatch; duplicate incremental imports preserve
   delete globalThis.__sessionClient;
 });
 
-async function loadProject() {
-  const bundle = await build({
-    entryPoints: [
-      new URL('../../modules/lody-kit/data-runtime/project.ts', import.meta.url)
-        .pathname,
-    ],
-    bundle: true,
-    format: 'esm',
-    platform: 'neutral',
-    write: false,
-    external: ['loro-crdt/base64'],
-  });
-  return import(
-    'data:text/javascript;base64,' +
-      Buffer.from(bundle.outputFiles[0].text).toString('base64')
-  );
-}
-
 test('projection carries stable item ids, tool summaries, and diff counts', async () => {
   const mod = await loadProject();
 
@@ -786,8 +773,8 @@ test('projection keeps subagent task identity and live fields', async () => {
   assert.equal(item.skipTranscript, false);
 });
 
-test('projection keeps a subagent run transcript in transcript item shape', async () => {
-  const { projectSession } = await loadProject();
+test('the envelope carries the latest run step; the run sheet reads every step in transcript item shape', async () => {
+  const { projectSession, subagentRun } = await loadProject();
   const doc = new LoroDoc();
   const entry = doc.getList('history').pushContainer(new LoroMap());
   entry.set('id', 'e-run');
@@ -846,16 +833,34 @@ test('projection keeps a subagent run transcript in transcript item shape', asyn
       contextUsagePercent: 18,
     },
   );
+  assert.equal(item.run.itemCount, 3);
   assert.deepEqual(
-    item.run.items.map((i) => [i.type, i.text ?? i.title]),
+    item.run.items.map((i) => [i.type, i.text]),
+    [['text', 'Six callers.']],
+    'The session envelope carries only the latest step',
+  );
+  const full = subagentRun(doc, 'e-run', item.itemId, task);
+  assert.deepEqual(
+    full.items.map((i) => [i.type, i.text ?? i.title]),
     [
       ['thought', 'Trace verifyToken.'],
       ['tool_call', 'Grep verifyToken'],
       ['text', 'Six callers.'],
     ],
   );
-  assert.equal(item.run.items[1].itemId, 'grep-1');
-  const before = item.rev;
+  assert.equal(full.items[1].itemId, 'grep-1');
+  assert.equal(full.items.at(-1).rev, item.run.items[0].rev);
+  // A step before the latest one still moves the task's rev.
+  tool.set('status', 'failed');
+  doc.commit();
+  const middle = projectSession(doc, 'live').entries[0].items[0];
+  assert.deepEqual(middle.run.items, item.run.items);
+  assert.ok(middle.rev > item.rev);
+  assert.equal(
+    subagentRun(doc, 'e-run', item.itemId, task).items[1].status,
+    'failed',
+  );
+  const before = middle.rev;
   doc
     .getList('history')
     .get(0)
@@ -868,7 +873,7 @@ test('projection keeps a subagent run transcript in transcript item shape', asyn
     .insert(12, ' Two misorder the cookie.');
   doc.commit();
   const next = projectSession(doc, 'live').entries[0].items[0];
-  assert.equal(next.run.items[2].text, 'Six callers. Two misorder the cookie.');
+  assert.equal(next.run.items[0].text, 'Six callers. Two misorder the cookie.');
   assert.ok(next.rev > before);
 });
 

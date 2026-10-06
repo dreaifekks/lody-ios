@@ -12,6 +12,7 @@ import {
   runMeta,
   type SubagentTask,
 } from '@/features/sessions/subagentRun';
+import { useSubagentRun } from '@/features/sessions/useSubagentRun';
 import { Screen } from '@/ui/Screen';
 import { AppText } from '@/ui/AppText';
 import { Button } from '@/ui/Button';
@@ -20,6 +21,8 @@ import type { createProcessSource } from './ProcessScreen';
 
 export type { SubagentTask };
 export type SubagentTaskParams = SubagentTask & {
+  /** With `entryId`, lets the sheet read every step of a live run. */
+  sessionId?: string;
   entryId?: string;
   source?: ReturnType<typeof createProcessSource>;
   onStop?: (task: SubagentTask) => void;
@@ -48,18 +51,32 @@ function View() {
   const source = params.source ?? noSource;
   const json = useSyncExternalStore(source.subscribe, source.getSnapshot);
   const task = params.entryId ? liveTask(params, params.entryId, json) : params;
-  if (task.run) return <RunView task={task} onStop={params.onStop} />;
+  if (task.run)
+    return (
+      <RunView
+        task={task}
+        target={
+          params.sessionId && params.entryId
+            ? { sessionId: params.sessionId, entryId: params.entryId }
+            : undefined
+        }
+        onStop={params.onStop}
+      />
+    );
   return <SummaryView task={task} />;
 }
 
 function RunView({
-  task,
+  task: envelopeTask,
+  target,
   onStop,
 }: {
   task: SubagentTask;
+  target?: { sessionId: string; entryId: string };
   onStop?: (task: SubagentTask) => void;
 }) {
   const colors = usePalette();
+  const task = useSubagentRun(envelopeTask, target);
   const run = task.run!;
   const entriesJSON = JSON.stringify(runEntries(task));
   const openProcess = useProcessSheet(entriesJSON, () => {});

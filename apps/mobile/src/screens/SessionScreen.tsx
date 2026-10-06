@@ -466,7 +466,11 @@ function View() {
     const item = entry?.items.find((i) => i.itemId === itemId);
     if (
       openAgentError(item) ||
-      openSubagentTask(item, { entryId, source: taskSource })
+      openSubagentTask(item, {
+        sessionId: session.id,
+        entryId,
+        source: taskSource,
+      })
     )
       return;
     if (snapshot.status !== 'live') {

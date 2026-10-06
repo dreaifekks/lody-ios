@@ -8,7 +8,10 @@ import type { ItemSummary } from '@/models/session';
 
 export function openSubagentTask(
   item: ItemSummary | undefined,
-  live?: Pick<SubagentTaskParams, 'entryId' | 'source' | 'onStop'>,
+  live?: Pick<
+    SubagentTaskParams,
+    'sessionId' | 'entryId' | 'source' | 'onStop'
+  >,
 ): boolean {
   if (item?.type !== 'subagent_task') return false;
   void present(SubagentTaskScreen, { ...(item as SubagentTask), ...live });

@@ -3,7 +3,14 @@ import {
   type TurnMetadata,
 } from '../../../src/cloud/turnMetadata.ts';
 import { executionProjection, type SteerReceipt } from './execution';
-import type { LoroDoc, LoroList, LoroMap } from 'loro-crdt/base64';
+import {
+  isContainer,
+  type ContainerID,
+  type LoroDoc,
+  type LoroList,
+  type LoroMap,
+  type LoroMovableList,
+} from 'loro-crdt/base64';
 import {
   parseQuestionMeta,
   samePermissionOutcome,
@@ -78,7 +85,12 @@ export type SubagentRunSummary = {
   totalTokens?: number;
   toolCallCount?: number;
   contextUsagePercent?: number;
+  /**
+   * The session envelope carries only the latest step, with `itemCount` set to
+   * the run's length; `subagentRun` reads every step when a sheet asks for it.
+   */
   items: ItemSummary[];
+  itemCount?: number;
 };
 
 export type EntrySummary = TurnMetadata & {
@@ -119,21 +131,148 @@ export type Envelope = {
 };
 
 let revision = 0;
+type CachedEntry = {
+  /** The entry as `lightEntry` reads it, before steer links are applied. */
+  base: any;
+  value?: EntrySummary & { userTurnId?: string };
+  /** What `value` was summarized with besides the entry itself. */
+  index: number;
+  link: string;
+  pending: string;
+};
 type Projection = {
   revs: Map<string, { rev: number; fingerprint: string }>;
-  entries: Map<
-    string,
-    { fingerprint: string; value: EntrySummary & { userTurnId?: string } }
-  >;
+  /** History entries by container: a moved or re-inserted entry is a new one. */
+  entries: Map<ContainerID, CachedEntry>;
+  /** Entries a change reached since the last projection. */
+  dirty: Set<ContainerID>;
+  /** Every cached entry must be read again. */
+  stale: boolean;
+  unsubscribe: () => void;
 };
+const HISTORY = 'history';
 const projections = new WeakMap<LoroDoc, Projection>();
 function projectionFor(doc: LoroDoc) {
-  let projection = projections.get(doc);
-  if (!projection) {
-    projection = { revs: new Map(), entries: new Map() };
-    projections.set(doc, projection);
-  }
+  const existing = projections.get(doc);
+  if (existing) return existing;
+  const history = doc.getList(HISTORY);
+  const projection: Projection = {
+    revs: new Map(),
+    entries: new Map(),
+    dirty: new Set(),
+    stale: true,
+    unsubscribe: () => {},
+  };
+  // Loro delivers a batch synchronously at the end of its commit or import, so
+  // the paths index the history as it is now. Anything unexpected re-reads all.
+  projection.unsubscribe = doc.subscribe((batch) => {
+    if (batch.by === 'checkout') {
+      projection.stale = true;
+      return;
+    }
+    for (const event of batch.events) {
+      const [root, index] = event.path;
+      // Inserting or deleting entries changes only which containers are read.
+      if (root !== HISTORY || event.path.length < 2) continue;
+      const entry = typeof index === 'number' ? history.get(index) : undefined;
+      if (isContainer(entry)) projection.dirty.add(entry.id);
+      else projection.stale = true;
+    }
+  });
+  projections.set(doc, projection);
   return projection;
+}
+/** Stops following a replica that is being discarded. */
+export function releaseProjection(doc: LoroDoc) {
+  projections.get(doc)?.unsubscribe();
+  projections.delete(doc);
+}
+
+const plain = (value: unknown): any =>
+  isContainer(value) ? (value as { toJSON(): unknown }).toJSON() : value;
+// By kind rather than `instanceof`: a test may hold another Loro instance.
+const kindOf = (value: unknown) =>
+  isContainer(value) ? value.kind() : undefined;
+const isMap = (value: unknown): value is LoroMap => kindOf(value) === 'Map';
+const isList = (value: unknown): value is LoroList | LoroMovableList =>
+  kindOf(value) === 'List' || kindOf(value) === 'MovableList';
+// Provider payloads can hold whole files and images, and no summary reads them.
+const PAYLOAD_KEYS = new Set(['_meta', 'rawInput', 'rawOutput']);
+/** A content block keeps only what summaries read: diffs whole, others by type. */
+function lightBlock(block: unknown) {
+  if (isMap(block)) {
+    const type = plain(block.get('type'));
+    return type === 'diff' ? block.toJSON() : { type };
+  }
+  const value = block as any;
+  return value?.type === 'diff' ? value : { type: value?.type };
+}
+function lightContent(value: unknown) {
+  if (isList(value)) {
+    const blocks = [];
+    for (let i = 0; i < value.length; i++)
+      blocks.push(lightBlock(value.get(i)));
+    return blocks;
+  }
+  return Array.isArray(value) ? value.map(lightBlock) : plain(value);
+}
+function lightItems(value: unknown) {
+  if (isList(value)) {
+    const items = [];
+    for (let i = 0; i < value.length; i++) items.push(lightItem(value.get(i)));
+    return items;
+  }
+  return Array.isArray(value) ? value.map(lightItem) : plain(value);
+}
+function lightRun(run: unknown) {
+  if (isMap(run)) {
+    const value: Record<string, unknown> = {};
+    for (const key of run.keys())
+      value[key] =
+        key === 'items' ? lightItems(run.get(key)) : plain(run.get(key));
+    return value;
+  }
+  const value = run as any;
+  return value && typeof value === 'object' && 'items' in value
+    ? { ...value, items: lightItems(value.items) }
+    : value;
+}
+/** An item without provider payloads or the bodies of its content blocks. */
+function lightItem(item: unknown): any {
+  if (isMap(item)) {
+    const value: Record<string, unknown> = {};
+    for (const key of item.keys()) {
+      if (PAYLOAD_KEYS.has(key)) continue;
+      const field = item.get(key);
+      if (key === 'content') value.content = lightContent(field);
+      else if (key === 'run') value.run = lightRun(field);
+      else value[key] = plain(field);
+    }
+    return value;
+  }
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+  const value: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(item)) {
+    if (PAYLOAD_KEYS.has(key)) continue;
+    if (key === 'content') value.content = lightContent(field);
+    else if (key === 'run') value.run = lightRun(field);
+    else value[key] = field;
+  }
+  return value;
+}
+/** One history entry as every projection reads it, at a fraction of `toJSON`. */
+function lightEntry(entry: unknown): any {
+  if (isMap(entry)) {
+    const value: Record<string, unknown> = {};
+    for (const key of entry.keys())
+      value[key] =
+        key === 'items' ? lightItems(entry.get(key)) : plain(entry.get(key));
+    return value;
+  }
+  const value = entry as any;
+  return value && typeof value === 'object' && 'items' in value
+    ? { ...value, items: lightItems(value.items) }
+    : value;
 }
 function bump(projection: Projection, key: string, fingerprint: string) {
   const previous = projection.revs.get(key);
@@ -346,8 +485,14 @@ function summarizeItem(
         raw.skipTranscript == null ? undefined : Boolean(raw.skipTranscript),
       run: summarizeRun(projection, raw.run, key),
     };
+    // Every step counts toward the rev, so an open run sheet reads it again.
     summary.rev = bump(projection, key, JSON.stringify(summary));
-    return summary as ItemSummary;
+    const run = summary.run;
+    if (!run) return summary as ItemSummary;
+    return {
+      ...summary,
+      run: { ...run, items: run.items.slice(-1), itemCount: run.items.length },
+    } as ItemSummary;
   }
 
   return { itemId, rev: bump(projection, key, type), type } as ItemSummary;
@@ -378,6 +523,23 @@ function summarizeRun(
       summarizeItem(projection, item, `${key}/run`, `run-${index}`),
     ) as ItemSummary[],
   };
+}
+
+/**
+ * Every step of the run a `subagent_task` item holds, for the sheet that shows
+ * it. The session envelope carries only the latest step.
+ */
+export function subagentRun(
+  doc: LoroDoc,
+  entryId: string,
+  itemId: string,
+  item: LoroMap,
+): SubagentRunSummary | undefined {
+  return summarizeRun(
+    projectionFor(doc),
+    lightRun(item.get('run')),
+    `${entryId}/${itemId}`,
+  );
 }
 
 function summarizeEntry(
@@ -413,9 +575,6 @@ function summarizeEntry(
       }),
     };
   }
-  const fingerprint = JSON.stringify(entry);
-  const cached = projection.entries.get(id);
-  if (cached && cached.fingerprint === fingerprint) return cached.value;
   const container = history.get(index) as LoroMap | undefined;
   const items =
     container && typeof (container as any).get === 'function'
@@ -475,10 +634,25 @@ function summarizeEntry(
     items: summarizedItems,
     ...(fileDiffs.length ? { fileDiffs } : {}),
   };
-  projection.entries.set(id, { fingerprint, value });
   return value;
 }
 
+function pendingFingerprint(
+  pendingOutcomes: ReadonlyMap<string, unknown> | undefined,
+  entryId: string,
+) {
+  if (!pendingOutcomes?.size) return '';
+  let fingerprint = '';
+  for (const [key, outcome] of pendingOutcomes)
+    if (key.startsWith(`${entryId}/`))
+      fingerprint += `${key}=${JSON.stringify(outcome)};`;
+  return fingerprint;
+}
+
+/**
+ * Projects the replica for the chat. Only entries a change reached since the
+ * previous call are read again, and without provider payloads.
+ */
 export function projectSession(
   doc: LoroDoc,
   status: string,
@@ -486,7 +660,33 @@ export function projectSession(
   pendingOutcomes?: ReadonlyMap<string, unknown>,
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
 ): Envelope {
-  const history = doc.getList('history') as LoroList;
+  return project(doc, false, status, reason, pendingOutcomes, steerReceipts);
+}
+
+/**
+ * Projects every entry again from its complete JSON: the reference that the
+ * incremental `projectSession` must equal.
+ */
+export function projectSessionFull(
+  doc: LoroDoc,
+  status: string,
+  reason?: string,
+  pendingOutcomes?: ReadonlyMap<string, unknown>,
+  steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+): Envelope {
+  return project(doc, true, status, reason, pendingOutcomes, steerReceipts);
+}
+
+function project(
+  doc: LoroDoc,
+  full: boolean,
+  status: string,
+  reason?: string,
+  pendingOutcomes?: ReadonlyMap<string, unknown>,
+  steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+): Envelope {
+  const projection = projectionFor(doc);
+  const history = doc.getList(HISTORY) as LoroList;
   const links = doc.getMap('lodySteerLinks').toJSON() as Record<string, any>;
   const configFor = (id: string, input: any) => {
     const link = links[id];
@@ -503,10 +703,62 @@ export function projectSession(
       _lodySteerMode: link.mode,
     };
   };
-  const raw = (history.toJSON() as any[]).map((entry) => ({
-    ...entry,
-    inputConfig: configFor(entry.id, entry.inputConfig),
-  }));
+  const reuse = !full && !projection.stale;
+  const present = new Set<ContainerID>();
+  const raw: any[] = [];
+  const summarized: (EntrySummary & { userTurnId?: string })[] = [];
+  for (let index = 0; index < history.length; index++) {
+    const container = history.get(index);
+    const key = isContainer(container) ? container.id : undefined;
+    let cached =
+      key && reuse && !projection.dirty.has(key)
+        ? projection.entries.get(key)
+        : undefined;
+    if (!cached) {
+      cached = {
+        base: full ? plain(container) : lightEntry(container),
+        index: -1,
+        link: '',
+        pending: '',
+      };
+      if (key) projection.entries.set(key, cached);
+    }
+    if (key) present.add(key);
+    const base = cached.base;
+    const entry = {
+      ...base,
+      inputConfig: configFor(base?.id, base?.inputConfig),
+    };
+    raw.push(entry);
+    // A summary also depends on the entry's place, steer link and unsent answers.
+    const link = JSON.stringify(links[base?.id]) ?? '';
+    const pending = pendingFingerprint(
+      pendingOutcomes,
+      String(base?.id ?? identityAt(history, index)),
+    );
+    if (
+      !cached.value ||
+      cached.index !== index ||
+      cached.link !== link ||
+      cached.pending !== pending
+    ) {
+      cached.value = summarizeEntry(
+        projection,
+        history,
+        entry,
+        index,
+        pendingOutcomes,
+      );
+      cached.index = index;
+      cached.link = link;
+      cached.pending = pending;
+    }
+    summarized.push(cached.value);
+  }
+  for (const key of projection.entries.keys())
+    if (!present.has(key)) projection.entries.delete(key);
+  projection.dirty.clear();
+  projection.stale = false;
   const input = raw.findLast((entry) => entry?.role === 'user')?.inputConfig;
   const options =
     input?.configOptionValues && typeof input.configOptionValues === 'object'
@@ -519,9 +771,6 @@ export function projectSession(
   );
   const effort = [options.reasoning_effort, options.effort].find(
     (value) => typeof value === 'string',
-  );
-  const summarized = raw.map((entry, index) =>
-    summarizeEntry(projectionFor(doc), history, entry, index, pendingOutcomes),
   );
 
   // A daemon history-sync timeout can place a concurrent reply before its input.
@@ -620,12 +869,7 @@ export function projectSession(
               { type: 'text', text: item.task },
             ]
           ).map((block: any, index: number) =>
-            summarizeItem(
-              projectionFor(doc),
-              block,
-              item.userTurnId,
-              `queue:${index}`,
-            ),
+            summarizeItem(projection, block, item.userTurnId, `queue:${index}`),
           ),
         })),
     ],

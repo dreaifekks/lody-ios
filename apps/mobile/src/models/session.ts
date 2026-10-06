@@ -61,7 +61,10 @@ export type ItemSummary =
         totalTokens?: number;
         toolCallCount?: number;
         contextUsagePercent?: number;
+        /** In the session envelope, only the latest step. */
         items: ItemSummary[];
+        /** The run's length when `items` holds only its latest step. */
+        itemCount?: number;
       };
     }
   | { itemId: string; rev: number; type: string };

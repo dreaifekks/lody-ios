@@ -2,7 +2,13 @@ import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
 import { decodeFrames, encodeFrame } from '../decoder/frames';
-import { identityAt, itemRev, projectSession } from './project';
+import {
+  identityAt,
+  itemRev,
+  projectSession,
+  releaseProjection,
+  subagentRun,
+} from './project';
 import type { SteerReceipt } from './execution';
 import { machineRpc, type RpcReply } from './machine-rpc';
 import { retrySessionRead } from './session-read';
@@ -22,7 +28,7 @@ import {
   questionOutcome,
   samePermissionOutcome,
 } from '../../../src/cloud/permissionQuestions.ts';
-export { projectSession } from './project';
+export { projectSession, projectSessionFull } from './project';
 
 type Grant = { token: string; gatewayBaseUrl: string };
 export const MAX_BACKGROUND_SESSION_SYNCS = 3;
@@ -92,14 +98,30 @@ function backgroundStatus(
     return 'waiting';
   return 'receiving';
 }
+/** The newest reply to `turnId`, read field by field from the end of history. */
+function latestReply(state: SessionState, turnId: string) {
+  const history = state.doc.getList('history');
+  for (let i = history.length - 1; i >= 0; i--) {
+    const entry = history.get(i);
+    const get = (key: string) =>
+      entry instanceof LoroMap
+        ? plainField(entry.get(key))
+        : (entry as any)?.[key];
+    if (get('role') === 'assistant' && get('userTurnId') === turnId)
+      return { finished: get('finished') };
+  }
+  return undefined;
+}
+function plainField(value: unknown): any {
+  if (value instanceof LoroText) return value.toString();
+  return value instanceof LoroMap || value instanceof LoroList
+    ? value.toJSON()
+    : value;
+}
 function backgroundProgress(state: SessionState) {
   const work = state.backgroundWork;
   if (!work) return undefined;
-  const history = state.doc.getList('history').toJSON() as any[];
-  const reply = history.findLast(
-    (entry) => entry?.role === 'assistant' && entry.userTurnId === work.turnId,
-  );
-  const status = backgroundStatus(state, reply);
+  const status = backgroundStatus(state, latestReply(state, work.turnId));
   if (['completed', 'waiting', 'failed'].includes(status))
     state.backgroundWork = undefined;
   return { id: work.id, state: status };
@@ -200,6 +222,7 @@ function evict(state: SessionState) {
   }
   clearTimeout(state.pending);
   state.controller.abort();
+  releaseProjection(state.doc);
   sessions.delete(state.id);
 }
 function trimSessions() {
@@ -247,6 +270,7 @@ export function stopSessions() {
   for (const state of sessions.values()) {
     clearTimeout(state.pending);
     state.controller.abort();
+    releaseProjection(state.doc);
   }
   sessions.clear();
   reserved.clear();
@@ -1368,11 +1392,19 @@ export async function itemDetail(args: {
   entryId: string;
   itemId: string;
   cursor?: string;
+  /** Reads every step of a sub-agent run instead of content blocks. */
+  run?: boolean;
 }) {
   if (!active || active.id !== args.sessionId || !active.ready)
     throw new Error('session_not_ready');
   const item = locateItem(args.entryId, args.itemId);
   if (!item) throw new Error('item_not_found');
+  if (args.run)
+    return {
+      itemId: args.itemId,
+      rev: itemRev(active.doc, args.entryId, args.itemId),
+      run: subagentRun(active.doc, args.entryId, args.itemId, item) ?? null,
+    };
   const raw: any = item.toJSON();
   const content: unknown[] = Array.isArray(raw.content) ? raw.content : [];
   const start = Math.max(0, Number(args.cursor ?? 0) || 0);
