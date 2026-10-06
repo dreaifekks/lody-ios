@@ -167,6 +167,14 @@ public final class LodyKitModule: Module, @unchecked Sendable {
   }
 
   @JS
+  func readVoicePreferences() -> String { VoicePreferences.json }
+
+  @JS
+  func saveVoicePreferences(enabled: Bool, configId: String, machineId: String) {
+    Task { @MainActor in VoicePreferences.save(enabled: enabled, configId: configId, machineId: machineId) }
+  }
+
+  @JS
   func saveQueuedMessageBehavior(value: String) {
     UserDefaults.standard.set(value == "guide" ? "guide" : "queue", forKey: "queuedMessageBehavior")
   }
@@ -454,6 +462,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     AsyncFunction("localProjects") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("localProjects", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("remoteSettings") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("remoteSettings", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("machineStatus") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("machineStatus", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("voiceAgents") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("voiceAgents", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("createSession") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.createSession(payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("workspaceBillingEntitlement") { (workspace: String, user: String, promise: Promise) in
       MainActor.assumeIsolated { self.dataRuntime.workspaceBillingEntitlement(workspace: workspace, user: user, promise: promise) }

@@ -147,6 +147,12 @@ const nativeComponents = [
     url: 'https://github.com/ashleymills/Reachability.swift',
     file: 'modules/lody-kit/licenses/ReachabilitySwift-LICENSE.txt',
   },
+  {
+    name: 'WebRTC',
+    license: 'BSD-3-Clause',
+    url: 'https://github.com/stasel/WebRTC',
+    file: 'modules/lody-kit/licenses/WebRTC-LICENSE.txt',
+  },
 ];
 
 /** Npm packages linked natively but not reachable from the declared graph. */

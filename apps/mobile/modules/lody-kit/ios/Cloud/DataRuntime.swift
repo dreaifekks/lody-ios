@@ -521,6 +521,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
   }
   var onLan: Bool { lan != nil }
+  /// The workspace the runtime replicates, for native features that address its machines.
+  var workspaceId: String? { workspace }
 
   /// The LAN machine that keeps a session's files: the session's own machine,
   /// or `machineId` for a session the runtime has not seen yet.
@@ -686,6 +688,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     if method == "sessionSharing" { timeout = 130 }
     if method == "sessionPreview" { timeout = 330 }
     if method == "iosSimulatorControl" { timeout = 100 }
+    // A voice start may first download the machine's Codex runtime.
+    if method == "machineVoice" { timeout = 190 }
     if method == "localProjects" && args["action"] as? String == "history" { timeout = 130 }
     // Catalog expansion precedes the durable send and has its own bounded read.
     if method == "sendTurn", let text = args["text"] as? String,

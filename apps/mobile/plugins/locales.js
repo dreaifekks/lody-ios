@@ -8,6 +8,7 @@ const INFO_KEYS = {
   'ios.info.cameraUsage': 'NSCameraUsageDescription',
   'ios.info.photoLibraryUsage': 'NSPhotoLibraryUsageDescription',
   'ios.info.localNetworkUsage': 'NSLocalNetworkUsageDescription',
+  'ios.info.microphoneUsage': 'NSMicrophoneUsageDescription',
 };
 
 function localesDir(projectRoot) {

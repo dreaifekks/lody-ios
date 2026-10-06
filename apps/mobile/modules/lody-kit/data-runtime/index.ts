@@ -37,7 +37,14 @@ import {
   revokePreview,
 } from './preview';
 import { machineRpc } from './machine-rpc';
-import { remoteSettings } from './settings';
+import { openSettings, remoteSettings } from './settings';
+import {
+  machineHostsVoice,
+  sharedVoiceAgent,
+  voiceAgentOptions,
+  voiceReply,
+  type VoiceAgent,
+} from './voice';
 import type { SettingsRequest } from '../../../src/models/settings.ts';
 import {
   fileDiff,
@@ -770,6 +777,67 @@ Object.assign(globalThis, {
       )
         throw new Error('machine_ping_failed');
       return { ms: Math.round(performance.now() - sentAt) };
+    },
+    /** Codex agents that can host experimental voice, and the workspace's choice. */
+    async voiceAgents(args: { workspaceId: string }) {
+      if (args.workspaceId !== workspace || !metaReplica)
+        throw new Error('metadata_not_ready');
+      const { flock } = await openSettings(
+        `${workspace}:wf:workspace`,
+        getGrant,
+        AbortSignal.timeout(30000),
+      );
+      return {
+        shared: sharedVoiceAgent(flock.scan()),
+        agents: voiceAgentOptions(metaReplica.flock, machineReplicas),
+      };
+    },
+    /**
+     * Forwards one `machine/voice` request. A start without a device choice
+     * uses the workspace's agent; later requests name the machine that answered it.
+     */
+    async machineVoice(args: {
+      workspaceId: string;
+      request: { action: string } & Record<string, unknown>;
+      agent?: VoiceAgent | null;
+      machineId?: string;
+    }) {
+      if (args.workspaceId !== workspace || !metaReplica)
+        throw new Error('metadata_not_ready');
+      const { request } = args;
+      let machineId = args.machineId;
+      let params: Record<string, unknown> = request;
+      if (request.action === 'start') {
+        let agent = args.agent;
+        if (!agent) {
+          const { flock } = await openSettings(
+            `${workspace}:wf:workspace`,
+            getGrant,
+            AbortSignal.timeout(30000),
+          );
+          agent = sharedVoiceAgent(flock.scan());
+        }
+        if (!agent) return { success: false, error: 'voice_no_agent' };
+        machineId = agent.machineId;
+        params = { ...request, configId: agent.configId };
+      }
+      if (
+        !machineId ||
+        !(catalogs.get('meta')?.machineIds ?? []).includes(machineId)
+      )
+        return { success: false, error: 'machine_unavailable' };
+      if (!machineHostsVoice(metaReplica.flock, machineId))
+        return { success: false, error: 'voice_unsupported' };
+      // A start may first download the Codex runtime; a poll waits up to its own limit.
+      const reply = await machineRpc(
+        workspace,
+        machineId,
+        'machine/voice',
+        params,
+        getGrant,
+        AbortSignal.timeout(request.action === 'start' ? 180_000 : 30_000),
+      );
+      return { ...voiceReply(reply), machineId };
     },
     /**
      * Development probe: reports the shape of the machine replicas so the client

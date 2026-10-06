@@ -88,6 +88,13 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   saveDarkBackground(value: string): void;
   readonly initialQueuedMessageBehavior: string;
   saveQueuedMessageBehavior(value: string): void;
+  readVoicePreferences(): string;
+  saveVoicePreferences(
+    enabled: boolean,
+    configId: string,
+    machineId: string,
+  ): void;
+  voiceAgents(payload: string): Promise<string>;
   readonly initialQuickRepliesJSON: string;
   saveQuickReplies(json: string): void;
   readInboxExpansion(): Record<string, boolean>;

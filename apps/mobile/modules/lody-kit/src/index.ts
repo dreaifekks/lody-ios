@@ -254,3 +254,10 @@ export { NativeSessionShare } from './session-share/NativeSessionShare';
 
 export { SimulatorView, type SimulatorSource } from './simulator/SimulatorView';
 export { TerminalView, type TerminalState } from './terminal/TerminalView';
+export {
+  readVoicePreferences,
+  saveVoicePreferences,
+  voiceAgentsRaw,
+  type VoiceAgent,
+  type VoicePreferences,
+} from './voice/Voice';

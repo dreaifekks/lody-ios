@@ -31,6 +31,8 @@ import {
   isAccentColor,
 } from '@/lib/theme/appearance';
 import { useQueuedMessageBehavior } from '@/features/settings/queued-message-behavior';
+import { useVoiceSettings } from '@/features/settings/useVoiceSettings';
+import { useCatalog } from '@/cloud/catalog/CatalogProvider';
 import { relativeTime } from '@/ui/time';
 import { showToast } from '@/ui/toast';
 import { definePage } from '@/lib/presentation';
@@ -67,6 +69,8 @@ function View() {
   const { queuedMessageBehavior, setQueuedMessageBehavior } =
     useQueuedMessageBehavior();
   const connection = useConnection();
+  const { selected } = useCatalog();
+  const voice = useVoiceSettings(auth.account ? selected?.id : undefined);
   const hubLatency = useHubLatency(
     auth.account?.lan ? connectionService.hubLatency : undefined,
   );
@@ -216,6 +220,7 @@ function View() {
         },
       ],
     },
+    voice.section(!!auth.account),
     {
       id: 'about',
       header: t('settings.section.about'),
@@ -321,6 +326,10 @@ function View() {
           (actionId === 'queue' || actionId === 'guide')
         )
           setQueuedMessageBehavior(actionId);
+        if (id === 'voice-agent') voice.choose(actionId);
+      }}
+      onRowToggle={({ nativeEvent: { id, value } }) => {
+        if (id === 'voice-dictation') voice.setEnabled(value);
       }}
       onRowPress={({ nativeEvent }) => {
         if (nativeEvent.id.startsWith('remote-')) {
