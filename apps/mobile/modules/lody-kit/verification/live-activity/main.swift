@@ -226,18 +226,20 @@ let labels = LiveActivityCatalog.Labels(
   lastSync: "上次同步",
   openHint: "点按处理"
 )
+// Live sessions carry a heartbeat stamped just now.
+let seen = Int(Date().timeIntervalSince1970 * 1000)
 let catalog = LiveActivityCatalog.state(catalogJSON: """
 {
   "projects": [],
   "machineIds": ["m1"],
   "sessions": [
-    { "id": "run", "title": "Build the widget", "status": "running", "lastMessageAt": 1757000002000, "agentType": "codex" },
-    { "id": "await", "title": "Approve force push", "status": "running", "awaitingUserSince": 1757000003000, "lastMessageAt": 1757000001000, "agentType": "claude" },
+    { "id": "run", "title": "Build the widget", "status": "running", "lastMessageAt": 1757000002000, "lastRunningSeen": \(seen), "agentType": "codex" },
+    { "id": "await", "title": "Approve force push", "status": "running", "awaitingUserSince": 1757000003000, "lastMessageAt": 1757000001000, "lastRunningSeen": \(seen), "agentType": "claude" },
     { "id": "idle", "title": "Old thread", "status": "completed", "lastMessageAt": 1757000000000, "agentType": "claude" },
-    { "id": "archived", "title": "Archived but running", "status": "running", "archived": true, "lastMessageAt": 1757000006000, "agentType": "claude" },
-    { "id": "queued", "title": "Waiting to run", "status": "queued", "lastMessageAt": 1757000004000, "cliType": "gemini" },
-    { "id": "nameless", "title": "No agent", "status": "initializing", "lastMessageAt": 1757000005000 },
-    { "id": "fresh", "title": "Never spoke", "status": "queued", "agentType": "claude" }
+    { "id": "archived", "title": "Archived but running", "status": "running", "archived": true, "lastMessageAt": 1757000006000, "lastRunningSeen": \(seen), "agentType": "claude" },
+    { "id": "queued", "title": "Waiting to run", "status": "queued", "lastMessageAt": 1757000004000, "lastRunningSeen": \(seen), "cliType": "gemini" },
+    { "id": "nameless", "title": "No agent", "status": "initializing", "lastMessageAt": 1757000005000, "lastRunningSeen": \(seen) },
+    { "id": "fresh", "title": "Never spoke", "status": "queued", "lastRunningSeen": \(seen), "agentType": "claude" }
   ]
 }
 """, labels: labels)
@@ -285,17 +287,52 @@ print("PASS: widget copy travels in the state and older payloads fall back")
 
 print("PASS: catalog mapping skips idle sessions, ranks awaiting first, and maps agent glyphs")
 
-let twoRunning = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"running","lastMessageAt":1},{"id":"b","status":"running","lastMessageAt":2}]}"#, labels: labels)
+let twoRunning = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"running","lastMessageAt":1,"lastRunningSeen":\#(seen)},{"id":"b","status":"running","lastMessageAt":2,"lastRunningSeen":\#(seen)}]}"#, labels: labels)
 precondition(twoRunning.showsOverview && twoRunning.activeCount == 2)
-let updatedRunning = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"b","status":"running","lastMessageAt":3},{"id":"a","status":"running","lastMessageAt":4}]}"#, labels: labels)
+let updatedRunning = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"b","status":"running","lastMessageAt":3,"lastRunningSeen":\#(seen)},{"id":"a","status":"running","lastMessageAt":4,"lastRunningSeen":\#(seen)}]}"#, labels: labels)
 precondition(twoRunning.visibleItems.map(\.id) == updatedRunning.visibleItems.map(\.id), "stream updates never shuffle session links")
-let oneRemaining = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"completed","awaitingUserSince":1},{"id":"b","status":"running"},{"id":"new","status":"pending"}]}"#, labels: labels)
+let oneRemaining = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"completed","awaitingUserSince":1},{"id":"b","status":"running","lastRunningSeen":\#(seen)},{"id":"new","status":"pending"}]}"#, labels: labels)
 precondition(oneRemaining.focus?.id == "b" && !oneRemaining.showsOverview && oneRemaining.activeCount == 1, "completion removes stale awaiting state; pending is idle")
 let allFinished = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"completed"},{"id":"b","status":"error"}]}"#, labels: labels)
 precondition(!allFinished.isActive && allFinished.focus == nil && allFinished.dismissalDate(from: now) == now.addingTimeInterval(60))
 precondition(pushToStart.route(for: twoRunning).path == "/activity")
 precondition(pushToStart.route(for: oneRemaining).path == "/ws1/sessions/b")
 print("PASS: multiple turns, stable links, partial completion, stale awaiting cleanup, all-finished dismissal and overview routing")
+
+// Lody's isSessionActiveWithHeartbeat: a status only counts while its machine
+// stamped lastRunningSeen within HEARTBEAT_TTL_MS (180 s).
+let heartbeatNow = Date(timeIntervalSince1970: 1_800_000_000)
+let heartbeatMs = heartbeatNow.timeIntervalSince1970 * 1000
+let dropped = LiveActivityCatalog.state(catalogJSON: """
+{ "sessions": [
+  { "id": "live", "status": "running", "lastRunningSeen": \(heartbeatMs - 179_000) },
+  { "id": "gone", "status": "running", "lastRunningSeen": \(heartbeatMs - 180_000) },
+  { "id": "never", "status": "running" },
+  { "id": "ask-live", "status": "requestPermission", "lastRunningSeen": \(heartbeatMs - 10_000) },
+  { "id": "ask-gone", "status": "requestPermission", "awaitingUserSince": \(heartbeatMs - 600_000), "lastRunningSeen": \(heartbeatMs - 600_000) },
+  { "id": "await-gone", "status": "running", "awaitingUserSince": \(heartbeatMs - 1_000), "lastRunningSeen": \(heartbeatMs - 900_000) },
+  { "id": "await-idle", "status": "idle", "awaitingUserSince": \(heartbeatMs - 1_000), "lastRunningSeen": \(heartbeatMs - 1_000) }
+] }
+""", labels: labels, now: heartbeatNow)
+precondition(dropped.items.map(\.id).sorted() == ["ask-live", "live"], "stale, missing or idle heartbeats are not live: \(dropped.items.map(\.id))")
+precondition(dropped.statusCounts.permission == 1 && dropped.statusCounts.running == 1)
+let allDropped = LiveActivityCatalog.state(catalogJSON: """
+{ "sessions": [{ "id": "gone", "status": "requestPermission", "awaitingUserSince": 1, "lastRunningSeen": \(heartbeatMs - 200_000) }] }
+""", labels: labels, now: heartbeatNow)
+precondition(!allDropped.isActive && allDropped.dismissalDate(from: heartbeatNow) != nil, "a machine that went silent mid-request ends the activity")
+precondition(LiveActivityCatalog.resolveStatus(awaiting: 5, status: "running", lastRunningSeen: heartbeatMs, now: heartbeatMs) == .permission, "a live session waiting on the user asks for attention")
+precondition(LiveActivityCatalog.resolveStatus(awaiting: nil, status: "completed", lastRunningSeen: heartbeatMs, now: heartbeatMs) == nil)
+precondition(LiveActivityCatalog.resolveStatus(awaiting: nil, status: "running", lastRunningSeen: .nan, now: heartbeatMs) == nil)
+let expiry = LiveActivityCatalog.nextHeartbeatExpiry(sessions: [
+  ["id": "a", "status": "running", "lastRunningSeen": heartbeatMs - 100_000],
+  ["id": "b", "status": "requestPermission", "lastRunningSeen": heartbeatMs - 150_000],
+  ["id": "c", "status": "running", "lastRunningSeen": heartbeatMs - 170_000, "archived": true],
+  ["id": "d", "status": "completed", "lastRunningSeen": heartbeatMs - 170_000],
+  ["id": "e", "status": "running", "lastRunningSeen": heartbeatMs - 400_000],
+], now: heartbeatNow)
+precondition(expiry == heartbeatMs + 30_000, "the next re-check is when the oldest live heartbeat expires")
+precondition(LiveActivityCatalog.nextHeartbeatExpiry(sessions: [["id": "x", "status": "running"]], now: heartbeatNow) == nil)
+print("PASS: running and permission sessions need a fresh heartbeat; the next expiry is scheduled")
 
 // A LAN host builds this payload from its members' summaries (Lody
 // `hub-push.ts`): the phone's own labels and copy, no relative time label.

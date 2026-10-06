@@ -13,6 +13,8 @@ final class LiveActivities {
   private var pushToStartTask: Task<Void, Never>?
   private var activityTask: Task<Void, Never>?
   private var syncTask: Task<Void, Never>?
+  /// Re-reads the last catalog when a live session's heartbeat runs out.
+  private var heartbeatTask: Task<Void, Never>?
   private var workStarts: [String: Double] = [:]
   private var userId: String?
   private var identityResolved = false
@@ -152,6 +154,18 @@ final class LiveActivities {
           let sessions = root["sessions"] as? [[String: Any]] else { return }
     var state = LiveActivityCatalog.state(sessions: sessions, labels: Self.labels)
     let failed = LiveActivityCatalog.failedSessionIds(sessions: sessions)
+    // A machine that drops off writes nothing more, so the catalog may never
+    // change again; judge it once more when its heartbeat expires.
+    heartbeatTask?.cancel()
+    heartbeatTask = nil
+    if let expiry = LiveActivityCatalog.nextHeartbeatExpiry(sessions: sessions) {
+      let wait = max(0, expiry - Date().timeIntervalSince1970 * 1000) + 1000
+      heartbeatTask = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000))
+        guard !Task.isCancelled else { return }
+        sync(catalogJSON: catalogJSON, workspaceId: workspaceId, workspaceSlug: workspaceSlug, workspaceName: workspaceName, userId: userId)
+      }
+    }
     pinWorkStarts(&state)
     let attributes = LodyActivityAttributes(
       workspaceId: workspaceId,
@@ -284,6 +298,8 @@ final class LiveActivities {
 
   func endAll() {
     syncTask?.cancel()
+    heartbeatTask?.cancel()
+    heartbeatTask = nil
     let ids = Set(tokenTasks.keys).union(Activity<LodyActivityAttributes>.activities
       .filter { !Self.isDebug($0.attributes) }.map { Self.id(of: $0) })
     tokenTasks.values.forEach {

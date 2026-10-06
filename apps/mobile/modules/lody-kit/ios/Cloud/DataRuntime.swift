@@ -282,6 +282,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         workspaceName: workspaceName,
         userId: userId
       )
+      PushNotifications.shared.withdrawSettledPermissions(catalogJSON: catalog)
     case "synced":
       if phase != "live" { publish("live", reason: "synced") }
     case "syncError":

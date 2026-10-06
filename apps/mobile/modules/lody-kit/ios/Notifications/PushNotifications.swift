@@ -19,6 +19,9 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   var onClickAvailable: (() -> Void)?
   var visibleRoute = ""
   private var registered = false
+  /// The last catalog the data runtime sent and when, for settling permission
+  /// notifications again on foreground.
+  private var permissionCatalog: (json: String, at: Date)?
   #if DEBUG
   private var verificationShown = false
   var onRegistered: (() -> Void)?
@@ -64,6 +67,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   func stopLan() {
     guard lanMode else { return }
     lanMode = false
+    permissionCatalog = nil
     clearDelivered()
   }
 
@@ -105,6 +109,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
       LanPush.shared.identify(id)
       if id == nil || (previous != nil && previous != id) {
         visibleRoute = ""
+        permissionCatalog = nil
         clearDelivered()
       }
       if id != nil { LiveActivities.shared.start() }
@@ -209,6 +214,13 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     let info = notification.request.content.userInfo
     let route = info["route"] as? String
     let recipient = info["recipientUserId"] as? String
+    if info["lodyKind"] as? String == PermissionNotices.resolved {
+      // Answered on another device: show nothing and take the request it
+      // replaces out of Notification Center.
+      center.removeDeliveredNotifications(withIdentifiers: [notification.request.identifier])
+      completionHandler([])
+      return
+    }
     nonisolated(unsafe) let completionHandler = completionHandler
     Task { @MainActor in
       // The session already on screen needs no banner.
@@ -241,6 +253,38 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     }
   }
 
+  /// Removes permission notifications that ask nothing any more: every
+  /// resolution the hub sent, and requests whose session the latest catalog
+  /// shows no longer waiting. Runs on each catalog and on foreground.
+  func withdrawSettledPermissions(catalogJSON: String? = nil) {
+    if let catalogJSON { permissionCatalog = (catalogJSON, Date()) }
+    guard lanMode, let userId, !userId.isEmpty else { return }
+    let catalog = permissionCatalog
+    UNUserNotificationCenter.current().getDeliveredNotifications { @Sendable notifications in
+      let notices = notifications.map {
+        PermissionNotices.Delivered(
+          identifier: $0.request.identifier,
+          userInfo: $0.request.content.userInfo,
+          threadId: $0.request.content.threadIdentifier,
+          date: $0.date
+        )
+      }.filter(\.isPermission)
+      guard !notices.isEmpty else { return }
+      // Parsed here, off the main thread, and only when there is something to settle.
+      var waiting: [String: Bool]?
+      if let catalog, let root = try? JSONSerialization.jsonObject(with: Data(catalog.json.utf8)) as? [String: Any],
+         let sessions = root["sessions"] as? [[String: Any]] {
+        waiting = PermissionNotices.waitingOnUser(sessions: sessions)
+      }
+      let ids = PermissionNotices.withdrawable(notices, userId: userId, waiting: waiting, catalogAt: catalog?.at)
+      guard !ids.isEmpty else { return }
+      Task { @MainActor in
+        guard self.lanMode, self.userId == userId else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+      }
+    }
+  }
+
   private func clearDelivered() {
     UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     UNUserNotificationCenter.current().setBadgeCount(0)
@@ -250,6 +294,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
 public final class PushAppDelegateSubscriber: ExpoAppDelegateSubscriber {
   public func applicationDidBecomeActive(_ application: UIApplication) {
     PushNotifications.shared.status { _ in }
+    PushNotifications.shared.withdrawSettledPermissions()
     LiveActivities.shared.start()
   }
 
