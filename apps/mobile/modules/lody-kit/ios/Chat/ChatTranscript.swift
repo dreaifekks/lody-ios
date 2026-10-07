@@ -242,7 +242,7 @@ enum ChatAnswerText {
   /// Length counts UTF-16 units, as Lody's does.
   static func isSubstantive(_ text: String) -> Bool {
     text.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count >= substantiveLength
-      || text.range(of: #"(?:^|\n)[ \t]*(?:[-*+] |\d+[.)] |\||#{1,6} )"#, options: .regularExpression) != nil
+      || text.range(of: #"(?:^|\n)[ \t]*(?:[-*+] |[0-9]+[.)] |\||#{1,6} )"#, options: .regularExpression) != nil
   }
 
   /// Ascending indices of the visible text. The closing run is the last

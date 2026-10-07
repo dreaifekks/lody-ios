@@ -177,6 +177,25 @@ assert(endsInWork.rows().filter { $0.kind == "text" }.map(\.itemID) == ["answer"
   "A turn that ends in work keeps only its last text")
 assert(endsInWork.rows(processEntryID: "fold").map(\.itemID) == ["report", "read", "tail"])
 
+for (count, folds) in [(149, false), (150, true)] {
+  let emoji = try answerTurn("""
+  {"itemId":"answer","type":"text","text":"配置没问题。"},{"itemId":"read","type":"tool_call","status":"completed"},
+  {"itemId":"closing","type":"text","text":"\(String(repeating: "😀", count: count))"}
+  """)
+  assert(emoji.rows().filter { $0.kind == "text" }.map(\.itemID) == (folds ? ["closing"] : ["answer", "closing"]),
+    "Closing length counts UTF-16 units: \(count) emoji")
+  assert(emoji.rows(processEntryID: "fold").map(\.itemID) == (folds ? ["answer", "read"] : ["read"]))
+}
+
+let plainRun = String(repeating: "a", count: 149)
+let joinedClosing = try answerTurn("""
+{"itemId":"answer","type":"text","text":"配置没问题。"},{"itemId":"read","type":"tool_call","status":"completed"},
+{"itemId":"part1","type":"text","text":"\(plainRun)"},{"itemId":"part2","type":"text","text":"\(plainRun)"}
+""")
+assert(joinedClosing.rows().filter { $0.kind == "text" }.map(\.itemID) == ["part1", "part2"],
+  "Adjacent closing blocks join with a blank line before they are measured")
+assert(joinedClosing.rows(processEntryID: "fold").map(\.itemID) == ["answer", "read"])
+
 let structuredEarlier = try answerTurn("""
 {"itemId":"aside","type":"text","text":"先看看配置。"},{"itemId":"read","type":"tool_call","status":"completed"},
 {"itemId":"list","type":"text","text":"- 配置正确"},{"itemId":"heading","type":"text","text":"## 结果"},
