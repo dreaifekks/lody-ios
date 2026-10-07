@@ -231,6 +231,49 @@ enum ChatWorkDuration {
   }
 }
 
+/// The text a finished assistant turn keeps beside its folded work, following
+/// Lody's `shouldCollapseAssistantMessageItem`.
+enum ChatAnswerText {
+  static let substantiveLength = 300
+
+  /// Agents narrate while they work; those short lines fold with it. A long or
+  /// structured block (list, table, heading) is a report, typically a complete
+  /// answer that a background task's followup appended a short note after.
+  /// Length counts UTF-16 units, as Lody's does.
+  static func isSubstantive(_ text: String) -> Bool {
+    text.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count >= substantiveLength
+      || text.range(of: #"(?:^|\n)[ \t]*(?:[-*+] |\d+[.)] |\||#{1,6} )"#, options: .regularExpression) != nil
+  }
+
+  /// Ascending indices of the visible text. The closing run is the last
+  /// contiguous text before the never-folded tail. When it is thin it reads as a
+  /// postscript, so the one text run before the work it follows stays with it,
+  /// whatever its length. Earlier substantive text stays too. A turn that ends
+  /// in work keeps only its last text.
+  static func visibleIndices(_ items: [ChatItem]) -> [Int] {
+    let texts = items.indices.filter {
+      items[$0].type == "text" && !(items[$0].text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    var end = items.count
+    while end > 0, trailsAnswer(items[end - 1]) { end -= 1 }
+    var start = end
+    while start > 0, items[start - 1].type == "text" { start -= 1 }
+    guard start < end else { return texts.last.map { [$0] } ?? [] }
+    if !isSubstantive(items[start..<end].compactMap(\.text).joined(separator: "\n\n")),
+       var earlier = items[..<start].lastIndex(where: { $0.type == "text" }) {
+      while earlier > 0, items[earlier - 1].type == "text" { earlier -= 1 }
+      start = earlier
+    }
+    return texts.filter { $0 >= start || isSubstantive(items[$0].text ?? "") }
+  }
+
+  /// Never folded, so a turn ending in one still closes in its text.
+  private static func trailsAnswer(_ item: ChatItem) -> Bool {
+    ["image", "image_group", "file", "plan", "goal", "proposed_plan", "system_notice"].contains(item.type)
+      || (item.type == "tool_call" && item.kind == "switch_mode")
+  }
+}
+
 /// Conversation stays readable on wide hosts; the scroll view itself stays full-bleed
 /// so the vertical indicator remains on the screen edge.
 enum ChatReadingColumn {
@@ -421,7 +464,6 @@ struct ChatTranscript {
         }
         return result
       }
-      let finalText = entry.items.lastIndex { $0.type == "text" && !($0.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
       var visible: [Int] = []
       var groups: [Int: [Int]] = [:]
       if entry.role != "assistant" {
@@ -434,15 +476,17 @@ struct ChatTranscript {
           let end = entry.items.indices.dropFirst(start + 1).first { entry.items[$0].type == "text" || entry.items[$0].isAttachment } ?? entry.items.endIndex
           visible = Array(start..<end).filter { !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && !entry.items[$0].hidesFromTranscript }
         } else {
-          visible = entry.items.indices.filter { $0 != finalText && !entry.items[$0].isAttachment && !entry.items[$0].hidesFromTranscript }
+          let answer = ChatAnswerText.visibleIndices(entry.items)
+          visible = entry.items.indices.filter { !answer.contains($0) && !entry.items[$0].isAttachment && !entry.items[$0].hidesFromTranscript }
         }
       } else if entry.finished {
+        let answer = ChatAnswerText.visibleIndices(entry.items)
         let process = entry.items.indices.filter {
-          $0 != finalText && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task"
+          !answer.contains($0) && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task"
         }
         if let first = process.first { groups[first] = process }
         visible = process.first.map { [$0] } ?? []
-        if let finalText { visible.append(finalText) }
+        visible.append(contentsOf: answer)
         visible.append(contentsOf: entry.items.indices.filter {
           entry.items[$0].isAttachment || entry.items[$0].isChatFailure
             || (entry.items[$0].type == "subagent_task" && !entry.items[$0].hidesFromTranscript)

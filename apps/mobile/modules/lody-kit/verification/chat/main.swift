@@ -78,8 +78,9 @@ assert(transcript.rows().map(\.kind) == ["text", "summary", "text", "summary", "
 assert(transcript.rows(processEntryID: "steps", processStartID: "think1").map(\.itemID) == ["think1", "read"])
 assert(transcript.rows(processEntryID: "steps", processStartID: "think2").map(\.itemID) == ["think2", "write"])
 transcript.entries[0].finished = true
-assert(transcript.rows().map(\.kind) == ["summary", "text", "meta"])
-assert(transcript.rows().last(where: { $0.kind == "text" })?.itemID == "final")
+assert(transcript.rows().map(\.kind) == ["summary", "text", "text", "meta"])
+assert(transcript.rows().filter { $0.kind == "text" }.map(\.itemID) == ["middle", "final"],
+  "A thin closing text keeps the text run before its work")
 transcript.entries[0].modelInfo = ChatEntry.ModelInfo(modelId: "actual", name: "Actual Model", thoughtLevel: "High")
 assert(transcript.rows().last?.text == "Actual Model · High")
 assert(transcript.rows().last?.imageAsset == "", "Unknown models must not invent a provider mark")
@@ -104,9 +105,88 @@ let openaiMetaRows = ChatTranscript(entries: try JSONDecoder().decode([ChatEntry
 assert(openaiMetaRows.last?.kind == "meta")
 assert(openaiMetaRows.last?.text == "GPT-5.6 Sol · High")
 assert(openaiMetaRows.last?.imageAsset == "lody-agent-openai", "Known providers put their mark on the model line")
-assert(transcript.rows(processEntryID: "steps").map(\.itemID) == ["first", "think1", "read", "middle", "think2", "write"])
+assert(transcript.rows(processEntryID: "steps").map(\.itemID) == ["first", "think1", "read", "think2", "write"])
 assert(transcript.rows(processEntryID: "steps", processStartID: "think1").map(\.itemID) == ["think1", "read"], "An open segment must not change scope on completion")
 print("Chat folding: live text boundaries, scoped process, and conclusion-only completion passed")
+
+func answerTurn(_ items: String, finished: Bool = true) throws -> ChatTranscript {
+  let json = """
+  [{"id":"fold","role":"assistant","status":"completed","finished":\(finished),
+  "timestamp":"1970-01-01T00:00:00.000Z","endedAt":60000,"items":[\(items)]}]
+  """
+  return ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(json.utf8)))
+}
+let report = String(repeating: "检查结果正常。", count: 50)
+assert(ChatAnswerText.isSubstantive(report))
+assert(!ChatAnswerText.isSubstantive(String(repeating: "a", count: 299) + "\n "), "Length counts trimmed text")
+for structured in ["- 第一项", "1. 第一步", "说明\n2) 第二步", "| a | b |", "## 结果", "  * 缩进项"] {
+  assert(ChatAnswerText.isSubstantive(structured), structured)
+}
+for plain in ["#标签", "-1 度", "第 1.5 版", "后台任务也已结束。"] {
+  assert(!ChatAnswerText.isSubstantive(plain), plain)
+}
+
+let backgroundNote = try answerTurn("""
+{"itemId":"think","type":"thought","text":"查看"},{"itemId":"read","type":"tool_call","status":"completed"},
+{"itemId":"report","type":"text","text":"\(report)"},{"itemId":"poll","type":"tool_call","status":"completed"},
+{"itemId":"note","type":"text","text":"后台任务也已结束。"}
+""")
+assert(backgroundNote.rows().map(\.kind) == ["duration", "text", "text", "meta"])
+assert(backgroundNote.rows().filter { $0.kind == "text" }.map(\.itemID) == ["report", "note"],
+  "A followup note must not fold the answer it follows")
+assert(backgroundNote.rows().first?.actionable == true, "The duration row still opens the folded work")
+assert(backgroundNote.rows(processEntryID: "fold").map(\.itemID) == ["think", "read", "poll"])
+
+let shortAnswerItems = """
+{"itemId":"answer","type":"text","text":"备份已完成，文件保存在 /tmp/backup.tar.gz。"},
+{"itemId":"poll","type":"tool_call","status":"completed"},{"itemId":"note","type":"text","text":"后台任务也已结束。"}
+"""
+let shortAnswer = try answerTurn(shortAnswerItems)
+assert(shortAnswer.rows().filter { $0.kind == "text" }.map(\.itemID) == ["answer", "note"],
+  "A one-sentence answer stays with its postscript")
+assert(shortAnswer.rows(processEntryID: "fold").map(\.itemID) == ["poll"])
+assert(ChatMessageShare.content(in: shortAnswer, entryID: "fold")?.text == "备份已完成，文件保存在 /tmp/backup.tar.gz。\n\n后台任务也已结束。",
+  "Copy shares every visible answer text, as Lody does")
+let liveIDs = Set(try answerTurn(shortAnswerItems, finished: false).rows().map(\.id))
+assert(shortAnswer.rows().filter { $0.kind == "text" }.allSatisfy { liveIDs.contains($0.id) },
+  "Completion keeps the live identities of the text it leaves visible")
+
+let narratedReport = try answerTurn("""
+{"itemId":"aside","type":"text","text":"先看看配置。"},{"itemId":"read","type":"tool_call","status":"completed"},
+{"itemId":"check","type":"text","text":"再确认一次。"},{"itemId":"run","type":"tool_call","status":"completed"},
+{"itemId":"report","type":"text","text":"\(report)"}
+""")
+assert(narratedReport.rows().filter { $0.kind == "text" }.map(\.itemID) == ["report"],
+  "A substantive closing text folds the narration before it")
+assert(narratedReport.rows(processEntryID: "fold").map(\.itemID) == ["aside", "read", "check", "run"])
+
+let onePostscriptRun = try answerTurn("""
+{"itemId":"aside","type":"text","text":"先看看配置。"},{"itemId":"read","type":"tool_call","status":"completed"},
+{"itemId":"answer","type":"text","text":"配置没问题。"},{"itemId":"poll","type":"tool_call","status":"completed"},
+{"itemId":"note","type":"text","text":"后台任务也已结束。"},{"itemId":"picture","type":"image","image":{"id":"i","fileName":"a.png"}},
+{"itemId":"exit","type":"tool_call","kind":"switch_mode","status":"completed"}
+""")
+assert(onePostscriptRun.rows().filter { $0.kind == "text" }.map(\.itemID) == ["answer", "note"],
+  "A postscript keeps one earlier run, past the never-folded tail")
+
+let endsInWork = try answerTurn("""
+{"itemId":"report","type":"text","text":"\(report)"},{"itemId":"read","type":"tool_call","status":"completed"},
+{"itemId":"answer","type":"text","text":"还在处理。"},{"itemId":"tail","type":"tool_call","status":"completed"}
+""")
+assert(endsInWork.rows().filter { $0.kind == "text" }.map(\.itemID) == ["answer"],
+  "A turn that ends in work keeps only its last text")
+assert(endsInWork.rows(processEntryID: "fold").map(\.itemID) == ["report", "read", "tail"])
+
+let structuredEarlier = try answerTurn("""
+{"itemId":"aside","type":"text","text":"先看看配置。"},{"itemId":"read","type":"tool_call","status":"completed"},
+{"itemId":"list","type":"text","text":"- 配置正确"},{"itemId":"heading","type":"text","text":"## 结果"},
+{"itemId":"run","type":"tool_call","status":"completed"},{"itemId":"aside2","type":"text","text":"接着检查。"},
+{"itemId":"run2","type":"tool_call","status":"completed"},{"itemId":"report","type":"text","text":"\(report)"}
+""")
+assert(structuredEarlier.rows().filter { $0.kind == "text" }.map(\.itemID) == ["list", "heading", "report"],
+  "Structured earlier text stays visible beside a substantive answer")
+assert(structuredEarlier.rows(processEntryID: "fold").map(\.itemID) == ["aside", "read", "run", "aside2", "run2"])
+print("Chat folding: substantive and postscript answer text stays visible on completion passed")
 
 let liveDurationJSON = """
 [{"id":"timed-live","role":"assistant","status":"running","finished":false,
