@@ -911,7 +911,14 @@ assert(liveTaskRows.map(\.itemID) == ["explore", "done"])
 assert(!transcript.rows().contains { $0.itemID == "house" })
 assert(liveTaskRows.allSatisfy(\.actionable))
 assert(liveTaskRows[0].subagent == ChatSubagentCard(actor: "Explore", description: "Find chrome", status: "in_progress",
-  detail: LodyStrings.text("native.chat.subagent.runningTool", ["tool": "Read"]), background: false))
+  detail: LodyStrings.text("native.chat.subagent.runningTool", ["tool": "Read"]), background: false, position: "first",
+  groupTitle: [
+    LodyStrings.plural("native.chat.subagent.group", 2),
+    LodyStrings.plural("native.chat.subagent.groupRunning", 1),
+    LodyStrings.plural("native.chat.subagent.groupDone", 1),
+  ].joined(separator: " · ")))
+assert(liveTaskRows[1].subagent == ChatSubagentCard(actor: "Explore", description: "Already finished", status: "completed",
+  detail: "", background: false, position: "last", groupTitle: ""))
 assert(transcript.rows().contains { $0.kind == "summary" })
 let processTasks = transcript.rows(processEntryID: "reply")
 assert(processTasks.contains { $0.itemID == "explore" && $0.kind == "subagent_task" })
