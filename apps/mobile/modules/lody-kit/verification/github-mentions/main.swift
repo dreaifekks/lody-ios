@@ -68,11 +68,17 @@ final class GitHubProtocol: URLProtocol {
       assert(request.url?.host == "api.github.com")
       let branchRequest = request.url?.path == "/repos/LodyAI/Lody/branches"
       let repoRequest = request.url?.path == "/repos/LodyAI/Lody"
-      assert(branchRequest || repoRequest || request.url?.path == "/repos/LodyAI/Lody/issues")
+      let listRequest = request.url?.path == "/user/repos"
+      assert(branchRequest || repoRequest || listRequest || request.url?.path == "/repos/LodyAI/Lody/issues")
       let token = request.value(forHTTPHeaderField: "Authorization")!
       assert(token.hasPrefix("Bearer synthetic-repo-"), "App credentials must never go to GitHub")
       if token.hasSuffix("failure") { status = 503 }
-      if repoRequest {
+      if listRequest {
+        let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "page" }!.value!
+        // A full first page with one name twice, then a short page with an owner the app cannot name.
+        if page == "1" { body = (1...99).map { ["full_name": "Owner/Repo\($0)"] } + [["full_name": "owner/repo1"]] }
+        else { body = [["full_name": "Other/Later"], ["full_name": "managed_user/tool"]] }
+      } else if repoRequest {
         body = ["default_branch": "trunk"]
       } else if branchRequest {
         let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "page" }!.value!
@@ -158,13 +164,20 @@ final class GitHubProtocol: URLProtocol {
     assert(lanItems.count == 2, "A LAN lists issues and PRs with the hub's token")
     let lanBranches = try await GitHubCloud.branches(workspace: lan, repo: "LodyAI/Lody", page: 1)
     assert(lanBranches.defaultBranch == "trunk" && lanBranches.nextPage == 2, "A LAN lists branches with the hub's token")
+    let listed = { GitHubProtocol.urls.withLock { $0.filter { $0.contains("/user/repos") } } }
+    let lanRepositories = try await GitHubCloud.repositories(workspace: lan)
+    assert(lanRepositories.count == 100 && lanRepositories.first == "Owner/Repo1" && lanRepositories.last == "Other/Later",
+      "A LAN lists what the hub's token reads, page after page, once per name")
+    assert(listed().count == 2 && listed().allSatisfy { $0.contains("per_page=100") && $0.contains("sort=full_name") })
     LanHub.hubToken.withLock { $0 = nil }
     let githubBefore = GitHubProtocol.urls.withLock { $0.count }
     let noToken = try await GitHubMentions.load(workspace: lan, repo: "LodyAI/Lody")
     assert((noToken["items"] as! [Any]).isEmpty && GitHubProtocol.urls.withLock { $0.count } == githubBefore)
     do { _ = try await GitHubCloud.branches(workspace: lan, repo: "LodyAI/Lody", page: 1); fatalError("A hub without a token offered branches") }
     catch { assert(error.localizedDescription == "github_unavailable" && GitHubProtocol.urls.withLock { $0.count } == githubBefore) }
+    let noRepositories = try await GitHubCloud.repositories(workspace: lan)
+    assert(noRepositories.isEmpty && GitHubProtocol.urls.withLock { $0.count } == githubBefore, "A hub without a token lists no repository")
     assert(cloudCalls() == cloudBefore, "A LAN never asks the Cloud broker")
-    print("GitHub mentions: Issue/PR references, unconnected project, bounded listing, credential isolation, failure behavior, branch pages and the LAN hub token passed")
+    print("GitHub mentions: Issue/PR references, unconnected project, bounded listing, credential isolation, failure behavior, branch pages and the LAN hub's repositories and token passed")
   }
 }

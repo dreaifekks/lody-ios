@@ -100,6 +100,7 @@ import Foundation
   }
 
   static func repositories(workspace: String) async throws -> [String] {
+    if LanInvite.isWorkspace(workspace) { return try await lanRepositories(workspace) }
     let value = try await call("query", path: "github:getWorkspaceRepositories", args: ["workspaceId": workspace])
     if value is NSNull { return [] }
     guard let rows = value as? [[String: Any]] else { throw failure() }
@@ -108,6 +109,29 @@ import Foundation
       guard let name = row["fullName"] as? String, validRepository(name) else { throw failure() }
       return seen.insert(name.lowercased()).inserted ? name : nil
     }
+  }
+
+  /// A LAN keeps no registry: its repositories are the ones its hub's GitHub token reads, in the
+  /// ten pages Lody's `listLocalGitHubRepositories` asks for. A hub without a token has none.
+  private static func lanRepositories(_ workspace: String) async throws -> [String] {
+    guard let invite = LanHub.credential(for: workspace) else { throw failure() }
+    guard let token = try await LanHub.githubToken(invite) else { return [] }
+    var names: [String] = []
+    var seen = Set<String>()
+    for page in 1...10 {
+      try Task.checkCancellation()
+      guard let rows = try await request(
+        "https://api.github.com/user/repos?per_page=100&sort=full_name&page=\(page)", token: token
+      ) as? [[String: Any]] else { throw failure() }
+      for row in rows {
+        // GitHub also lists owners this app's project ids cannot name, such as managed users.
+        guard let name = row["full_name"] as? String, validRepository(name),
+          seen.insert(name.lowercased()).inserted else { continue }
+        names.append(name)
+      }
+      if rows.count < 100 { break }
+    }
+    return names
   }
 
   static func call(_ kind: String, path: String, args: [String: Any]) async throws -> Any {

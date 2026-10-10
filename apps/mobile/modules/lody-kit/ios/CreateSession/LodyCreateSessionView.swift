@@ -106,8 +106,6 @@ final class LodyCreateSessionView: ExpoView {
     guard !configured, let config = CreateJSON.decode(CreateSessionConfig.self, json) else { return }
     configured = true
     persistShare = config.persistShare
-    // A LAN has no hosted repository registry; its projects are all local.
-    if LanInvite.isWorkspace(config.workspaceId) { controller.loadRepositories = nil }
     controller.form = CreateSessionForm(
       userId: config.userId, workspaceId: config.workspaceId, projects: config.projects,
       machineNames: config.machineNames, prefs: config.prefs)
