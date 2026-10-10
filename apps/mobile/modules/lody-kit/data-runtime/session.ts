@@ -805,8 +805,9 @@ export async function sendTurn(
         ? configOptionValues
         : undefined,
       // The machine restarts the agent when a turn names another memory than
-      // the one it runs with, so the binding travels with every turn.
-      memory: previous.memory,
+      // the one it runs with, so the binding travels with the turn. It is the
+      // Role instance's, and a turn recorded as None names none, as in Lody.
+      memory: agentRole.agentRoleId === null ? undefined : previous.memory,
       mcpServerIds: previous.mcpServerIds ?? [],
       taskToolsEnabled: previous.taskToolsEnabled ?? false,
       ...agentRole,

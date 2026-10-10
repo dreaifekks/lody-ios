@@ -159,7 +159,7 @@ test('a Continue turn carries Lody’s delivery marker into history and the proj
   }
 });
 
-test('a Role session keeps its Role, instance record and memory while the run configuration is unchanged and records None once a control moves', async () => {
+test('a Role session keeps its Role, instance record and memory while the run configuration is unchanged and records None without them once a control moves', async () => {
   const calls = [];
   const fixture = await openTestSession({
     onRpc: (request) => {
@@ -256,10 +256,14 @@ test('a Role session keeps its Role, instance record and memory while the run co
       undefined,
       'The instance record leaves with the Role it describes',
     );
-    assert.deepEqual(
+    assert.equal(
       calls[2].params.inputConfig.memory,
-      memory,
-      'The agent keeps running with the memory it started with',
+      undefined,
+      'The memory is the instance’s and leaves with it',
+    );
+    assert.equal(
+      'memory' in fixture.server.toJSON().history.at(-1).inputConfig,
+      false,
     );
     assert.equal(
       fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
@@ -272,15 +276,65 @@ test('a Role session keeps its Role, instance record and memory while the run co
       null,
       'Once None, a later turn does not return to the Role',
     );
-    assert.equal((await fixture.runtime.sendTurn(args)).state, 'queued');
-    assert.deepEqual(
-      fixture.server.toJSON().mq[0].acpSessionConfig.memory,
-      memory,
-      'A queued turn carries the binding too',
-    );
+    assert.equal(calls[3].params.inputConfig.memory, undefined);
   } finally {
     fixture.close();
   }
+});
+
+test('memory follows a session without a Role record into dispatched and queued turns, and not a turn recorded as None', async () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const send = async (inputConfig) => {
+    const calls = [];
+    const fixture = await openTestSession({
+      onRpc: (request) => {
+        calls.push(request);
+        return { result: { accepted: true } };
+      },
+    });
+    const args = {
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic memory follow-up',
+    };
+    try {
+      const history = fixture.server.getList('history');
+      history.push({
+        id: 'first',
+        role: 'user',
+        finished: true,
+        items: [],
+        inputConfig,
+      });
+      history.push({
+        id: 'reply',
+        role: 'assistant',
+        finished: true,
+        items: [],
+      });
+      fixture.server.commit();
+      await fixture.pushUpdate();
+      assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
+      assert.equal((await fixture.runtime.sendTurn(args)).state, 'queued');
+      return {
+        dispatched: calls[0].params.inputConfig,
+        queued: fixture.server.toJSON().mq[0].acpSessionConfig,
+      };
+    } finally {
+      fixture.close();
+    }
+  };
+  const inherited = await send({ modelId: 'opus', memory });
+  assert.deepEqual(inherited.dispatched.memory, memory);
+  assert.deepEqual(inherited.queued.memory, memory);
+  assert.equal('agentRoleId' in inherited.dispatched, false);
+  const none = await send({ modelId: 'opus', memory, agentRoleId: null });
+  assert.equal(none.dispatched.agentRoleId, null);
+  assert.equal(none.dispatched.memory, undefined);
+  assert.equal('memory' in none.queued, false);
 });
 
 test('a turn projects who wrote it, and a record of another shape is no author', async () => {
