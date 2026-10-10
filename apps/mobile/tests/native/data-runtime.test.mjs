@@ -4,6 +4,22 @@ import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { LoroDoc } from 'loro-crdt/base64';
 
+// These runtimes start inactive, so presence is never joined; the real
+// transport would import the Streams client this file replaces.
+const presenceUnused = {
+  name: 'presence-unused',
+  setup(build) {
+    build.onResolve({ filter: /^@loro-dev\/streams-crdt\/loro$/ }, () => ({
+      path: 'presence',
+      namespace: 'presence-unused',
+    }));
+    build.onLoad({ filter: /.*/, namespace: 'presence-unused' }, () => ({
+      contents:
+        'export const EphemeralStoreAdaptor = undefined, EphemeralStreamCrdt = undefined;',
+    }));
+  },
+};
+
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
   const flock = new Flock('synthetic');
   flock.set(['e', 'session-s1'], true, 1);
@@ -303,6 +319,7 @@ test('lost results settle from reads issued after the attempt; an upload left un
     platform: 'browser',
     write: false,
     plugins: [
+      presenceUnused,
       {
         name: 'synthetic-stream',
         setup(build) {
@@ -331,7 +348,7 @@ test('lost results settle from reads issued after the attempt; an upload left un
     'no catalog has been read yet',
   );
   const first = catalogEvent();
-  runtime.start(workspaceId);
+  runtime.start(workspaceId, undefined, false);
   await first;
   assert.deepEqual(runtime.confirmSession({ workspaceId, sessionId: 's1' }), {
     state: 'created',
@@ -472,6 +489,7 @@ test('a catalog read that fails on the network resumes from its cursor instead o
     platform: 'browser',
     write: false,
     plugins: [
+      presenceUnused,
       {
         name: 'synthetic-stream',
         setup(build) {
@@ -493,7 +511,7 @@ test('a catalog read that fails on the network resumes from its cursor instead o
   const runtime = globalThis.dataRuntime;
   const workspaceId = 'synthetic-workspace';
   const first = catalogEvent();
-  runtime.start(workspaceId);
+  runtime.start(workspaceId, undefined, false);
   await first;
   assert.equal(bootstraps, 2, 'the catalog and its one machine');
   const errors = () => events.filter((event) => event.type === 'syncError');
