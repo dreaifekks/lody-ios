@@ -3,6 +3,7 @@ import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
 import { decodeFrames, encodeFrame } from '../decoder/frames';
 import {
+  conversationConfigs,
   identityAt,
   itemRev,
   projectSession,
@@ -733,14 +734,14 @@ export async function sendTurn(
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
-    const userTurns = (
-      (state.doc.toJSON().history as any[] | undefined) ?? []
-    ).filter((entry) => entry.role === 'user');
-    const previous = userTurns.at(-1)?.inputConfig ?? {};
+    const raw = state.doc.toJSON();
+    const history = (raw.history ?? []) as any[];
+    const configs = conversationConfigs(history, raw.mq ?? []);
+    const previous = configs[0] ?? {};
     // Lody keeps a Role sticky from the newest turn that names one, or None.
-    const roleTurn = userTurns.findLast(
-      (entry) => entry.inputConfig?.agentRoleId !== undefined,
-    )?.inputConfig;
+    const roleTurn = configs.find(
+      (config) => config?.agentRoleId !== undefined,
+    );
     const configOptionValues = {
       ...(previous.configOptionValues &&
       typeof previous.configOptionValues === 'object' &&
@@ -816,8 +817,6 @@ export async function sendTurn(
         ? { _lodyDeliveryKind: 'continue' }
         : {}),
     };
-    const raw = state.doc.toJSON();
-    const history = (raw.history ?? []) as any[];
     const lastUser = history.findLastIndex((entry) => entry.role === 'user');
     // Re-evaluate after attachment upload and mention expansion. A completed
     // target must follow the ordinary dispatch/queue path, never orphan a guide.

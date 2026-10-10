@@ -681,6 +681,21 @@ function summarizeEntry(
   return value;
 }
 
+/**
+ * The session's turn configurations, newest first, in the order of Lody's
+ * `collectSessionConversationSources`: what is queued runs after everything in
+ * history, so the next turn and the composer follow the queue's tail.
+ */
+export function conversationConfigs(history: any[], queue: any[]): any[] {
+  return [
+    ...queue.map((item) => item?.acpSessionConfig).reverse(),
+    ...history
+      .filter((entry) => entry?.role === 'user')
+      .map((entry) => entry.inputConfig)
+      .reverse(),
+  ];
+}
+
 function pendingFingerprint(
   pendingOutcomes: ReadonlyMap<string, unknown> | undefined,
   entryId: string,
@@ -803,7 +818,11 @@ function project(
     if (!present.has(key)) projection.entries.delete(key);
   projection.dirty.clear();
   projection.stale = false;
-  const input = raw.findLast((entry) => entry?.role === 'user')?.inputConfig;
+  const queued = (doc.getMovableList('mq').toJSON() as any[]).map((item) => ({
+    ...item,
+    acpSessionConfig: configFor(item.userTurnId, item.acpSessionConfig),
+  }));
+  const input = conversationConfigs(raw, queued)[0];
   const options =
     input?.configOptionValues && typeof input.configOptionValues === 'object'
       ? input.configOptionValues
@@ -838,10 +857,6 @@ function project(
         ],
   );
 
-  const queued = (doc.getMovableList('mq').toJSON() as any[]).map((item) => ({
-    ...item,
-    acpSessionConfig: configFor(item.userTurnId, item.acpSessionConfig),
-  }));
   const execution = executionProjection(
     [
       ...raw,

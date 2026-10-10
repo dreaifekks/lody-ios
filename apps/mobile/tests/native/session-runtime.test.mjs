@@ -337,6 +337,109 @@ test('memory follows a session without a Role record into dispatched and queued 
   assert.equal('memory' in none.queued, false);
 });
 
+test('the next turn and the composer follow the newest queued turn before history, as Lody resolves a conversation', async () => {
+  const instance = (name) => ({
+    agentRoleId: `role-${name}`,
+    agentRoleRevision: 2,
+    agentRoleSnapshot: {
+      id: `role-${name}`,
+      revision: 2,
+      name,
+      emoji: '🪼',
+      instanceId: `instance-${name}`,
+    },
+    memory: { providerId: 'nowledge-mem', memoryId: name },
+  });
+  const send = async (queuedConfig) => {
+    const fixture = await openTestSession({
+      onRpc: () => ({ result: { accepted: true } }),
+    });
+    try {
+      const history = fixture.server.getList('history');
+      history.push({
+        id: 'first',
+        role: 'user',
+        finished: true,
+        items: [],
+        inputConfig: {
+          modelId: 'opus',
+          mcpServerIds: ['history'],
+          ...instance('a'),
+        },
+      });
+      history.push({
+        id: 'reply',
+        role: 'assistant',
+        finished: true,
+        items: [],
+      });
+      // Another client queued a turn after the one history ends with.
+      fixture.server.getMovableList('mq').push({
+        task: 'Synthetic queued turn',
+        userId: 'u2',
+        userTurnId: 'queued',
+        timestamp: new Date().toISOString(),
+        acpSessionConfig: queuedConfig,
+      });
+      fixture.server.commit();
+      await fixture.pushUpdate();
+      const composer = fixture.runtime.projectSession(
+        fixture.server,
+        'live',
+      ).composer;
+      assert.equal(
+        (
+          await fixture.runtime.sendTurn({
+            sessionId: 's1',
+            machineId: 'm1',
+            userId: 'u1',
+            cliType: 'builtin',
+            agentType: 'claude',
+            text: 'Synthetic follow-up',
+          })
+        ).state,
+        'queued',
+      );
+      return { composer, sent: fixture.server.toJSON().mq[1].acpSessionConfig };
+    } finally {
+      fixture.close();
+    }
+  };
+  const other = await send({
+    modelId: 'sonnet',
+    mcpServerIds: ['queue'],
+    ...instance('b'),
+  });
+  assert.equal(other.composer.modelId, 'sonnet');
+  assert.equal(other.sent.modelId, 'sonnet');
+  assert.deepEqual(other.sent.mcpServerIds, ['queue']);
+  assert.equal(other.sent.agentRoleId, 'role-b');
+  assert.deepEqual(
+    other.sent.agentRoleSnapshot,
+    instance('b').agentRoleSnapshot,
+  );
+  assert.deepEqual(
+    other.sent.memory,
+    instance('b').memory,
+    'Returning to the memory history ends with would restart the agent the queue left running',
+  );
+  const none = await send({ modelId: 'opus', agentRoleId: null });
+  assert.equal(none.sent.agentRoleId, null);
+  assert.equal('agentRoleSnapshot' in none.sent, false);
+  assert.equal(
+    'memory' in none.sent,
+    false,
+    'A queue that ends in None is not followed by the Role history named',
+  );
+  const sticky = await send({ modelId: 'opus' });
+  assert.equal(
+    sticky.sent.agentRoleId,
+    'role-a',
+    'A queued turn that names no Role leaves the one before it standing',
+  );
+  assert.equal('memory' in sticky.sent, false);
+});
+
 test('a turn projects who wrote it, and a record of another shape is no author', async () => {
   const { projectSession, projectSessionFull } = await loadProject();
   const doc = new LoroDoc();
