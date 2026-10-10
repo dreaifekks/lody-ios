@@ -179,17 +179,15 @@ test('skill references keep project precedence and expand the correct scope path
 });
 
 test('Role references filter private rows and invalid machine bindings before expansion', () => {
-  const agents = new Map([
-    [
-      'm',
+  const agents = new Map(
+    ['m', 'unnamed-machine'].map((machineId) => [
+      machineId,
       {
         get: (key) =>
-          key[1] === 'a'
-            ? { id: 'a', machineId: 'm', name: 'Agent' }
-            : undefined,
+          key[1] === 'a' ? { id: 'a', machineId, name: 'Agent' } : undefined,
       },
-    ],
-  ]);
+    ]),
+  );
   const row = (id, patch = {}) => ({
     key: ['agentRole', id],
     value: {
@@ -210,19 +208,17 @@ test('Role references filter private rows and invalid machine bindings before ex
     row('private', { ownerUserId: 'them' }),
     row('deleted-agent', { agentConfigId: 'missing' }),
     row('other-machine', { machineId: 'other' }),
+    row('far', { machineId: 'unnamed-machine' }),
   ];
-  const result = mentions.roleMentions(rows, 'me', agents, 'm');
+  const result = mentions.roleMentions(rows, 'me', agents, new Map(), 'm');
   assert.deepEqual(
     result.items.map((item) => [item.path, item.name]),
     [
       ['own:m', 'own'],
       ['shared:m', 'shared'],
+      ['far:unnamed-machine', 'far · unnamed-'],
     ],
-    'A row written before instances is one instance under the id Lody derives',
-  );
-  assert.equal(
-    mentions.roleMentions(rows, 'me', agents, 'other').items.length,
-    0,
+    'A row written before instances is one instance under the id Lody derives; a machine without a name is told by the start of its id',
   );
   assert.equal(
     mentions.expandMentionText('@role:private:m', result.items),
@@ -234,7 +230,7 @@ test('Role references filter private rows and invalid machine bindings before ex
   );
 });
 
-test('a Role lists its instances by group, on the machine asked for', () => {
+test('a Role lists every instance group, the composer’s machine first and an entry elsewhere by its machine', () => {
   const config = (machineId, id, patch = {}) => [
     `${machineId}/${id}`,
     { id, machineId, name: id, cliType: 'builtin', agentType: id, ...patch },
@@ -294,10 +290,15 @@ test('a Role lists its instances by group, on the machine asked for', () => {
       instance('moa-mac', 'mac', 'codex'),
     ]),
     row('solo', [instance('solo-nuc', 'nuc', 'claude')]),
+    row('alpha', [instance('alpha-nuc', 'nuc', 'claude')]),
   ];
+  const names = new Map([
+    ['mac', 'MacBook'],
+    ['nuc', 'Home NUC'],
+  ]);
   const listed = (machineId) =>
     mentions
-      .roleMentions(rows, 'me', machines, machineId)
+      .roleMentions(rows, 'me', machines, names, machineId)
       .items.map((item) => [item.path, item.name]);
   assert.deepEqual(
     listed('mac'),
@@ -307,29 +308,42 @@ test('a Role lists its instances by group, on the machine asked for', () => {
       ['moa-deepseek', 'moa · DeepSeek'],
       ['moa-fable', 'moa · Fable'],
       ['moa-gemini', 'moa · Gemini'],
+      ['alpha-nuc', 'alpha · Home NUC'],
+      ['solo-nuc', 'solo · Home NUC'],
     ],
-    'A Role whose first instance runs elsewhere still lists what runs here, in group order',
+    'A group runs here when it can; a Role that only runs elsewhere follows, by its machine',
   );
-  assert.deepEqual(listed('nuc'), [
-    ['moa-nuc', 'moa · Claude Code'],
-    ['solo-nuc', 'solo'],
-  ]);
   assert.deepEqual(
-    listed(undefined).map(([path]) => path),
+    listed('nuc'),
     [
-      'moa-nuc',
-      'moa-codex',
-      'moa-deepseek',
-      'moa-fable',
-      'moa-gemini',
-      'solo-nuc',
+      ['alpha-nuc', 'alpha'],
+      ['moa-nuc', 'moa · Claude Code'],
+      ['solo-nuc', 'solo'],
+      ['moa-codex', 'moa · Codex · MacBook'],
+      ['moa-deepseek', 'moa · DeepSeek · MacBook'],
+      ['moa-fable', 'moa · Fable · MacBook'],
+      ['moa-gemini', 'moa · Gemini · MacBook'],
+    ],
+    'The groups this machine has no instance of are still offered',
+  );
+  assert.deepEqual(
+    listed(undefined),
+    [
+      ['alpha-nuc', 'alpha · Home NUC'],
+      ['moa-nuc', 'moa · Claude Code · Home NUC'],
+      ['moa-codex', 'moa · Codex · MacBook'],
+      ['moa-deepseek', 'moa · DeepSeek · MacBook'],
+      ['moa-fable', 'moa · Fable · MacBook'],
+      ['moa-gemini', 'moa · Gemini · MacBook'],
+      ['solo-nuc', 'solo · Home NUC'],
     ],
     'Without a machine a group is listed once, by its first instance',
   );
-  const { items } = mentions.roleMentions(rows, 'me', machines, 'mac');
+  const { items } = mentions.roleMentions(rows, 'me', machines, names, 'nuc');
   assert.equal(
-    mentions.expandMentionText('@role:moa-fable @role:moa-mac', items),
-    'use lody mcp to create a session with agent role[id: moa, instance: moa-fable, name: moa · Fable] use lody mcp to create a session with agent role[id: moa, instance: moa-mac, name: moa · Claude Code]',
+    mentions.expandMentionText('@role:moa-fable @role:moa-nuc', items),
+    'use lody mcp to create a session with agent role[id: moa, instance: moa-fable, name: moa · Fable] use lody mcp to create a session with agent role[id: moa, instance: moa-nuc, name: moa · Claude Code]',
+    'The prompt names the instance by its group, never by its machine',
   );
 });
 

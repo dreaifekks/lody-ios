@@ -655,14 +655,25 @@ async function getMentions(
     return commandMentions(capability.availableCommands);
   }
   if (args.category === 'role') {
-    const pinned =
-      projectId?.startsWith(`${machineId}:local:`) ||
-      (session && projectId?.startsWith('github:'));
+    const meta = metaReplica.flock;
+    const machineNames = new Map<string, string>();
+    for (const id of machineReplicas.keys()) {
+      const name =
+        meta.get(['m', `machine-${id}`, 'name']) ??
+        (
+          meta.get(['m', `machine-${id}`]) as
+            Record<string, unknown> | undefined
+        )?.name;
+      if (typeof name === 'string' && name) machineNames.set(id, name);
+    }
+    // A Role mention starts another session, so every machine's Roles are
+    // offered; the composer's machine only comes first.
     return workspaceRoleMentions(
       workspace,
       args.userId,
       machineReplicas,
-      pinned ? machineId : undefined,
+      machineNames,
+      machineId,
       getGrant,
     );
   }

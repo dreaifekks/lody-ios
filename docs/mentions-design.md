@@ -9,10 +9,12 @@ human readable. This deliberately retains the namespaced spelling rather than
 introducing a second persisted range/chip model in the native composer.
 
 A Role is a template and its instances are what run, so a Role reference names
-one instance (`@role:<instance id>`). The picker lists one entry per instance
-group of each Role: the group's instance on the machine the project pins, or its
-first instance when no machine is pinned. A Role with several groups shows each
-group's name (its alias, else its agent's) beside its own.
+one instance (`@role:<instance id>`). A mention starts another session, which
+need not run where the composer does, so the picker lists one entry per instance
+group of every Role: the group's instance on the composer's machine when it has
+one, else its first. Entries on the composer's machine come first; one that runs
+elsewhere names its machine. A Role with several groups shows each group's name
+(its alias, else its agent's) beside its own.
 
 The runtime expands immediately before `sendTurn` writes history or the queue.
 Creation's first turn uses that same send operation; Steer moves an already

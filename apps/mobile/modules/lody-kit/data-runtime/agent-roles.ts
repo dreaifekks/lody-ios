@@ -8,6 +8,7 @@ export async function workspaceRoleMentions(
   workspaceId: string,
   userId: string,
   machines: Map<string, Flock>,
+  machineNames: Map<string, string>,
   machineId: string | undefined,
   getGrant: Parameters<typeof openSettings>[1],
 ): Promise<MentionCatalog> {
@@ -16,7 +17,7 @@ export async function workspaceRoleMentions(
     getGrant,
     AbortSignal.timeout(30000),
   );
-  return roleMentions(flock.scan(), userId, machines, machineId);
+  return roleMentions(flock.scan(), userId, machines, machineNames, machineId);
 }
 
 type Row = Record<string, unknown>;
@@ -132,16 +133,24 @@ function instanceGroup(instance: Instance, agent: Row | undefined) {
   };
 }
 
+/**
+ * The Role entries a composer offers, as Lody's `buildComposerAgentRoleItems`
+ * lists them: one per instance group of every Role, whatever machine it runs
+ * on. A mention starts a new session, which need not stay on the composer's
+ * machine; that machine is only preferred.
+ */
 export function roleMentions(
   rows: { key: unknown[]; value?: unknown }[],
   userId: string,
   machines: Map<string, Pick<Flock, 'get'>>,
+  machineNames: Map<string, string>,
   machineId?: string,
 ): MentionCatalog {
   const entries: {
     id: string;
     name: string;
     group: number;
+    local: boolean;
     item: MentionItem;
   }[] = [];
   for (const row of rows) {
@@ -193,28 +202,37 @@ export function roleMentions(
       };
       groups.set(identity.key, group);
       // The token carries the instance id, and ends at whitespace or `@`.
-      if (
-        agent &&
-        !/[\s@]/.test(instance.id) &&
-        (machineId === undefined || instance.machineId === machineId)
-      )
+      if (agent && !/[\s@]/.test(instance.id))
         group.usable.push({ instance, agent });
     }
-    // One entry per group: its instance on this machine, or without a machine
-    // its first one. Sibling groups are told apart by their names.
+    // A group shows its instance on this machine when it has one, else its
+    // first. The title tells sibling groups apart by their names, and names
+    // the machine of an entry that runs elsewhere.
     [...groups.values()].forEach((group, index) => {
-      const [first] = group.usable;
-      if (!first) return;
+      const picked =
+        group.usable.find((entry) => entry.instance.machineId === machineId) ??
+        group.usable[0];
+      if (!picked) return;
+      const { instance, agent } = picked;
+      const local = instance.machineId === machineId;
+      const title = [name];
+      if (groups.size > 1) title.push(group.name);
+      if (!local)
+        title.push(
+          machineNames.get(instance.machineId) ??
+            instance.machineId.slice(0, 8),
+        );
       entries.push({
         id,
         name,
         group: index,
+        local,
         item: {
-          path: first.instance.id,
-          name: groups.size > 1 ? `${name} · ${group.name}` : name,
+          path: instance.id,
+          name: title.join(' · '),
           kind: 'role',
-          subtitle: summary || String(first.agent.name ?? ''),
-          insertText: `@role:${first.instance.id}`,
+          subtitle: summary || String(agent.name ?? ''),
+          insertText: `@role:${instance.id}`,
           role: { id, name, instance: group.name },
         },
       });
@@ -222,6 +240,7 @@ export function roleMentions(
   }
   entries.sort(
     (a, b) =>
+      Number(b.local) - Number(a.local) ||
       a.name.localeCompare(b.name) ||
       a.id.localeCompare(b.id) ||
       a.group - b.group,
