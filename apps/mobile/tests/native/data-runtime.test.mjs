@@ -4,6 +4,22 @@ import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { LoroDoc } from 'loro-crdt/base64';
 
+// These runtimes start inactive, so presence is never joined; the real
+// transport would import the Streams client this file replaces.
+const presenceUnused = {
+  name: 'presence-unused',
+  setup(build) {
+    build.onResolve({ filter: /^@loro-dev\/streams-crdt\/loro$/ }, () => ({
+      path: 'presence',
+      namespace: 'presence-unused',
+    }));
+    build.onLoad({ filter: /.*/, namespace: 'presence-unused' }, () => ({
+      contents:
+        'export const EphemeralStoreAdaptor = undefined, EphemeralStreamCrdt = undefined;',
+    }));
+  },
+};
+
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
   const flock = new Flock('synthetic');
   flock.set(['e', 'session-s1'], true, 1);
@@ -77,6 +93,23 @@ test('persistent runtime applies live increments to the existing replica and adv
       {
         name: 'synthetic-stream',
         setup(build) {
+          build.onResolve(
+            { filter: /^@loro-dev\/streams-crdt\/loro$/ },
+            () => ({ path: 'presence', namespace: 'presence-test' }),
+          );
+          build.onLoad({ filter: /.*/, namespace: 'presence-test' }, () => ({
+            contents: `
+              export const EphemeralStoreAdaptor = store => store;
+              export class EphemeralStreamCrdt {
+                constructor({ adaptor }) { this.store = adaptor; globalThis.__runtimePresence = this; }
+                async join({ onStatusChange }) {
+                  onStatusChange('joined');
+                  return { ok: true, value: { unsubscribe() {} } };
+                }
+                async close() { this.closed = true; }
+              }
+            `,
+          }));
           build.onResolve({ filter: /^\.\/files$/ }, () => ({
             path: 'files',
             namespace: 'file-test',
@@ -85,6 +118,7 @@ test('persistent runtime applies live increments to the existing replica and adv
             contents: `
               export const readFile = (ctx, args) => ({ ctx, args });
               export const fileDiff = readFile;
+              export const workspaceChanges = readFile;
               export const turnDiff = readFile;
               export const listDir = readFile;
             `,
@@ -114,7 +148,12 @@ test('persistent runtime applies live increments to the existing replica and adv
   assert.equal(JSON.parse((await first).catalog).sessions[0].title, 'Before');
   assert.equal(requests[0].live, 'long-poll');
   const fileArgs = { sessionId: 's1', path: 'README.md', entryId: 'turn' };
-  for (const method of ['readFile', 'fileDiff', 'turnDiff']) {
+  for (const method of [
+    'readFile',
+    'fileDiff',
+    'turnDiff',
+    'workspaceChanges',
+  ]) {
     const request = globalThis.dataRuntime[method](fileArgs);
     assert.equal(request.ctx.ownerSessionId, 's1');
     assert.equal(request.args.sessionId, 's1');
@@ -137,7 +176,12 @@ test('persistent runtime applies live increments to the existing replica and adv
     'parent',
   );
   // No session document was opened: ownership must come from live Meta Flock.
-  for (const method of ['readFile', 'fileDiff', 'turnDiff']) {
+  for (const method of [
+    'readFile',
+    'fileDiff',
+    'turnDiff',
+    'workspaceChanges',
+  ]) {
     const request = globalThis.dataRuntime[method](fileArgs);
     assert.equal(request.ctx.ownerSessionId, 'parent');
     assert.equal(request.args.sessionId, 's1');
@@ -145,6 +189,31 @@ test('persistent runtime applies live increments to the existing replica and adv
   assert.equal(requests[1].offset, '2');
   assert.equal(events.filter((e) => e.type === 'grant').length, 1);
   assert.equal(globalThis.dataRuntime.ping(), true);
+  globalThis.__runtimePresence.store.set('machine:m1', {
+    kind: 'machine',
+    machineId: 'm1',
+    instanceId: 'test',
+    updatedAt: Date.now(),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(
+    JSON.parse(
+      events.filter((e) => e.type === 'machinePresence').at(-1).presence,
+    ),
+    {
+      state: 'live',
+      onlineMachineIds: ['m1'],
+    },
+  );
+  globalThis.dataRuntime.setActive(false);
+  assert.equal(globalThis.__runtimePresence.closed, true);
+  assert.equal(
+    JSON.parse(
+      events.filter((e) => e.type === 'machinePresence').at(-1).presence,
+    ).state,
+    'unknown',
+  );
+  delete globalThis.__runtimePresence;
   delete globalThis.webkit;
   delete globalThis.location;
   delete globalThis.__runtimeTestClient;
@@ -250,6 +319,7 @@ test('lost results settle from reads issued after the attempt; an upload left un
     platform: 'browser',
     write: false,
     plugins: [
+      presenceUnused,
       {
         name: 'synthetic-stream',
         setup(build) {
@@ -278,7 +348,7 @@ test('lost results settle from reads issued after the attempt; an upload left un
     'no catalog has been read yet',
   );
   const first = catalogEvent();
-  runtime.start(workspaceId);
+  runtime.start(workspaceId, undefined, false);
   await first;
   assert.deepEqual(runtime.confirmSession({ workspaceId, sessionId: 's1' }), {
     state: 'created',
@@ -419,6 +489,7 @@ test('a catalog read that fails on the network resumes from its cursor instead o
     platform: 'browser',
     write: false,
     plugins: [
+      presenceUnused,
       {
         name: 'synthetic-stream',
         setup(build) {
@@ -440,7 +511,7 @@ test('a catalog read that fails on the network resumes from its cursor instead o
   const runtime = globalThis.dataRuntime;
   const workspaceId = 'synthetic-workspace';
   const first = catalogEvent();
-  runtime.start(workspaceId);
+  runtime.start(workspaceId, undefined, false);
   await first;
   assert.equal(bootstraps, 2, 'the catalog and its one machine');
   const errors = () => events.filter((event) => event.type === 'syncError');

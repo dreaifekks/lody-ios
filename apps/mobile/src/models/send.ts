@@ -23,6 +23,8 @@ export type Capability = {
   agentType: string;
   models: CapabilityChoice[];
   modes: CapabilityChoice[];
+  // Actual legacy ACP modes, before the model picker folds in config selectors.
+  legacyModes?: CapabilityChoice[];
   reasoningEfforts: Record<string, string[]>;
   reasoningEffortConfigId?: string;
   configOptions?: ConfigOption[];
@@ -30,6 +32,7 @@ export type Capability = {
 };
 
 export type CreationOptions = {
+  availability?: 'online' | 'offline' | 'unknown';
   sessionId: string;
   project?: Project;
   agents: {

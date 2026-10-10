@@ -19,7 +19,12 @@ import { NotificationPreviewScreen } from './NotificationPreviewScreen';
 import { LiveActivityPreviewScreen } from './LiveActivityPreviewScreen';
 import { ReplyHapticsPreviewScreen } from './ReplyHapticsPreviewScreen';
 import { uiVerify } from './uiVerify';
-import { openCreateParity, openModelMemory } from './createFixture';
+import {
+  openCreateLanBranch,
+  openCreateParity,
+  openCreateRecovery,
+  openModelMemory,
+} from './createFixture';
 import { ComposerPreviewScreen } from './ComposerPreviewScreen';
 import { EditMessagePreviewScreen } from './EditMessagePreviewScreen';
 import { ComposerHandoffPreviewScreen } from './ComposerHandoffPreviewScreen';
@@ -41,8 +46,13 @@ import { SettingsPreviewScreen } from './SettingsPreviewScreen';
 import { SettingsScreen } from '../SettingsScreen';
 import { QuickRepliesPreviewScreen } from './QuickRepliesPreviewScreen';
 import { OnboardingPreviewScreen } from './OnboardingPreviewScreen';
-import { useNavigation, useRouter, useTheme } from 'expo-router';
-import { useEffect, useState } from 'react';
+import {
+  useLocalSearchParams,
+  useNavigation,
+  useRouter,
+  useTheme,
+} from 'expo-router';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Text, View as RNView } from 'react-native';
 import {
   NativeCloseButton,
@@ -75,6 +85,11 @@ function openRow(id: string, title: string, image: string): NativeListRow {
 function View() {
   const router = useRouter();
   const navigation = useNavigation();
+  const { verifyCase, request } = useLocalSearchParams<{
+    verifyCase?: string;
+    request?: string;
+  }>();
+  const openedRequest = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!uiVerify) return;
     globalThis.__lodyUiVerifyReset = () =>
@@ -139,6 +154,11 @@ function View() {
       id: 'ui',
       header: '界面验收',
       rows: [
+        openRow(
+          'create-recovery',
+          'Device recovery verification',
+          'desktopcomputer',
+        ),
         openRow('reply-haptics-preview', '回复触感试验', 'waveform'),
         openRow(
           'pull-request-preview',
@@ -200,6 +220,11 @@ function View() {
           'create-parity',
           'Create parity verification',
           'square.on.square',
+        ),
+        openRow(
+          'create-lan-branch',
+          'LAN typed branch verification',
+          'arrow.triangle.branch',
         ),
       ],
     },
@@ -360,7 +385,8 @@ function View() {
       void present(AppIconFailurePreviewScreen, {}),
     'appearance-preview': () => void present(SettingsScreen, {}),
     'queued-message-behavior-preview': () => void present(SettingsScreen, {}),
-    'quick-replies-preview': () => void present(QuickRepliesPreviewScreen),
+    'quick-replies-preview': () =>
+      void present(QuickRepliesPreviewScreen, undefined),
     'session-tree-preview': () => void present(SessionTreePreviewScreen),
     'subagents-preview': () => void present(SubagentsPreviewScreen),
     'inbox-preview': () => void present(InboxPreviewScreen, {}),
@@ -374,6 +400,8 @@ function View() {
       void present(ChatStreamPerformanceScreen, {}),
     'model-memory': () => void openModelMemory(),
     'create-parity': () => void openCreateParity(),
+    'create-recovery': () => void openCreateRecovery(),
+    'create-lan-branch': () => void openCreateLanBranch(),
     'mention-chat': () =>
       void present(
         ComposerPreviewScreen,
@@ -457,6 +485,23 @@ function View() {
         .catch((error) => setResult(String(error)));
     },
   };
+
+  const openVerifyCase = useEffectEvent((id: string) => {
+    if (!Object.hasOwn(actions, id))
+      throw new Error(`Unknown UI verify case: ${id}`);
+    actions[id]();
+  });
+  useEffect(() => {
+    if (
+      !uiVerify ||
+      !verifyCase ||
+      !request ||
+      openedRequest.current === request
+    )
+      return;
+    openedRequest.current = request;
+    openVerifyCase(verifyCase);
+  }, [verifyCase, request]);
 
   return (
     <NativeGroupedList

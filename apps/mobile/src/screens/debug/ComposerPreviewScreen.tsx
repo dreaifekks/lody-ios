@@ -81,6 +81,7 @@ const mentionItems: MentionItem[] = [
     kind: 'role',
     subtitle: 'Review changes',
     insertText: '@role:role-reviewer',
+    role: { id: 'reviewer', name: 'Reviewer', instance: 'Claude Code' },
   },
   {
     path: 'issue:11',
@@ -113,6 +114,7 @@ function View() {
   const [clearDraftToken, setClearDraftToken] = useState(0);
   const [sending, setSending] = useState(false);
   const [fast, setFast] = useState(false);
+  const [permissionId, setPermissionId] = useState('ask');
   const [count, setCount] = useState(0);
   const [lastSent, setLastSent] = useState('');
   const [selectedPage, setSelectedPage] = useState(0);
@@ -161,11 +163,27 @@ function View() {
     }),
     onComposerOptionChange: ({
       nativeEvent,
-    }: NativeSyntheticEvent<{ fast?: boolean }>) => {
+    }: NativeSyntheticEvent<{ fast?: boolean; permissionId?: string }>) => {
       if (typeof nativeEvent.fast === 'boolean') setFast(nativeEvent.fast);
+      if (nativeEvent.permissionId !== undefined)
+        setPermissionId(nativeEvent.permissionId);
     },
     composerOptionsJSON: JSON.stringify({
       fast,
+      permissionId,
+      permissions: [
+        {
+          id: 'ask',
+          title: 'Ask Every Time',
+          description: 'Ask before executing tools.',
+        },
+        { id: 'auto', title: 'Auto Approve' },
+        {
+          id: 'danger-full-access',
+          title: 'Dangerous Mode',
+          description: 'Allow unrestricted tool execution.',
+        },
+      ],
       modelId: 'gpt-5.6-sol',
       models: [{ id: 'gpt-5.6-sol', title: 'GPT-5.6 Sol' }],
       effort: 'high',

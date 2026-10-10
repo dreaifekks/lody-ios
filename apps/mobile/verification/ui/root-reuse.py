@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import sys
-from driver import UI
+from driver import BUNDLE_ID, UI
 from inspector import inspector
 
 ui = UI(sys.argv[1], sys.argv[2])
@@ -11,18 +11,13 @@ ui = UI(sys.argv[1], sys.argv[2])
 
 def pid():
     lines = subprocess.check_output(['xcrun', 'simctl', 'spawn', ui.udid, 'launchctl', 'list'], text=True, timeout=20).splitlines()
-    return next(line.split()[0] for line in lines if 'UIKitApplication:app.innei.lody[' in line)
+    return next(line.split()[0] for line in lines if f'UIKitApplication:{BUNDLE_ID}[' in line)
 
 
 original = pid()
 for host in ['chat', 'sheet']:
     if host == 'sheet':
-        for _ in range(8):
-            if any(i.get('AXUniqueId') == 'model-memory' and 120 < i['frame']['y'] < 600 for i in ui.state()):
-                break
-            ui.axe('swipe', '--start-x', '200', '--start-y', '700', '--end-x', '200', '--end-y', '500', '--duration', '.5', '--post-delay', '.6')
-        ui.capture('sheet-entry')
-        ui.axe('tap', '--id', 'model-memory', '--tap-style', 'physical', '--pre-delay', '.8', '--post-delay', '.6')
+        ui.open_case('model-memory')
         ui.element('create-session-input')
     ui.axe('tap', '--id', 'session-input' if host == 'chat' else 'create-session-input', '--post-delay', '.6')
     ui.axe('tap', '--id', 'session-model', '--post-delay', '.5')

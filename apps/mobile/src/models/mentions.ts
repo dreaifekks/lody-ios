@@ -6,6 +6,8 @@ export type MentionItem = {
   kind: MentionCategory | 'directory';
   subtitle: string;
   insertText?: string;
+  /** A Role entry runs the instance `path` names: its Role, and the name of the instance's group. */
+  role?: { id: string; name: string; instance: string };
 };
 export type MentionSource = {
   workspaceId: string;

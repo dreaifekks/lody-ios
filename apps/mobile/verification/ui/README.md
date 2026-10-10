@@ -1,11 +1,31 @@
 # Offline UI verification
 
+`branch-picker` exercises the native new-session branch selector without an account:
+repository defaults, pagination during case-insensitive search, selection and back
+cancellation, long names, failed-load retry, and empty repositories. It captures
+English light/dark screenshots and video. `share-probe.py --branches --app <app>`
+exercises the real Share Extension's cached branch search and selected-branch inbox
+payload, then verifies missing-cache handoff preserves the shared text. Run that
+probe with `--appearance light` and `--appearance dark`. Native `create-session`,
+`github-mentions`, and `share` checks cover selection boundaries, paged GitHub
+responses, credential isolation and account/workspace cache separation.
+
+`branch-picker-lan` opens the same form on a fixture LAN workspace, where no hub
+answers and the branch list fails without a request. It checks the retained retry
+row, the typed-name row a LAN adds for a search that is not listed, and that the
+typed branch reaches the form. `branch-picker` keeps checking that Lody Cloud
+offers no such row.
+
 `edit-message` exercises the production last-user-message context menu and full-screen
 editor in English light/dark appearances. It checks cancellation preserving the chat
 draft, removing an original attachment, adding a file through paste, rejected resend
 retaining edits, and successful replacement. Screenshots and video capture the states.
 The service boundary is synthetic; no cloud history is rewritten. Protocol tests cover
 eligibility, server-owned history replacement and non-replay of uncertain requests.
+
+`composer-fullscreen` types past the chat input's inline cap, expands it in place to
+full screen, checks the upward growth and format bar, collapses it, then sends from full
+screen. It uses the offline chat-success fixture in English light/dark.
 
 `--suite chat-kit` exercises the Swift Package migration through the
 production streaming transcript, standalone Composer sheet and attachment send
@@ -19,6 +39,16 @@ and replaces the transcript to verify stale selections are cleared. The Selectio
 Fixture uses production rendering without account or cloud access. User bubbles,
 tool rows and unloaded history form selection boundaries; changing visible group
 membership clears selection. Table selections keep their upstream group and menu.
+
+Pinned [Litext](https://github.com/Lakr233/Litext) 3.6.2 uses UIKit's public `UITextSelectionDisplayInteraction`
+for highlights/handles and `UITextLoupeSession` on iOS 17 and later. `markdown`
+checks one system display with two handles and no visible custom handles, and
+captures the loupe while long presses and cross-row/table
+handle drags are still held, then checks the released menu and real clipboard.
+`file-selection` provides focused selection acceptance; `file-preview` also exercises held word selection and copy in Markdown documents
+opened from browser, chat and process hosts. Review the held screenshots and
+videos in both appearances; a clipboard assertion alone does not prove the loupe
+renders correctly. Its appearance belongs to the tested OS runtime.
 
 `markdown` and `file-preview` include native Ruby annotations in both appearances.
 The chat check also verifies annotation readings, selectable base text and increased
@@ -74,6 +104,23 @@ merged, closed and draft states. It checks the icon-only GitHub button's 44 pt
 target, VoiceOver label and existing open action.
 
 ## Run locally
+
+After the offline ready marker, the runner opens each Debug scene with
+`lody:///debug?verifyCase=<preview-id>&request=<unique-id>`, reusing the same
+menu action without scrolling or tapping the Debug list. Only the offline
+verification bundle handles these parameters; each request opens once.
+Home cases keep their native launch fixtures. Use `UI.open_case` for later fixture
+entries and relaunches as well; no case should scroll the Debug menu merely to
+reach its fixture. Results include `caseEntrySeconds` and `checkSeconds`.
+
+The runner establishes English and software-keyboard mode once per batch.
+Cases reuse that baseline. `UI.axe("type", text)` / `UI.type_into` submit text
+through one AXe composite HID batch rather than individual key submissions;
+do not repeat keyboard setup, switch IMEs, or erase/retry a mismatched draft.
+A mismatch fails immediately. Individual software-key taps remain only when the
+specific key interaction is under test (for example, the `$` mention trigger).
+Retain keyboard geometry assertions where keyboard behavior is the requirement.
+Recording starts after shared startup is ready, immediately before scene entry.
 
 `session-search` and `session-search-pad` run the production Inbox/sidebar and
 session find with isolated cached fixtures. They cover title/path/branch and
@@ -138,6 +185,19 @@ layout. The native `list` check exercises shared content at both densities;
 `home` verifies the iPhone grouped host. The older `ipad` script records the
 superseded panel-local sheet experiment and is not current business acceptance.
 
+`devices` covers the workspace's status dot and device submenu, mixed/offline/unknown
+states, the current session's device subtitle, and recovery in
+the open new-session sheet. The recovery scene starts with an options-load failure,
+then waits for its project computer; another computer coming online must not
+enable Send or replace the selection. It preserves edited text and an attachment
+through recovery and Project/Chat switching. `devices-pad` exercises the workspace
+indicator and device menu in the iPad sidebar. Both run in English, light and dark, with video.
+The Debug-only boundary reads `ui-device-presence` and `ui-device-options-error`
+from the local fixture cache; no credentials, cloud traffic, or real turn are used.
+Production liveness comes from the workspace ephemeral presence stream, not the
+registered catalog or the app's cloud connection. Transport/TTL behavior is checked
+separately by the machine-presence and data-runtime behavioral checks.
+
 For a verified build, wrap the build and checks so Xcode cannot select a personal
 Simulator. The wrapper exposes its device as `LODY_VERIFY_UDID`; `pnpm
 verify:build` builds for that lease and prints the App path, and nested verify
@@ -201,6 +261,12 @@ connecting, ready, simulator and unavailable. The composer's single context
 chip must keep a separator before the suggestions and follow its label width.
 It collapses to its icon while a draft exists and stays when work hides the
 suggestions. `run.mp4` is the evidence for the width and text morphs.
+It also pushes a fresh conversation with a Simulator chip already present and
+returns to the original row. The native `context-chip` check samples presentation
+geometry through first display and repeated identical updates, rejecting a
+second entrance animation or a restarted horizontal displacement. It also
+delivers replies after a real navigation push has begun, checking that the row
+moves with its page instead of independently expanding during the transition.
 
 `pull-request` opens Debug → GitHub PR / CI 预览 with an injected OSS-shaped
 projection. It captures the native chat entry, PR summary, grouped checks,
@@ -252,7 +318,7 @@ visual smoothness. The probe contains fixture IDs and geometry only.
 | composer-glass          | NativeComposer in a real form sheet                   | Separate unfocused Add/input glass, focus merge animation and unified final surface, mirrored Add/Send centers, shared baseline, trailing model selector, light/dark screenshots and video                                                                                                                                                                                                                                                                                                                                                                                                            |
 | composer-video          | NativeChat composer                                   | Paste a movie that also registers a PNG poster; the chip and sent user row keep the video filename and never open an image cell                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | composer-success        | NativeChat composer                                   | File paste, pending clear/lock, text and attachments stay cleared after acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| markdown                | MarkdownView code block + table                       | Copy preserves complete code and indentation through the Simulator clipboard; a wide table bleeds to the screen edges and keeps that bleed after a horizontal swipe                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| markdown                | MarkdownView code block + table                       | Copy preserves complete code and indentation through the Simulator clipboard; a wide table stays inside its border during selection and horizontal scrolling                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | live-activity           | LodyLiveActivity widget + NotificationSettingsContent | Fixture activity start, running → permission update, compact Dynamic Island and Lock Screen card captures, end returns the debug status row to `0 个活动`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | terminal                | TerminalScreen + LodyTerminalView (fixture)           | Debug LAN terminal fixture without a machine: SwiftTerm surface labelled for VoiceOver with its visible screen as value, shell title in the navigation bar, typed input echoes, and the shell sits above the keyboard                                                                                                                                                                                                                                                                                                                                                                                 |
 | background              | DataRuntime + UIApplication background allowance      | Same WebView cross-background restoration, short background allowance without a system Live Activity, completion/expiration release, no restart from late updates                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -323,8 +389,9 @@ supply `--udid` or wrap it in a single-device lease. Build separately with
 
 The runner enables request diagnostics only for its owned Metro. `metro.log`
 records manifest/status request starts, completion/connection-close, status and
-duration without headers, query parameters or bodies. `metro-startup.json` and
-per-case `metro-failure.json` probe host-side status and manifest HEAD/GET with
+duration without headers, query parameters or bodies. A successful start only
+waits for status and prewarms the bundle once. On failures, `metro-startup.json`
+and per-case `metro-failure.json` probe host-side status and manifest HEAD/GET with
 10-second deadlines; they do not prove Simulator reachability. Compare these
 with the five-minute `native.log` and failure screenshot to distinguish no
 incoming request, an unfinished server response, and app-side failure.
@@ -335,7 +402,9 @@ the run requires it, including failures. A failed case always takes a Simulator
 framebuffer screenshot first (`failure.png`, also copied to `failures/`); that
 does not wait on AXe. The first `describe-ui` after a fresh Simulator boot
 retries until AXe's XCTest session exists. Later AXe commands retry the same way
-when that session dies. `navigation` dismisses the first-open SpringBoard alert
+when that session dies. A command that hangs restarts the simulator
+`testmanagerd` before the retry, because killing the client alone leaves the
+next `describe-ui` stuck on the same session. `navigation` dismisses the first-open SpringBoard alert
 by tapping Open without waiting on `describe-ui`, which hangs on that dialog, and
 does that only once so later links are not delayed by missing-label probes.
 Embedded `navigation` does two cold relaunches and one unknown-URL return, and
@@ -502,11 +571,14 @@ regressions. Performance numbers are reported without arbitrary pass thresholds.
 ### Send animation frame checks
 
 `--case morph` opens the production new-session sheet from offline Home and
-checks close, backdrop dismissal and first-message handoff in both appearances.
-Native `lody-morph-*.json` samples must show a shrinking sheet and fading backdrop
-on every path. The send check also requires the same composer, unchanged focus
-and input state, and adoption within 1.5 pt. Review `run.mp4` for visual continuity;
-these fixtures do not send a cloud message.
+checks close, cancelled drag, backdrop dismissal, completed swipe and first-message
+handoff in both appearances. Dismissals must remove the Router presentation,
+and reopening must remain possible. The send check requires the same composer,
+unchanged focus and input state, and adoption within 1.5 pt. Review `run.mp4`
+with `transition-events.json` for the system button-to-sheet zoom, reverse zoom
+and the source-less send dismissal. `--case sheet-zoom-project` covers the
+Project page navigation button, repeated opening/cancellation, and retaining the
+owning project route. These fixtures do not send a cloud message.
 
 `send`, `send-handoff`, `send-rounds`, `send-queue`, `send-guide`, `send-transition`, and `send-transition-handoff` enable the `--ui-verify-throw` probe.
 It requests the Simulator screen's maximum refresh rate and samples Core Animation
@@ -632,6 +704,88 @@ Ordinary regression runs are never ingested: `results.json` stays a programmatic
 CI gate. Simulator Debug evidence cannot claim physical-device performance,
 haptics or cloud persistence, whatever the round says.
 
+Attachment overlays:
+
+- `--case attachment-overlay-chat` and `--case attachment-overlay-sheet` use the
+  production composer with real Simulator Photos, seeded with the app icon. They
+  check keyboard coverage, retained selection across back/forward navigation,
+  attachment import and continued draft editing in both themes.
+
+Attachment authorization regression: `--case attachment-overlay-chat` and
+`--case attachment-overlay-sheet` reset Photos permission before each appearance
+and use the real system prompt. `--photo-access full|limited|denied|settings`
+selects the outcome; `settings` denies first, opens system Settings, then
+returns without changing authorization to verify the live continuation. Changing
+privacy in Settings can terminate the app and is a separate cold-launch path. Evidence includes the system handoff, restored
+recent-photos surface, retained draft/selection and continued keyboard input.
+Run native UI drivers serially to avoid simulator accessibility contention.
+
+`attachment-camera-chat` / `attachment-camera-sheet` exercise the production
+three-action menu and inline camera page with `--ui-verify-camera`. The native
+capture fixture fails the first shutter press, then creates a local image;
+checks cover back/reopen, inline glass tools, flash cycling, retry, direct attachment handoff and
+capture-session shutdown on page exit/dismissal. Both appearances are recorded.
+This verifies UI and ownership, not physical camera hardware or sensor output.
+The Photos permission cases above continue to exercise actual system prompts.
+Use `--camera-access allow` or `--camera-access deny` with these same camera
+cases to reset only the leased device's camera permission and exercise the real
+system prompt. The returned panel must remain above the keyboard; capture on
+Simulator may show the native unavailable-camera message. Never reset privacy on
+a user preview device.
+
+Attachment media geometry checks assert a 60% window-height viewport and 12 pt
+side/bottom insets for photos and camera. The root menu uses 56 pt rows with
+40 pt icon discs and 16 pt symbols (visually review the captured root menu).
+Photo checks also cover multiline drafts and, in the chat host, a hidden keyboard.
+
+Attachment controls share 40 pt visible height and a minimum 44 pt hit area.
+The root menu uses 20 pt side and 12 pt vertical padding: its first/last icon
+centers coincide with the nominal 40 pt menu corner centers. Camera checks tap
+the expanded edge of the back button, outside its visible glass.
+
+Camera capture accepts a photo directly into the draft without a review screen or
+sending a message. The overlay closes into the actual attachment thumbnail using
+a transient image; Reduce Motion and offscreen targets fade in place. Ownership
+is transferred before animation, so cancellation cannot delete an accepted file.
+
+Continuous attachment pages retain one outer glass panel across push/back.
+The camera body and photo grid use `contentLayout: .stable` with their destination
+allocation and the grid retains its scroll offset. Both expose `OverlayPageChrome` for
+fixed-size foreground controls that follow the live bottom edge and safe inset.
+Review `run.mp4` through entry and return in both hosts, checking for clipped
+controls, scaled labels/icons and outgoing media behind incoming menu labels.
+The upstream library's Reliability scene also samples rapid reversal and
+same-size page changes through the public API.
+
+Recent-photo confirmation shares the camera's draft-first thumbnail handoff.
+Full-access photo cases capture single selection, clearing the last selection
+(neutral All Photos), and multiple selection (system-blue Add N Items), then
+verify both single and batch imports without sending a message. Review the
+recording through each confirmation: the first newly accepted image represents
+the batch and contracts into its actual thumbnail. Offscreen destinations and
+Reduce Motion keep the library's existing in-place fade.
+
+The overlay kit now owns external-interaction continuations, destination visibility,
+menu rows, glass action buttons and bottom action-bar geometry. Keep the permission
+request and media/draft ownership in Lody. Reuse `attachment-overlay-*` with both
+`--photo-access full` and `--photo-access settings` to cover prompt restoration and
+an actual Settings round trip in both composer hosts; the camera cases also exercise
+the shared action bar with a custom shutter. Upstream Reliability checks stale
+continuations, exactly-once restoration, and destination alpha on cancellation or
+replacement.
+
+The full-access attachment overlay flow also exercises the photo layout toggle in
+both directions, including reversal while the corner spring is settling. Review
+the screenshots and recording for an 18pt top panel radius in inset mode
+(6pt photo radius + 12pt inset), restored 40pt in edge-to-edge mode, and the
+same inset corners after reopening the page. Bottom corners remain device-concentric.
+The flow runs in
+both composer hosts and appearances. It checks 12pt margins on all four edges,
+edge-to-edge restoration, a saved layout after the page stack is recreated,
+selection retention, and the visible photo anchor after switching while scrolled.
+The Photos fixture includes enough rows for a real scroll. Layout controls reuse
+AnchoredOverlayKit; the preference and photo layout stay in LodyKit.
+
 `agent-error` verifies native inline alert cards, separate detail/copy actions, hidden actions for historical or incomplete failures, single-dispatch manual retry, definite rejection, accepted continuation, compact content-driven height, stable pending action geometry and preserved composer drafts in both appearances. Its retry service is local; no cloud turn is sent. Set `LODY_VERIFY_RUNTIME` to an installed Simulator runtime identifier when the default iOS 27.0 runtime is unavailable.
 
 ### Scroll edge host coverage
@@ -674,18 +828,18 @@ and video cover both hosts. Service data is offline; this does not establish liv
 cloud synchronization. Session trees use `openedBySessionId`; contained Tabs and
 transcript `subagent_task` items retain their existing UI.
 
-`--suite camera` opens the recent-photo grid from both production composer hosts.
-The first cell expands its preview into an edge-to-edge camera inside the same
-3:4 sheet, while controls float over the image with safe-area clearance. The menu camera instead opens full-screen with black control regions outside a 3:4 viewfinder. The explicit `--ui-verify-camera`
-launch fixture supplies a local image and rejects the first shutter press; it
-never requests camera or photo-library access. Both English appearances exercise
-retry, review, retake/temporary-file cleanup, multiple captured selections,
-attachment handoff, separate full-screen camera entry and direct confirmation, cancellation and foreground
-ownership. The grid morph keeps preview geometry fixed and scales it with the viewport while the sheet background and controls transition together. Screenshots/video cover the transition and camera UI. The lifecycle
-record proves session start/stop requests, not physical sensor activity.
-`verify:native --case composer` also checks actual JPEG storage and invalid input.
-Real camera preview, orientation, focus, flash and lens switching require iPhone
-validation; the fixture does not establish their hardware behavior.
+`--suite camera` exercises the attachment overlay camera in both composer hosts,
+using the same checks as `attachment-camera-chat` and `attachment-camera-sheet`.
+The explicit `--ui-verify-camera` launch fixture supplies a local image and rejects
+the first shutter press. The checks cover retry, flash/lens controls, direct
+attachment handoff, cancellation and foreground ownership. Screenshots and video
+cover the continuous menu/container transition. Share Extension retains its system
+attachment sheet because the keyboard overlay requires application-only APIs;
+its shared capture service is compiled into both targets.
+`verify:native --case composer` also checks JPEG storage, invalid input, overlay
+viewport resizing and ChatKit attachment handoff geometry/cleanup. Real camera
+preview, orientation, focus, flash and lens switching require iPhone validation;
+the fixture does not establish their hardware behavior.
 
 `--suite paste-plain` checks the native Paste as Plain Text menu in chat and the
 new-session composer, in English light/dark appearances. It verifies that long
@@ -705,8 +859,80 @@ chat, the keyboard stays clear, drafts survive, and close/reopen creates a fresh
 stream. Light/dark screenshots and video cover the transitions. This fixture
 requires neither cloud access nor a connected computer; it does not prove the
 remote tunnel's availability or background network continuity.
-It also cancels an interactive return, changes the selected device, stops sharing,
-and re-enters the chat; the fixture's active-source counter must stay at one, so
-an abandoned renderer cannot keep running unnoticed.
+`pnpm verify:native --case simulator-transport` separately exercises the production
+native transport against a loopback werift peer (the CLI gateway's WebRTC stack)
+over real DTLS/SCTP, plus a loopback WebSocket server: bounded frame reassembly,
+acknowledged controls, disconnect without replaying uncertain commands,
+old/malformed/redirecting signaling fallback, and close during negotiation. It
+uses synthetic HTTP signaling and does not establish live TURN, cross-network
+latency or compatibility with a deployed CLI version.
+Left/right/down swipes inside the device must not dismiss Preview. A slow border
+swipe must visibly shrink and move the device while held, then cancel without
+replacing the decoder. A longer edge swipe must track touch before completing
+into the PiP. The check measures decoded-frame pixels in intermediate screenshots
+because UIKit's transition container leaves the renderer's own layer/AX geometry
+unchanged. It also changes the selected device, stops sharing, and re-enters the
+chat; the fixture's active-source counter must stay at one, so an abandoned
+renderer cannot keep running unnoticed.
 Native presentation-layer traces verify fade blur in on each return, removal of
 the entrance blur, and no replay during dragging or keyboard layout changes.
+
+`--case attachment-overlay-create` additionally exercises the production native
+`CreateSessionController` form: photo authorization, keyboard coverage, attachment
+handoff and draft preservation. It uses the offline create-parity fixture and full
+Photos access.
+
+Camera entry checks sample the production page during the panel transition: the
+viewfinder allocation must remain fixed while the visible panel changes height.
+Initial preview orientation is configured before capture starts, with implicit
+preview geometry animations disabled. Actual sensor startup/orientation still
+requires iPhone verification. Authorized photo selection checks capture both selected top
+corners, partial scrolling and inset mode to review the continuous theme-accent outline
+and opaque white selection numbers.
+
+For photo selection visual checks independent of the system authorization
+continuation, use `--photo-access granted`. The runner grants Photos access only
+on its leased Simulator and runs focused layout, selection, scrolling and
+attachment checks through `attachment-selection.py`. This mode does not establish permission-prompt restoration;
+use the existing `full`/`limited`/`denied`/`settings` modes for that contract.
+
+`attachment-motion-chat`, `attachment-motion-sheet` and `attachment-motion-create`
+record the same menu open → camera → back → photos → back → close/reopen flow.
+They use granted fixture photos and the deterministic camera, retain the draft,
+and check that the viewfinder keeps its destination size during transitions.
+Run with `--require-video` and omit `--appearance` for light/dark coverage.
+`motion-events.json` records wall-clock action boundaries for trimming idle waits
+from before/after clips; preserve original playback speed and inspect the frames.
+
+`workspace-changes` opens the shared production overflow actions, then the workspace
+list and current-file diff. It covers refresh failure, retry and successful empty
+results in English light/dark with screenshots and video. `simulator-preview`
+now enters through that same overflow menu. Both use offline service fixtures;
+they do not prove availability of a deployed Machine. Workspace changes use the
+Machine All Changes comparison base, displayed in the list, and may include
+committed branch changes as well as uncommitted files.
+
+`--suite permission-composer` runs `permission-mode-chat`,
+`permission-mode-sheet`, and `permission-mode-create`. These exercise the shared composer permission menu with offline agent options in both
+appearances. They check 44 pt controls, separation from mentions/model controls,
+selection round trips, menu reopening, and retained drafts. The runtime regression
+checks persistence before RPC and restoration from history; no live agent turn is
+sent by these UI fixtures.
+
+### Library-owned selection boundary
+
+`ChatRecentPhotosView` adopts `OverlayBoundaryHighlighting` and returns selected
+visible image regions with the collection view as `clippedTo`. Lody keeps the
+ordered selection, badges and each photo's own border. AnchoredOverlayKit owns
+the panel-edge stroke, live corners, coordinate conversion and clipping; there
+is no app-owned boundary view, shape mask or scroll/layout refresh callback.
+
+The app pins the published `@rien7/anchored-overlay-kit@0.3.0` package.
+The temporary 0.2.0 dependency patch has been removed; CocoaPods resolves the
+released Swift sources from node_modules.
+
+Reuse `attachment-overlay-chat`, `attachment-overlay-sheet` and
+`attachment-overlay-create` with `--photo-access granted --embedded` to verify
+selection at both top corners, repeated edge/inset layout switching, partially
+scrolled selection, renumbering and draft-preserving import in both appearances.
+Review the screenshots and videos for border continuity and stale highlights.

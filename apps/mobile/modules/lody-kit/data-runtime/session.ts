@@ -3,6 +3,7 @@ import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
 import { decodeFrames, encodeFrame } from '../decoder/frames';
 import {
+  conversationConfigs,
   identityAt,
   itemRev,
   projectSession,
@@ -581,6 +582,8 @@ export function appendUserTurn(
     id,
     role: 'user',
     userId,
+    // Lody's `MessageAuthor`: a turn typed here is a person's, not an agent's.
+    author: { v: 1, kind: 'human', userId },
     timestamp,
     status,
     read: false,
@@ -731,14 +734,14 @@ export async function sendTurn(
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
-    const userTurns = (
-      (state.doc.toJSON().history as any[] | undefined) ?? []
-    ).filter((entry) => entry.role === 'user');
-    const previous = userTurns.at(-1)?.inputConfig ?? {};
+    const raw = state.doc.toJSON();
+    const history = (raw.history ?? []) as any[];
+    const configs = conversationConfigs(history, raw.mq ?? []);
+    const previous = configs[0] ?? {};
     // Lody keeps a Role sticky from the newest turn that names one, or None.
-    const roleTurn = userTurns.findLast(
-      (entry) => entry.inputConfig?.agentRoleId !== undefined,
-    )?.inputConfig;
+    const roleTurn = configs.find(
+      (config) => config?.agentRoleId !== undefined,
+    );
     const configOptionValues = {
       ...(previous.configOptionValues &&
       typeof previous.configOptionValues === 'object' &&
@@ -760,9 +763,13 @@ export async function sendTurn(
     // A Role names the run configuration it pinned. The turn keeps naming it
     // while nothing changed and records an explicit None once the user moves a
     // control, as Lody's composer does; the instruction belongs to the first
-    // turn only and is not replayed.
-    let agentRole: { agentRoleId?: string | null; agentRoleRevision?: number } =
-      {};
+    // turn only and is not replayed. The snapshot names the instance that ran
+    // and stays with the Role it describes.
+    let agentRole: {
+      agentRoleId?: string | null;
+      agentRoleRevision?: number;
+      agentRoleSnapshot?: Record<string, unknown>;
+    } = {};
     if (typeof roleTurn?.agentRoleId === 'string') {
       const before =
         previous.configOptionValues &&
@@ -783,6 +790,8 @@ export async function sendTurn(
         agentRole = { agentRoleId: roleTurn.agentRoleId };
         if (Number.isInteger(roleTurn.agentRoleRevision))
           agentRole.agentRoleRevision = roleTurn.agentRoleRevision;
+        if (roleTurn.agentRoleSnapshot)
+          agentRole.agentRoleSnapshot = roleTurn.agentRoleSnapshot;
       }
     } else if (roleTurn?.agentRoleId === null)
       agentRole = { agentRoleId: null };
@@ -796,6 +805,10 @@ export async function sendTurn(
       configOptionValues: Object.keys(configOptionValues).length
         ? configOptionValues
         : undefined,
+      // The machine restarts the agent when a turn names another memory than
+      // the one it runs with, so the binding travels with the turn. It is the
+      // Role instance's, and a turn recorded as None names none, as in Lody.
+      memory: agentRole.agentRoleId === null ? undefined : previous.memory,
       mcpServerIds: previous.mcpServerIds ?? [],
       taskToolsEnabled: previous.taskToolsEnabled ?? false,
       ...agentRole,
@@ -804,8 +817,6 @@ export async function sendTurn(
         ? { _lodyDeliveryKind: 'continue' }
         : {}),
     };
-    const raw = state.doc.toJSON();
-    const history = (raw.history ?? []) as any[];
     const lastUser = history.findLastIndex((entry) => entry.role === 'user');
     // Re-evaluate after attachment upload and mention expansion. A completed
     // target must follow the ordinary dispatch/queue path, never orphan a guide.

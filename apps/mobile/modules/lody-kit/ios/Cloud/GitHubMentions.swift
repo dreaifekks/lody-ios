@@ -59,7 +59,48 @@ import Foundation
       ![".", ".."].contains(repo.components(separatedBy: "/").last ?? "")
   }
 
+  static func branches(workspace: String, repo: String, page: Int) async throws -> CreateBranches {
+    guard validRepository(repo), page > 0, page < Int.max else { throw failure() }
+    let account = try AuthKeychain.read()
+    let token: String
+    if LanInvite.isWorkspace(workspace) {
+      // A LAN lists with its hub's token; a hub without one has no branch to offer.
+      guard let invite = LanHub.credential(for: workspace),
+        let hubToken = try await LanHub.githubToken(invite) else { throw failure() }
+      token = hubToken
+    } else {
+      guard let result = try await call(
+        "action", path: "github:getAccessTokenByRepoNameForClient",
+        args: ["workspaceId": workspace, "repoFullName": repo]
+      ) as? [String: Any], result["success"] as? Bool == true,
+        let brokered = result["token"] as? String, !brokered.isEmpty else { throw failure() }
+      token = brokered
+    }
+    try Task.checkCancellation()
+    let base = "https://api.github.com/repos/\(repo)"
+    var defaultBranch: String?
+    if page == 1 {
+      guard let repository = try await request(base, token: token) as? [String: Any] else { throw failure() }
+      guard let name = repository["default_branch"] as? String, !name.isEmpty, name.utf8.count <= 255 else { throw failure() }
+      defaultBranch = name
+    }
+    guard let rows = try await request("\(base)/branches?per_page=100&page=\(page)", token: token) as? [[String: Any]],
+      rows.count <= 100 else { throw failure() }
+    var names = try rows.map { row -> String in
+      guard let name = row["name"] as? String, !name.isEmpty, name.utf8.count <= 255 else { throw failure() }
+      return name
+    }
+    // An empty repository has a configured default name but no branch to select.
+    if !names.isEmpty, let name = defaultBranch, !name.isEmpty, name.utf8.count <= 255 {
+      names.append(name)
+    } else if names.isEmpty { defaultBranch = nil }
+    try Task.checkCancellation()
+    guard try AuthKeychain.read() == account else { throw failure() }
+    return CreateBranches(names: Array(Set(names)), defaultBranch: defaultBranch, nextPage: rows.count == 100 ? page + 1 : nil)
+  }
+
   static func repositories(workspace: String) async throws -> [String] {
+    if LanInvite.isWorkspace(workspace) { return try await lanRepositories(workspace) }
     let value = try await call("query", path: "github:getWorkspaceRepositories", args: ["workspaceId": workspace])
     if value is NSNull { return [] }
     guard let rows = value as? [[String: Any]] else { throw failure() }
@@ -68,6 +109,29 @@ import Foundation
       guard let name = row["fullName"] as? String, validRepository(name) else { throw failure() }
       return seen.insert(name.lowercased()).inserted ? name : nil
     }
+  }
+
+  /// A LAN keeps no registry: its repositories are the ones its hub's GitHub token reads, in the
+  /// ten pages Lody's `listLocalGitHubRepositories` asks for. A hub without a token has none.
+  private static func lanRepositories(_ workspace: String) async throws -> [String] {
+    guard let invite = LanHub.credential(for: workspace) else { throw failure() }
+    guard let token = try await LanHub.githubToken(invite) else { return [] }
+    var names: [String] = []
+    var seen = Set<String>()
+    for page in 1...10 {
+      try Task.checkCancellation()
+      guard let rows = try await request(
+        "https://api.github.com/user/repos?per_page=100&sort=full_name&page=\(page)", token: token
+      ) as? [[String: Any]] else { throw failure() }
+      for row in rows {
+        // GitHub also lists owners this app's project ids cannot name, such as managed users.
+        guard let name = row["full_name"] as? String, validRepository(name),
+          seen.insert(name.lowercased()).inserted else { continue }
+        names.append(name)
+      }
+      if rows.count < 100 { break }
+    }
+    return names
   }
 
   static func call(_ kind: String, path: String, args: [String: Any]) async throws -> Any {

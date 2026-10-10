@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import shutil
 import subprocess
+from driver import BUNDLE_ID
 
 
 def center(frame):
@@ -29,7 +30,7 @@ def project(point, path, cumulative):
 class ThrowTrace:
     def __init__(self, ui):
         self.ui = ui
-        container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+        container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
         self.folder = Path(container) / 'tmp'
         self.existing = set(self.folder.glob('lody-throw-*.json'))
 

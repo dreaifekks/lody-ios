@@ -69,12 +69,27 @@ export type ItemSummary =
     }
   | { itemId: string; rev: number; type: string };
 
+/**
+ * Who wrote a turn, from Lody's `MessageAuthor`: only what a bubble shows. A
+ * user turn another agent forwarded has an `agent` author.
+ */
+export type TurnAuthor =
+  | { kind: 'human' | 'system' }
+  | {
+      kind: 'agent';
+      name: string;
+      role?: { name: string; emoji: string; instanceLabel?: string };
+      /** The model's name, else its id. */
+      model?: string;
+    };
+
 export type EntrySummary = TurnMetadata & {
   id: string;
   rev: number;
   role: string;
   status: string;
   finished: boolean;
+  author?: TurnAuthor;
   canSteer?: boolean;
   userTurnId?: string;
   /** A turn sent to resume an interrupted one. */

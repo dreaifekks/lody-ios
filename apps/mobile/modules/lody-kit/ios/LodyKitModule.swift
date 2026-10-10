@@ -120,15 +120,15 @@ public final class LodyKitModule: Module, @unchecked Sendable {
   }
 
   @JS
-  func prepareMorphReveal(sourceLabel: String) {
+  func prepareSheetZoom(sourceLabel: String) {
     // Must be armed before the router's presentation lands on the main queue,
     // so this blocks JS until the main thread has run it.
     if Thread.isMainThread {
-      MainActor.assumeIsolated { LodyMorphReveal.prepare(sourceLabel: sourceLabel) }
+      MainActor.assumeIsolated { LodySheetZoom.prepare(sourceLabel: sourceLabel) }
       return
     }
     DispatchQueue.main.sync {
-      MainActor.assumeIsolated { LodyMorphReveal.prepare(sourceLabel: sourceLabel) }
+      MainActor.assumeIsolated { LodySheetZoom.prepare(sourceLabel: sourceLabel) }
     }
   }
 
@@ -400,8 +400,8 @@ public final class LodyKitModule: Module, @unchecked Sendable {
         return pulses.count
       }
     }.runOnQueue(.main)
-    AsyncFunction("morphDismiss") { (promise: Promise) in
-      MainActor.assumeIsolated { LodyMorphReveal.dismiss { promise.resolve() } }
+    AsyncFunction("dismissSheetZoom") { (promise: Promise) in
+      MainActor.assumeIsolated { LodySheetZoom.dismiss { promise.resolve() } }
     }.runOnQueue(.main)
     AsyncFunction("cancelComposerRelay") { (id: String) in
       LodyComposerView.cancelRelay(id)
@@ -543,7 +543,21 @@ public final class LodyKitModule: Module, @unchecked Sendable {
         self.dataRuntime.command("turnDiff", payload: payload, promise: promise)
       }
     }.runOnQueue(.main)
-    AsyncFunction("fileDiff") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("fileDiff", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("workspaceChanges") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("workspaceChanges", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("fileDiff") { (payload: String, promise: Promise) in
+      try MainActor.assumeIsolated {
+        if LodyUIVerify.enabled,
+          let params = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: String],
+          params["sessionId"] == "ui-verify-workspace", let path = params["path"] {
+          let contents = try JSONSerialization.data(withJSONObject: ["old": "export const greeting = 'hi';\n", "new": "export const greeting = 'hello';\n"])
+          let handle = ContentStore.shared.put(StoredContent(data: contents, kind: "diff", path: path, session: "ui-verify-workspace", mimeType: nil))
+          let result = try JSONSerialization.data(withJSONObject: ["status": "ok", "path": path, "handle": handle, "base": "current", "oldKind": "text", "newKind": "text", "add": 1, "del": 1])
+          promise.resolve(String(decoding: result, as: UTF8.self))
+          return
+        }
+        self.dataRuntime.command("fileDiff", payload: payload, promise: promise)
+      }
+    }.runOnQueue(.main)
     AsyncFunction("readFile") { (payload: String, promise: Promise) in
       MainActor.assumeIsolated {
         let runtime = self.dataRuntime
@@ -666,6 +680,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     View(LodyCreateSessionView.self) {
       Events("onRequest", "onPrefs", "onSelection", "onSubmit", "onRelayReady", "onMentionBrowse", "onCancel")
       Prop("configJSON") { (view: LodyCreateSessionView, value: String) in view.configure(value) }
+      Prop("refreshKey") { (view: LodyCreateSessionView, value: String) in view.setRefreshKey(value) }
       Prop("responseJSON") { (view: LodyCreateSessionView, value: String) in view.respond(value) }
       Prop("composerRelay") { (view: LodyCreateSessionView, value: Bool) in view.setComposerRelay(value) }
       Prop("sendHandoff") { (view: LodyCreateSessionView, value: Bool?) in view.setSendHandoff(value ?? true) }
@@ -738,6 +753,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       Prop("navigationTitle") { (view: LodyChatView, value: String) in view.setNavigationTitle(value) }
       Prop("navigationSubtitle") { (view: LodyChatView, value: String) in view.setNavigationSubtitle(value) }
       Prop("navigationMachine") { (view: LodyChatView, value: String) in view.setNavigationMachine(value) }
+      Prop("navigationMachineState") { (view: LodyChatView, value: String) in view.setNavigationMachineState(value) }
       Prop("navigationBranch") { (view: LodyChatView, value: String) in view.setNavigationBranch(value) }
       Prop("titleMenuJSON") { (view: LodyChatView, value: String) in view.setTitleMenu(value) }
       Prop("mentionRepository") { (view: LodyChatView, value: String) in view.mentionRepository = value }
@@ -867,6 +883,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     }
     View(LodyMenuButton.self) {
       Events("onSelect", "onSize")
+      Prop("status") { (view: LodyMenuButton, value: String) in view.setStatus(value) }
       Prop("accessibilityName") { (view: LodyMenuButton, name: String) in
         view.setAccessibilityName(name)
       }

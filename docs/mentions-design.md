@@ -8,11 +8,20 @@ session, another Role, or a file with the same name. Labels in the picker remain
 human readable. This deliberately retains the namespaced spelling rather than
 introducing a second persisted range/chip model in the native composer.
 
+A Role is a template and its instances are what run, so a Role reference names
+one instance (`@role:<instance id>`). A mention starts another session, which
+need not run where the composer does, so the picker lists one entry per instance
+group of every Role: the group's instance on the composer's machine when it has
+one, else its first. Entries on the composer's machine come first; one that runs
+elsewhere names its machine. A Role with several groups shows each group's name
+(its alias, else its agent's) beside its own.
+
 The runtime expands immediately before `sendTurn` writes history or the queue.
 Creation's first turn uses that same send operation; Steer moves an already
 expanded queue entry without expanding it twice. File, issue, PR and command
 expansion is identity. Skills resolve their machine path; sessions become the
-OSS MCP history query; Roles become the OSS MCP create-session instruction.
+OSS MCP history query; Roles become the OSS MCP create-session instruction,
+which names the Role and the instance.
 Role mentions do not mutate the current turn's `agentRoleId` or run config.
 This is independent of #19's current-session Role selector; both must consume
 the workspace Role catalog, with private-role visibility and machine binding

@@ -4,11 +4,11 @@ import subprocess
 import sys
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / 'verification/ui'))
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(*sys.argv[1:])
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 movie = container / 'Documents/ui-verify-attachment.mp4'
 subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
                 'testsrc2=size=320x180:rate=15', '-t', '8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(movie)], check=True)

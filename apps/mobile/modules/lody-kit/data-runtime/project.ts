@@ -15,7 +15,7 @@ import {
   parseQuestionMeta,
   samePermissionOutcome,
 } from '../../../src/cloud/permissionQuestions.ts';
-import type { QuestionMeta } from '../../../src/models/session.ts';
+import type { QuestionMeta, TurnAuthor } from '../../../src/models/session.ts';
 import { billableTurnCount } from './billing';
 import { previewSummary } from './preview';
 
@@ -99,6 +99,7 @@ export type EntrySummary = TurnMetadata & {
   role: string;
   status: string;
   finished: boolean;
+  author?: TurnAuthor;
   userTurnId?: string;
   executionId?: string;
   executionFinished?: boolean;
@@ -273,6 +274,47 @@ function lightEntry(entry: unknown): any {
   return value && typeof value === 'object' && 'items' in value
     ? { ...value, items: lightItems(value.items) }
     : value;
+}
+/**
+ * Lody's `readMessageAuthor`, kept to what a bubble shows: a record of another
+ * version or shape is no author at all, never a guessed one.
+ */
+function readAuthor(value: any): TurnAuthor | undefined {
+  // Lody's labels: trimmed, 1 to 256 characters.
+  const label = (text: unknown) => {
+    const trimmed = typeof text === 'string' ? text.trim() : '';
+    return trimmed && trimmed.length <= 256 ? trimmed : undefined;
+  };
+  if (value?.v !== 1) return undefined;
+  if (value.kind === 'system') return { kind: 'system' };
+  if (value.kind === 'human')
+    return label(value.userId) ? { kind: 'human' } : undefined;
+  const name = label(value.name);
+  if (value.kind !== 'agent' || !name) return undefined;
+  const author: TurnAuthor = { kind: 'agent', name };
+  if (value.role !== undefined) {
+    const roleName = label(value.role?.name);
+    const instanceLabel = label(value.role?.instanceLabel);
+    if (
+      !roleName ||
+      typeof value.role?.emoji !== 'string' ||
+      (value.role?.instanceLabel !== undefined && !instanceLabel)
+    )
+      return undefined;
+    author.role = {
+      name: roleName,
+      emoji: value.role.emoji,
+      ...(instanceLabel ? { instanceLabel } : {}),
+    };
+  }
+  if (value.model !== undefined) {
+    const id = label(value.model?.id);
+    const modelName = label(value.model?.name);
+    if (!id || (value.model?.name !== undefined && !modelName))
+      return undefined;
+    author.model = modelName ?? id;
+  }
+  return author;
 }
 function bump(projection: Projection, key: string, fingerprint: string) {
   const previous = projection.revs.get(key);
@@ -609,6 +651,7 @@ function summarizeEntry(
         : undefined,
   };
   const metadata = readTurnMetadata(entry);
+  const author = readAuthor(entry?.author);
   const value = {
     ...metadata,
     id,
@@ -616,11 +659,12 @@ function summarizeEntry(
       projection,
       `entry/${id}`,
       summarizedItems.map((i) => `${i.itemId}:${i.rev}`).join(',') +
-        `|${entry?.status}|${entry?.finished}|${entry?.inputConfig?._lodyDeliveryKind === 'continue'}|${JSON.stringify(fileDiffs)}|${JSON.stringify(modelInfo)}|${JSON.stringify(metadata)}`,
+        `|${entry?.status}|${entry?.finished}|${entry?.inputConfig?._lodyDeliveryKind === 'continue'}|${JSON.stringify(fileDiffs)}|${JSON.stringify(modelInfo)}|${JSON.stringify(metadata)}|${JSON.stringify(author)}`,
     ),
     role: String(entry?.role ?? 'assistant'),
     status: entry?.status ?? (entry?.read ? 'seen' : 'pending'),
     finished: entry?.finished === true,
+    ...(author ? { author } : {}),
     timestamp: entry?.timestamp,
     startedAt: entry?.startedAt,
     endedAt: entry?.endedAt,
@@ -635,6 +679,21 @@ function summarizeEntry(
     ...(fileDiffs.length ? { fileDiffs } : {}),
   };
   return value;
+}
+
+/**
+ * The session's turn configurations, newest first, in the order of Lody's
+ * `collectSessionConversationSources`: what is queued runs after everything in
+ * history, so the next turn and the composer follow the queue's tail.
+ */
+export function conversationConfigs(history: any[], queue: any[]): any[] {
+  return [
+    ...queue.map((item) => item?.acpSessionConfig).reverse(),
+    ...history
+      .filter((entry) => entry?.role === 'user')
+      .map((entry) => entry.inputConfig)
+      .reverse(),
+  ];
 }
 
 function pendingFingerprint(
@@ -759,15 +818,22 @@ function project(
     if (!present.has(key)) projection.entries.delete(key);
   projection.dirty.clear();
   projection.stale = false;
-  const input = raw.findLast((entry) => entry?.role === 'user')?.inputConfig;
+  const queued = (doc.getMovableList('mq').toJSON() as any[]).map((item) => ({
+    ...item,
+    acpSessionConfig: configFor(item.userTurnId, item.acpSessionConfig),
+  }));
+  const input = conversationConfigs(raw, queued)[0];
   const options =
     input?.configOptionValues && typeof input.configOptionValues === 'object'
       ? input.configOptionValues
       : {};
-  const fastValues = Object.fromEntries(
-    ['fast', 'fast-mode'].flatMap((id) =>
-      typeof options[id] === 'boolean' ? [[id, options[id]]] : [],
-    ),
+  // Restore agent-specific permission selectors as well as Fast. Effort has
+  // its own composer field, so a model change can clear it independently.
+  const composerValues = Object.fromEntries(
+    Object.entries(
+      readTurnMetadata({ inputConfig: input }).inputConfig
+        ?.configOptionValues ?? {},
+    ).filter(([id]) => id !== 'effort' && id !== 'reasoning_effort'),
   );
   const effort = [options.reasoning_effort, options.effort].find(
     (value) => typeof value === 'string',
@@ -794,10 +860,6 @@ function project(
         ],
   );
 
-  const queued = (doc.getMovableList('mq').toJSON() as any[]).map((item) => ({
-    ...item,
-    acpSessionConfig: configFor(item.userTurnId, item.acpSessionConfig),
-  }));
   const execution = executionProjection(
     [
       ...raw,
@@ -839,8 +901,8 @@ function project(
               ? { modeId: input.modeId }
               : {}),
             ...(typeof effort === 'string' ? { effort } : {}),
-            ...(Object.keys(fastValues).length
-              ? { configOptionValues: fastValues }
+            ...(Object.keys(composerValues).length
+              ? { configOptionValues: composerValues }
               : {}),
           },
         }

@@ -34,11 +34,12 @@ const session = {
   insertText: '@session:s2',
 };
 const role = {
-  path: 'reviewer',
+  path: 'reviewer-claude',
   name: 'Reviewer',
   kind: 'role',
   subtitle: '',
-  insertText: '@role:reviewer',
+  insertText: '@role:reviewer-claude',
+  role: { id: 'reviewer', name: 'Reviewer', instance: 'Claude Code' },
 };
 const items = [skill, session, role];
 const load = async (category) => ({
@@ -46,10 +47,11 @@ const load = async (category) => ({
   truncated: false,
   incomplete: false,
 });
-const text = '@src/file.ts $auth @session:s2 @role:reviewer #11 #12 /compact';
+const text =
+  '@src/file.ts $auth @session:s2 @role:reviewer-claude #11 #12 /compact';
 // OSS mention-skill/session/agent-role-source prompt formats, not copied tables.
 const expected =
-  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) use lody mcp to query session[id: s2] history use lody mcp to create a session with agent role[id: reviewer, name: Reviewer] #11 #12 /compact';
+  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) use lody mcp to query session[id: s2] history use lody mcp to create a session with agent role[id: reviewer, instance: reviewer-claude, name: Reviewer · Claude Code] #11 #12 /compact';
 
 test('send expansion matches OSS prompts; paths, GitHub references and commands remain verbatim', async () => {
   assert.equal(await mentions.expandMentions(text, load), expected);
@@ -177,17 +179,15 @@ test('skill references keep project precedence and expand the correct scope path
 });
 
 test('Role references filter private rows and invalid machine bindings before expansion', () => {
-  const agents = new Map([
-    [
-      'm',
+  const agents = new Map(
+    ['m', 'unnamed-machine'].map((machineId) => [
+      machineId,
       {
         get: (key) =>
-          key[1] === 'a'
-            ? { id: 'a', machineId: 'm', name: 'Agent' }
-            : undefined,
+          key[1] === 'a' ? { id: 'a', machineId, name: 'Agent' } : undefined,
       },
-    ],
-  ]);
+    ]),
+  );
   const row = (id, patch = {}) => ({
     key: ['agentRole', id],
     value: {
@@ -208,19 +208,142 @@ test('Role references filter private rows and invalid machine bindings before ex
     row('private', { ownerUserId: 'them' }),
     row('deleted-agent', { agentConfigId: 'missing' }),
     row('other-machine', { machineId: 'other' }),
+    row('far', { machineId: 'unnamed-machine' }),
   ];
-  const result = mentions.roleMentions(rows, 'me', agents, 'm');
+  const result = mentions.roleMentions(rows, 'me', agents, new Map(), 'm');
   assert.deepEqual(
-    result.items.map((item) => item.path),
-    ['own', 'shared'],
+    result.items.map((item) => [item.path, item.name]),
+    [
+      ['own:m', 'own'],
+      ['shared:m', 'shared'],
+      ['far:unnamed-machine', 'far · unnamed-'],
+    ],
+    'A row written before instances is one instance under the id Lody derives; a machine without a name is told by the start of its id',
   );
   assert.equal(
-    mentions.roleMentions(rows, 'me', agents, 'other').items.length,
-    0,
+    mentions.expandMentionText('@role:private:m', result.items),
+    '@role:private:m',
   );
   assert.equal(
-    mentions.expandMentionText('@role:private', result.items),
-    '@role:private',
+    mentions.expandMentionText('@role:own:m', result.items),
+    'use lody mcp to create a session with agent role[id: own, instance: own:m, name: own · Agent]',
+  );
+});
+
+test('a Role lists every instance group, the composer’s machine first and an entry elsewhere by its machine', () => {
+  const config = (machineId, id, patch = {}) => [
+    `${machineId}/${id}`,
+    { id, machineId, name: id, cliType: 'builtin', agentType: id, ...patch },
+  ];
+  const configs = new Map([
+    config('mac', 'claude'),
+    config('mac', 'codex'),
+    config('mac', 'deepseek', {
+      agentType: 'claude',
+      name: 'DeepSeek',
+      env: { ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic' },
+    }),
+    config('mac', 'gemini', {
+      cliType: 'registry',
+      agentType: 'antigravity-acp',
+      name: 'Gemini',
+    }),
+    config('nuc', 'claude'),
+  ]);
+  const machines = new Map(
+    ['mac', 'nuc'].map((machineId) => [
+      machineId,
+      { get: (key) => configs.get(`${machineId}/${key[1]}`) },
+    ]),
+  );
+  const instance = (id, machineId, agentConfigId, alias) => ({
+    id,
+    machineId,
+    agentConfigId,
+    runConfig: {},
+    ...(alias ? { alias } : {}),
+  });
+  const row = (id, instances) => ({
+    key: ['agentRole', id],
+    value: {
+      v: 1,
+      id,
+      name: id,
+      ownerUserId: 'me',
+      visibility: 'private',
+      // The mirror of the first instance, which is all an older client reads.
+      machineId: instances[0].machineId,
+      agentConfigId: instances[0].agentConfigId,
+      revision: 1,
+      instances,
+    },
+  });
+  const rows = [
+    row('moa', [
+      instance('moa-nuc', 'nuc', 'claude'),
+      instance('moa-mac', 'mac', 'claude'),
+      instance('moa-codex', 'mac', 'codex'),
+      instance('moa-deepseek', 'mac', 'deepseek'),
+      instance('moa-fable', 'mac', 'claude', 'Fable'),
+      instance('moa-gemini', 'mac', 'gemini'),
+      instance('moa-gone', 'mac', 'deleted'),
+      instance('moa-mac', 'mac', 'codex'),
+    ]),
+    row('solo', [instance('solo-nuc', 'nuc', 'claude')]),
+    row('alpha', [instance('alpha-nuc', 'nuc', 'claude')]),
+  ];
+  const names = new Map([
+    ['mac', 'MacBook'],
+    ['nuc', 'Home NUC'],
+  ]);
+  const listed = (machineId) =>
+    mentions
+      .roleMentions(rows, 'me', machines, names, machineId)
+      .items.map((item) => [item.path, item.name]);
+  assert.deepEqual(
+    listed('mac'),
+    [
+      ['moa-mac', 'moa · Claude Code'],
+      ['moa-codex', 'moa · Codex'],
+      ['moa-deepseek', 'moa · DeepSeek'],
+      ['moa-fable', 'moa · Fable'],
+      ['moa-gemini', 'moa · Gemini'],
+      ['alpha-nuc', 'alpha · Home NUC'],
+      ['solo-nuc', 'solo · Home NUC'],
+    ],
+    'A group runs here when it can; a Role that only runs elsewhere follows, by its machine',
+  );
+  assert.deepEqual(
+    listed('nuc'),
+    [
+      ['alpha-nuc', 'alpha'],
+      ['moa-nuc', 'moa · Claude Code'],
+      ['solo-nuc', 'solo'],
+      ['moa-codex', 'moa · Codex · MacBook'],
+      ['moa-deepseek', 'moa · DeepSeek · MacBook'],
+      ['moa-fable', 'moa · Fable · MacBook'],
+      ['moa-gemini', 'moa · Gemini · MacBook'],
+    ],
+    'The groups this machine has no instance of are still offered',
+  );
+  assert.deepEqual(
+    listed(undefined),
+    [
+      ['alpha-nuc', 'alpha · Home NUC'],
+      ['moa-nuc', 'moa · Claude Code · Home NUC'],
+      ['moa-codex', 'moa · Codex · MacBook'],
+      ['moa-deepseek', 'moa · DeepSeek · MacBook'],
+      ['moa-fable', 'moa · Fable · MacBook'],
+      ['moa-gemini', 'moa · Gemini · MacBook'],
+      ['solo-nuc', 'solo · Home NUC'],
+    ],
+    'Without a machine a group is listed once, by its first instance',
+  );
+  const { items } = mentions.roleMentions(rows, 'me', machines, names, 'nuc');
+  assert.equal(
+    mentions.expandMentionText('@role:moa-fable @role:moa-nuc', items),
+    'use lody mcp to create a session with agent role[id: moa, instance: moa-fable, name: moa · Fable] use lody mcp to create a session with agent role[id: moa, instance: moa-nuc, name: moa · Claude Code]',
+    'The prompt names the instance by its group, never by its machine',
   );
 });
 

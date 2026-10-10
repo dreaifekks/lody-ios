@@ -24,8 +24,8 @@ const PACKAGES = [
   },
   {
     name: 'Litext',
-    url: 'https://github.com/Lakr233/Litext',
-    version: '3.3.2',
+    url: 'https://github.com/Lakr233/Litext.git',
+    version: '3.6.2',
   },
   // 1.11+ adds a build-tool plugin and Metal resources cocoapods-spm cannot host.
   {
@@ -83,7 +83,10 @@ const spmPkg = (pkg) => {
   const products = pkg.products
     ? `, :products => [${pkg.products.map((name) => `"${name}"`).join(', ')}]`
     : '';
-  return `  spm_pkg "${pkg.name}", :url => "${pkg.url}", :version => "${pkg.version}"${products}\n`;
+  const requirement = pkg.commit
+    ? `:commit => "${pkg.commit}"`
+    : `:version => "${pkg.version}"`;
+  return `  spm_pkg "${pkg.name}", :url => "${pkg.url}", ${requirement}${products}\n`;
 };
 
 module.exports = function withMarkdownView(config) {

@@ -71,11 +71,21 @@ test('independent configuration reaches durable history before RPC, inherits on 
       ...configOptionValues,
       effort: 'high',
     });
+    assert.equal(
+      'memory' in fixture.server.toJSON().history.at(-1).inputConfig,
+      false,
+      'A session without a memory binding records none',
+    );
+    assert.deepEqual(
+      fixture.server.toJSON().history.at(-1).author,
+      { v: 1, kind: 'human', userId: 'u1' },
+      'A turn typed here records its person as Lody does',
+    );
     assert.deepEqual(
       fixture.runtime.projectSession(fixture.server, 'live').composer
         .configOptionValues,
-      { fast: false },
-      'Reopened composer must restore explicit Fast off from the sent turn',
+      configOptionValues,
+      'Reopened composer restores permission and other agent choices, including explicit Fast off',
     );
     assert.equal((await fixture.runtime.sendTurn(args)).state, 'queued');
     assert.deepEqual(
@@ -149,7 +159,7 @@ test('a Continue turn carries Lody’s delivery marker into history and the proj
   }
 });
 
-test('a Role session keeps its Role while the run configuration is unchanged and records None once a control moves', async () => {
+test('a Role session keeps its Role, instance record and memory while the run configuration is unchanged and records None without them once a control moves', async () => {
   const calls = [];
   const fixture = await openTestSession({
     onRpc: (request) => {
@@ -164,6 +174,15 @@ test('a Role session keeps its Role while the run configuration is unchanged and
     cliType: 'acp',
     agentType: 'claude',
     text: 'Synthetic Role follow-up',
+  };
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const snapshot = {
+    id: 'role-1',
+    revision: 4,
+    name: 'Reviewer',
+    emoji: '🪼',
+    instanceId: 'instance-1',
+    instanceLabel: 'Claude Code',
   };
   const finish = async () => {
     fixture.server.getList('history').push({
@@ -187,16 +206,29 @@ test('a Role session keeps its Role while the run configuration is unchanged and
         configOptionValues: { effort: 'high', fast: false },
         agentRoleId: 'role-1',
         agentRoleRevision: 4,
+        agentRoleSnapshot: snapshot,
+        memory,
       },
     });
     await finish();
     assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
     assert.equal(calls[0].params.inputConfig.agentRoleId, 'role-1');
     assert.equal(calls[0].params.inputConfig.agentRoleRevision, 4);
+    assert.deepEqual(calls[0].params.inputConfig.agentRoleSnapshot, snapshot);
+    assert.deepEqual(
+      calls[0].params.inputConfig.memory,
+      memory,
+      'A turn without the binding makes the machine restart the agent without its memory',
+    );
     assert.equal(
       fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
       'role-1',
       'The durable turn names the Role it ran as',
+    );
+    assert.deepEqual(
+      fixture.server.toJSON().history.at(-1).inputConfig.memory,
+      memory,
+      'The next turn inherits from the durable one',
     );
     await finish();
     assert.equal(
@@ -220,6 +252,20 @@ test('a Role session keeps its Role while the run configuration is unchanged and
     assert.equal(calls[2].params.inputConfig.agentRoleId, null);
     assert.equal(calls[2].params.inputConfig.agentRoleRevision, undefined);
     assert.equal(
+      calls[2].params.inputConfig.agentRoleSnapshot,
+      undefined,
+      'The instance record leaves with the Role it describes',
+    );
+    assert.equal(
+      calls[2].params.inputConfig.memory,
+      undefined,
+      'The memory is the instance’s and leaves with it',
+    );
+    assert.equal(
+      'memory' in fixture.server.toJSON().history.at(-1).inputConfig,
+      false,
+    );
+    assert.equal(
       fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
       null,
     );
@@ -230,9 +276,251 @@ test('a Role session keeps its Role while the run configuration is unchanged and
       null,
       'Once None, a later turn does not return to the Role',
     );
+    assert.equal(calls[3].params.inputConfig.memory, undefined);
   } finally {
     fixture.close();
   }
+});
+
+test('memory follows a session without a Role record into dispatched and queued turns, and not a turn recorded as None', async () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const send = async (inputConfig) => {
+    const calls = [];
+    const fixture = await openTestSession({
+      onRpc: (request) => {
+        calls.push(request);
+        return { result: { accepted: true } };
+      },
+    });
+    const args = {
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'claude',
+      text: 'Synthetic memory follow-up',
+    };
+    try {
+      const history = fixture.server.getList('history');
+      history.push({
+        id: 'first',
+        role: 'user',
+        finished: true,
+        items: [],
+        inputConfig,
+      });
+      history.push({
+        id: 'reply',
+        role: 'assistant',
+        finished: true,
+        items: [],
+      });
+      fixture.server.commit();
+      await fixture.pushUpdate();
+      assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
+      assert.equal((await fixture.runtime.sendTurn(args)).state, 'queued');
+      return {
+        dispatched: calls[0].params.inputConfig,
+        queued: fixture.server.toJSON().mq[0].acpSessionConfig,
+      };
+    } finally {
+      fixture.close();
+    }
+  };
+  const inherited = await send({ modelId: 'opus', memory });
+  assert.deepEqual(inherited.dispatched.memory, memory);
+  assert.deepEqual(inherited.queued.memory, memory);
+  assert.equal('agentRoleId' in inherited.dispatched, false);
+  const none = await send({ modelId: 'opus', memory, agentRoleId: null });
+  assert.equal(none.dispatched.agentRoleId, null);
+  assert.equal(none.dispatched.memory, undefined);
+  assert.equal('memory' in none.queued, false);
+});
+
+test('the next turn and the composer follow the newest queued turn before history, as Lody resolves a conversation', async () => {
+  const instance = (name) => ({
+    agentRoleId: `role-${name}`,
+    agentRoleRevision: 2,
+    agentRoleSnapshot: {
+      id: `role-${name}`,
+      revision: 2,
+      name,
+      emoji: '🪼',
+      instanceId: `instance-${name}`,
+    },
+    memory: { providerId: 'nowledge-mem', memoryId: name },
+  });
+  const send = async (queuedConfig) => {
+    const fixture = await openTestSession({
+      onRpc: () => ({ result: { accepted: true } }),
+    });
+    try {
+      const history = fixture.server.getList('history');
+      history.push({
+        id: 'first',
+        role: 'user',
+        finished: true,
+        items: [],
+        inputConfig: {
+          modelId: 'opus',
+          mcpServerIds: ['history'],
+          ...instance('a'),
+        },
+      });
+      history.push({
+        id: 'reply',
+        role: 'assistant',
+        finished: true,
+        items: [],
+      });
+      // Another client queued a turn after the one history ends with.
+      fixture.server.getMovableList('mq').push({
+        task: 'Synthetic queued turn',
+        userId: 'u2',
+        userTurnId: 'queued',
+        timestamp: new Date().toISOString(),
+        acpSessionConfig: queuedConfig,
+      });
+      fixture.server.commit();
+      await fixture.pushUpdate();
+      const composer = fixture.runtime.projectSession(
+        fixture.server,
+        'live',
+      ).composer;
+      assert.equal(
+        (
+          await fixture.runtime.sendTurn({
+            sessionId: 's1',
+            machineId: 'm1',
+            userId: 'u1',
+            cliType: 'builtin',
+            agentType: 'claude',
+            text: 'Synthetic follow-up',
+          })
+        ).state,
+        'queued',
+      );
+      return { composer, sent: fixture.server.toJSON().mq[1].acpSessionConfig };
+    } finally {
+      fixture.close();
+    }
+  };
+  const other = await send({
+    modelId: 'sonnet',
+    mcpServerIds: ['queue'],
+    ...instance('b'),
+  });
+  assert.equal(other.composer.modelId, 'sonnet');
+  assert.equal(other.sent.modelId, 'sonnet');
+  assert.deepEqual(other.sent.mcpServerIds, ['queue']);
+  assert.equal(other.sent.agentRoleId, 'role-b');
+  assert.deepEqual(
+    other.sent.agentRoleSnapshot,
+    instance('b').agentRoleSnapshot,
+  );
+  assert.deepEqual(
+    other.sent.memory,
+    instance('b').memory,
+    'Returning to the memory history ends with would restart the agent the queue left running',
+  );
+  const none = await send({ modelId: 'opus', agentRoleId: null });
+  assert.equal(none.sent.agentRoleId, null);
+  assert.equal('agentRoleSnapshot' in none.sent, false);
+  assert.equal(
+    'memory' in none.sent,
+    false,
+    'A queue that ends in None is not followed by the Role history named',
+  );
+  const sticky = await send({ modelId: 'opus' });
+  assert.equal(
+    sticky.sent.agentRoleId,
+    'role-a',
+    'A queued turn that names no Role leaves the one before it standing',
+  );
+  assert.equal('memory' in sticky.sent, false);
+});
+
+test('a turn projects who wrote it, and a record of another shape is no author', async () => {
+  const { projectSession, projectSessionFull } = await loadProject();
+  const doc = new LoroDoc();
+  const history = doc.getList('history');
+  const agent = {
+    v: 1,
+    kind: 'agent',
+    sessionId: 'coordinator',
+    turnId: 'turn-1',
+    agentConfigId: 'config-1',
+    cliType: 'builtin',
+    agentType: 'claude',
+    name: ' Claude Code ',
+    role: {
+      id: 'role-1',
+      revision: 3,
+      name: 'Reviewer',
+      emoji: '🪼',
+      instanceId: 'instance-1',
+      instanceLabel: 'Fable',
+    },
+    model: { id: 'opus', name: 'Opus 5.5', source: 'runtime' },
+    reasoningEffort: 'high',
+  };
+  const authors = {
+    human: { v: 1, kind: 'human', userId: 'u1' },
+    system: { v: 1, kind: 'system' },
+    agent,
+    bare: {
+      ...agent,
+      role: undefined,
+      model: { id: 'opus', source: 'configured' },
+    },
+    legacy: undefined,
+    future: { ...agent, v: 2 },
+    unnamed: { ...agent, name: ' ' },
+    'bad-role': { ...agent, role: { ...agent.role, name: 7 } },
+    'bad-model': { ...agent, model: { name: 'Opus 5.5' } },
+    anonymous: { v: 1, kind: 'human' },
+    unknown: { v: 1, kind: 'robot', name: 'Claude Code' },
+    text: 'Claude Code',
+  };
+  for (const [id, author] of Object.entries(authors)) {
+    const entry = history.pushContainer(new LoroMap());
+    entry.set('id', id);
+    entry.set('role', 'user');
+    entry.set('finished', true);
+    entry.setContainer('items', new LoroList());
+    if (author !== undefined)
+      entry.set('author', JSON.parse(JSON.stringify(author)));
+  }
+  doc.commit();
+  const projected = Object.fromEntries(
+    projectSession(doc, 'live').entries.map((entry) => [
+      entry.id,
+      entry.author,
+    ]),
+  );
+  assert.deepEqual(projected, {
+    human: { kind: 'human' },
+    system: { kind: 'system' },
+    agent: {
+      kind: 'agent',
+      name: 'Claude Code',
+      role: { name: 'Reviewer', emoji: '🪼', instanceLabel: 'Fable' },
+      model: 'Opus 5.5',
+    },
+    bare: { kind: 'agent', name: 'Claude Code', model: 'opus' },
+    legacy: undefined,
+    future: undefined,
+    unnamed: undefined,
+    'bad-role': undefined,
+    'bad-model': undefined,
+    anonymous: undefined,
+    unknown: undefined,
+    text: undefined,
+  });
+  assert.deepEqual(
+    projectSessionFull(doc, 'live').entries.map((entry) => entry.author),
+    projectSession(doc, 'live').entries.map((entry) => entry.author),
+  );
 });
 
 test('reply metadata preserves each recorded model and updates when it arrives after completion', async () => {

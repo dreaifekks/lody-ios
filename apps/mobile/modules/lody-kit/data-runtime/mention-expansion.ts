@@ -4,8 +4,9 @@ import type {
   MentionItem,
 } from '../../../src/models/mentions';
 
-// Explicit session/Role IDs survive native text-only draft restoration and
-// renames. Quoted file references own their text, including any dollar signs.
+// Explicit session and Role instance IDs survive native text-only draft
+// restoration and renames. Quoted file references own their text, including
+// any dollar signs.
 const referencePattern =
   /@"(?:\\.|[^"\\])*"|(^|\s)(\$[^\s$@]+|@(?:session|role):[^\s@]+)(?=\s|$)/g;
 
@@ -69,8 +70,8 @@ export function expandMentionText(
 export function mentionPrompt(item: MentionItem): string {
   if (item.kind === 'session')
     return `use lody mcp to query session[id: ${item.path}] history`;
-  if (item.kind === 'role')
-    return `use lody mcp to create a session with agent role[id: ${item.path}, name: ${item.name}]`;
+  if (item.kind === 'role' && item.role)
+    return `use lody mcp to create a session with agent role[id: ${item.role.id}, instance: ${item.path}, name: ${item.role.name} · ${item.role.instance}]`;
   if (item.kind === 'skill') {
     const destination = item.path.replace(/\\/g, '\\\\').replace(/\)/g, '\\)');
     const token =
