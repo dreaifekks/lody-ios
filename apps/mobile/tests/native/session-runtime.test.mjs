@@ -71,6 +71,11 @@ test('independent configuration reaches durable history before RPC, inherits on 
       ...configOptionValues,
       effort: 'high',
     });
+    assert.equal(
+      'memory' in fixture.server.toJSON().history.at(-1).inputConfig,
+      false,
+      'A session without a memory binding records none',
+    );
     assert.deepEqual(
       fixture.runtime.projectSession(fixture.server, 'live').composer
         .configOptionValues,
@@ -149,7 +154,7 @@ test('a Continue turn carries Lody’s delivery marker into history and the proj
   }
 });
 
-test('a Role session keeps its Role while the run configuration is unchanged and records None once a control moves', async () => {
+test('a Role session keeps its Role, instance record and memory while the run configuration is unchanged and records None once a control moves', async () => {
   const calls = [];
   const fixture = await openTestSession({
     onRpc: (request) => {
@@ -164,6 +169,15 @@ test('a Role session keeps its Role while the run configuration is unchanged and
     cliType: 'acp',
     agentType: 'claude',
     text: 'Synthetic Role follow-up',
+  };
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const snapshot = {
+    id: 'role-1',
+    revision: 4,
+    name: 'Reviewer',
+    emoji: '🪼',
+    instanceId: 'instance-1',
+    instanceLabel: 'Claude Code',
   };
   const finish = async () => {
     fixture.server.getList('history').push({
@@ -187,16 +201,29 @@ test('a Role session keeps its Role while the run configuration is unchanged and
         configOptionValues: { effort: 'high', fast: false },
         agentRoleId: 'role-1',
         agentRoleRevision: 4,
+        agentRoleSnapshot: snapshot,
+        memory,
       },
     });
     await finish();
     assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
     assert.equal(calls[0].params.inputConfig.agentRoleId, 'role-1');
     assert.equal(calls[0].params.inputConfig.agentRoleRevision, 4);
+    assert.deepEqual(calls[0].params.inputConfig.agentRoleSnapshot, snapshot);
+    assert.deepEqual(
+      calls[0].params.inputConfig.memory,
+      memory,
+      'A turn without the binding makes the machine restart the agent without its memory',
+    );
     assert.equal(
       fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
       'role-1',
       'The durable turn names the Role it ran as',
+    );
+    assert.deepEqual(
+      fixture.server.toJSON().history.at(-1).inputConfig.memory,
+      memory,
+      'The next turn inherits from the durable one',
     );
     await finish();
     assert.equal(
@@ -220,6 +247,16 @@ test('a Role session keeps its Role while the run configuration is unchanged and
     assert.equal(calls[2].params.inputConfig.agentRoleId, null);
     assert.equal(calls[2].params.inputConfig.agentRoleRevision, undefined);
     assert.equal(
+      calls[2].params.inputConfig.agentRoleSnapshot,
+      undefined,
+      'The instance record leaves with the Role it describes',
+    );
+    assert.deepEqual(
+      calls[2].params.inputConfig.memory,
+      memory,
+      'The agent keeps running with the memory it started with',
+    );
+    assert.equal(
       fixture.server.toJSON().history.at(-1).inputConfig.agentRoleId,
       null,
     );
@@ -229,6 +266,12 @@ test('a Role session keeps its Role while the run configuration is unchanged and
       calls[3].params.inputConfig.agentRoleId,
       null,
       'Once None, a later turn does not return to the Role',
+    );
+    assert.equal((await fixture.runtime.sendTurn(args)).state, 'queued');
+    assert.deepEqual(
+      fixture.server.toJSON().mq[0].acpSessionConfig.memory,
+      memory,
+      'A queued turn carries the binding too',
     );
   } finally {
     fixture.close();

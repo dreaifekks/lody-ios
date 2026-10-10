@@ -760,9 +760,13 @@ export async function sendTurn(
     // A Role names the run configuration it pinned. The turn keeps naming it
     // while nothing changed and records an explicit None once the user moves a
     // control, as Lody's composer does; the instruction belongs to the first
-    // turn only and is not replayed.
-    let agentRole: { agentRoleId?: string | null; agentRoleRevision?: number } =
-      {};
+    // turn only and is not replayed. The snapshot names the instance that ran
+    // and stays with the Role it describes.
+    let agentRole: {
+      agentRoleId?: string | null;
+      agentRoleRevision?: number;
+      agentRoleSnapshot?: Record<string, unknown>;
+    } = {};
     if (typeof roleTurn?.agentRoleId === 'string') {
       const before =
         previous.configOptionValues &&
@@ -783,6 +787,8 @@ export async function sendTurn(
         agentRole = { agentRoleId: roleTurn.agentRoleId };
         if (Number.isInteger(roleTurn.agentRoleRevision))
           agentRole.agentRoleRevision = roleTurn.agentRoleRevision;
+        if (roleTurn.agentRoleSnapshot)
+          agentRole.agentRoleSnapshot = roleTurn.agentRoleSnapshot;
       }
     } else if (roleTurn?.agentRoleId === null)
       agentRole = { agentRoleId: null };
@@ -796,6 +802,9 @@ export async function sendTurn(
       configOptionValues: Object.keys(configOptionValues).length
         ? configOptionValues
         : undefined,
+      // The machine restarts the agent when a turn names another memory than
+      // the one it runs with, so the binding travels with every turn.
+      memory: previous.memory,
       mcpServerIds: previous.mcpServerIds ?? [],
       taskToolsEnabled: previous.taskToolsEnabled ?? false,
       ...agentRole,
