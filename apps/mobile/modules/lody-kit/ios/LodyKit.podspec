@@ -14,10 +14,14 @@ Pod::Spec.new do |s|
   s.source = { git: 'https://github.com/Innei/lody-ios.git', tag: s.version.to_s }
   s.static_framework = true
   s.libraries = 'sqlite3'
+  s.dependency 'AnchoredOverlayKit', '0.3.0'
   s.dependency 'ExpoModulesCore'
   s.dependency 'OneSignalXCFramework/OneSignal', '5.5.1'
   # Experimental voice dictation owns its microphone and WebRTC peer natively.
   s.dependency 'WebRTC-lib', '154.0.0'
+  # Pinned source build; see ../datachannel/build.sh.
+  system('/bin/bash', File.join(__dir__, '..', 'datachannel', 'build.sh'), exception: true)
+  s.vendored_frameworks = 'Vendor/LodyDataChannel.xcframework'
   # Precompiled ExpoModulesCore skips autolinking's macro-plugin injection.
   macros_plugin = File.join(File.dirname(`node --print "require.resolve('@expo/expo-modules-macros-plugin/package.json')"`.strip), 'apple')
   s.pod_target_xcconfig = {
@@ -34,6 +38,7 @@ Pod::Spec.new do |s|
   s.spm_dependency 'Lexical/LexicalHTML'
   s.spm_dependency 'SwiftTerm/SwiftTerm'
   s.source_files = '**/*.{swift,h,m}'
+  s.exclude_files = 'Vendor/**/*.h'
   s.resources = ['Resources/*', 'Fonts/*.ttf']
   s.resource_bundles = { 'LodyKitShaders' => ['Chat/Shaders/*.metal'] }
   s.script_phase = {

@@ -48,6 +48,7 @@ import {
 import type { SettingsRequest } from '../../../src/models/settings.ts';
 import {
   fileDiff,
+  workspaceChanges,
   type FileContext,
   listDir,
   readFile,
@@ -76,8 +77,21 @@ import {
 } from './session';
 import { decodeFrames, encodeFrame } from '../decoder/frames';
 import { createPresence } from './presence';
+import {
+  watchMachinePresence,
+  availableCreationOptions,
+} from './machine-presence';
+import {
+  unknownPresence,
+  type MachinePresence,
+} from '../../../src/models/machines.ts';
 
-type Grant = { token: string; gatewayBaseUrl: string; expiresIn: number };
+type Grant = {
+  token: string;
+  gatewayBaseUrl: string;
+  expiresIn: number;
+  shardHostSuffix?: string;
+};
 const host = (globalThis as any).webkit.messageHandlers.dataRuntime;
 const send = (message: object) => host.postMessage(message);
 let grantResolve: ((grant: Grant) => void) | undefined;
@@ -139,7 +153,7 @@ const delay = (ms: number, signal: AbortSignal) =>
 /** A machine that has not answered a ping by then is shown offline. */
 const MACHINE_PING_TIMEOUT_MS = 6000;
 // Machines are online by their heartbeat on the meta stream's presence channel, as in Lody.
-const presence = createPresence(async (signal) => {
+const heartbeats = createPresence(async (signal) => {
   const { gatewayBaseUrl, token } = await getGrant();
   return fetch(
     `${gatewayBaseUrl.replace(/\/$/, '')}/ds/lody/${encodeURIComponent(`${workspace}:meta`)}?ephemeral=presence&live=sse`,
@@ -154,6 +168,15 @@ const presence = createPresence(async (signal) => {
 });
 let metaReplica: { flock: Flock; client: StreamsClient } | undefined;
 let workspace = '';
+let presence: MachinePresence = unknownPresence;
+let stopPresence: (() => void) | undefined;
+function startPresence() {
+  stopPresence?.();
+  stopPresence = watchMachinePresence(workspace, getGrant, (value) => {
+    presence = value;
+    send({ type: 'machinePresence', presence: JSON.stringify(value) });
+  });
+}
 const machineReplicas = new Map<string, Flock>();
 let creating = false;
 // When the read behind the current meta replica was issued, and when each
@@ -735,7 +758,7 @@ Object.assign(globalThis, {
       const meta = metaReplica.flock;
       const machineIds = catalogs.get('meta')?.machineIds ?? [];
       if (args.action === 'list') {
-        const online = await presence.online();
+        const online = await heartbeats.online();
         const text = (id: string, key: string) => {
           const room = `machine-${id}`;
           const value =
@@ -1021,6 +1044,9 @@ Object.assign(globalThis, {
     turnDiff(args: { sessionId: string; entryId: string; path: string }) {
       return turnDiff(machineFor(args.sessionId, args.path), args);
     },
+    workspaceChanges(args: { sessionId: string }) {
+      return workspaceChanges(machineFor(args.sessionId, '/'), args);
+    },
     fileDiff(args: { sessionId: string; path: string }) {
       return fileDiff(machineFor(args.sessionId, args.path), args);
     },
@@ -1046,11 +1072,12 @@ Object.assign(globalThis, {
     creationOptions(args: { workspaceId: string; projectId?: string }) {
       if (args.workspaceId !== workspace || !metaReplica || unhealthy.size)
         throw new Error('metadata_not_ready');
-      return creationOptions(
+      const options = creationOptions(
         args.projectId,
         metaReplica.flock,
         machineReplicas,
       );
+      return availableCreationOptions(options, presence);
     },
     async createSession(args: CreateSessionArgs) {
       if (args.workspaceId !== workspace) return { state: 'rejected' };
@@ -1306,10 +1333,19 @@ Object.assign(globalThis, {
         ),
       );
     },
-    start(id: string, userId?: string) {
+    start(id: string, userId?: string, active = true) {
       workspace = id;
       runtimeUserId = userId ?? '';
       watch('meta');
+      if (active) startPresence();
+    },
+    setActive(active: boolean) {
+      if (!workspace) return;
+      if (active) startPresence();
+      else {
+        stopPresence?.();
+        stopPresence = undefined;
+      }
     },
     grant(value: Grant | null) {
       if (!value) grantReject?.(new Error('grant_failed'));

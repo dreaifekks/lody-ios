@@ -12,6 +12,11 @@ struct ChatAttachment: Equatable {
   let url: URL
   let isImage: Bool
 
+  /// Only for newly imported files that were never accepted into a draft.
+  static func discardImports(_ items: [ChatAttachment]) {
+    for item in items { try? FileManager.default.removeItem(at: item.url) }
+  }
+
   static func thumbnail(_ url: URL) -> UIImage? {
     guard url.isFileURL, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
       let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -261,6 +266,24 @@ final class ChatAttachmentPreview: QLPreviewController, QLPreviewControllerDataS
 final class ChatAttachmentBar: CKAttachmentStrip {
   private var projected: [String: (source: ChatAttachment, item: CKAttachmentItem)] = [:]
 
+  static let thumbnailRadius: CGFloat = 6
+
+  private static func rounded(_ image: UIImage) -> UIImage {
+    let format = UIGraphicsImageRendererFormat.preferred()
+    format.scale = image.scale
+    return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+      UIBezierPath(roundedRect: CGRect(origin: .zero, size: image.size), cornerRadius: thumbnailRadius).addClip()
+      image.draw(at: .zero)
+    }
+  }
+
+  func handoffDestination(id: String) -> UIView? {
+    layoutIfNeeded()
+    guard let frame = attachmentFrame(id: id) else { return nil }
+    scrollRectToVisible(frame, animated: true)
+    return thumbnailView(id: id)
+  }
+
   func render(_ attachments: [ChatAttachment], animatedRemoval: Bool = false) {
     let items = attachments.map { attachment -> CKAttachmentItem in
       if let cached = projected[attachment.id], cached.source == attachment { return cached.item }
@@ -269,7 +292,7 @@ final class ChatAttachmentBar: CKAttachmentStrip {
       if attachment.isImage { symbol = "photo" }
       else if type?.conforms(to: .movie) == true { symbol = "video" }
       else { symbol = "doc" }
-      let thumbnail = attachment.isImage ? ChatAttachment.thumbnail(attachment.url)?.preparingThumbnail(of: CGSize(width: 28, height: 28)) : nil
+      let thumbnail = attachment.isImage ? ChatAttachment.thumbnail(attachment.url)?.preparingThumbnail(of: CGSize(width: 28, height: 28)).map(Self.rounded) : nil
       let item = CKAttachmentItem(id: attachment.id, name: attachment.name, symbol: symbol, thumbnail: thumbnail,
         previewAccessibilityLabel: LodyStrings.text("native.chat.attachment.preview", ["name": attachment.name]),
         removeAccessibilityLabel: LodyStrings.text("native.chat.attachment.remove", ["name": attachment.name]))

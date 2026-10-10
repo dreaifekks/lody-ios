@@ -66,11 +66,22 @@ final class GitHubProtocol: URLProtocol {
       }
     } else {
       assert(request.url?.host == "api.github.com")
-      assert(request.url?.path == "/repos/LodyAI/Lody/issues")
+      let branchRequest = request.url?.path == "/repos/LodyAI/Lody/branches"
+      let repoRequest = request.url?.path == "/repos/LodyAI/Lody"
+      assert(branchRequest || repoRequest || request.url?.path == "/repos/LodyAI/Lody/issues")
       let token = request.value(forHTTPHeaderField: "Authorization")!
       assert(token.hasPrefix("Bearer synthetic-repo-"), "App credentials must never go to GitHub")
       if token.hasSuffix("failure") { status = 503 }
-      if token.hasSuffix("full") {
+      if repoRequest {
+        body = ["default_branch": "trunk"]
+      } else if branchRequest {
+        let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "page" }!.value!
+        if token.hasSuffix("empty") { body = [] as [[String: String]] }
+        else if token.hasSuffix("malformed") { body = [["name": ""]] }
+        else if page == "1" { body = (1...100).map { ["name": "feature/\($0)"] } }
+        else { body = [["name": "feature/later"]] }
+        if token.hasSuffix("account-switch") { AuthKeychain.token.withLock { $0 = "new-account" } }
+      } else if token.hasSuffix("full") {
         let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "page" }!.value!
         let offset = (Int(page)! - 1) * 100
         body = (1...100).map { ["number": offset + $0, "title": "Issue \(offset + $0)", "state": "open"] as [String: Any] }
@@ -124,17 +135,36 @@ final class GitHubProtocol: URLProtocol {
       catch { assert(error.localizedDescription == "github_unavailable") }
     }
     AuthKeychain.token.withLock { $0 = "synthetic-app-token" }
+    let first = try await GitHubCloud.branches(workspace: "linked", repo: "LodyAI/Lody", page: 1)
+    assert(first.defaultBranch == "trunk" && first.names.contains("trunk") && first.nextPage == 2)
+    let second = try await GitHubCloud.branches(workspace: "linked", repo: "LodyAI/Lody", page: 2)
+    assert(second.names == ["feature/later"] && second.nextPage == nil)
+    let emptyBranches = try await GitHubCloud.branches(workspace: "empty", repo: "LodyAI/Lody", page: 1)
+    assert(emptyBranches.names.isEmpty && emptyBranches.defaultBranch == nil, "Empty repo must not offer a nonexistent configured default")
+    for workspace in ["unlinked", "failure", "malformed", "account-switch"] {
+      do { _ = try await GitHubCloud.branches(workspace: workspace, repo: "LodyAI/Lody", page: 1); fatalError("Invalid branch response accepted") }
+      catch { assert(error.localizedDescription == "github_unavailable") }
+    }
+    AuthKeychain.token.withLock { $0 = "synthetic-app-token" }
+    let beforeInvalid = GitHubProtocol.urls.withLock { $0.count }
+    do { _ = try await GitHubCloud.branches(workspace: "linked", repo: "owner/..", page: 1); fatalError("Invalid branch repo accepted") } catch {}
+    do { _ = try await GitHubCloud.branches(workspace: "linked", repo: "LodyAI/Lody", page: 0); fatalError("Invalid page accepted") } catch {}
+    assert(GitHubProtocol.urls.withLock { $0.count } == beforeInvalid)
     // A LAN lists with its hub's token, and a hub without one lists nothing.
     let lan = LanHub.invite.workspaceId
     let cloudCalls = { GitHubProtocol.urls.withLock { $0.filter { !$0.hasPrefix("https://api.github.com/") }.count } }
     let cloudBefore = cloudCalls()
     let lanItems = try await GitHubMentions.load(workspace: lan, repo: "LodyAI/Lody")["items"] as! [[String: Any]]
     assert(lanItems.count == 2, "A LAN lists issues and PRs with the hub's token")
+    let lanBranches = try await GitHubCloud.branches(workspace: lan, repo: "LodyAI/Lody", page: 1)
+    assert(lanBranches.defaultBranch == "trunk" && lanBranches.nextPage == 2, "A LAN lists branches with the hub's token")
     LanHub.hubToken.withLock { $0 = nil }
     let githubBefore = GitHubProtocol.urls.withLock { $0.count }
     let noToken = try await GitHubMentions.load(workspace: lan, repo: "LodyAI/Lody")
     assert((noToken["items"] as! [Any]).isEmpty && GitHubProtocol.urls.withLock { $0.count } == githubBefore)
+    do { _ = try await GitHubCloud.branches(workspace: lan, repo: "LodyAI/Lody", page: 1); fatalError("A hub without a token offered branches") }
+    catch { assert(error.localizedDescription == "github_unavailable" && GitHubProtocol.urls.withLock { $0.count } == githubBefore) }
     assert(cloudCalls() == cloudBefore, "A LAN never asks the Cloud broker")
-    print("GitHub mentions: Issue/PR references, unconnected project, bounded listing, credential isolation, failure behavior and the LAN hub token passed")
+    print("GitHub mentions: Issue/PR references, unconnected project, bounded listing, credential isolation, failure behavior, branch pages and the LAN hub token passed")
   }
 }

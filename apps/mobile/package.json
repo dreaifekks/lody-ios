@@ -19,7 +19,9 @@
     "@expo/dom-webview": "workspace:*",
     "@loro-dev/flock-wasm": "0.4.3",
     "@loro-dev/streams-client": "0.7.0",
+    "@loro-dev/streams-crdt": "0.16.1",
     "@pierre/diffs": "1.4.1",
+    "@rien7/anchored-overlay-kit": "0.3.0",
     "base64-js": "1.5.1",
     "diff": "9.0.0",
     "expo": "~57.0.20",
@@ -48,6 +50,8 @@
   "devDependencies": {
     "@react-native/metro-config": "0.86.3",
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "expo-build-properties": "~57.0.22",
+    "typescript": "~6.0.3",
+    "werift": "0.24.4"
   }
 }

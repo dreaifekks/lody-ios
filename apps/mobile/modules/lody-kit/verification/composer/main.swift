@@ -21,6 +21,55 @@ import UniformTypeIdentifiers
   body()
 }
 
+// Width changes must keep three columns in the very first layout pass, so
+// visible photos retain their cells and do not restart thumbnail requests.
+@MainActor final class PhotoGridFixture: NSObject, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+  var configurations = 0
+  func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { 60 }
+  func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+    configurations += 1
+    return collectionView.dequeueReusableCell(withReuseIdentifier: "photo", for: indexPath)
+  }
+  func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+    let side = floor((collectionView.bounds.width - 6) / 3)
+    return CGSize(width: side, height: side)
+  }
+}
+let photoLayout = ChatPhotoGridLayout()
+photoLayout.minimumLineSpacing = 3
+photoLayout.minimumInteritemSpacing = 3
+let photoGrid = UICollectionView(frame: CGRect(x: 0, y: 0, width: 378, height: 450), collectionViewLayout: photoLayout)
+let photoFixture = PhotoGridFixture()
+photoGrid.dataSource = photoFixture
+photoGrid.delegate = photoFixture
+photoGrid.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "photo")
+let photoWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+photoWindow.addSubview(photoGrid)
+photoWindow.isHidden = false
+photoGrid.layoutIfNeeded()
+let fourthRow = [10, 11].map { IndexPath(item: $0, section: 0) }
+let originalPhotoCells = fourthRow.map { photoGrid.cellForItem(at: $0)! }
+let initialPhotoConfigurations = photoFixture.configurations
+for width: CGFloat in [354, 378, 354, 378] {
+  UIView.animate(withDuration: 0.28) {
+    photoGrid.bounds.size.width = width
+    photoGrid.layoutIfNeeded()
+  }
+  let side = floor((width - 6) / 3)
+  for (index, path) in fourthRow.enumerated() {
+    let frame = photoLayout.layoutAttributesForItem(at: path)!.frame
+    precondition(frame.minY == 3 * (side + 3) && frame.width == side,
+      "Photo resizing must use the new three-column metrics on its first pass")
+    precondition(photoGrid.cellForItem(at: path) === originalPhotoCells[index],
+      "Resizing must retain fourth-row photo cells instead of fading replacement cells")
+  }
+  precondition(photoFixture.configurations == initialPhotoConfigurations,
+    "Resizing visible photos must not reconfigure cells or restart thumbnails")
+  RunLoop.main.run(until: Date().addingTimeInterval(0.32))
+}
+photoWindow.isHidden = true
+print("Photos: repeated width changes retain three columns and visible cell identities")
+
 // Camera results use the same temporary-file/preview path as other attachments.
 let capture = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 48)).image { context in
   UIColor.systemBlue.setFill()
@@ -33,42 +82,40 @@ try FileManager.default.removeItem(at: capturedPhoto.url)
 precondition(ChatCameraCapture.store(Data("invalid image".utf8)) == nil, "Invalid capture must not become an attachment")
 print("Camera: valid JPEG storage and invalid image rejection pass")
 
-// During the tile morph, the live layer keeps its crop and scales uniformly.
-let cameraMorph = ChatAttachmentCameraView(session: AVCaptureSession())
-let viewport = CGSize(width: 390, height: 430)
-cameraMorph.frame = CGRect(x: 0, y: 0, width: 116, height: 116)
-cameraMorph.prepareTransition(viewport: viewport)
-for size in [CGSize(width: 116, height: 116), CGSize(width: 240, height: 280), viewport] {
-  cameraMorph.frame.size = size
-  cameraMorph.setNeedsLayout()
-  cameraMorph.layoutIfNeeded()
-  let live = cameraMorph.previewLayer
-  precondition(live.bounds.size == viewport, "Live preview must not recrop independently during the morph")
-  let transform = live.affineTransform()
-  precondition(abs(transform.a - transform.d) < 0.001, "Camera contents must never stretch")
-  precondition(live.frame.width >= size.width - 0.01 && live.frame.height >= size.height - 0.01,
-    "Preview must cover the moving viewport without exposing blank edges")
+// The overlay camera fills its continuously resizing container.
+let overlayCamera = ChatAttachmentOverlayCameraView(session: AVCaptureSession())
+overlayCamera.setExpanded(true)
+for size in [CGSize(width: 280, height: 300), CGSize(width: 390, height: 524)] {
+  overlayCamera.frame = CGRect(origin: .zero, size: size)
+  overlayCamera.setNeedsLayout()
+  overlayCamera.layoutIfNeeded()
+  precondition(overlayCamera.previewLayer.frame == overlayCamera.bounds,
+    "Camera preview must fill the overlay viewport")
+  let controls = descendants(overlayCamera).filter { $0.accessibilityIdentifier == "camera-shutter" }
+  precondition(controls.count == 1, "Camera must retain one shutter while resizing")
 }
-cameraMorph.prepareTransition(viewport: nil)
-let fullCamera = ChatAttachmentSheet(cameraOnly: true)
-fullCamera.loadViewIfNeeded()
-precondition(fullCamera.modalPresentationStyle == .fullScreen)
-precondition(!descendants(fullCamera.view).contains { $0 is UICollectionView },
-  "Direct capture must not construct a recent-photo grid underneath")
-cameraMorph.letterboxed = true
-cameraMorph.setExpanded(true)
-cameraMorph.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-cameraMorph.controlInsets = UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0)
-cameraMorph.setNeedsLayout()
-cameraMorph.layoutIfNeeded()
-let finder = cameraMorph.previewLayer.frame
-precondition(abs(finder.width / finder.height - 0.75) < 0.001)
-let cameraButtons = descendants(cameraMorph)
-let closeFrame = cameraButtons.first { $0.accessibilityIdentifier == "camera-collapse" }!.frame
-let shutterFrame = cameraButtons.first { $0.accessibilityIdentifier == "camera-shutter" }!.frame
-precondition(closeFrame.maxY <= finder.minY && shutterFrame.minY >= finder.maxY,
-  "Full-screen controls must stay in the black bars outside the 3:4 viewfinder")
-print("Camera: uniform preview morph, independent full-screen entry and 3:4 viewfinder pass")
+print("Camera: overlay viewport resizing passes")
+
+let handoffBar = ChatAttachmentBar()
+handoffBar.frame = CGRect(x: 0, y: 0, width: 200, height: 34)
+let handoffURL = FileManager.default.temporaryDirectory.appendingPathComponent("handoff-photo.png")
+try! UIGraphicsImageRenderer(size: CGSize(width: 30, height: 40)).image { context in
+  UIColor.systemBlue.setFill()
+  context.fill(CGRect(x: 0, y: 0, width: 30, height: 40))
+}.pngData()!.write(to: handoffURL)
+let handoffFiles = (0..<4).map { ChatAttachment(id: "file-\($0)", name: "notes-\($0).txt", url: URL(fileURLWithPath: "/tmp/notes-\($0).txt"), isImage: false) }
+let handoffItem = ChatAttachment(id: "handoff", name: "photo.png", url: handoffURL, isImage: true)
+handoffBar.render(handoffFiles + [handoffItem])
+handoffBar.layoutIfNeeded()
+let handoffTarget = handoffBar.handoffDestination(id: handoffItem.id)!
+let handoffPill = handoffBar.attachmentFrame(id: handoffItem.id)!
+precondition(handoffPill.contains(handoffTarget.convert(handoffTarget.bounds, to: handoffBar))
+  && handoffTarget.bounds.width < handoffPill.width / 2,
+  "The photo must land in the pill's thumbnail, not cover its name")
+precondition(handoffBar.handoffDestination(id: handoffFiles[0].id) == nil, "File pills have no thumbnail to land in")
+precondition(handoffBar.handoffDestination(id: "missing") == nil)
+try? FileManager.default.removeItem(at: handoffURL)
+print("Attachments: ChatKit thumbnail handoff target and reveal pass")
 
 let composer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
 let initialScroll = UIScrollView()
@@ -86,18 +133,6 @@ composer.attachScrollEdge(to: nil)
 precondition(scrollInteraction.scrollView == nil,
   "Detaching the composer must release its scroll target")
 print("Composer scroll edge: direct attachment, host replacement and detachment pass")
-let photoSheet = ChatAttachmentSheet()
-photoSheet.loadViewIfNeeded()
-photoSheet.view.frame = CGRect(x: 0, y: 0, width: 390, height: 430)
-photoSheet.additionalSafeAreaInsets.bottom = 34
-photoSheet.view.layoutIfNeeded()
-let photoScroll = photoSheet.contentScrollView(for: .bottom)
-precondition(photoScroll?.frame == photoSheet.view.bounds, "Photo grid must reach the sheet edges despite bottom safe area")
-precondition(photoScroll is UICollectionView && photoSheet.contentScrollView(for: .top) === photoScroll,
-  "Photo selection must publish its native grid as the sheet's scroll content")
-let photoFades = descendants(photoSheet.view).compactMap { $0 as? LodyEdgeFade }
-precondition(photoFades.count == 1 && photoFades[0].isHidden && photoScroll?.bottomEdgeEffect.isHidden == true,
-  "The confirmation fade must not occlude photos before a selection exists")
 composer.setInputIdentifier("create-session-input")
 var height: CGFloat = 0
 composer.onHeightChange = { height = $0 }

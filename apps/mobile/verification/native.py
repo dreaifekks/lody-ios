@@ -23,11 +23,12 @@ if args.udid is None:
     raise SystemExit(run_with_simulator(SimulatorPool(), 'Native', command))
 sdk = subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path'], text=True).strip()
 checks = {
+    'simulator-transport': ['LodyStrings.swift', 'SimulatorStream/SimulatorDeviceView.swift', 'SimulatorStream/SimulatorRemote.swift', 'SimulatorStream/SimulatorRTCFrame.swift', 'SimulatorStream/SimulatorRTC.swift', 'SimulatorStream/SimulatorTransport.swift'],
     'chat-kit': [],
     'lexical-swift': [],
     'scroll-edges': ['Chrome/LodyScrollEdges.swift', 'LodyTint.swift', 'Chrome/LodyEdgeFade.swift'],
     'glass-transition': [],
-    'github-mentions': ['Auth/LanInvite.swift', 'Cloud/GitHubMentions.swift'],
+    'github-mentions': ['Auth/LanInvite.swift', 'Cloud/GitHubMentions.swift', 'CreateSession/CreateSessionModels.swift'],
     'github-pr': ['Auth/LanInvite.swift', 'Cloud/GitHubPullRequests.swift'],
     'session-sharing': ['Cloud/SessionSharing.swift'],
     'notifications': ['Notifications/PushPermissionLaunchRequest.swift', 'Notifications/PushClickBuffer.swift', 'Notifications/ApsEnvironment.swift'],
@@ -42,8 +43,9 @@ checks = {
     'content-store': ['Cloud/ContentStore.swift'],
     'chat-render': ['LodyStrings.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift'],
     'chat-chrome': ['LodyStrings.swift', 'Chat/ChatOverlay.swift'],
+    'context-chip': ['LodyStrings.swift', 'Chat/ChatQuickReplies.swift'],
     'model-panel': ['LodyStrings.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Chat/ChatComposerModelPanel.swift'],
-    'composer': ['Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyStrings.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatAttachmentSheet.swift', 'Chat/ChatAttachmentCamera.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift'],
+    'composer': ['Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyStrings.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift'],
     'attachments': ['LodyStrings.swift', 'Cloud/SessionAttachments.swift'],
     'inline-diff': ['UIFont+Dynamic.swift', 'Diff/InlineDiffModel.swift', 'Diff/InlineDiffRenderer.swift'],
     'list': [
@@ -60,7 +62,7 @@ checks = {
         'LodyStrings.swift',
         'Toast/LodySessionBannerView.swift',
     ],
-    'chat-title': ['LodyUIVerify.swift', 'Chrome/LodyNavigationHeader.swift', 'Chat/ChatNavigationTitle.swift'],
+    'chat-title': ['LodyStrings.swift', 'LodyUIVerify.swift', 'Chrome/LodyNavigationHeader.swift', 'Chat/ChatNavigationTitle.swift'],
     'live-activity': ['../live-activity/LodyActivityAttributes.swift', '../live-activity/LiveActivityCatalog.swift'],
     'watch-card': ['../live-activity/LodyActivityAttributes.swift', '../live-activity/LiveActivityCatalog.swift', '../live-activity/LodyPermissionIntent.swift', '../live-activity/LiveActivityViews.swift'],
     'page-progress': ['List/LodyPageProgress.swift'],
@@ -79,6 +81,9 @@ for files in checks.values():
         files.append('Chat/ChatPendingSend.swift')
     if 'Chat/ChatSendHandoff.swift' in files or 'Chat/ChatMentionPanel.swift' in files:
         files.insert(0, 'LodyUIVerify.swift')
+    # The branch fixture returns CreateBranches, so every isolated compile of the fixture needs that model.
+    if 'LodyUIVerify.swift' in files and 'CreateSession/CreateSessionModels.swift' not in files:
+        files.append('CreateSession/CreateSessionModels.swift')
 if 'markdown-repair' in checks:
     subprocess.run(['node', str(root / 'apps/mobile/scripts/build-decoder.mjs')], cwd=root, check=True, timeout=120)
 with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
@@ -142,18 +147,34 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'attachments', 'inline-diff', 'list', 'banner', 'chat-title', 'live-activity', 'watch-card', 'chat-chrome']
+        simulator = name in ['simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'context-chip', 'attachments', 'inline-diff', 'list', 'banner', 'chat-title', 'live-activity', 'watch-card', 'chat-chrome']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
+        if name == 'simulator-transport':
+            subprocess.run(['/bin/bash', str(kit / 'datachannel/build.sh')], check=True)
+            command += ['-F', str(kit / 'ios/Vendor/LodyDataChannel.xcframework/ios-arm64_x86_64-simulator'),
+                        '-framework', 'LodyDataChannel']
         if simulator:
             arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
             ios = '26.0'
             command += ['-sdk', sdk, '-target', f'{arch}-apple-ios{ios}-simulator']
+        if name == 'composer':
+            manifest = subprocess.check_output([
+                'node', '-p', 'require.resolve("@rien7/anchored-overlay-kit/package.json")',
+            ], cwd=root / 'apps/mobile', text=True).strip()
+            sources = sorted((Path(manifest).parent / 'Sources/AnchoredOverlayKit').glob('*.swift'))
+            subprocess.run([
+                *command, '-emit-library', '-static', '-emit-module',
+                '-module-name', 'AnchoredOverlayKit',
+                '-emit-module-path', str(Path(output) / 'AnchoredOverlayKit.swiftmodule'),
+                *map(str, sources), '-o', str(Path(output) / 'libAnchoredOverlayKit.a'),
+            ], check=True, timeout=120)
+            command += ['-I', output, '-L', output, '-lAnchoredOverlayKit']
         if name in ['attachments', 'github-mentions', 'github-pr', 'session-sharing']:
             command += ['-parse-as-library']
         if name == 'inline-diff':
             command += ['-framework', 'UIKit']
-        if name in ['chat-render', 'composer', 'chat-title', 'watch-card']:
+        if name in ['chat-render', 'composer', 'context-chip', 'chat-title', 'watch-card']:
             command += ['-framework', 'SwiftUI']
         main = kit / 'verification' / name / 'main.swift'
         package_sources = [kit / 'ios' / file for file in files] + [main]
@@ -171,7 +192,18 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         subprocess.run(command, check=True, timeout=240)
         # A cold CI Simulator draws its first text far slower than a warm local one.
         command = ['xcrun', 'simctl', 'spawn', args.udid, binary] if simulator else [binary]
-        if name == 'attachments':
+        if name == 'simulator-transport':
+            subprocess.run(['codesign', '--force', '--sign', '-', binary], check=True)
+            with subprocess.Popen(['node', str(kit / 'verification/simulator-transport/server.mjs')], stdout=subprocess.PIPE, text=True) as server:
+                try:
+                    endpoint = server.stdout.readline().strip()
+                    if not endpoint.startswith('http://127.0.0.1:'):
+                        raise RuntimeError('Simulator transport fixture server did not start')
+                    subprocess.run(command, check=True, timeout=90, env={**os.environ, 'SIMCTL_CHILD_LODY_SIMULATOR_TEST_URL': endpoint,
+                                                                       'SIMCTL_CHILD_OS_ACTIVITY_DT_MODE': 'enable'})
+                finally:
+                    server.terminate()
+        elif name == 'attachments':
             with subprocess.Popen([sys.executable, str(kit / 'verification/attachments/progress-server.py')], stdout=subprocess.PIPE, text=True) as server:
                 try:
                     endpoint = server.stdout.readline().strip()

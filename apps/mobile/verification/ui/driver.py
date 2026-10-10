@@ -2,9 +2,11 @@
 import json
 import os
 import select
+import shlex
 import subprocess
 import tempfile
 import time
+from urllib.parse import urlencode
 from pathlib import Path
 
 # run.py reads it from the app under test, so a fork signed with its own id verifies too.
@@ -19,11 +21,45 @@ def axe_session_dead(error):
     return 'remote automation session' in message or 'accessibility automation' in message
 
 
+def restart_accessibility(udid):
+    """A hung describe-ui keeps the simulator accessibility session until that client dies.
+    AXe restarts testmanagerd only after a channel disconnect, so a client timeout does it here."""
+    try:
+        subprocess.run(
+            ['xcrun', 'simctl', 'spawn', udid, 'launchctl', 'kickstart', '-k',
+             'user/foreground/com.apple.testmanagerd'],
+            check=False,
+            timeout=8,
+            capture_output=True,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return
+
+
 def launch_covered(items, app_pid):
     """describe-ui of another process means SpringBoard covered the launched app."""
     if not app_pid or not items:
         return False
     return not any(str(item.get('pid')) == str(app_pid) for item in items)
+
+
+def allow_custom_scheme(ui):
+    """SpringBoard's first-use scheme alert blocks describe-ui; tap Open without reading the tree."""
+    ui.invalidate_axe()
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        for label in ('Open', '打开', '開啟'):
+            try:
+                ui.axe('tap', '--label', label, '--post-delay', '1', timeout=3, recover=False)
+                return
+            except subprocess.TimeoutExpired:
+                ui.axe('tap', '-x', '280', '-y', '450', '--post-delay', '1', timeout=3, recover=False)
+                return
+            except (subprocess.CalledProcessError, RuntimeError) as error:
+                if 'no accessibility element matched' not in str(error).casefold():
+                    ui.axe('tap', '-x', '280', '-y', '450', '--post-delay', '1', timeout=3, recover=False)
+                    return
+        time.sleep(0.4)
 
 
 class UI:
@@ -32,11 +68,19 @@ class UI:
         self.output.mkdir(parents=True, exist_ok=True)
         self._axe_ready = False
 
+    def open_case(self, preview):
+        """Enter an offline Debug action without depending on the menu's scroll position."""
+        query = urlencode({'verifyCase': preview, 'request': time.monotonic_ns()})
+        subprocess.run(['xcrun', 'simctl', 'openurl', self.udid, f'lody:///debug?{query}'],
+                       check=True, timeout=30, capture_output=True)
+
     def invalidate_axe(self):
         """Forget the XCTest session after terminate/relaunch so the next describe retries."""
         self._axe_ready = False
 
     def axe(self, *args, timeout=20, recover=True):
+        if args and args[0] == 'type':
+            args = ('batch', '--type-submission', 'composite', '--step', shlex.join(args))
         # AXe's automatic style sends a simulator tapAt, which a focused Lexical input's keyboard session can swallow; fingers are down/up.
         if args and args[0] == 'tap' and '--tap-style' not in args:
             args = (*args, '--tap-style', 'physical')
@@ -55,29 +99,15 @@ class UI:
                 if not recover or not axe_session_dead(error) or time.monotonic() >= deadline:
                     raise
                 self._axe_ready = False
+                if isinstance(error, subprocess.TimeoutExpired):
+                    restart_accessibility(self.udid)
                 time.sleep(2)
 
     def type_into(self, identifier, text):
-        """A Chinese App Language activates the pinyin IME, which holds typed Latin
-        fixture text as composition instead of committing it. Switch to the English
-        keyboard and retype only when the field disagrees, so a run never toggles a
-        keyboard that is already Latin."""
-        import catalog
-        def committed():
-            got = self.element(identifier).get('AXValue') or ''
-            # AXe type can hold Shift, so Latin fixture text may land in all caps.
-            return got == text or got.casefold() == text.casefold()
+        """Batch input under the runner's shared English keyboard baseline."""
         self.axe('type', text)
-        if committed():
-            return
-        try:
-            self.axe('tap', '--label', catalog.system('nextKeyboard'), '--post-delay', '.6', recover=False)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError):
-            pass
-        for _ in range(len(text) + 8):
-            self.axe('key', '42')
-        self.axe('type', text)
-        assert committed(), f'Typed text did not commit: {self.element(identifier).get("AXValue")!r}'
+        got = self.element(identifier).get('AXValue') or ''
+        assert got.casefold() == text.casefold(), f'Typed text did not commit: {got!r}'
 
     def paste_file(self, identifier):
         return self._paste_provider(identifier, 'file-pasteboard.swift', ['clipboard-fixture.txt'])

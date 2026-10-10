@@ -1,3 +1,8 @@
+#if !LODY_SHARE_EXTENSION
+import AnchoredOverlayKit
+import AVFoundation
+import Photos
+#endif
 import ChatKit
 import EditorHistoryPlugin
 import Lexical
@@ -203,12 +208,21 @@ final class ChatComposerInput: TextView {
       .paddingHead: 12.0,
       .quoteCustomDrawing: QuoteCustomDrawingAttributes(barColor: .separator, barWidth: 3, rounded: true, barInsets: .zero),
     ]
+    setHeadingFont(of: theme, body: UIFont.dynamic(of: 17))
     let history = EditorHistoryPlugin()
     let config = EditorConfig(theme: theme, plugins: [ListPlugin(), LinkPlugin(), MarkdownShortcutPlugin(), history])
     let view = LexicalView(editorConfig: config, featureFlags: FeatureFlags(), textViewType: ChatComposerInput.self)
     try? view.editor.registerNode(nodeType: .lodyReference, class: ChatReferenceNode.self)
     (view.textView as? ChatComposerInput)?.history = history
     return view
+  }
+
+  // Matches ChatMarkdownTheme's title font, which the transcript uses for every heading level.
+  private static func setHeadingFont(of theme: Theme, body: UIFont) {
+    let font = UIFont.systemFont(ofSize: body.pointSize * 20 / 17, weight: .semibold)
+    for tag in ["h1", "h2", "h3", "h4", "h5", "h6"] {
+      theme.setValue(.heading, forSubtype: tag, value: [.font: font])
+    }
   }
 
   private var history: EditorHistoryPlugin? {
@@ -232,6 +246,7 @@ final class ChatComposerInput: TextView {
     didSet {
       guard let font, (editor.getTheme().root?[.font] as? UIFont) != font else { return }
       editor.getTheme().root?[.font] = font
+      Self.setHeadingFont(of: editor.getTheme(), body: font)
       try? editor.update { editor.dirtyType = .fullReconcile }
     }
   }
@@ -549,6 +564,11 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private let send = UIButton(type: .system)
   private let sendVisual = ChatComposerActionVisual()
   private let sendFeedback = UIImpactFeedbackGenerator(style: .medium)
+  #if !LODY_SHARE_EXTENSION
+  private let attachmentOverlay = AnchoredOverlayController()
+  private lazy var attachmentPages = OverlayPages(controller: attachmentOverlay, transitionStyle: .blurredCrossfade)
+  #endif
+  private enum AttachmentPage { case photos, camera }
   private let attach = UIButton(type: .system)
   private let attachSurface = UIVisualEffectView(effect: nil)
   private let accessoryBar = UIView()
@@ -576,6 +596,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
   }
   private let mentionButton = UIButton(type: .system)
+  private let permissionButton = UIButton(type: .system)
+  private var modelLeading: NSLayoutConstraint?
+  private var permissionLeading: NSLayoutConstraint?
   private var mentionHeight: NSLayoutConstraint!
   /// Experimental dictation through a Codex agent; shown only once enabled in Settings.
   private let voiceButton = UIButton(type: .system)
@@ -596,6 +619,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private var state = ChatComposerState()
   private var composerOptions = ChatComposerOptions()
   private var composerExpanded = false
+  var allowsFullScreen = false { didSet { updateComposer() } }
+  private var fullScreen = false
+  private let expandButton = UIButton(type: .system)
+  private lazy var formatBar = ChatComposerFormatBar(editor: input.editor)
+  private var formatHeight: NSLayoutConstraint!
+  private let fullScreenDim = UIView()
   private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?)?
   private var sentStates: [String: String] = [:]
   var sendHandoff = true
@@ -726,6 +755,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attach.tintColor = .label
     attach.accessibilityLabel = LodyStrings.text("native.chat.composer.attach")
     attach.accessibilityIdentifier = "session-attach"
+#if LODY_SHARE_EXTENSION
     attach.showsMenuAsPrimaryAction = true
     attach.menu = UIMenu(children: [
       UIAction(title: LodyStrings.text("native.chat.composer.takePhoto"), image: UIImage(systemName: "camera")) { [weak self] _ in
@@ -741,6 +771,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         self.filePicker.files(from: controller)
       },
     ])
+#else
+    attachmentOverlay.anchorTransition = .fade
+    attach.addTarget(self, action: #selector(presentAttachments), for: .touchUpInside)
+#endif
     modelButton.accessibilityIdentifier = "session-model"
     modelButton.addTarget(self, action: #selector(presentComposerOptions), for: .touchUpInside)
     modelButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -774,6 +808,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     #if !LODY_SHARE_EXTENSION
     NotificationCenter.default.addObserver(self, selector: #selector(voicePreferencesChanged), name: VoicePreferences.didChange, object: nil)
     #endif
+    permissionButton.setImage(UIImage(systemName: "shield.lefthalf.filled", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular)), for: .normal)
+    permissionButton.tintColor = .label
+    permissionButton.accessibilityLabel = LodyStrings.text("model.tab.permission")
+    permissionButton.accessibilityIdentifier = "session-permission"
+    permissionButton.showsMenuAsPrimaryAction = true
+    expandButton.tintColor = .secondaryLabel
+    expandButton.accessibilityIdentifier = "session-expand"
+    expandButton.addTarget(self, action: #selector(toggleFullScreen), for: .touchUpInside)
+    formatBar.clipsToBounds = true
+    formatBar.onChange = { [weak self] in self?.updateComposer() }
+    fullScreenDim.backgroundColor = UIColor.black.withAlphaComponent(0.22)
+    fullScreenDim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    fullScreenDim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggleFullScreen)))
     mentionPanel.onChange = { [weak self] in self?.updateComposer() }
     attachmentBar.onHeightChange = { [weak self] in self?.updateComposer() }
     queueView.onHeightChange = { [weak self] in self?.updateComposer() }
@@ -801,14 +848,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     composer.contentView.addSubview(attachSurface)
     composer.contentView.addSubview(inputSurface)
     attachSurface.contentView.addSubview(attach)
-    for view in [editorView, hint, accessoryBar, modelButton, mentionButton, voiceButton, send] {
+    for view in [editorView, hint, formatBar, accessoryBar, modelButton, mentionButton, permissionButton, voiceButton, send, expandButton] {
       inputSurface.contentView.addSubview(view)
     }
-    for view in [composer, mentionPanel, mentionButton, voiceButton, queueView, quickRepliesView, inputSurface, attachSurface, notice, attachmentBar, quotaNotice, editorView, hint, accessoryBar, send, attach, modelButton] {
+    for view in [composer, mentionPanel, mentionButton, permissionButton, voiceButton, queueView, quickRepliesView, inputSurface, attachSurface, notice, attachmentBar, quotaNotice, editorView, hint, formatBar, accessoryBar, send, attach, modelButton, expandButton] {
       view.translatesAutoresizingMaskIntoConstraints = false
     }
     inputHeight = editorView.heightAnchor.constraint(equalToConstant: 48)
     accessoryHeight = accessoryBar.heightAnchor.constraint(equalToConstant: 0)
+    formatHeight = formatBar.heightAnchor.constraint(equalToConstant: 0)
     hintLeading = hint.leadingAnchor.constraint(equalTo: editorView.leadingAnchor, constant: 21)
     hintTop = hint.topAnchor.constraint(equalTo: editorView.topAnchor, constant: 13)
     noticeHeight = notice.heightAnchor.constraint(equalToConstant: 0)
@@ -851,7 +899,13 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       editorView.topAnchor.constraint(equalTo: inputSurface.contentView.topAnchor),
       editorView.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor),
       editorView.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor), inputHeight,
-      accessoryBar.topAnchor.constraint(equalTo: editorView.bottomAnchor),
+      formatBar.topAnchor.constraint(equalTo: editorView.bottomAnchor),
+      formatBar.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor),
+      formatBar.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor), formatHeight,
+      expandButton.topAnchor.constraint(equalTo: editorView.topAnchor, constant: 2),
+      expandButton.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor, constant: -2),
+      expandButton.widthAnchor.constraint(equalToConstant: 44), expandButton.heightAnchor.constraint(equalToConstant: 44),
+      accessoryBar.topAnchor.constraint(equalTo: formatBar.bottomAnchor),
       accessoryBar.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor),
       accessoryBar.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor),
       accessoryBar.bottomAnchor.constraint(equalTo: inputSurface.contentView.bottomAnchor), accessoryHeight,
@@ -863,7 +917,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       mentionButton.leadingAnchor.constraint(equalTo: inputSurface.leadingAnchor, constant: 52),
       mentionButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
       mentionButton.widthAnchor.constraint(equalToConstant: 44), mentionButton.heightAnchor.constraint(equalToConstant: 44),
-      modelButton.leadingAnchor.constraint(greaterThanOrEqualTo: inputSurface.contentView.leadingAnchor, constant: 2),
+      permissionButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
+      permissionButton.widthAnchor.constraint(equalToConstant: 44), permissionButton.heightAnchor.constraint(equalToConstant: 44),
       modelButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
       modelButton.heightAnchor.constraint(equalToConstant: 44),
       modelButton.trailingAnchor.constraint(equalTo: voiceButton.leadingAnchor),
@@ -871,6 +926,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       voiceButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
       voiceButton.heightAnchor.constraint(equalToConstant: 44), voiceWidth,
     ])
+    permissionLeading = permissionButton.leadingAnchor.constraint(equalTo: mentionButton.trailingAnchor)
+    permissionLeading?.isActive = true
+    modelLeading = modelButton.leadingAnchor.constraint(greaterThanOrEqualTo: inputSurface.contentView.leadingAnchor, constant: 2)
+    modelLeading?.isActive = true
     updateComposer()
   }
 
@@ -909,6 +968,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     if window == nil {
       stopDictation()
       saveDraft()
+      #if !LODY_SHARE_EXTENSION
+      attachmentOverlay.cancel()
+      #endif
       optionsPopover?.dismiss(animated: false)
     }
     else if mentionNeedsFocus || autoFocus {
@@ -1001,6 +1063,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     input.text = ""
     attachments = []
   }
+  #if LODY_SHARE_EXTENSION
   private func presentAttachmentCamera() {
     guard let controller = presenter() else { return }
     let camera = ChatAttachmentSheet(cameraOnly: true)
@@ -1013,6 +1076,160 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     sheet.onPick = { [weak self] picked in self?.addAttachments(picked) }
     controller.present(sheet, animated: true)
   }
+  #else
+  @objc private func presentAttachments() {
+    guard attach.isEnabled else { return }
+    if attachmentOverlay.isPresented { attachmentOverlay.dismiss(); return }
+    let page = OverlayPage(id: "attachments", layout: OverlayLayout(width: .fixed(280), height: .content(max: 300)),
+      appearance: OverlayAppearance(corners: .fixed(OverlayControlMetrics().menuRadius)), contentScaling: .fit) { [weak self] in
+      ChatAttachmentMenu.content { [weak self] action in
+        guard let self else { return }
+        switch action {
+        case .recentPhotos: self.presentRecentPhotos()
+        case .takePhoto: self.openCamera()
+        case .files:
+          self.finishAttachmentOverlay { owner, controller in owner.filePicker.files(from: controller) }
+        }
+      }
+    }
+    if attachmentPages.present(page, anchoredTo: attach, dismissLabel: LodyStrings.text("native.close")) == .presented {
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+  }
+
+  private func finishAttachmentOverlay(onCancel: (() -> Void)? = nil, _ action: @escaping (ChatComposerView, UIViewController) -> Void) {
+    attachmentOverlay.dismissWithResult { [weak self] result in
+      guard result == .dismissed, let self, self.window != nil,
+            self.attach.isEnabled, let controller = self.presenter() else { onCancel?(); return }
+      action(self, controller)
+    }
+  }
+
+  private var attachmentMediaLayout: OverlayLayout {
+    .bottomEdge(inset: 12, height: .viewportFraction(0.60))
+  }
+
+  private func presentRecentPhotos() {
+    attachmentPages.push(OverlayPage(id: "recent-photos", layout: attachmentMediaLayout,
+      appearance: ChatRecentPhotosView.initialAppearance) { [weak self] in
+      let photos = ChatRecentPhotosView()
+      photos.onAppearanceChange = { [weak self] appearance in
+        guard let self, self.attachmentPages.pageID == "recent-photos" else { return }
+        self.attachmentPages.controller.updateAppearance(appearance)
+      }
+      photos.onBack = { [weak self] in self?.attachmentPages.back() }
+      photos.onLibrary = { [weak self] in
+        self?.finishAttachmentOverlay { owner, controller in owner.libraryPicker.present(from: controller) }
+      }
+      photos.onRequestAccess = { [weak self] in self?.requestPhotoAccess() }
+      photos.onManageLimited = { [weak self] in
+        self?.performMediaAccess { controller, complete in
+          PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: controller) { _ in
+            Task { @MainActor in complete(true) }
+          }
+        }
+      }
+      photos.onPick = { [weak self] picked in
+        guard let self else { ChatAttachment.discardImports(picked); return }
+        self.acceptOverlayAttachments(picked)
+      }
+      return photos
+    })
+  }
+  private func openCamera() {
+    if !ChatCameraCapture.fixture && AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+      requestCameraAccess()
+    } else { presentCamera() }
+  }
+
+  private func presentCamera() {
+    attachmentPages.push(OverlayPage(id: "camera", layout: attachmentMediaLayout,
+      appearance: OverlayAppearance(corners: .bottomConcentric(top: 40)), contentLayout: .stable) { [weak self] in
+      let camera = ChatCameraPage()
+      camera.onBack = { [weak self] in self?.attachmentPages.back() }
+      camera.onRequestAccess = { [weak self] in self?.requestCameraAccess() }
+      camera.onPick = { [weak self] photo in
+        guard let self else { try? FileManager.default.removeItem(at: photo.url); return }
+        self.acceptOverlayAttachments([photo])
+      }
+      return camera
+    })
+  }
+
+  /// The draft owns imports before the visual handoff; animation cancellation
+  /// must never discard an accepted attachment.
+  private func acceptOverlayAttachments(_ picked: [ChatAttachment]) {
+    guard window != nil, attach.isEnabled, attachmentOverlay.isPresented else {
+      ChatAttachment.discardImports(picked.filter { item in !attachments.contains { $0.url == item.url } })
+      return
+    }
+    let accepted = picked.filter { item in !attachments.contains { $0.id == item.id } }
+    ChatAttachment.discardImports(picked.filter { item in
+      attachments.contains { $0.id == item.id } && !attachments.contains { $0.url == item.url }
+    })
+    guard let first = accepted.first else { attachmentOverlay.dismiss(); return }
+    addAttachments(accepted)
+    window?.layoutIfNeeded()
+    // The photo lands in the new pill's own thumbnail, which stays hidden until
+    // the panel arrives so the swap is invisible.
+    guard let image = ChatAttachment.thumbnail(first.url) else { attachmentOverlay.dismiss(); return }
+    let representation = UIImageView(image: image)
+    representation.contentMode = .scaleAspectFill
+    representation.clipsToBounds = true
+    attachmentOverlay.dismiss(to: attachmentBar.handoffDestination(id: first.id), representation: representation,
+      cornerRadius: ChatAttachmentBar.thumbnailRadius, destinationVisibility: .hideDuringTransition) { _ in }
+  }
+
+  private func requestCameraAccess() {
+    let needsPrompt = AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined
+    performMediaAccess(page: .camera, waitForActivation: !needsPrompt) { _, complete in
+      if needsPrompt {
+        AVCaptureDevice.requestAccess(for: .video) { _ in
+          Task { @MainActor in complete(true) }
+        }
+      } else if let url = URL(string: UIApplication.openSettingsURLString) {
+        UIApplication.shared.open(url) { opened in
+          Task { @MainActor in complete(opened) }
+        }
+      }
+    }
+  }
+
+  private func requestPhotoAccess() {
+    let needsPrompt = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined
+    performMediaAccess(waitForActivation: !needsPrompt) { _, complete in
+      if needsPrompt {
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
+          Task { @MainActor in complete(true) }
+        }
+      } else if let url = URL(string: UIApplication.openSettingsURLString) {
+        UIApplication.shared.open(url) { opened in
+          Task { @MainActor in complete(opened) }
+        }
+      }
+    }
+  }
+
+  private func performMediaAccess(page: AttachmentPage = .photos, waitForActivation: Bool = false,
+      _ action: @escaping (UIViewController, @escaping @MainActor (Bool) -> Void) -> Void) {
+    guard let controller = presenter() else { return }
+    attachmentOverlay.performExternalInteraction(from: controller,
+      interaction: waitForActivation ? .leavingApp : .inApp,
+      isValid: { [weak self, weak controller] in
+        guard let self, let controller else { return false }
+        return self.attach.isEnabled && self.presenter() === controller
+      }, operation: action, resume: { [weak self] in
+        guard let self else { return }
+        self.presentAttachments()
+        switch page {
+        case .photos: self.presentRecentPhotos()
+        case .camera: self.presentCamera()
+        }
+      })
+  }
+
+  #endif
+
   private func addAttachments(_ picked: [ChatAttachment]) {
     attachments += picked.filter { new in !attachments.contains { $0.id == new.id } }
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1040,12 +1257,51 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     saveDraft()
   }
   private func presenter() -> UIViewController? {
+    owningController().map { $0.presentedViewController ?? $0 } ?? window?.rootViewController
+  }
+  private func owningController() -> UIViewController? {
     var responder: UIResponder? = next
     while let current = responder {
-      if let controller = current as? UIViewController { return controller.presentedViewController ?? controller }
+      if let controller = current as? UIViewController { return controller }
       responder = current.next
     }
-    return window?.rootViewController
+    return nil
+  }
+  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
+    guard let superview, let host = owningController()?.view else { return ChatMessageContent.maximumCollapsedHeight }
+    // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
+    let top = max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + 8
+    return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
+  }
+  @objc private func toggleFullScreen() {
+    setFullScreen(!fullScreen)
+  }
+  private func setFullScreen(_ value: Bool, animated: Bool = true) {
+    guard fullScreen != value, let superview else { return }
+    superview.layoutIfNeeded()
+    fullScreen = value
+    if value {
+      fullScreenDim.frame = superview.bounds
+      fullScreenDim.alpha = 0
+      superview.addSubview(fullScreenDim)
+      superview.bringSubviewToFront(self)
+      formatBar.refresh()
+    }
+    updateComposer()
+    let changes = {
+      self.fullScreenDim.alpha = value ? 1 : 0
+      superview.layoutIfNeeded()
+      self.input.scrollRangeToVisible(self.input.selectedRange)
+    }
+    let finish = { (_: Bool) in
+      if !self.fullScreen { self.fullScreenDim.removeFromSuperview() }
+    }
+    guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else {
+      changes()
+      finish(true)
+      return
+    }
+    UIView.animate(springDuration: 0.42, bounce: 0, options: [.beginFromCurrentState], animations: changes, completion: finish)
   }
   var connection: String { state.connection ?? "" }
 
@@ -1099,7 +1355,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     surfaceLayout.update(isFocused: expanded)
     input.isEditable = state.editable && (sendHandoff || !sending)
     attach.isEnabled = state.editable && !sending
+    #if !LODY_SHARE_EXTENSION
+    if !attach.isEnabled { attachmentOverlay.cancel() }
+    if !attachmentOverlay.isPresented { attach.alpha = attach.isEnabled ? 1 : 0.5 }
+    #else
     attach.alpha = attach.isEnabled ? 1 : 0.5
+    #endif
     attachmentBar.isUserInteractionEnabled = state.editable && !sending
     attachmentBar.render(attachments)
     attachmentHeight.constant = attachmentBar.hasVisiblePills ? 42 : 0
@@ -1140,6 +1401,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let noticeText = failedDraft == nil ? (displayError ?? state.notice) : LodyStrings.text("native.chat.composer.failedDraft")
     let canReconnect = failedDraft != nil || displayError != nil || state.reconnect
     notice.setTitle(noticeText, for: .normal)
+    notice.isHidden = noticeText.isEmpty
     notice.setTitleColor(canReconnect ? .lodyAccent : .secondaryLabel, for: .normal)
     notice.isUserInteractionEnabled = canReconnect
     notice.accessibilityTraits = canReconnect ? .button : .staticText
@@ -1152,16 +1414,30 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let quotaSize = quotaNotice.sizeThatFits(CGSize(width: max(1, quotaWidth), height: .greatestFiniteMagnitude))
     quotaNoticeHeight.constant = quotaNotice.isHidden ? 0 : max(quotaNotice.font.lineHeight, quotaSize.height)
     quotaGap.constant = quotaNotice.isHidden ? 8 : 6
+    if fullScreen && (!allowsFullScreen || !expanded || !state.editable) {
+      fullScreen = false
+      fullScreenDim.removeFromSuperview()
+    }
     accessoryHeight.constant = expanded ? 44 : 0
+    formatHeight.constant = fullScreen ? 44 : 0
+    formatBar.isHidden = !fullScreen
+    formatBar.accessibilityElementsHidden = !fullScreen
     let verticalInset = expanded ? 13 : max(0, (48 - input.font!.lineHeight) / 2)
-    input.textContainerInset = UIEdgeInsets(top: verticalInset, left: 16, bottom: verticalInset, right: expanded ? 16 : 46)
+    input.textContainerInset = UIEdgeInsets(top: verticalInset, left: 16, bottom: verticalInset, right: expanded && !allowsFullScreen ? 16 : 46)
     hintLeading.constant = 21
     hintTop.constant = verticalInset
     let height = input.sizeThatFits(CGSize(width: max(1, input.bounds.width), height: .greatestFiniteMagnitude)).height
-    inputHeight.constant = min(ChatMessageContent.maximumCollapsedHeight, max(expanded ? 68 : 48, height))
-    input.isScrollEnabled = height > ChatMessageContent.maximumCollapsedHeight
+    let overflows = height > ChatMessageContent.maximumCollapsedHeight
+    let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + quickRepliesHeight.constant + noticeHeight.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + formatHeight.constant + 16
+    inputHeight.constant = fullScreen ? fullScreenInputHeight(chrome: chrome) : min(ChatMessageContent.maximumCollapsedHeight, max(expanded ? 68 : 48, height))
+    input.isScrollEnabled = fullScreen || overflows
+    expandButton.isHidden = !(fullScreen || (allowsFullScreen && expanded && overflows))
+    expandButton.accessibilityElementsHidden = expandButton.isHidden
+    let expandSymbol = fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+    expandButton.setImage(UIImage(systemName: expandSymbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)), for: .normal)
+    expandButton.accessibilityLabel = LodyStrings.text(fullScreen ? "native.chat.composer.collapse" : "native.chat.composer.expand")
     updateComposerOptions()
-    onHeightChange?(mentionHeight.constant + queueHeight.constant + queueGap.constant + quickRepliesHeight.constant + noticeHeight.constant + attachmentHeight.constant + quotaNoticeHeight.constant + inputHeight.constant + accessoryHeight.constant + 16)
+    onHeightChange?(chrome + inputHeight.constant)
     setNeedsLayout()
     if expansionChanged {
       if window != nil && !UIAccessibility.isReduceMotionEnabled {
@@ -1177,6 +1453,26 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
   }
   private func updateComposerOptions() {
+    let permissions = composerOptions.permissions ?? []
+    permissionButton.isHidden = !composerExpanded || permissions.isEmpty
+    permissionButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
+    permissionButton.accessibilityValue = permissions.first { $0.id == composerOptions.permissionId }?.title
+      ?? LodyStrings.text("model.useDefault")
+    permissionButton.menu = UIMenu(title: LodyStrings.text("model.tab.permission"), children: permissions.map { option in
+      UIAction(title: option.title, subtitle: option.description, state: option.id == composerOptions.permissionId ? .on : .off) { [weak self] _ in
+        guard let self, self.permissionButton.isEnabled,
+          self.composerOptions.permissions?.contains(where: { $0.id == option.id }) == true else { return }
+        self.composerOptions.permissionId = option.id
+        self.updateComposerOptions()
+        self.onComposerOptionChange?(["modelId": self.composerOptions.modelId, "effort": self.composerOptions.effort, "permissionId": option.id])
+      }
+    })
+    permissionLeading?.constant = mentionButton.isHidden ? -44 : 0
+    if !permissionButton.isHidden {
+      modelLeading?.constant = mentionButton.isHidden ? 96 : 140
+    } else {
+      modelLeading?.constant = mentionButton.isHidden ? 2 : 96
+    }
     modelButton.isHidden = !composerExpanded || composerOptions.models.isEmpty
     modelButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
     let title = NSMutableAttributedString(string: composerOptions.modelTitle, attributes: [.foregroundColor: UIColor.label])
@@ -1267,6 +1563,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   @objc private func openMentions() { mentionPanel.open(input: input) }
   func textViewDidChangeSelection(_ textView: UITextView) {
+    if fullScreen { formatBar.refresh() }
     guard activeMentionItems != nil else { return }
     updateComposer()
   }
@@ -1274,6 +1571,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   func textViewDidBeginEditing(_ textView: UITextView) { updateComposer() }
   func textViewDidEndEditing(_ textView: UITextView) {
     stopDictation()
+    setFullScreen(false)
     updateComposer()
     saveDraft()
   }
@@ -1299,6 +1597,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       return
     }
     sendFeedback.impactOccurred(intensity: 0.85)
+    if fullScreen { UIView.performWithoutAnimation { setFullScreen(false, animated: false) } }
     let queued = queuesSubmission
     let guiding = guidesSubmission
     let id = UUID().uuidString.lowercased()
