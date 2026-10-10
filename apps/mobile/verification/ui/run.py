@@ -480,6 +480,12 @@ with metro_context:
                         allow_custom_scheme(ui)
                         ui.element('ui-verify-ready')
                         links_ready = True
+                        if case not in HOME_CASES:
+                            # The handshake link routes through index and leaves a second
+                            # Debug page that would cover the case; start from a clean stack.
+                            terminate_app()
+                            sim(*launch)
+                            ui.wait(verify_ready, 'Missing ui-verify-ready', timeout=180)
                     if require_video:
                         recording = subprocess.Popen(['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=hevc', str(output / 'run.mp4')], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                         deadline = time.monotonic() + 20
