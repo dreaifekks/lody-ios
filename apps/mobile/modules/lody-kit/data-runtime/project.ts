@@ -15,7 +15,7 @@ import {
   parseQuestionMeta,
   samePermissionOutcome,
 } from '../../../src/cloud/permissionQuestions.ts';
-import type { QuestionMeta } from '../../../src/models/session.ts';
+import type { QuestionMeta, TurnAuthor } from '../../../src/models/session.ts';
 import { billableTurnCount } from './billing';
 import { previewSummary } from './preview';
 
@@ -99,6 +99,7 @@ export type EntrySummary = TurnMetadata & {
   role: string;
   status: string;
   finished: boolean;
+  author?: TurnAuthor;
   userTurnId?: string;
   executionId?: string;
   executionFinished?: boolean;
@@ -273,6 +274,47 @@ function lightEntry(entry: unknown): any {
   return value && typeof value === 'object' && 'items' in value
     ? { ...value, items: lightItems(value.items) }
     : value;
+}
+/**
+ * Lody's `readMessageAuthor`, kept to what a bubble shows: a record of another
+ * version or shape is no author at all, never a guessed one.
+ */
+function readAuthor(value: any): TurnAuthor | undefined {
+  // Lody's labels: trimmed, 1 to 256 characters.
+  const label = (text: unknown) => {
+    const trimmed = typeof text === 'string' ? text.trim() : '';
+    return trimmed && trimmed.length <= 256 ? trimmed : undefined;
+  };
+  if (value?.v !== 1) return undefined;
+  if (value.kind === 'system') return { kind: 'system' };
+  if (value.kind === 'human')
+    return label(value.userId) ? { kind: 'human' } : undefined;
+  const name = label(value.name);
+  if (value.kind !== 'agent' || !name) return undefined;
+  const author: TurnAuthor = { kind: 'agent', name };
+  if (value.role !== undefined) {
+    const roleName = label(value.role?.name);
+    const instanceLabel = label(value.role?.instanceLabel);
+    if (
+      !roleName ||
+      typeof value.role?.emoji !== 'string' ||
+      (value.role?.instanceLabel !== undefined && !instanceLabel)
+    )
+      return undefined;
+    author.role = {
+      name: roleName,
+      emoji: value.role.emoji,
+      ...(instanceLabel ? { instanceLabel } : {}),
+    };
+  }
+  if (value.model !== undefined) {
+    const id = label(value.model?.id);
+    const modelName = label(value.model?.name);
+    if (!id || (value.model?.name !== undefined && !modelName))
+      return undefined;
+    author.model = modelName ?? id;
+  }
+  return author;
 }
 function bump(projection: Projection, key: string, fingerprint: string) {
   const previous = projection.revs.get(key);
@@ -609,6 +651,7 @@ function summarizeEntry(
         : undefined,
   };
   const metadata = readTurnMetadata(entry);
+  const author = readAuthor(entry?.author);
   const value = {
     ...metadata,
     id,
@@ -616,11 +659,12 @@ function summarizeEntry(
       projection,
       `entry/${id}`,
       summarizedItems.map((i) => `${i.itemId}:${i.rev}`).join(',') +
-        `|${entry?.status}|${entry?.finished}|${entry?.inputConfig?._lodyDeliveryKind === 'continue'}|${JSON.stringify(fileDiffs)}|${JSON.stringify(modelInfo)}|${JSON.stringify(metadata)}`,
+        `|${entry?.status}|${entry?.finished}|${entry?.inputConfig?._lodyDeliveryKind === 'continue'}|${JSON.stringify(fileDiffs)}|${JSON.stringify(modelInfo)}|${JSON.stringify(metadata)}|${JSON.stringify(author)}`,
     ),
     role: String(entry?.role ?? 'assistant'),
     status: entry?.status ?? (entry?.read ? 'seen' : 'pending'),
     finished: entry?.finished === true,
+    ...(author ? { author } : {}),
     timestamp: entry?.timestamp,
     startedAt: entry?.startedAt,
     endedAt: entry?.endedAt,

@@ -581,6 +581,8 @@ export function appendUserTurn(
     id,
     role: 'user',
     userId,
+    // Lody's `MessageAuthor`: a turn typed here is a person's, not an agent's.
+    author: { v: 1, kind: 'human', userId },
     timestamp,
     status,
     read: false,

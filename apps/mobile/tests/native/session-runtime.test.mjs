@@ -77,6 +77,11 @@ test('independent configuration reaches durable history before RPC, inherits on 
       'A session without a memory binding records none',
     );
     assert.deepEqual(
+      fixture.server.toJSON().history.at(-1).author,
+      { v: 1, kind: 'human', userId: 'u1' },
+      'A turn typed here records its person as Lody does',
+    );
+    assert.deepEqual(
       fixture.runtime.projectSession(fixture.server, 'live').composer
         .configOptionValues,
       { fast: false },
@@ -276,6 +281,89 @@ test('a Role session keeps its Role, instance record and memory while the run co
   } finally {
     fixture.close();
   }
+});
+
+test('a turn projects who wrote it, and a record of another shape is no author', async () => {
+  const { projectSession, projectSessionFull } = await loadProject();
+  const doc = new LoroDoc();
+  const history = doc.getList('history');
+  const agent = {
+    v: 1,
+    kind: 'agent',
+    sessionId: 'coordinator',
+    turnId: 'turn-1',
+    agentConfigId: 'config-1',
+    cliType: 'builtin',
+    agentType: 'claude',
+    name: ' Claude Code ',
+    role: {
+      id: 'role-1',
+      revision: 3,
+      name: 'Reviewer',
+      emoji: '🪼',
+      instanceId: 'instance-1',
+      instanceLabel: 'Fable',
+    },
+    model: { id: 'opus', name: 'Opus 5.5', source: 'runtime' },
+    reasoningEffort: 'high',
+  };
+  const authors = {
+    human: { v: 1, kind: 'human', userId: 'u1' },
+    system: { v: 1, kind: 'system' },
+    agent,
+    bare: {
+      ...agent,
+      role: undefined,
+      model: { id: 'opus', source: 'configured' },
+    },
+    legacy: undefined,
+    future: { ...agent, v: 2 },
+    unnamed: { ...agent, name: ' ' },
+    'bad-role': { ...agent, role: { ...agent.role, name: 7 } },
+    'bad-model': { ...agent, model: { name: 'Opus 5.5' } },
+    anonymous: { v: 1, kind: 'human' },
+    unknown: { v: 1, kind: 'robot', name: 'Claude Code' },
+    text: 'Claude Code',
+  };
+  for (const [id, author] of Object.entries(authors)) {
+    const entry = history.pushContainer(new LoroMap());
+    entry.set('id', id);
+    entry.set('role', 'user');
+    entry.set('finished', true);
+    entry.setContainer('items', new LoroList());
+    if (author !== undefined)
+      entry.set('author', JSON.parse(JSON.stringify(author)));
+  }
+  doc.commit();
+  const projected = Object.fromEntries(
+    projectSession(doc, 'live').entries.map((entry) => [
+      entry.id,
+      entry.author,
+    ]),
+  );
+  assert.deepEqual(projected, {
+    human: { kind: 'human' },
+    system: { kind: 'system' },
+    agent: {
+      kind: 'agent',
+      name: 'Claude Code',
+      role: { name: 'Reviewer', emoji: '🪼', instanceLabel: 'Fable' },
+      model: 'Opus 5.5',
+    },
+    bare: { kind: 'agent', name: 'Claude Code', model: 'opus' },
+    legacy: undefined,
+    future: undefined,
+    unnamed: undefined,
+    'bad-role': undefined,
+    'bad-model': undefined,
+    anonymous: undefined,
+    unknown: undefined,
+    text: undefined,
+  });
+  assert.deepEqual(
+    projectSessionFull(doc, 'live').entries.map((entry) => entry.author),
+    projectSession(doc, 'live').entries.map((entry) => entry.author),
+  );
 });
 
 test('reply metadata preserves each recorded model and updates when it arrives after completion', async () => {
