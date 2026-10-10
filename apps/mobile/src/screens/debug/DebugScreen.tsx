@@ -20,6 +20,7 @@ import { LiveActivityPreviewScreen } from './LiveActivityPreviewScreen';
 import { ReplyHapticsPreviewScreen } from './ReplyHapticsPreviewScreen';
 import { uiVerify } from './uiVerify';
 import {
+  openCreateLanBranch,
   openCreateParity,
   openCreateRecovery,
   openModelMemory,
@@ -220,6 +221,11 @@ function View() {
           'Create parity verification',
           'square.on.square',
         ),
+        openRow(
+          'create-lan-branch',
+          'LAN typed branch verification',
+          'arrow.triangle.branch',
+        ),
       ],
     },
     {
@@ -395,6 +401,7 @@ function View() {
     'model-memory': () => void openModelMemory(),
     'create-parity': () => void openCreateParity(),
     'create-recovery': () => void openCreateRecovery(),
+    'create-lan-branch': () => void openCreateLanBranch(),
     'mention-chat': () =>
       void present(
         ComposerPreviewScreen,

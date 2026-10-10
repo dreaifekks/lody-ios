@@ -131,6 +131,15 @@ struct CreateSessionForm {
     project = CreateSessionPage(chat: false, projectId: picked.id)
   }
 
+  /// A LAN's hub may keep no GitHub token to list branches with, so its form also takes a
+  /// typed name. `lw_` is `LanInvite.workspacePrefix`; the Share Extension does not compile it.
+  func typedBranch(_ query: String) -> String? {
+    let name = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard workspaceId.hasPrefix("lw_"), !name.isEmpty, !name.contains(where: \.isWhitespace),
+      project.branches?.names.contains(name) != true else { return nil }
+    return name
+  }
+
   mutating func applyBranches(_ value: CreateBranches) {
     if project.branches == nil { project.branches = value }
     else { project.branches?.append(value) }

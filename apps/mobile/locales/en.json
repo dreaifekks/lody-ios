@@ -1158,5 +1158,6 @@
   "create.branch.failed": "Unable to load branches. Tap to retry.",
   "create.branch.more": "Load more branches",
   "create.branch.empty": "This repository has no branches.",
-  "create.branch.noMatch": "No matching branches"
+  "create.branch.noMatch": "No matching branches",
+  "create.branch.use": "Use “{name}”"
 }

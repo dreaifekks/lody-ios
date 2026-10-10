@@ -228,3 +228,25 @@ do {
   form.deferUnresolved = true
   check(form.canSend && form.draft(sessionId: "s") == nil, "offline share defers unresolved branch to the app")
 }
+
+// A LAN takes a typed base branch, since its hub may have no GitHub token to list with.
+do {
+  var cloud = CreateSessionForm(userId: "u", workspaceId: "w")
+  cloud.selectProject(CreateProject(id: "github:Owner/Repo", machineId: "", name: "Repo"))
+  cloud.applyBranches(CreateBranches(names: ["trunk"]))
+  check(cloud.typedBranch("release/1.0") == nil, "Cloud offers only listed branches")
+  var lan = CreateSessionForm(userId: "u", workspaceId: "lw_0123456789abcdef")
+  lan.selectProject(CreateProject(id: "github:Owner/Repo", machineId: "", name: "Repo"))
+  lan.applyOptions(options, chat: false)
+  check(lan.project.branches == nil && lan.typedBranch(" release/1.0 ") == "release/1.0", "a LAN takes a typed name before any list has loaded")
+  lan.applyBranches(CreateBranches(names: []))
+  check(lan.typedBranch("release/1.0") == "release/1.0", "a LAN takes a typed name when the list is empty")
+  lan.applyBranches(CreateBranches(names: ["trunk", "develop"], defaultBranch: "trunk"))
+  check(lan.typedBranch("release/1.0") == "release/1.0", "a LAN takes a name that is not listed")
+  check(lan.typedBranch("trunk") == nil, "a listed name is picked from the list")
+  check(lan.typedBranch("  ") == nil && lan.typedBranch("my branch") == nil, "an empty or spaced name is not a branch")
+  lan.project.branch = "release/1.0"
+  check(lan.canSend && lan.draft(sessionId: "s")?.branch == "release/1.0", "the typed branch goes into the draft")
+  lan.applyBranches(CreateBranches(names: ["feature/later"]))
+  check(lan.project.branch == "release/1.0", "a later page keeps the typed branch")
+}

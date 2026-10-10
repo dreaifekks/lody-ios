@@ -10,6 +10,12 @@ probe with `--appearance light` and `--appearance dark`. Native `create-session`
 `github-mentions`, and `share` checks cover selection boundaries, paged GitHub
 responses, credential isolation and account/workspace cache separation.
 
+`branch-picker-lan` opens the same form on a fixture LAN workspace, where no hub
+answers and the branch list fails without a request. It checks the retained retry
+row, the typed-name row a LAN adds for a search that is not listed, and that the
+typed branch reaches the form. `branch-picker` keeps checking that Lody Cloud
+offers no such row.
+
 `edit-message` exercises the production last-user-message context menu and full-screen
 editor in English light/dark appearances. It checks cancellation preserving the chat
 draft, removing an original attachment, adding a file through paste, rejected resend

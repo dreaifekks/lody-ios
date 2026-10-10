@@ -326,9 +326,10 @@ final class CreateSessionController: UIViewController {
     let projectId = form.project.projectId
     let picker = CreateBranchController(repo: String(projectId.dropFirst(7)))
     picker.onMore = { [weak self] in self?.fetchBranches() }
+    picker.typed = { [weak self] in self?.form.typedBranch($0) }
     picker.onPick = { [weak self] name in
       guard let self, self.form.project.projectId == projectId,
-        self.form.project.branches?.names.contains(name) == true else { return }
+        self.form.project.branches?.names.contains(name) == true || self.form.typedBranch(name) == name else { return }
       self.form.project.branch = name
       self.changed(prefs: false)
     }

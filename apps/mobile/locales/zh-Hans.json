@@ -1158,5 +1158,6 @@
   "create.branch.failed": "无法加载分支，轻点重试。",
   "create.branch.more": "加载更多分支",
   "create.branch.empty": "此仓库没有可用分支。",
-  "create.branch.noMatch": "未找到匹配的分支"
+  "create.branch.noMatch": "未找到匹配的分支",
+  "create.branch.use": "使用“{name}”"
 }

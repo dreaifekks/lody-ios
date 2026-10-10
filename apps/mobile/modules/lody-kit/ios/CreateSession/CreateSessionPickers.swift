@@ -254,6 +254,8 @@ private extension Array {
 final class CreateBranchController: CreateListController {
   var onPick: ((String) -> Void)?
   var onMore: (() -> Void)?
+  /// The name a search stands for where the form takes one that is not listed.
+  var typed: ((String) -> String?)?
   private let repo: String
   private var page = CreateSessionPage(chat: false)
   private var cachedOnly = false
@@ -289,6 +291,9 @@ final class CreateBranchController: CreateListController {
       return LodyListRow.item("branch:" + name, name, value: value, selected: name == page.branch,
         accessibilityValue: [value, selected].filter { !$0.isEmpty }.joined(separator: ", "))
     }
+    if let name = typed?(query) {
+      rows.insert(.item("typed:" + name, LodyStrings.text("create.branch.use", ["name": name]), image: "plus"), at: 0)
+    }
     let incomplete = branches == nil || branches?.nextPage != nil
     if page.branchesLoading {
       rows.append(.item("branches-loading", LodyStrings.text("common.reading"), action: false))
@@ -314,6 +319,11 @@ final class CreateBranchController: CreateListController {
       DispatchQueue.main.async { [weak self] in self?.render() }
     } else if name == "rowPress", let id = body["id"] as? String {
       if id == "branches-more" { onMore?(); return }
+      if id.hasPrefix("typed:"), let name = typed?(query), id == "typed:" + name {
+        onPick?(name)
+        navigationController?.popViewController(animated: true)
+        return
+      }
       guard id.hasPrefix("branch:"), let names = page.branches?.names else { return }
       let branch = String(id.dropFirst(7))
       guard names.contains(branch) else { return }

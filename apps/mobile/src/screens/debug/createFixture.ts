@@ -1,3 +1,4 @@
+import { githubProject } from '@/cloud/catalog/model';
 import { writeLocal } from '@/cloud/kv';
 import { createPrefsKey } from '@/features/sessions/createPrefs';
 import { present } from '@/lib/presentation';
@@ -178,6 +179,19 @@ export async function openCreateParity() {
         'ui-create-parity',
         projects.find((project) => project.id === projectId),
       ),
+  });
+}
+
+/** A LAN whose hub lists no branches, so the name is typed. No hub, credential or network. */
+export async function openCreateLanBranch() {
+  const workspaceId = 'lw_ui-branch';
+  await writeLocal(createPrefsKey('', workspaceId), null);
+  const project = githubProject('Owner/Offline')!;
+  await present(CreateSessionScreen, {
+    workspaceId,
+    projects: [project],
+    projectId: project.id,
+    loadOptions: async () => fixtureOptions('ui-lan-branch', project),
   });
 }
 
