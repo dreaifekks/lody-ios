@@ -34,11 +34,12 @@ const session = {
   insertText: '@session:s2',
 };
 const role = {
-  path: 'reviewer',
+  path: 'reviewer-claude',
   name: 'Reviewer',
   kind: 'role',
   subtitle: '',
-  insertText: '@role:reviewer',
+  insertText: '@role:reviewer-claude',
+  role: { id: 'reviewer', name: 'Reviewer', instance: 'Claude Code' },
 };
 const items = [skill, session, role];
 const load = async (category) => ({
@@ -46,10 +47,11 @@ const load = async (category) => ({
   truncated: false,
   incomplete: false,
 });
-const text = '@src/file.ts $auth @session:s2 @role:reviewer #11 #12 /compact';
+const text =
+  '@src/file.ts $auth @session:s2 @role:reviewer-claude #11 #12 /compact';
 // OSS mention-skill/session/agent-role-source prompt formats, not copied tables.
 const expected =
-  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) use lody mcp to query session[id: s2] history use lody mcp to create a session with agent role[id: reviewer, name: Reviewer] #11 #12 /compact';
+  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) use lody mcp to query session[id: s2] history use lody mcp to create a session with agent role[id: reviewer, instance: reviewer-claude, name: Reviewer · Claude Code] #11 #12 /compact';
 
 test('send expansion matches OSS prompts; paths, GitHub references and commands remain verbatim', async () => {
   assert.equal(await mentions.expandMentions(text, load), expected);
@@ -211,16 +213,123 @@ test('Role references filter private rows and invalid machine bindings before ex
   ];
   const result = mentions.roleMentions(rows, 'me', agents, 'm');
   assert.deepEqual(
-    result.items.map((item) => item.path),
-    ['own', 'shared'],
+    result.items.map((item) => [item.path, item.name]),
+    [
+      ['own:m', 'own'],
+      ['shared:m', 'shared'],
+    ],
+    'A row written before instances is one instance under the id Lody derives',
   );
   assert.equal(
     mentions.roleMentions(rows, 'me', agents, 'other').items.length,
     0,
   );
   assert.equal(
-    mentions.expandMentionText('@role:private', result.items),
-    '@role:private',
+    mentions.expandMentionText('@role:private:m', result.items),
+    '@role:private:m',
+  );
+  assert.equal(
+    mentions.expandMentionText('@role:own:m', result.items),
+    'use lody mcp to create a session with agent role[id: own, instance: own:m, name: own · Agent]',
+  );
+});
+
+test('a Role lists its instances by group, on the machine asked for', () => {
+  const config = (machineId, id, patch = {}) => [
+    `${machineId}/${id}`,
+    { id, machineId, name: id, cliType: 'builtin', agentType: id, ...patch },
+  ];
+  const configs = new Map([
+    config('mac', 'claude'),
+    config('mac', 'codex'),
+    config('mac', 'deepseek', {
+      agentType: 'claude',
+      name: 'DeepSeek',
+      env: { ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic' },
+    }),
+    config('mac', 'gemini', {
+      cliType: 'registry',
+      agentType: 'antigravity-acp',
+      name: 'Gemini',
+    }),
+    config('nuc', 'claude'),
+  ]);
+  const machines = new Map(
+    ['mac', 'nuc'].map((machineId) => [
+      machineId,
+      { get: (key) => configs.get(`${machineId}/${key[1]}`) },
+    ]),
+  );
+  const instance = (id, machineId, agentConfigId, alias) => ({
+    id,
+    machineId,
+    agentConfigId,
+    runConfig: {},
+    ...(alias ? { alias } : {}),
+  });
+  const row = (id, instances) => ({
+    key: ['agentRole', id],
+    value: {
+      v: 1,
+      id,
+      name: id,
+      ownerUserId: 'me',
+      visibility: 'private',
+      // The mirror of the first instance, which is all an older client reads.
+      machineId: instances[0].machineId,
+      agentConfigId: instances[0].agentConfigId,
+      revision: 1,
+      instances,
+    },
+  });
+  const rows = [
+    row('moa', [
+      instance('moa-nuc', 'nuc', 'claude'),
+      instance('moa-mac', 'mac', 'claude'),
+      instance('moa-codex', 'mac', 'codex'),
+      instance('moa-deepseek', 'mac', 'deepseek'),
+      instance('moa-fable', 'mac', 'claude', 'Fable'),
+      instance('moa-gemini', 'mac', 'gemini'),
+      instance('moa-gone', 'mac', 'deleted'),
+      instance('moa-mac', 'mac', 'codex'),
+    ]),
+    row('solo', [instance('solo-nuc', 'nuc', 'claude')]),
+  ];
+  const listed = (machineId) =>
+    mentions
+      .roleMentions(rows, 'me', machines, machineId)
+      .items.map((item) => [item.path, item.name]);
+  assert.deepEqual(
+    listed('mac'),
+    [
+      ['moa-mac', 'moa · Claude Code'],
+      ['moa-codex', 'moa · Codex'],
+      ['moa-deepseek', 'moa · DeepSeek'],
+      ['moa-fable', 'moa · Fable'],
+      ['moa-gemini', 'moa · Gemini'],
+    ],
+    'A Role whose first instance runs elsewhere still lists what runs here, in group order',
+  );
+  assert.deepEqual(listed('nuc'), [
+    ['moa-nuc', 'moa · Claude Code'],
+    ['solo-nuc', 'solo'],
+  ]);
+  assert.deepEqual(
+    listed(undefined).map(([path]) => path),
+    [
+      'moa-nuc',
+      'moa-codex',
+      'moa-deepseek',
+      'moa-fable',
+      'moa-gemini',
+      'solo-nuc',
+    ],
+    'Without a machine a group is listed once, by its first instance',
+  );
+  const { items } = mentions.roleMentions(rows, 'me', machines, 'mac');
+  assert.equal(
+    mentions.expandMentionText('@role:moa-fable @role:moa-mac', items),
+    'use lody mcp to create a session with agent role[id: moa, instance: moa-fable, name: moa · Fable] use lody mcp to create a session with agent role[id: moa, instance: moa-mac, name: moa · Claude Code]',
   );
 });
 

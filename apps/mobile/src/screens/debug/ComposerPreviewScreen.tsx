@@ -81,6 +81,7 @@ const mentionItems: MentionItem[] = [
     kind: 'role',
     subtitle: 'Review changes',
     insertText: '@role:role-reviewer',
+    role: { id: 'reviewer', name: 'Reviewer', instance: 'Claude Code' },
   },
   {
     path: 'issue:11',
