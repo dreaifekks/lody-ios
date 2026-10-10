@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from driver import UI
+from driver import BUNDLE_ID, UI
 
 udid = os.environ['LODY_VERIFY_UDID']
 app, destination = sys.argv[1:]
@@ -26,7 +26,7 @@ for appearance in ('light', 'dark'):
     directory.mkdir(exist_ok=True)
     ui = UI(udid, directory)
     sim('ui', udid, 'appearance', appearance)
-    sim('launch', '--terminate-running-process', udid, 'app.innei.lody', '--ui-verify', '--glass-spike')
+    sim('launch', '--terminate-running-process', udid, BUNDLE_ID, '--ui-verify', '--glass-spike')
     ui.element('glass-spike-run')
     ui.capture('initial')
     with (directory / 'recording.log').open('w') as log:
@@ -47,7 +47,7 @@ for appearance in ('light', 'dark'):
         finally:
             recorder.send_signal(signal.SIGINT)
             recorder.wait(timeout=30)
-    container = Path(sim('get_app_container', udid, 'app.innei.lody', 'data'))
+    container = Path(sim('get_app_container', udid, BUNDLE_ID, 'data'))
     shutil.copy2(container / 'Documents/glass-spike.json', directory / 'observations.json')
     report = json.loads((directory / 'observations.json').read_text())
     assert report['events'][-1]['event'] == 'final-visible-after-reversal'

@@ -5,10 +5,10 @@ import subprocess
 from pathlib import Path
 import sys
 import time
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 ui = UI(*sys.argv[1:])
-container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
 probe = Path(container) / 'tmp/lody-file-source.json'
 def geometry(name):
     value = json.loads(probe.read_text())

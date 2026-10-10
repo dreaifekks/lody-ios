@@ -9,11 +9,11 @@ import shutil
 import subprocess
 import sys
 import time
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(*sys.argv[1:])
-folder = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()) / 'tmp'
+folder = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()) / 'tmp'
 started = time.monotonic()
 events = []
 

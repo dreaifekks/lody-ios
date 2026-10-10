@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from driver import UI
+from driver import BUNDLE_ID, UI
 
 udid, output = sys.argv[1:3]
 ui = UI(udid, output)
@@ -23,7 +23,7 @@ def tap(name):
     ui.axe('tap', '--id', 'background-' + name, '--tap-style', 'physical')
 
 def foreground():
-    subprocess.run(['xcrun', 'simctl', 'launch', udid, 'app.innei.lody'], check=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'launch', udid, BUNDLE_ID], check=True, timeout=30)
 
 try:
     tap('start')

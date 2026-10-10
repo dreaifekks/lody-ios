@@ -4,7 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from driver import UI
+from driver import BUNDLE_ID, UI
 from attachment_geometry import check_media_geometry
 
 ui = UI(*sys.argv[1:])
@@ -64,7 +64,7 @@ for name, point, expected in [
         ui.capture(name)
 (ui.output/'motion-events.json').write_text(json.dumps(events, indent=2))
 assert ui.element(field).get('AXValue') == draft, 'Menu transitions changed the draft'
-container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
 frames = json.loads((Path(container)/'tmp/lody-camera-layout.json').read_text())
 assert len(frames) > 2
 assert max(f['width'] for f in frames) - min(f['width'] for f in frames) < .5

@@ -4,7 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(*sys.argv[1:])
@@ -12,7 +12,7 @@ ui = UI(*sys.argv[1:])
 
 def table_bleed_path():
     container = subprocess.check_output(
-        ['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'],
+        ['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'],
         text=True,
         timeout=10,
     ).strip()

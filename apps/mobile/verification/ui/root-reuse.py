@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import sys
-from driver import UI
+from driver import BUNDLE_ID, UI
 from inspector import inspector
 
 ui = UI(sys.argv[1], sys.argv[2])
@@ -11,7 +11,7 @@ ui = UI(sys.argv[1], sys.argv[2])
 
 def pid():
     lines = subprocess.check_output(['xcrun', 'simctl', 'spawn', ui.udid, 'launchctl', 'list'], text=True, timeout=20).splitlines()
-    return next(line.split()[0] for line in lines if 'UIKitApplication:app.innei.lody[' in line)
+    return next(line.split()[0] for line in lines if f'UIKitApplication:{BUNDLE_ID}[' in line)
 
 
 original = pid()

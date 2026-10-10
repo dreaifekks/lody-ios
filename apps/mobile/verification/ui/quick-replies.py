@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import time
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(*sys.argv[1:])
@@ -161,9 +161,9 @@ assert chips()[0]['AXUniqueId'] == 'quick-reply:' + custom_id
 ui.capture('custom-chip')
 
 # Relaunch the real app to verify UserDefaults hydration, not only React state.
-subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, 'app.innei.lody'], check=True, timeout=30)
+subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, BUNDLE_ID], check=True, timeout=30)
 ui.invalidate_axe()
-launch = ['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody', '--ui-verify', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US']
+launch = ['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID, '--ui-verify', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US']
 port = os.environ.get('LODY_UI_METRO_PORT')
 if port:
     launch += ['--initialUrl', f'http://127.0.0.1:{port}?disableOnboarding=1']

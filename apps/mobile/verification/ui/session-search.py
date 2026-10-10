@@ -2,7 +2,7 @@
 import json
 import subprocess
 import sys
-from driver import UI
+from driver import BUNDLE_ID, UI
 import catalog
 
 ui = UI(sys.argv[1], sys.argv[2])
@@ -79,7 +79,7 @@ def back_to_inbox():
 def highlight_probe(name, expected=True):
     """Read actual highlight layers and their screen coordinates, never mutate UI."""
     processes = subprocess.check_output(['xcrun', 'simctl', 'spawn', ui.udid, 'launchctl', 'list'], text=True)
-    pid = next(line.split()[0] for line in processes.splitlines() if 'UIKitApplication:app.innei.lody[' in line)
+    pid = next(line.split()[0] for line in processes.splitlines() if f'UIKitApplication:{BUNDLE_ID}[' in line)
     expression = '''({ NSMutableArray *q = [NSMutableArray array];
       for (UIWindowScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
         if ([scene isKindOfClass:[UIWindowScene class]]) [q addObjectsFromArray:(NSArray *)[scene windows]];

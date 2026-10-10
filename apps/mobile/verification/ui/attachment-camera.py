@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from driver import UI
+from driver import BUNDLE_ID, UI
 from attachment_geometry import check_media_geometry
 import catalog
 
@@ -16,7 +16,7 @@ def tap(identifier):
     ui.axe('tap', '-x', str(f['x']+f['width']/2), '-y', str(f['y']+f['height']/2), '--tap-style', 'physical', '--post-delay', '.6')
 
 def events():
-    container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+    container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
     return json.loads((Path(container)/'tmp/lody-camera-events.json').read_text())
 
 tap(field)
@@ -62,7 +62,7 @@ back_frame = ui.element('camera-collapse')['frame']
 ui.axe('tap', '-x', str(back_frame['x'] + 1), '-y', str(back_frame['y'] + 22), '--tap-style', 'physical', '--post-delay', '.6')
 ui.element('attachment-menu-takePhoto')
 assert events()[-1] == 'stop', 'Back left the camera running'
-container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
 frames = json.loads((Path(container)/'tmp/lody-camera-layout.json').read_text())
 (ui.output / 'viewfinder-layout.json').write_text(json.dumps(frames, indent=2))
 assert len(frames) > 2, 'Camera transition geometry was not sampled'
@@ -117,7 +117,7 @@ ui.element('camera-shutter')
 subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'com.apple.Preferences'], check=True, timeout=30)
 ui.wait(lambda items: not any(i.get('AXUniqueId') == field for i in items), 'App did not leave foreground')
 assert events()[-1] == 'stop', 'Background left camera active'
-subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody'], check=True, timeout=30)
+subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID], check=True, timeout=30)
 assert ui.element(field).get('AXValue') == draft + ' continues'
 assert not any(i.get('AXUniqueId') == 'camera-shutter' for i in ui.state())
 assert any('Photo.jpg' in (i.get('AXLabel') or '') for i in ui.state()), 'Background lost the accepted photo'
