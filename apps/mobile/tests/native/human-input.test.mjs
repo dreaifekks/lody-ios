@@ -23,11 +23,6 @@ for (const kind of ['first', 'queue', 'guide', 'continue']) {
           producer?.producerId,
           'the append is deduplicated by its producer tuple',
         );
-        assert.equal(
-          fixture.runtime.sessionDoc('s1').getMap('humanInputReceipts').get(id),
-          undefined,
-          'the unacknowledged receipt is absent from the live replica',
-        );
         const candidate = new LoroDoc();
         candidate.import(fixture.server.export({ mode: 'snapshot' }));
         candidate.import(part.body.subarray(4));
@@ -154,7 +149,7 @@ test('dispatch inputOrigin is sent only to machines advertising Operation Inbox'
   }
 });
 
-test('rejected and lost-ACK appends never publish an unconfirmed local receipt or a second turn', async () => {
+test('rejected and lost-ACK appends discard the replica and never write a second turn', async () => {
   for (const lostAck of [false, true]) {
     const id = crypto.randomUUID();
     const fixture = await openTestSession({
@@ -163,9 +158,15 @@ test('rejected and lost-ACK appends never publish an unconfirmed local receipt o
       markDispatch: () => assert.fail('no pointer without a confirmed append'),
     });
     try {
+      const before = fixture.runtime.sessionDoc('s1');
       assert.equal(
         (await fixture.runtime.sendTurn({ ...args, id })).state,
         'unknown',
+      );
+      assert.notEqual(
+        fixture.runtime.sessionDoc('s1'),
+        before,
+        'the unconfirmed replica is discarded',
       );
       await fixture.runtime.ensureSession(
         's1',
@@ -216,74 +217,100 @@ test('agent forwards and imported history never acquire human receipts on sync o
   }
 });
 
-test('edit-and-resend persists only the replacement receipt before its machine-owned history write', async () => {
-  let fail = true;
-  const requests = [];
-  const fixture = await openTestSession({
-    failAppend: (url) => fail && !url.includes(':rpc:'),
-    onRpc(request) {
-      requests.push(request);
-      assert.equal(request.method, 'session/edit-and-resend');
-      const raw = fixture.server.toJSON();
-      assert.deepEqual(raw.humanInputReceipts, {
-        [id]: { userId: request.params.requestedByUserId },
-      });
-      assert.equal(
-        raw.history[0].id,
-        'original',
-        'the client does not replace history',
-      );
-      return { result: { success: true } };
-    },
-  });
-  try {
-    fixture.server.getList('history').push({
-      id: 'original',
-      role: 'user',
-      status: 'completed',
-      items: [],
-      inputConfig: {},
+for (const failure of ['rejected', 'lost-ack', 'thrown']) {
+  test(`edit-and-resend recovers a ${failure} receipt append before its machine-owned history write`, async () => {
+    let fail = true;
+    const requests = [];
+    const fixture = await openTestSession({
+      failAppend: (url) =>
+        fail && failure === 'rejected' && !url.includes(':rpc:'),
+      loseAck: (url) =>
+        fail && failure === 'lost-ack' && !url.includes(':rpc:'),
+      onAppend({ url }) {
+        if (fail && failure === 'thrown' && !url.includes(':rpc:'))
+          throw new Error('connection_lost');
+      },
+      onRpc(request) {
+        requests.push(request);
+        assert.equal(request.method, 'session/edit-and-resend');
+        const raw = fixture.server.toJSON();
+        assert.deepEqual(raw.humanInputReceipts, {
+          [id]: { userId: request.params.requestedByUserId },
+        });
+        assert.equal(
+          raw.history[0].id,
+          'original',
+          'the client does not replace history',
+        );
+        return { result: { success: true } };
+      },
     });
-    await fixture.pushUpdate();
-    const edit = {
-      ...args,
-      action: 'send',
-      expectedUserTurnId: 'original',
-      id,
-      retainedIds: [],
-    };
-    const meta = { machineId: 'm1', cliType: 'builtin', agentType: 'codex' };
-    assert.equal(
-      (await fixture.runtime.editSession(edit, meta)).state,
-      'not_sent',
-    );
-    assert.deepEqual(
-      fixture.runtime.sessionDoc('s1').getMap('humanInputReceipts').toJSON(),
-      {},
-    );
-    assert.equal(
-      requests.length,
-      0,
-      'a failed receipt upload cannot activate replacement history',
-    );
-    fail = false;
-    assert.equal(
-      (await fixture.runtime.editSession(edit, meta)).state,
-      'accepted',
-    );
-    const receipts = fixture.appends.filter(
-      (url) => !url.includes(':rpc:'),
-    ).length;
-    assert.equal(
-      (await fixture.runtime.editSession(edit, meta)).state,
-      'accepted',
-    );
-    assert.equal(
-      fixture.appends.filter((url) => !url.includes(':rpc:')).length,
-      receipts,
-      'repeating an acknowledged replacement does not write another receipt',
-    );
-  } finally {
-    fixture.close();
-  }
-});
+    try {
+      fixture.server.getList('history').push({
+        id: 'original',
+        role: 'user',
+        status: 'completed',
+        items: [],
+        inputConfig: {},
+      });
+      await fixture.pushUpdate();
+      const edit = {
+        ...args,
+        action: 'send',
+        expectedUserTurnId: 'original',
+        id,
+        retainedIds: [],
+      };
+      const meta = { machineId: 'm1', cliType: 'builtin', agentType: 'codex' };
+      const before = fixture.runtime.sessionDoc('s1');
+      assert.equal(
+        (await fixture.runtime.editSession(edit, meta)).state,
+        'not_sent',
+      );
+      assert.notEqual(
+        fixture.runtime.sessionDoc('s1'),
+        before,
+        'a refused receipt discards the replica',
+      );
+      await fixture.runtime.ensureSession(
+        's1',
+        'w1',
+        async () => ({
+          token: 'synthetic',
+          gatewayBaseUrl: 'https://x.invalid',
+        }),
+        () => {},
+        async () => {},
+      );
+      assert.deepEqual(
+        fixture.runtime.sessionDoc('s1').getMap('humanInputReceipts').toJSON(),
+        failure === 'lost-ack' ? { [id]: { userId: args.userId } } : {},
+        'only the hub copy can restore the receipt after an unconfirmed append',
+      );
+      assert.equal(
+        requests.length,
+        0,
+        'a failed receipt upload cannot activate replacement history',
+      );
+      fail = false;
+      assert.equal(
+        (await fixture.runtime.editSession(edit, meta)).state,
+        'accepted',
+      );
+      const receipts = fixture.appends.filter(
+        (url) => !url.includes(':rpc:'),
+      ).length;
+      assert.equal(
+        (await fixture.runtime.editSession(edit, meta)).state,
+        'accepted',
+      );
+      assert.equal(
+        fixture.appends.filter((url) => !url.includes(':rpc:')).length,
+        receipts,
+        'repeating an acknowledged replacement does not write another receipt',
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+}

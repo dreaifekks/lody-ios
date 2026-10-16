@@ -853,21 +853,19 @@ export async function sendTurn(
       state.steerReceipts ??= new Map();
       state.steerReceipts.set(id, { targetId: guide.id, state: 'confirming' });
     }
-    // Receipt and turn share one acknowledged append. The live replica stays
-    // unchanged while the hub has not answered, including during other reads.
-    const staged = new LoroDoc();
-    staged.import(state.doc.export({ mode: 'snapshot' }));
-    const before = staged.version();
+    // Receipt and turn share one update. A failed append discards this replica
+    // and reads it again before another turn can depend on the unconfirmed write.
+    const before = state.doc.version();
     writeStarted = true;
-    recordHumanInputReceipt(staged, id, args.userId);
+    recordHumanInputReceipt(state.doc, id, args.userId);
     if (guide)
-      staged.getMap('lodySteerLinks').set(id, {
+      state.doc.getMap('lodySteerLinks').set(id, {
         targetId: guide.id,
         mode: 'native',
       });
     if (queued) {
       // OSS consumes the shared movable queue, then creates its history turn.
-      const item = staged.getMovableList('mq').pushContainer(new LoroMap());
+      const item = state.doc.getMovableList('mq').pushContainer(new LoroMap());
       for (const [key, value] of Object.entries({
         task: text,
         userId: args.userId,
@@ -881,10 +879,10 @@ export async function sendTurn(
         chainDepth: 0,
       }))
         if (value !== undefined) config.set(key, value);
-      staged.commit();
+      state.doc.commit();
     } else {
       appendUserTurn(
-        staged,
+        state.doc,
         id,
         text,
         args.userId,
@@ -893,13 +891,12 @@ export async function sendTurn(
         guide ? 'pending_apply' : 'pending',
       );
     }
-    const update = staged.export({ mode: 'update', from: before });
+    const update = state.doc.export({ mode: 'update', from: before });
     const result = await appendOnce(state.client, {
       contentType: 'application/octet-stream',
       body: encodeFrame(update),
     });
     if (!result.ok) throw new Error(result.result.code);
-    state.doc.import(update);
     uploaded = true;
     if (queued) {
       // The queue is durable before its catalog wake-up watermark is published.
@@ -1353,23 +1350,23 @@ export async function editSession(
     return { state: 'not_sent', reason: 'invalid_message' };
   }
   state.sending = true;
+  let receiptUnconfirmed = false;
   try {
     if (!(await reachable(state)))
       return { state: 'not_sent', reason: 'session_not_ready' };
-    // The machine owns the replacement history. Author its receipt before the
-    // RPC can write/activate it, joining only an update the hub acknowledged.
-    const staged = new LoroDoc();
-    staged.import(state.doc.export({ mode: 'snapshot' }));
-    const before = staged.version();
-    if (recordHumanInputReceipt(staged, args.id, args.userId)) {
-      staged.commit();
-      const update = staged.export({ mode: 'update', from: before });
+    // The machine owns the replacement history. Confirm its receipt before
+    // the RPC can write/activate it; a failed append discards this replica.
+    const before = state.doc.version();
+    if (recordHumanInputReceipt(state.doc, args.id, args.userId)) {
+      receiptUnconfirmed = true;
+      state.doc.commit();
+      const update = state.doc.export({ mode: 'update', from: before });
       const result = await appendOnce(state.client, {
         contentType: 'application/octet-stream',
         body: encodeFrame(update),
       });
-      if (!result.ok) return { state: 'not_sent', reason: result.result.code };
-      state.doc.import(update);
+      if (!result.ok) throw new Error(result.result.code);
+      receiptUnconfirmed = false;
     }
 
     const response = await machineRpc(
@@ -1402,7 +1399,14 @@ export async function editSession(
         reason: result.error?.message ?? 'edit_failed',
       };
     return { state: 'unknown' };
-  } catch {
+  } catch (error) {
+    if (receiptUnconfirmed) {
+      resync(state);
+      return {
+        state: 'not_sent',
+        reason: error instanceof Error ? error.message : 'send_failed',
+      };
+    }
     return { state: 'unknown' };
   } finally {
     state.sending = false;
