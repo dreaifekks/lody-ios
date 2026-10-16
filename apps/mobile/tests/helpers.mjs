@@ -85,6 +85,7 @@ export async function openTestSession({
   reachable = () => true,
   markDispatch = async () => {},
   onRpc,
+  onAppend = async () => {},
 } = {}) {
   const server = new LoroDoc();
   const ok = (result) => ({ ok: true, result });
@@ -144,6 +145,7 @@ export async function openTestSession({
     async append({ part, producer }) {
       appends.push(this.url);
       producers.push(producer);
+      await onAppend({ url: this.url, part, producer });
       if (failAppend(this.url))
         return { ok: false, result: { code: 'timeout' } };
       if (this.url.includes(':rpc:req:')) {

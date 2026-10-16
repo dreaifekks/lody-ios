@@ -567,6 +567,16 @@ export async function openSession(
   })();
   return 'watching';
 }
+/** Only human-send entry points stamp provenance; imports and queue moves do not. */
+function recordHumanInputReceipt(doc: LoroDoc, id: string, userId: string) {
+  const receipts = doc.getMap('humanInputReceipts');
+  const existing = receipts.get(id);
+  if (existing instanceof LoroMap && existing.get('userId') === userId)
+    return false;
+  receipts.setContainer(id, new LoroMap()).set('userId', userId);
+  return true;
+}
+
 export function appendUserTurn(
   doc: LoroDoc,
   id: string,
@@ -643,6 +653,7 @@ export async function sendTurn(
     billingEntitlement?: BillingEntitlement | null;
   },
   expand: (text: string) => Promise<string> = async (text) => text,
+  protocolCapabilities?: Record<string, number>,
 ) {
   if (args.id && uncertain.has(args.id))
     return { id: args.id, state: 'unknown', reason: 'turn_already_exists' };
@@ -842,16 +853,21 @@ export async function sendTurn(
       state.steerReceipts ??= new Map();
       state.steerReceipts.set(id, { targetId: guide.id, state: 'confirming' });
     }
-    const before = state.doc.version();
+    // Receipt and turn share one acknowledged append. The live replica stays
+    // unchanged while the hub has not answered, including during other reads.
+    const staged = new LoroDoc();
+    staged.import(state.doc.export({ mode: 'snapshot' }));
+    const before = staged.version();
     writeStarted = true;
+    recordHumanInputReceipt(staged, id, args.userId);
     if (guide)
-      state.doc.getMap('lodySteerLinks').set(id, {
+      staged.getMap('lodySteerLinks').set(id, {
         targetId: guide.id,
         mode: 'native',
       });
     if (queued) {
       // OSS consumes the shared movable queue, then creates its history turn.
-      const item = state.doc.getMovableList('mq').pushContainer(new LoroMap());
+      const item = staged.getMovableList('mq').pushContainer(new LoroMap());
       for (const [key, value] of Object.entries({
         task: text,
         userId: args.userId,
@@ -865,10 +881,10 @@ export async function sendTurn(
         chainDepth: 0,
       }))
         if (value !== undefined) config.set(key, value);
-      state.doc.commit();
+      staged.commit();
     } else {
       appendUserTurn(
-        state.doc,
+        staged,
         id,
         text,
         args.userId,
@@ -877,11 +893,13 @@ export async function sendTurn(
         guide ? 'pending_apply' : 'pending',
       );
     }
+    const update = staged.export({ mode: 'update', from: before });
     const result = await appendOnce(state.client, {
       contentType: 'application/octet-stream',
-      body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
+      body: encodeFrame(update),
     });
     if (!result.ok) throw new Error(result.result.code);
+    state.doc.import(update);
     uploaded = true;
     if (queued) {
       // The queue is durable before its catalog wake-up watermark is published.
@@ -953,6 +971,9 @@ export async function sendTurn(
         expiresAt: now + 15000,
         method: 'session/dispatch-turn',
         params: {
+          ...((protocolCapabilities?.operationInbox ?? 0) >= 1
+            ? { inputOrigin: 'human' }
+            : {}),
           sessionId: state.id,
           userTurnId: id,
           userId: args.userId,
@@ -1333,6 +1354,24 @@ export async function editSession(
   }
   state.sending = true;
   try {
+    if (!(await reachable(state)))
+      return { state: 'not_sent', reason: 'session_not_ready' };
+    // The machine owns the replacement history. Author its receipt before the
+    // RPC can write/activate it, joining only an update the hub acknowledged.
+    const staged = new LoroDoc();
+    staged.import(state.doc.export({ mode: 'snapshot' }));
+    const before = staged.version();
+    if (recordHumanInputReceipt(staged, args.id, args.userId)) {
+      staged.commit();
+      const update = staged.export({ mode: 'update', from: before });
+      const result = await appendOnce(state.client, {
+        contentType: 'application/octet-stream',
+        body: encodeFrame(update),
+      });
+      if (!result.ok) return { state: 'not_sent', reason: result.result.code };
+      state.doc.import(update);
+    }
+
     const response = await machineRpc(
       state.workspace,
       meta.machineId,

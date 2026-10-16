@@ -24,12 +24,21 @@ test('persistent runtime applies live increments to the existing replica and adv
   const flock = new Flock('synthetic');
   flock.set(['e', 'session-s1'], true, 1);
   flock.set(['e', 'machine-m1'], true, 1);
-  flock.set(['m', 'machine-m1'], { name: 'Synthetic Mac' }, 1);
+  flock.set(
+    ['m', 'machine-m1'],
+    { name: 'Synthetic Mac', protocolCapabilities: { operationInbox: 1 } },
+    1,
+  );
   flock.set(['m', 'session-s1'], { title: 'Before', machineId: 'm1' }, 2);
   const snapshot = flock.exportFile(),
     version = flock.version();
   flock.set(['m', 'session-s1', 'title'], 'After', 3);
   flock.set(['m', 'session-s1', 'parentSessionId'], 'parent', 4);
+  flock.set(
+    ['m', 'machine-m1', 'protocolCapabilities'],
+    { operationInbox: 2 },
+    5,
+  );
   const update = new TextEncoder().encode(
     JSON.stringify(flock.exportJson(version)),
   );
@@ -93,6 +102,25 @@ test('persistent runtime applies live increments to the existing replica and adv
       {
         name: 'synthetic-stream',
         setup(build) {
+          // Exercise catalog selection and mention expansion at the facade;
+          // human-input tests cover the session transport with real Loro.
+          build.onResolve({ filter: /^\.\/session$/ }, () => ({
+            path: 'session',
+            namespace: 'send-test',
+          }));
+          build.onLoad({ filter: /.*/, namespace: 'send-test' }, () => ({
+            resolveDir: new URL(
+              '../../modules/lody-kit/data-runtime/',
+              import.meta.url,
+            ).pathname,
+            contents: `
+              export * from ${JSON.stringify(new URL('../../modules/lody-kit/data-runtime/session.ts', import.meta.url).pathname)};
+              export async function sendTurn(args, expand, protocolCapabilities) {
+                return { text: await expand(args.text), protocolCapabilities };
+              }
+            `,
+          }));
+
           build.onResolve(
             { filter: /^@loro-dev\/streams-crdt\/loro$/ },
             () => ({ path: 'presence', namespace: 'presence-test' }),
@@ -147,6 +175,23 @@ test('persistent runtime applies live increments to the existing replica and adv
   globalThis.dataRuntime.start('synthetic-workspace');
   assert.equal(JSON.parse((await first).catalog).sessions[0].title, 'Before');
   assert.equal(requests[0].live, 'long-poll');
+  const send = (machineId) =>
+    globalThis.dataRuntime.sendTurn({
+      sessionId: 'other',
+      machineId,
+      userId: 'local:hub',
+      text: '@session:s1',
+    });
+  assert.deepEqual(await send('m1'), {
+    text: '[@Before](lody://session/s1?workspace=synthetic-workspace)',
+    protocolCapabilities: { operationInbox: 1 },
+  });
+  assert.equal(
+    (await send('old-machine')).protocolCapabilities,
+    undefined,
+    'capabilities belong to the target machine, not another upgraded machine',
+  );
+
   const fileArgs = { sessionId: 's1', path: 'README.md', entryId: 'turn' };
   for (const method of [
     'readFile',
@@ -170,6 +215,12 @@ test('persistent runtime applies live increments to the existing replica and adv
   });
   const changed = await second;
   assert.equal(JSON.parse(changed.catalog).sessions[0].title, 'After');
+  assert.deepEqual(
+    (await send('m1')).protocolCapabilities,
+    { operationInbox: 2 },
+    'a live capability field overrides the initial machine object',
+  );
+
   assert.equal(changed.revision, 2);
   assert.equal(
     JSON.parse(changed.catalog).sessions[0].parentSessionId,

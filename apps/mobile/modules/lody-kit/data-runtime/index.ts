@@ -1338,12 +1338,23 @@ Object.assign(globalThis, {
         cliType: args.cliType,
         agentType: args.agentType,
       };
-      return sendSessionTurn(args, (text) =>
-        expandMentions(
-          text,
-          (category) => getMentions({ ...source, category }),
-          workspace,
-        ),
+      const room = `machine-${args.machineId}`;
+      const protocolCapabilities = (metaReplica.flock.get([
+        'm',
+        room,
+        'protocolCapabilities',
+      ]) ??
+        (metaReplica.flock.get(['m', room]) as Record<string, unknown>)
+          ?.protocolCapabilities) as Record<string, number> | undefined;
+      return sendSessionTurn(
+        args,
+        (text) =>
+          expandMentions(
+            text,
+            (category) => getMentions({ ...source, category }),
+            workspace,
+          ),
+        protocolCapabilities,
       );
     },
     start(id: string, userId?: string, active = true) {
