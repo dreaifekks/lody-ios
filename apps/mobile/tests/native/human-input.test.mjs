@@ -218,8 +218,9 @@ test('agent forwards and imported history never acquire human receipts on sync o
 });
 
 for (const failure of ['rejected', 'lost-ack', 'thrown']) {
-  test(`edit-and-resend recovers a ${failure} receipt append before its machine-owned history write`, async () => {
+  test(`edit-and-resend recovers a ${failure} receipt append before its machine-owned history write`, async (t) => {
     let fail = true;
+    const reread = Promise.withResolvers();
     const requests = [];
     const fixture = await openTestSession({
       failAppend: (url) =>
@@ -254,6 +255,12 @@ for (const failure of ['rejected', 'lost-ack', 'thrown']) {
         inputConfig: {},
       });
       await fixture.pushUpdate();
+      const client = globalThis.__sessionClient.prototype;
+      const bootstrap = client.bootstrap;
+      t.mock.method(client, 'bootstrap', async function () {
+        await reread.promise;
+        return bootstrap.call(this);
+      });
       const edit = {
         ...args,
         action: 'send',
@@ -270,8 +277,36 @@ for (const failure of ['rejected', 'lost-ack', 'thrown']) {
       assert.notEqual(
         fixture.runtime.sessionDoc('s1'),
         before,
-        'a refused receipt discards the replica',
+        'an unconfirmed receipt discards the replica before rereading the hub',
       );
+      assert.deepEqual(
+        before.getMap('humanInputReceipts').toJSON(),
+        {
+          [id]: { userId: args.userId },
+        },
+        'the retired replica contained the local write',
+      );
+      assert.deepEqual(
+        fixture.runtime.sessionDoc('s1').getMap('humanInputReceipts').toJSON(),
+        {},
+        'the replacement replica cannot expose the receipt while bootstrap is blocked',
+      );
+      assert.deepEqual(
+        fixture.server.getMap('humanInputReceipts').toJSON(),
+        failure === 'lost-ack' ? { [id]: { userId: args.userId } } : {},
+        'a lost ACK may mean the receipt is already durable on the hub',
+      );
+      const appendCount = fixture.appends.length;
+      assert.deepEqual(await fixture.runtime.editSession(edit, meta), {
+        state: 'not_sent',
+        reason: 'session_not_ready',
+      });
+      assert.equal(
+        fixture.appends.length,
+        appendCount,
+        'no edit can reuse the unconfirmed replica',
+      );
+      reread.resolve();
       await fixture.runtime.ensureSession(
         's1',
         'w1',
@@ -310,6 +345,7 @@ for (const failure of ['rejected', 'lost-ack', 'thrown']) {
         'repeating an acknowledged replacement does not write another receipt',
       );
     } finally {
+      reread.resolve();
       fixture.close();
     }
   });
