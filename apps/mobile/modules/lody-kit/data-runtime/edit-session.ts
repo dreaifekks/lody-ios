@@ -92,7 +92,6 @@ export function editableUserTurn(
 ) {
   if (
     meta.isArchived ||
-    meta.autoReview ||
     meta.cliType !== 'builtin' ||
     !['codex', 'claude'].includes(meta.agentType)
   )

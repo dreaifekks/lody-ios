@@ -36,6 +36,10 @@ const original = {
 
 test('edit eligibility fences history, automation and provider boundaries; attachment edits preserve configuration', () => {
   assert.equal(editableUserTurn([original], meta), original);
+  assert.equal(
+    editableUserTurn([original], { ...meta, autoReview: true }),
+    original,
+  );
   const preceding = {
     id: 'reply',
     role: 'assistant',
@@ -52,7 +56,6 @@ test('edit eligibility fences history, automation and provider boundaries; attac
   );
   for (const invalid of [
     { isArchived: true },
-    { autoReview: true },
     { agentType: 'grok' },
     { latestGoal: { status: 'active' } },
   ]) {
