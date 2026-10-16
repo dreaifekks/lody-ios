@@ -1,3 +1,4 @@
+import { parseSessionLink } from '../../lib/sessionLink.ts';
 import type { Session } from '../../models/catalog.ts';
 
 /** What a link in a message opens; native code opens ordinary web links itself. */
@@ -9,10 +10,6 @@ export type MessageLinkAction =
   | { kind: 'loopback' }
   | { kind: 'none' };
 
-const SESSION_PREFIX = 'session://';
-// Lody's `parseSessionLinkHref`: session mentions reach the agent, and come
-// back from it, as `[@Title](session://<id>)`.
-const SESSION_ID = /^[A-Za-z0-9_-]+$/;
 const LOOPBACK =
   /^(https?):\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d{1,5})?([/?#].*)?$/i;
 const FILE = /^file:\/\/(\/[^?#]*)(?:#L(\d+))?/i;
@@ -24,15 +21,17 @@ const FILE = /^file:\/\/(\/[^?#]*)(?:#L(\d+))?/i;
  */
 export function messageLinkAction(
   href: string,
-  context: { sessions: Session[]; machineHost?: string },
+  context: { sessions: Session[]; workspaceId: string; machineHost?: string },
 ): MessageLinkAction {
-  const value = href.trim();
-  if (value.startsWith(SESSION_PREFIX)) {
-    const id = value.slice(SESSION_PREFIX.length).replace(/\/+$/, '');
-    if (!SESSION_ID.test(id)) return { kind: 'none' };
+  const link = parseSessionLink(href);
+  if (link) {
+    if (link.workspaceId && link.workspaceId !== context.workspaceId)
+      return { kind: 'missingSession' };
+    const id = link.tabSessionId ?? link.sessionId;
     const session = context.sessions.find((item) => item.id === id);
     return session ? { kind: 'session', session } : { kind: 'missingSession' };
   }
+  const value = href.trim();
   const file = FILE.exec(value);
   if (file) {
     let path = file[1];

@@ -51,10 +51,24 @@ const text =
   '@src/file.ts $auth @session:s2 @role:reviewer-claude #11 #12 /compact';
 // OSS mention-skill/session/agent-role-source prompt formats, not copied tables.
 const expected =
-  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) use lody mcp to query session[id: s2] history use lody mcp to create a session with agent role[id: reviewer, instance: reviewer-claude, name: Reviewer · Claude Code] #11 #12 /compact';
+  '@src/file.ts use /auth [Skill Path](/home/My Skills/auth\\)/SKILL.md) [@Other conversation](lody://session/s2?workspace=w1) use lody mcp to create a session with agent role[id: reviewer, instance: reviewer-claude, name: Reviewer · Claude Code] #11 #12 /compact';
+
+test('session mention labels escape markdown and preserve workspace addressing', () => {
+  assert.equal(
+    mentions.mentionPrompt(
+      { ...session, name: '  [Title] \\ path  ' },
+      'lw_hub',
+    ),
+    '[@\\[Title\\] \\\\ path](lody://session/s2?workspace=lw_hub)',
+  );
+  assert.equal(
+    mentions.mentionPrompt({ ...session, name: ' ' }, 'w1'),
+    '[@s2](lody://session/s2?workspace=w1)',
+  );
+});
 
 test('send expansion matches OSS prompts; paths, GitHub references and commands remain verbatim', async () => {
-  assert.equal(await mentions.expandMentions(text, load), expected);
+  assert.equal(await mentions.expandMentions(text, load, 'w1'), expected);
   assert.equal(
     mentions.expandMentionText(expected, items),
     expected,
@@ -131,7 +145,7 @@ test('workspace sessions exclude self, prefer unarchived entries, and retain sta
     mentions.expandMentionText('@session:active', [
       { ...result.items[0], name: 'Renamed' },
     ]),
-    'use lody mcp to query session[id: active] history',
+    '[@Renamed](lody://session/active)',
   );
   assert.equal(mentions.sessionMentions([], []).items.length, 0);
   assert.equal(
@@ -381,7 +395,7 @@ test('first turn, queue and Steer persist the same expansion before delivery; fa
   let expansions = 0;
   const expand = (value) => {
     expansions++;
-    return mentions.expandMentions(value, load);
+    return mentions.expandMentions(value, load, 'w1');
   };
   try {
     const failed = await fixture.runtime.sendTurn(args, async () => {

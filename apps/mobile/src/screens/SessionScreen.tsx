@@ -520,6 +520,7 @@ function View() {
   const openFile = useOpenFile(session.id);
   const openMessageLink = (href: string) => {
     const action = messageLinkAction(href, {
+      workspaceId: selected?.id ?? '',
       sessions: catalog.sessions,
       machineHost: account?.lan
         ? catalog.machineTerminals?.[currentSession.machineId]?.host

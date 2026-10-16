@@ -712,7 +712,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
               !Self.isLoopback(url) {
       UIApplication.shared.open(url)
     } else {
-      // `session://` mentions, `file://` paths and the session machine's own
+      // `lody://session/` (or legacy `session://`) mentions, `file://` paths and the session machine's own
       // loopback address need the catalog to resolve.
       onLinkPress(["href": href])
     }

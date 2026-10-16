@@ -1339,8 +1339,10 @@ Object.assign(globalThis, {
         agentType: args.agentType,
       };
       return sendSessionTurn(args, (text) =>
-        expandMentions(text, (category) =>
-          getMentions({ ...source, category }),
+        expandMentions(
+          text,
+          (category) => getMentions({ ...source, category }),
+          workspace,
         ),
       );
     },

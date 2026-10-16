@@ -88,7 +88,7 @@ export const NativeChat: ComponentType<
     onFilePress?: (
       event: NativeSyntheticEvent<{ path: string; line?: number }>,
     ) => void;
-    /** A link the transcript does not open itself: `session://`, `file://` or a loopback address. */
+    /** A link the transcript does not open itself: `lody://session/` (or legacy `session://`), `file://` or a loopback address. */
     onLinkPress?: (event: NativeSyntheticEvent<{ href: string }>) => void;
     onTurnChangesPress?: (
       event: NativeSyntheticEvent<{ entryId: string; path: string }>,

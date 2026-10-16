@@ -1,3 +1,4 @@
+import { buildSessionLink } from '../../../src/lib/sessionLink';
 import type {
   MentionCatalog,
   MentionCategory,
@@ -19,6 +20,7 @@ function categoryOf(token: string): MentionCategory {
 export async function expandMentions(
   text: string,
   load: (category: MentionCategory) => Promise<MentionCatalog>,
+  workspaceId?: string,
 ): Promise<string> {
   const categories = new Set<MentionCategory>();
   for (const match of text.matchAll(referencePattern)) {
@@ -32,6 +34,7 @@ export async function expandMentions(
     return expandMentionText(
       text,
       catalogs.flatMap((catalog) => catalog.items),
+      workspaceId,
     );
   } catch {
     throw new Error('mention_expansion_failed');
@@ -41,6 +44,7 @@ export async function expandMentions(
 export function expandMentionText(
   text: string,
   items: readonly MentionItem[],
+  workspaceId?: string,
 ): string {
   const byToken = new Map<string, MentionItem>();
   const ambiguous = new Set<string>();
@@ -62,14 +66,19 @@ export function expandMentionText(
         /^\s*\[Skill Path\]\(/.test(text.slice(offset + whole.length))
       )
         return whole;
-      return space + mentionPrompt(item);
+      return space + mentionPrompt(item, workspaceId);
     },
   );
 }
 
-export function mentionPrompt(item: MentionItem): string {
-  if (item.kind === 'session')
-    return `use lody mcp to query session[id: ${item.path}] history`;
+export function mentionPrompt(item: MentionItem, workspaceId?: string): string {
+  if (item.kind === 'session') {
+    const title = item.name.trim() || item.path;
+    const label = `@${title}`
+      .replace(/\\/gu, '\\\\')
+      .replace(/[[\]]/gu, '\\$&');
+    return `[${label}](${buildSessionLink({ sessionId: item.path, workspaceId })})`;
+  }
   if (item.kind === 'role' && item.role)
     return `use lody mcp to create a session with agent role[id: ${item.role.id}, instance: ${item.path}, name: ${item.role.name} · ${item.role.instance}]`;
   if (item.kind === 'skill') {
