@@ -56,8 +56,6 @@ def microphone():
     return button
 
 
-ui.open_case('preferences-preview')
-
 # Off by default: Settings shows only the switch, and signed out there is no agent to choose.
 set_voice(False)
 assert not present('voice-agent'), 'The voice agent row appeared while dictation is off'
