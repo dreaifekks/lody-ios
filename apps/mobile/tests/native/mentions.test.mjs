@@ -447,7 +447,7 @@ test('a LAN Role retains same-machine v2 target identities in mentions', () => {
   });
   assert.deepEqual(
     unaliased.items.map((item) => item.name),
-    ['claude · mac', 'codex · mac'],
+    ['Review · claude · mac', 'Review · codex · mac'],
   );
   assert.equal(
     mentions.expandMentionText('@role:review@mac@sol', items),

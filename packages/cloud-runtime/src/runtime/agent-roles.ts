@@ -77,7 +77,7 @@ export function roleMentions(
         typeof agent.name === 'string' &&
         agent.name
       )
-        name = agent.name;
+        name = `${role.name} · ${agent.name}`;
       if (multi)
         name = `${target.alias || name} · ${machineNames.get(target.machineId) ?? target.machineId}`;
       itemMachines.set(path, target.machineId);
