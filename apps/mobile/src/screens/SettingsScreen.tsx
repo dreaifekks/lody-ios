@@ -65,14 +65,18 @@ function View() {
       id: 'personal',
       header: t('settings.section.personal'),
       rows: [
-        {
-          id: 'connection',
-          title: t('settings.section.connection'),
-          image: 'network',
-          action: !!auth.account,
-          disclosure: !!auth.account,
-          navigates: !!auth.account,
-        },
+        ...(workspace
+          ? [
+              {
+                id: 'connection',
+                title: t('settings.section.connection'),
+                image: 'network',
+                action: true,
+                disclosure: true,
+                navigates: true,
+              },
+            ]
+          : []),
         {
           id: 'preferences',
           title: t('settings.preferences.title'),
@@ -345,7 +349,7 @@ function View() {
         if (id === 'archived' && workspace) void push(ArchivedSessionsScreen);
         if (id === 'diagnostics') void push(DiagnosticsScreen);
         if (id === 'account' && auth.account) void push(AccountScreen);
-        if (id === 'connection' && auth.account) void push(ConnectionScreen);
+        if (id === 'connection' && workspace) void push(ConnectionScreen);
         if (id === 'resync' && workspace && connection.state === 'offline')
           refresh();
         if (id === 'debug-open') {
