@@ -21,11 +21,15 @@ from simulator import DEVICE_TYPES, run_with_simulator, SimulatorPool
 
 CHAT = ROOT / 'apps/mobile/modules/lody-kit/verification/chat'
 BATCHES = {
-    'pages': ['session-tree', 'pull-request', 'mentions-production', 'project-history-entry', 'project-history', 'notifications', 'settings', 'appearance', 'queued-message-behavior', 'inbox', 'background', 'permission', 'home', 'licenses', 'navigation', 'navigation-toolbar', 'onboarding', 'community-notice', 'live-activity', 'project-picker', 'branch-picker', 'branch-picker-lan', 'connection', 'voice-dictation', 'terminal', 'machine-view'],
-    'send': ['quick-replies', 'context-chip', 'root-reuse', 'mention-chat', 'mention-sheet', 'send-transition', 'send-transition-handoff', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'send-rounds', 'send', 'free-turn-notice', 'send-handoff', 'send-handoff-delayed', 'model-options', 'fast-chat', 'fast-sheet', 'permission-mode-chat', 'permission-mode-sheet', 'permission-mode-create', 'paste-plain-chat', 'paste-plain-sheet', 'rich-paste-chat', 'rich-paste-sheet', 'attachment-overlay-chat', 'attachment-overlay-sheet', 'attachment-overlay-create', 'attachment-camera-chat', 'attachment-camera-sheet', 'attachment-motion-chat', 'attachment-motion-sheet', 'attachment-motion-create', 'composer', 'composer-glass', 'composer-glass-chat', 'composer-video', 'composer-success', 'composer-failure', 'composer-rich', 'composer-fullscreen', 'model-memory'],
-    'chat': ['workspace-changes', 'message-share', 'user-mentions', 'file-preview', 'file-selection', 'mcp-files', 'chat-performance', 'chat-stream-performance', 'layout', 'context-menu', 'tracking', 'smooth-scroll', 'image-preview', 'markdown', 'duration', 'process-counts', 'process-failed', 'agent-error', 'changes', 'inline-diff', 'chat-chrome', 'title-rename', 'simulator-preview', 'subagents'],
+    'pages': ['session-tree', 'pull-request', 'mentions-production', 'project-history-entry', 'project-history', 'notifications', 'diagnostics', 'settings', 'appearance', 'queued-message-behavior', 'inbox', 'background', 'permission', 'home', 'licenses', 'navigation', 'navigation-toolbar', 'onboarding', 'community-notice', 'live-activity', 'project-picker', 'branch-picker', 'branch-picker-lan', 'connection', 'voice-dictation', 'terminal', 'machine-view'],
+    'send': ['send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'quick-replies', 'context-chip', 'root-reuse', 'mention-chat', 'mention-sheet', 'send-transition', 'send-transition-handoff', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'send-rounds', 'send', 'free-turn-notice', 'send-handoff', 'send-handoff-delayed', 'model-options', 'fast-chat', 'fast-sheet', 'permission-mode-chat', 'permission-mode-sheet', 'permission-mode-create', 'paste-plain-chat', 'paste-plain-sheet', 'rich-paste-chat', 'rich-paste-sheet', 'attachment-overlay-chat', 'attachment-overlay-sheet', 'attachment-overlay-create', 'attachment-camera-chat', 'attachment-camera-sheet', 'attachment-motion-chat', 'attachment-motion-sheet', 'attachment-motion-create', 'composer', 'composer-glass', 'composer-glass-chat', 'composer-video', 'composer-success', 'composer-failure', 'composer-rich', 'composer-fullscreen', 'composer-rest-draft', 'composer-motion', 'model-memory'],
+    'chat': ['workspace-changes', 'message-share', 'user-mentions', 'file-preview', 'html-preview', 'file-selection', 'mcp-files', 'chat-performance', 'chat-stream-performance', 'layout', 'context-menu', 'tracking', 'smooth-scroll', 'image-preview', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'chat-chrome', 'title-rename', 'simulator-preview', 'subagents'],
 }
 SUITES = {
+    'settings-workspace': ['prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'role-mention-chat', 'role-mention-sheet'],
+    'guidance-scroll': ['send-scroll-normal', 'send-scroll-guide', 'send-scroll-queue'],
+    'html-files': ['html-preview', 'file-preview'],
+    'markdown-files': ['markdown', 'file-preview'],
     'permission-composer': ['permission-mode-chat', 'permission-mode-sheet', 'permission-mode-create'],
     'paste-plain': ['paste-plain-chat', 'paste-plain-sheet'],
     'rich-paste': ['rich-paste-chat', 'rich-paste-sheet'],
@@ -41,12 +45,29 @@ SUITES = {
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 # These lease an iPad. `--case` still accepts them; the default phone run must not.
-PAD_CASES = ['devices-pad', 'session-delete-pad', 'session-tree-pad', 'ipad', 'ipad-chrome', 'ipad-sidebar', 'native-shell', 'native-collection', 'session-search-pad']
-CASES = PHONE_CASES + PAD_CASES + ['devices', 'camera-chat', 'camera-sheet', 'message-details', 'edit-message', 'session-share', 'session-delete', 'session-search', 'morph', 'sheet-zoom-project', 'composer-relay', 'outbox', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'create-parity']
+PAD_CASES = ['devices-pad', 'session-delete-pad', 'session-tree-pad', 'ipad', 'ipad-chrome', 'ipad-sidebar', 'native-shell', 'native-collection', 'session-search-pad', 'wide-panel']
+CASES = PHONE_CASES + PAD_CASES + ['devices', 'camera-chat', 'camera-sheet', 'message-details', 'edit-message', 'session-share', 'session-delete', 'session-search', 'morph', 'sheet-zoom-project', 'composer-relay', 'outbox', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'create-parity', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'role-mention-chat', 'role-mention-sheet']
 # These select HomePreviewProviders at app launch, using the same shared bundle.
-HOME_CASES = {'machine-view', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'licenses', 'navigation', 'navigation-toolbar', 'project-history-entry', 'ipad', 'ipad-chrome', 'ipad-sidebar'}
-HOME_CASES.update({'session-delete', 'session-delete-pad', 'devices', 'devices-pad'})
+HOME_CASES = {'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'licenses', 'navigation', 'navigation-toolbar', 'project-history-entry', 'ipad', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'machine-view'}
+HOME_CASES.update({'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'})
 PREVIEW = {
+    'role-mention-chat': 'mention-chat',
+    'role-mention-sheet': 'mention-sheet',
+    'agent-roles': 'agent-roles-preview',
+    'published-shares': 'published-shares-preview',
+    'published-share-states': 'published-shares-readonly',
+    'memory-settings': 'memory-preview',
+    'memory-states': 'memory-states-preview',
+    'mcp-settings': 'mcp-settings-preview',
+    'ai-usage': 'ai-usage-preview',
+    'github-settings': 'github-settings-preview',
+    'project-visibility': 'project-visibility-preview',
+    'prompt-shortcuts': 'prompt-shortcuts-preview',
+    'agents-settings': 'settings-preview',
+    'settings-form-backgrounds': 'settings-forms-preview',
+    'machine-settings': 'machine-settings-preview',
+    'settings-baseline': 'settings-baseline-live',
+    'mermaid': 'mermaid-preview',
     'workspace-changes': 'simulator-preview',
     'simulator-preview': 'simulator-preview',
     'subagents': 'subagents-preview',
@@ -65,6 +86,7 @@ PREVIEW = {
     'scroll-edge': 'chat-preview',
     'scroll-edge-pages': 'scroll-edge-pages',
     'scroll-edge-diff': 'scroll-edge-diff',
+    'proposed-plan': 'proposed-plan-preview',
     'agent-error': 'agent-error-preview',
     'terminal': 'terminal-preview',
     'outbox': 'outbox-preview',
@@ -77,15 +99,20 @@ PREVIEW = {
     'send-transition': 'send-preview',
     'send-transition-handoff': 'send-handoff',
     'notifications': 'notification-preview',
+    'diagnostics': 'diagnostics-preview',
     'live-activity': 'live-activity-preview',
     'permission': 'permission-preview',
     'send-queue': 'send-queue',
     'steer': 'steer-preview',
     'send-guide': 'send-guide',
+    'send-scroll-normal': 'send-scroll-normal',
+    'send-scroll-guide': 'send-scroll-guide',
+    'send-scroll-queue': 'send-scroll-queue',
     'send-interrupt': 'send-interrupt',
     'send-rounds': 'send-preview',
     'user-mentions': 'file-preview',
     'file-preview': 'file-preview',
+    'html-preview': 'file-preview',
     'file-selection': 'file-preview',
     'mcp-files': 'file-preview',
     'chat-performance': 'chat-performance',
@@ -98,7 +125,7 @@ PREVIEW = {
     'connection': 'connection-preview',
     'appearance': 'appearance-preview',
     'queued-message-behavior': 'queued-message-behavior-preview',
-    'voice-dictation': 'queued-message-behavior-preview',
+    'voice-dictation': 'preferences-preview',
     'model-memory': 'model-memory',
     'create-parity': 'create-parity',
     'smooth-scroll': 'scroll-preview',
@@ -131,6 +158,8 @@ PREVIEW = {
     'fast-chat': 'chat-preview',
     'fast-sheet': 'composer-preview',
     'composer-glass-chat': 'composer-success',
+    'composer-rest-draft': 'composer-success',
+    'composer-motion': 'quick-replies-preview',
     'composer-video': 'composer-success',
     'composer-success': 'composer-success',
     'composer-failure': 'composer-failure',
@@ -142,6 +171,22 @@ PREVIEW = {
 }
 READY = {
     'subagents': 'subagent-probe',
+    'role-mention-sheet': 'create-session-input',
+    'agent-roles': 'list-unavailable-action',
+    'published-shares': 'list-unavailable-action',
+    'published-share-states': 'share:own',
+    'memory-settings': 'list-unavailable-action',
+    'memory-states': 'machine:not_installed',
+    'mcp-settings': 'setting:mcp::docs',
+    'ai-usage': 'list-unavailable-action',
+    'github-settings': 'list-unavailable-action',
+    'project-visibility': 'visibility:m1:same',
+    'prompt-shortcuts': 'list-unavailable-action',
+    'agents-settings': 'settings-agent',
+    'settings-form-backgrounds': 'form-machine',
+    'machine-settings': 'list-notice-action',
+    'settings-baseline': 'settings-baseline-ready',
+    'mermaid': 'mermaid-preview:text',
     'message-details': 'paper-reply:meta:details',
     'free-turn-notice': 'free-turn-24',
     'camera-chat': 'session-input',
@@ -156,6 +201,7 @@ READY = {
     'scroll-edge': 'session-input',
     'scroll-edge-pages': 'create-session-input',
     'scroll-edge-diff': 'scroll-edge-diff-toolbar',
+    'proposed-plan': 'plan-preview:document',
     'agent-error': 'error-system:failure:title',
     'terminal': 'terminal-view',
     'outbox': 'outbox-state',
@@ -168,14 +214,19 @@ READY = {
     'send-transition': 'send-status',
     'send-transition-handoff': 'create-session-input',
     'notifications': 'notification-preview-ready',
+    'diagnostics': 'diagnostics-count',
     'live-activity': 'live-activity-preview-ready',
     'send-queue': 'send-status',
     'steer': 'steer-next',
     'send-guide': 'send-status',
+    'send-scroll-normal': 'send-status',
+    'send-scroll-guide': 'send-status',
+    'send-scroll-queue': 'send-status',
     'send-interrupt': 'send-status',
     'send-rounds': 'send-status',
     'user-mentions': 'file-links:answer',
     'file-preview': 'file-links:answer',
+    'html-preview': 'file-links:answer',
     'file-selection': 'file-links:answer',
     'mcp-files': 'file-links:answer',
     'project-history': 'history-project:["studio","demo"]',
@@ -213,6 +264,8 @@ READY = {
     'fast-chat': 'session-input',
     'fast-sheet': 'create-session-input',
     'composer-glass-chat': 'session-input',
+    'composer-rest-draft': 'session-input',
+    'composer-motion': 'quick-reset',
     'composer-video': 'session-input',
     'composer-success': 'session-input',
     'composer-failure': 'session-input',
@@ -357,7 +410,7 @@ with metro_context:
         subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', str(Path(__file__).with_name('software-keyboard.m')), '-o', str(keyboard)], check=True, timeout=60)
         subprocess.run([str(keyboard), subprocess.check_output(['xcode-select', '-p'], text=True).strip(), args.udid], check=True, timeout=30)
         sim('install', args.udid, str(args.app.resolve()))
-        if any(case.startswith('attachment-motion-') for case in selected) or (args.photo_access in ['full', 'limited', 'granted'] and any(case.startswith('attachment-overlay-') for case in selected)):
+        if 'workspace-general' in selected or any(case.startswith('attachment-motion-') for case in selected) or (args.photo_access in ['full', 'limited', 'granted'] and any(case.startswith('attachment-overlay-') for case in selected)):
             # Photos outlives app launches. Seed once per app container so repeats
             # don't fill the grid with duplicates or reinitialize the photo service.
             container = Path(sim('get_app_container', args.udid, BUNDLE_ID, 'data').stdout.strip())
@@ -379,7 +432,7 @@ with metro_context:
         cases = sorted(HOME_CASES.intersection(selected)) + [case for case in selected if case not in HOME_CASES]
         launch_mode = None
         app_pid = None
-        trace_throw = bool(set(selected).intersection({'send-transition', 'send-transition-handoff', 'send', 'send-handoff', 'send-handoff-delayed', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'ipad-chrome'}))
+        trace_throw = any(case.startswith('send-scroll-') for case in selected) or bool(set(selected).intersection({'send-transition', 'send-transition-handoff', 'send', 'send-handoff', 'send-handoff-delayed', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'ipad-chrome'}))
         for appearance in appearances:
             sim('ui', args.udid, 'appearance', appearance)
             for case in cases:
@@ -515,12 +568,16 @@ with metro_context:
                         ui.axe('tap', '--label', 'Image Fixture')
                         ui.element('preview-image:attachment:ui-verify-image')
                     ui.capture('before')
-                    script = Path(__file__).with_name(f'{case}.py') if case in ['workspace-changes', 'simulator-preview', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'branch-picker-lan', 'notifications', 'user-mentions', 'file-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'duration', 'process-counts', 'process-failed', 'agent-error', 'changes', 'inline-diff', 'background', 'inbox', 'permission', 'home', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'live-activity', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen', 'subagents', 'connection'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                    script = Path(__file__).with_name(f'{case}.py') if case in ['workspace-changes', 'simulator-preview', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'permission', 'home', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'live-activity', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen', 'branch-picker-lan', 'subagents', 'connection'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                    if case.startswith('send-scroll-'):
+                        script = Path(__file__).with_name('send-scroll.py')
                     if case in {'devices', 'devices-pad'}:
                         script = Path(__file__).with_name('devices.py')
+                    if case in ('diagnostics', 'settings-baseline', 'workspace-general', 'machine-settings', 'settings-form-backgrounds', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles'):
+                        script = Path(__file__).with_name(f'{case}.py')
                     if case == 'file-selection':
                         script = Path(__file__).with_name('file-selection.py')
-                    if case in {'quick-replies', 'context-chip', 'morph', 'sheet-zoom-project', 'native-shell', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'terminal', 'machine-view', 'voice-dictation'}:
+                    if case in {'quick-replies', 'context-chip', 'morph', 'sheet-zoom-project', 'native-shell', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'terminal', 'machine-view', 'voice-dictation'}:
                         script = Path(__file__).with_name(f'{case}.py')
                     if case in ['session-tree', 'session-tree-pad']:
                         script = Path(__file__).with_name('session-tree.py')
@@ -550,18 +607,24 @@ with metro_context:
                         script = Path(__file__).with_name('paste-plain.py')
                     if case in ['rich-paste-sheet', 'rich-paste-chat']:
                         script = Path(__file__).with_name('rich-paste.py')
+                    if case in ('composer-rest-draft', 'composer-motion'):
+                        script = Path(__file__).with_name(f'{case}.py')
                     if case == 'composer-glass-chat':
                         script = Path(__file__).with_name('composer-glass.py')
                     if case == 'mentions-production':
                         script = Path(__file__).with_name('mentions-production.py')
                     if case == 'root-reuse':
                         script = Path(__file__).with_name('root-reuse.py')
+                    if case in ['role-mention-chat', 'role-mention-sheet']:
+                        script = Path(__file__).with_name('role-mentions.py')
                     if case in ['mention-chat', 'mention-sheet']:
                         script = Path(__file__).with_name('mentions.py')
                     if case in ['camera-chat', 'camera-sheet']:
                         script = Path(__file__).with_name('attachment-camera.py')
                     if case in ['send-transition', 'send-transition-handoff']:
                         script = Path(__file__).with_name('send-transition.py')
+                    if case == 'agents-settings':
+                        script = Path(__file__).with_name('settings.py')
                     command = [sys.executable, str(script), args.udid]
                     if case in ['composer-success', 'composer-failure']:
                         command += ['--expect', case.removeprefix('composer-'), '--output', str(output)]
@@ -569,7 +632,24 @@ with metro_context:
                         command += ['--send']
                     else:
                         command += [str(output)]
+                    if case.startswith('send-scroll-'):
+                        command.append(case.removeprefix('send-scroll-'))
+                    if case == 'agents-settings':
+                        command.append('--agents-only')
                     check_timeout = 180
+                    if case == 'mcp-settings':
+                        check_timeout = 300
+                    if case in ('agent-roles', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states'):
+                        check_timeout = 420
+                    if case in ('settings', 'settings-baseline', 'agents-settings'):
+                        # These cases visit several Settings contexts or editors.
+                        check_timeout = 300
+                    if case == 'pull-request':
+                        # Authorization, comment and investigation round trips share this case.
+                        check_timeout = 300
+                    if case == 'proposed-plan':
+                        # Document, search and business dispatch outcomes share this case.
+                        check_timeout = 360
                     if case == 'quick-replies':
                         check_timeout = 420
                     if case.startswith(('attachment-overlay-', 'attachment-motion-')) and args.photo_access in ['full', 'granted']:
@@ -585,10 +665,12 @@ with metro_context:
                         # Includes a real 61-second dismissal wait plus lock/unlock
                         # and Dynamic Island transitions; 180s cuts off deep links.
                         check_timeout = 480
-                    elif case == 'file-preview':
-                        # Browser, chat and process document selection add held captures
-                        # to the existing source, diff and Quick Look round trips.
+                    elif case == 'mermaid':
+                        # Six graph types, fallbacks, plan expansion and document copy.
                         check_timeout = 300
+                    elif case in ['file-preview', 'html-preview']:
+                        # Held selections plus loaded image/PDF close, reopen and drag dismissal.
+                        check_timeout = 420
                     elif case == 'simulator-preview':
                         # Held/cancelled/committed zoom gestures plus hide, stop and reopen flows.
                         check_timeout = 420
@@ -612,6 +694,9 @@ with metro_context:
                     result['checkSeconds'] = round(time.monotonic() - check_started, 2)
                     ui.capture('after')
                     result['status'] = 'passed'
+                    if case in ('appearance', 'quick-replies', 'queued-message-behavior'):
+                        # These checks cold-launch the App; the next case needs a fresh process baseline.
+                        launch_mode = None
                 except Exception as error:
                     # A failed case may have crashed or left a system modal; recover explicitly.
                     launch_mode = None

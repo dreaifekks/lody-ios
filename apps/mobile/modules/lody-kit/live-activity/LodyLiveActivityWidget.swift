@@ -5,11 +5,10 @@ import WidgetKit
 struct LodyLiveActivityWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: LodyActivityAttributes.self) { context in
-      LodyActivityPresentation(context: context)
+      LodyActivityContent(context: context)
     } dynamicIsland: { context in
       island(context)
     }
-    // The small family is what Apple Watch shows in its Smart Stack.
     .supplementalActivityFamilies([.small])
   }
 
@@ -137,14 +136,20 @@ struct LodyLiveActivityWidget: Widget {
   }
 }
 
-private struct LodyActivityPresentation: View {
+private struct LodyActivityContent: View {
   @Environment(\.activityFamily) private var family
   let context: ActivityViewContext<LodyActivityAttributes>
 
   var body: some View {
     if family == .small {
-      LodyCompactActivityView(state: context.state, isStale: context.isStale)
-        .widgetURL(context.attributes.route(for: context.state))
+      Group {
+        if context.attributes.userId.hasPrefix("local:") {
+          LodyCompactActivityView(state: context.state, isStale: context.isStale)
+        } else {
+          LodySmallActivityView(state: context.state, isStale: context.isStale)
+        }
+      }
+      .widgetURL(context.attributes.route(for: context.state))
     } else {
       LodyLockScreenView(
         state: context.state,

@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(ActivityKit)
+#if canImport(ActivityKit) && os(iOS)
 import ActivityKit
 #endif
 
@@ -127,6 +127,11 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
       var took: String?
       var allow: String?
       var deny: String?
+      var smallAttention: String?
+      var smallWaiting: String?
+      var smallDone: String?
+      var smallFailed: String?
+      var smallStale: String?
 
       init(stale: String, empty: String, others: String, lastSync: String, openHint: String) {
         self.stale = stale
@@ -153,6 +158,11 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
         took = try container.decodeIfPresent(String.self, forKey: .took)
         allow = try container.decodeIfPresent(String.self, forKey: .allow)
         deny = try container.decodeIfPresent(String.self, forKey: .deny)
+        smallAttention = try container.decodeIfPresent(String.self, forKey: .smallAttention)
+        smallWaiting = try container.decodeIfPresent(String.self, forKey: .smallWaiting)
+        smallDone = try container.decodeIfPresent(String.self, forKey: .smallDone)
+        smallFailed = try container.decodeIfPresent(String.self, forKey: .smallFailed)
+        smallStale = try container.decodeIfPresent(String.self, forKey: .smallStale)
       }
     }
 
@@ -164,6 +174,14 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
     // Invalidates existing presentations on a local icon change. Rendering reads
     // the App Group preference so server payloads cannot reset this device choice.
     var appIcon: String?
+    // Server summary timestamp for diagnostics. Older/local content omits it.
+    var updatedAt: Double?
+
+    var smallAttention: String { copy?.smallAttention ?? "Waiting for you" }
+    var smallWaiting: String { copy?.smallWaiting ?? "Waiting" }
+    var smallDone: String { copy?.smallDone ?? "Done" }
+    var smallFailed: String { copy?.smallFailed ?? "Failed" }
+    var smallStale: String { copy?.smallStale ?? "Outdated" }
 
     var staleLabel: String { copy?.stale ?? "Disconnected" }
 
@@ -336,6 +354,6 @@ struct LodyConversationLiveActivityAttributes: Codable, Hashable, Sendable {
   }
 }
 
-#if canImport(ActivityKit)
+#if canImport(ActivityKit) && os(iOS)
 extension LodyActivityAttributes: ActivityAttributes {}
 #endif

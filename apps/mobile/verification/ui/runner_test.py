@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 from urllib.parse import parse_qs, urlparse
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from driver import UI, launch_covered, restart_accessibility
 import catalog
@@ -43,16 +43,35 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(command[-2:], ['--udid', 'owned-simulator'])
             run.assert_called_once()
 
-    def test_batch_typing_uses_one_input_command_and_fails_without_retyping(self):
+    def test_batch_typing_does_not_retry_committed_input(self):
         with tempfile.TemporaryDirectory() as directory:
             ui = UI('owned-simulator', directory)
             with patch.object(ui, 'axe') as axe, patch.object(ui, 'element', return_value={'AXValue': 'DRAFT'}):
                 ui.type_into('field', 'draft')
                 axe.assert_called_once_with('type', 'draft')
+
+    def test_batch_typing_recovers_uncommitted_input_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ui = UI('owned-simulator', directory)
+            with patch.object(ui, 'axe') as axe, patch.object(ui, 'element', side_effect=[{'AXValue': ''}, {'AXValue': 'draft'}]):
+                ui.type_into('field', 'draft')
+                self.assertEqual(axe.call_args_list, [
+                    call('type', 'draft'),
+                    call('tap', '--id', 'field', '--post-delay', '.4'),
+                    call('type', 'draft'),
+                ])
+
+    def test_batch_typing_fails_when_retry_does_not_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ui = UI('owned-simulator', directory)
             with patch.object(ui, 'axe') as axe, patch.object(ui, 'element', return_value={'AXValue': 'different'}):
                 with self.assertRaisesRegex(AssertionError, 'did not commit'):
                     ui.type_into('field', 'draft')
-                axe.assert_called_once_with('type', 'draft')
+                self.assertEqual(axe.call_args_list, [
+                    call('type', 'draft'),
+                    call('tap', '--id', 'field', '--post-delay', '.4'),
+                    call('type', 'draft'),
+                ])
 
     def test_parallel_workers_keep_sibling_results_after_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -414,6 +433,23 @@ class SchemePermissionTest(unittest.TestCase):
             self.assertGreaterEqual(len(labels), 6)
             self.assertEqual(labels[:3], ['Open', '打开', '開啟'])
             self.assertFalse(any(args[:2] == ('tap', '-x') for args in calls))
+
+    def test_missing_open_from_cli_exit_does_not_tap_underlying_app(self):
+        from driver import allow_custom_scheme
+        with tempfile.TemporaryDirectory() as directory:
+            ui = UI('UDID', directory)
+            clock = {'t': 0}
+            missing = subprocess.CalledProcessError(
+                1, 'axe', output="Error: No accessibility element matched --label 'Open'.")
+            with (
+                patch('driver.subprocess.check_output', side_effect=missing) as command,
+                patch('driver.time.monotonic', lambda: clock['t']),
+                patch('driver.time.sleep', lambda seconds: clock.update(t=clock['t'] + seconds)),
+            ):
+                allow_custom_scheme(ui)
+            self.assertTrue(command.call_args_list)
+            self.assertFalse(any('-x' in call.args[0] for call in command.call_args_list))
+            self.assertEqual(command.call_args.kwargs['stderr'], subprocess.STDOUT)
 
     def test_allow_custom_scheme_retries_until_open_appears(self):
         from driver import allow_custom_scheme

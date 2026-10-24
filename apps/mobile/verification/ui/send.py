@@ -6,14 +6,23 @@ import catalog
 from send_motion import ThrowTrace
 ui = UI(*sys.argv[1:])
 trace = ThrowTrace(ui)
+progress = ui.element('send-upload-progress')['frame']
+viewport = ui.element('chat-transcript')['frame']
+assert progress['width'] >= 44 and progress['height'] >= 44, 'Upload progress must retain a 44 pt touch target'
+assert progress['x'] + progress['width'] <= viewport['x'] + viewport['width'], 'Upload progress fell outside the screen'
 ui.axe('tap', '--id', 'session-input')
-ui.axe('type', 'Offline send\nKeep my attachment')
+ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == 'inputView' and i['frame']['height'] > 200), None),
+        'The software keyboard must be ready before typing')
+ui.type_into('session-input', 'Offline send\nKeep my attachment')
 draft = ui.element('session-input')['AXValue']
 ui.capture('draft')
 ui.axe('tap', '--id', 'session-send', '--post-delay', '1')
-user = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').endswith(':user-text')), None), 'Offline message missing')
-ui.axe('tap', '--id', user['AXUniqueId'], '--post-delay', '.5')
+ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').endswith(':user-text')), None), 'Offline message missing')
+# Dismiss the keyboard away from the message that is still moving after Send.
+frame = ui.element('chat-transcript')['frame']
+ui.axe('tap', '-x', str(frame['x'] + 40), '-y', str(frame['y'] + 20), '--post-delay', '.5')
 timer = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').endswith(':delivery')), None), 'Offline delivery missing')
+assert timer['frame']['y'] >= frame['y'] - 1, 'Collapsed composer scrolled the delivery status above the transcript'
 turn = timer['AXUniqueId'].removesuffix(':delivery')
 assert timer['AXLabel'] == catalog.text('send.status.awaitingConnection'), 'Unacked send must show its delivery phase above the message'
 assert ui.element('send-status')['AXLabel'] == 'Calls: 0 · waiting'
@@ -85,6 +94,17 @@ if not ui.element('session-input').get('AXValue'):
     ui.type_into('session-input', 'after completion')
 assert ui.element('session-send')['enabled'], 'Completed Session did not accept a new draft'
 ui.capture('completed-unlocked')
+ui.axe('tap', '--id', 'send-toggle-pending')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · unknown' for i in items), 'Unknown-send fixture did not load')
+ui.axe('tap', '--id', 'session-input')
+ui.type_into('session-input', 'draft during confirmation')
+assert not ui.element('session-send')['enabled']
+ui.capture('causal-confirming')
+ui.axe('tap', '--id', 'send-reply')
+ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · idle' for i in items), 'A causally matching reply without its user row did not retire pending state')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'session-send' and i.get('enabled') for i in items), 'A confirmed reply left the next draft locked')
+assert ui.element('session-input').get('AXValue') == 'draft during confirmation', 'Confirmation erased the next draft'
+ui.capture('causal-unlocked')
 if not os.environ.get('LODY_UI_EMBEDDED'):
     trace.verify(2)
 print('PASS: offline media/text, retained failure and explicit retry without another throw, history takeover, new draft preserved')

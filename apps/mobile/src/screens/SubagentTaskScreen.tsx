@@ -13,6 +13,7 @@ import {
   type SubagentTask,
 } from '@/features/sessions/subagentRun';
 import { useSubagentRun } from '@/features/sessions/useSubagentRun';
+import { useOpenFile } from '@/hooks/screens/useOpenFile';
 import { Screen } from '@/ui/Screen';
 import { AppText } from '@/ui/AppText';
 import { Button } from '@/ui/Button';
@@ -20,14 +21,14 @@ import { FormGroup } from '@/ui/FormGroup';
 import type { createProcessSource } from './ProcessScreen';
 
 export type { SubagentTask };
-export type SubagentTaskParams = SubagentTask & {
-  /** With `entryId`, lets the sheet read every step of a live run. */
+export type SubagentTaskParams = {
+  task: SubagentTask;
+  entryId: string;
   sessionId?: string;
-  entryId?: string;
-  source?: ReturnType<typeof createProcessSource>;
+  source: ReturnType<typeof createProcessSource>;
   onStop?: (task: SubagentTask) => void;
+  onActivityPress: (entryId: string, itemId: string) => void;
 };
-const noSource = { subscribe: () => () => {}, getSnapshot: () => '[]' };
 
 const statusKeys = {
   pending: 'native.chat.subagent.pending',
@@ -48,9 +49,11 @@ const runStatus: Record<string, keyof typeof statusKeys> = {
 
 function View() {
   const { params } = usePageRuntime<SubagentTaskParams>();
-  const source = params.source ?? noSource;
+  const source = params.source;
   const json = useSyncExternalStore(source.subscribe, source.getSnapshot);
-  const task = params.entryId ? liveTask(params, params.entryId, json) : params;
+  const task = params.entryId
+    ? liveTask(params.task, params.entryId, json)
+    : params.task;
   if (task.run)
     return (
       <RunView
@@ -61,6 +64,7 @@ function View() {
             : undefined
         }
         onStop={params.onStop}
+        onActivityPress={params.onActivityPress}
       />
     );
   return <SummaryView task={task} />;
@@ -70,16 +74,25 @@ function RunView({
   task: envelopeTask,
   target,
   onStop,
+  onActivityPress,
 }: {
   task: SubagentTask;
   target?: { sessionId: string; entryId: string };
   onStop?: (task: SubagentTask) => void;
+  onActivityPress: (entryId: string, itemId: string) => void;
 }) {
   const colors = usePalette();
   const task = useSubagentRun(envelopeTask, target);
   const run = task.run!;
   const entriesJSON = JSON.stringify(runEntries(task));
-  const openProcess = useProcessSheet(entriesJSON, () => {});
+  const openFile = useOpenFile(target?.sessionId ?? '');
+  const { openProcess } = useProcessSheet(
+    entriesJSON,
+    (_entryId, itemId) => {
+      if (target) onActivityPress(target.entryId, itemId);
+    },
+    target?.sessionId,
+  );
   const running = run.state === 'running' || run.state === 'pending';
   const statusKey = statusKeys[runStatus[run.state] ?? 'unknown'];
   const actor = task.actor?.trim() || t('native.chat.transcript.subtask');
@@ -127,6 +140,9 @@ function RunView({
           openProcess(nativeEvent.entryId, nativeEvent.processStartId)
         }
         onReconnect={() => {}}
+        onFilePress={({ nativeEvent }) =>
+          void openFile(nativeEvent.path, nativeEvent.line)
+        }
       />
     </RNView>
   );
@@ -218,6 +234,7 @@ const styles = StyleSheet.create({
 
 export const SubagentTaskScreen = definePage<SubagentTaskParams>({
   id: 'subagent-task',
+  panel: true,
   title: t('native.chat.transcript.subtask'),
   Component: View,
   parseRouteParams: () => {

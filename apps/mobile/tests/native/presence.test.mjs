@@ -5,7 +5,7 @@ import {
   createPresence,
   onlineMachineIds,
   PRESENCE_TTL_MS,
-} from '../../modules/lody-kit/data-runtime/presence.ts';
+} from '../../../../packages/cloud-runtime/src/runtime/presence.ts';
 
 const base64 = (bytes) => Buffer.from(bytes).toString('base64');
 const heartbeat = (machineId, updatedAt) => {

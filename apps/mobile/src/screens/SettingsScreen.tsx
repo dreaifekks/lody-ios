@@ -1,89 +1,50 @@
-import { useEffect, useState } from 'react';
-import { AppIconScreen } from './AppIconScreen';
-import { ProjectHistoryScreen } from './ProjectHistoryScreen';
-import { NotificationSettingsScreen } from '@/screens/NotificationSettingsScreen';
-import { QuickRepliesScreen } from './QuickRepliesScreen';
+import { MemorySettingsScreen } from './MemorySettingsScreen';
+import { PublishedSharesScreen } from './PublishedSharesScreen';
+import { AIUsageScreen } from './AIUsageScreen';
+import { AgentRolesScreen } from './AgentRolesScreen';
+import { GitHubSettingsScreen } from './GitHubSettingsScreen';
+import { ProjectVisibilityScreen } from './ProjectVisibilityScreen';
+import { PromptShortcutsScreen } from './PromptShortcutsScreen';
 import { useRouter } from 'expo-router';
-import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
-import { AccountScreen } from './AccountScreen';
-import { ConnectionScreen } from './ConnectionScreen';
-import { ArchivedSessionsScreen } from './ArchivedSessionsScreen';
-import { LicensesScreen } from './LicensesScreen';
-import { RemoteSettingsScreen, settingsTitle } from './RemoteSettingsScreen';
-import { Linking } from 'react-native';
-import Constants from 'expo-constants';
-import {
-  NativeGroupedList,
-  getAppIcon,
-  showAccentColorPicker,
-  addAppActiveListener,
-  type NativeListSection,
-} from '@lody-ios/kit';
+import { NativeGroupedList, type NativeListSection } from '@lody-ios/kit';
 import { useAuth } from '@/cloud/auth/AuthProvider';
-import { useConnection } from '@/cloud/catalog/connection';
-import { connectionService } from '@/cloud/catalog/machineStatus';
-import { accountSubtitle, connectionRow } from '@/features/settings/connection';
-import { useHubLatency } from '@/features/settings/useConnectionStatus';
-import { usePalette } from '@/lib/theme/palette';
-import {
-  useAppearance,
-  accentChoices,
-  isAccentColor,
-} from '@/lib/theme/appearance';
-import { useQueuedMessageBehavior } from '@/features/settings/queued-message-behavior';
-import { useVoiceSettings } from '@/features/settings/useVoiceSettings';
 import { useCatalog } from '@/cloud/catalog/CatalogProvider';
-import { relativeTime } from '@/ui/time';
-import { showToast } from '@/ui/toast';
+import { useConnection } from '@/cloud/catalog/connection';
+import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
+import { t, tp } from '@/lib/i18n';
 import { definePage } from '@/lib/presentation';
-import type { RemoteSetting } from '@/models/settings';
-import { t, tp } from '../lib/i18n/index.ts';
+import { usePalette } from '@/lib/theme/palette';
 import { uiVerify } from '@/lib/uiVerify';
+import { relativeTime } from '@/ui/time';
+import { AboutScreen } from './AboutScreen';
+import { ConnectionScreen } from './ConnectionScreen';
+import { accountSubtitle } from '@/features/settings/connection';
+import { connectionService } from '@/cloud/catalog/machineStatus';
+import { useHubLatency } from '@/features/settings/useConnectionStatus';
+import { AccountScreen } from './AccountScreen';
+import { AppearanceScreen } from './AppearanceScreen';
+import { ArchivedSessionsScreen } from './ArchivedSessionsScreen';
+import { DiagnosticsScreen } from './DiagnosticsScreen';
+import { PreferencesScreen } from './PreferencesScreen';
+import { ProjectHistoryScreen } from './ProjectHistoryScreen';
+import { RemoteSettingsScreen, settingsTitle } from './RemoteSettingsScreen';
+import { WorkspaceEditorScreen } from './WorkspaceEditorScreen';
 
 function View() {
   const auth = useAuth();
   const router = useRouter();
-  const { push, cancel } = usePageRuntime();
+  const { push, present, cancel } = usePageRuntime();
   const colors = usePalette();
-  const { darkBackground, setDarkBackground, accentColor, setAccentColor } =
-    useAppearance();
-  const [appIcon, setCurrentAppIcon] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    const refreshIcon = () => {
-      void getAppIcon()
-        .then((name) => {
-          if (active) setCurrentAppIcon(name);
-        })
-        .catch(() => {
-          if (active) showToast(t('settings.appearance.iconFailed'));
-        });
-    };
-    refreshIcon();
-    const subscription = addAppActiveListener(refreshIcon);
-    return () => {
-      active = false;
-      subscription.remove();
-    };
-  }, []);
-  const { queuedMessageBehavior, setQueuedMessageBehavior } =
-    useQueuedMessageBehavior();
   const connection = useConnection();
-  const { selected } = useCatalog();
-  const voice = useVoiceSettings(auth.account ? selected?.id : undefined);
+  const { selected, refresh } = useCatalog();
+  const workspace = auth.account ? selected : undefined;
+  const onLan = !!auth.account?.lan;
   const hubLatency = useHubLatency(
-    auth.account?.lan ? connectionService.hubLatency : undefined,
+    onLan ? connectionService.hubLatency : undefined,
   );
-  const shape = connectionRow[connection.state];
-  const synced = connection.syncedAt
-    ? relativeTime(new Date(connection.syncedAt).toISOString())
-    : '';
-
-  const presetAccent = accentChoices.find((value) => value === accentColor);
   const sections: NativeListSection[] = [
     {
       id: 'account',
-      header: t('settings.section.account'),
       rows: [
         {
           id: 'account',
@@ -91,7 +52,9 @@ function View() {
           subtitle: auth.account?.lan
             ? accountSubtitle(auth.account.user.email, hubLatency)
             : (auth.account?.user.email ?? t('settings.account.signInHint')),
-          image: auth.account?.user.image ?? 'person.crop.circle',
+          image: onLan
+            ? 'network'
+            : (auth.account?.user.image ?? 'person.crop.circle'),
           action: !!auth.account,
           disclosure: !!auth.account,
           navigates: !!auth.account,
@@ -99,144 +62,31 @@ function View() {
       ],
     },
     {
-      id: 'connection',
-      header: t('settings.section.connection'),
+      id: 'personal',
+      header: t('settings.section.personal'),
       rows: [
         {
           id: 'connection',
-          title: tp('settings.machineCount', connection.machines, {
-            count: connection.machines,
-          }),
-          subtitle: [
-            t(shape.label),
-            synced && t('settings.connection.syncedAt', { time: synced }),
-          ]
-            .filter(Boolean)
-            .join(' · '),
-          image: shape.symbol,
+          title: t('settings.section.connection'),
+          image: 'network',
           action: !!auth.account,
           disclosure: !!auth.account,
           navigates: !!auth.account,
-          imageTint: {
-            live: colors.accent,
-            offline: 'danger',
-            syncing: 'secondary',
-          }[connection.state],
         },
-      ],
-    },
-    {
-      id: 'appearance-section',
-      header: t('settings.appearance.title'),
-      rows: [
+        {
+          id: 'preferences',
+          title: t('settings.preferences.title'),
+          subtitle: t('settings.preferences.subtitle'),
+          image: 'slider.horizontal.3',
+          action: true,
+          disclosure: true,
+          navigates: true,
+        },
         {
           id: 'appearance',
-          title: t('settings.appearance.darkBackground'),
-          value: t(`settings.appearance.${darkBackground}`),
-          image: 'circle.lefthalf.filled',
-          action: true,
-          options: (['soft', 'black'] as const).map((value) => ({
-            id: value,
-            title: t(`settings.appearance.${value}`),
-            selected: value === darkBackground,
-          })),
-        },
-        {
-          id: 'accent-color',
-          title: t('settings.appearance.accent'),
-          value: presetAccent
-            ? t(`settings.appearance.${presetAccent}`)
-            : t('settings.appearance.custom'),
-          image: 'circle.fill',
-          imageTint: colors.accent,
-          action: true,
-          options: [
-            ...accentChoices.map((value) => ({
-              id: value,
-              title: t(`settings.appearance.${value}`),
-              selected: value === accentColor,
-            })),
-            {
-              id: 'custom',
-              title: t('settings.appearance.customPicker'),
-              selected: accentColor.startsWith('#'),
-            },
-          ],
-        },
-        {
-          id: 'app-icon',
-          title: t('settings.appearance.appIcon'),
-          value:
-            appIcon === 'Aqua' ? 'Aqua' : t('settings.appearance.defaultIcon'),
-          accessibilityValue:
-            appIcon === 'Aqua' ? 'Aqua' : t('settings.appearance.defaultIcon'),
-          imageAsset: `AppIconPreview-${appIcon ?? 'default'}`,
-          imageOriginal: true,
-          action: true,
-          disclosure: true,
-          navigates: true,
-        },
-      ],
-    },
-    // Lody Cloud pushes through OneSignal; a LAN through its host.
-    {
-      id: 'notifications-section',
-      header: t('settings.notifications.title'),
-      rows: [
-        {
-          id: 'notifications',
-          title: t('settings.notifications.title'),
-          image: 'bell',
-          action: true,
-          disclosure: true,
-          navigates: true,
-        },
-      ],
-    },
-    {
-      id: 'chat',
-      header: t('settings.section.chat'),
-      footer: t('settings.queuedMessageBehavior.hint'),
-      rows: [
-        {
-          id: 'queued-message-behavior',
-          title: t('settings.queuedMessageBehavior.title'),
-          value: t(`settings.queuedMessageBehavior.${queuedMessageBehavior}`),
-          image: 'arrow.uturn.forward',
-          action: true,
-          options: (['queue', 'guide'] as const).map((value) => ({
-            id: value,
-            title: t(`settings.queuedMessageBehavior.${value}`),
-            selected: value === queuedMessageBehavior,
-          })),
-        },
-        {
-          id: 'quick-replies',
-          title: t('settings.quickReplies.title'),
-          image: 'text.bubble',
-          action: true,
-          disclosure: true,
-          navigates: true,
-        },
-      ],
-    },
-    voice.section(!!auth.account),
-    {
-      id: 'about',
-      header: t('settings.section.about'),
-      rows: [
-        {
-          id: 'about',
-          title: 'Lody for iOS',
-          subtitle: `${Constants.expoConfig?.version ?? '0.0.0'} (${
-            Constants.expoConfig?.ios?.buildNumber ?? '1'
-          })`,
-          image: 'info.circle',
-        },
-        {
-          id: 'licenses',
-          title: t('settings.licenses.title'),
-          image: 'doc.text',
+          title: t('settings.appearance.title'),
+          subtitle: t('settings.appearance.subtitle'),
+          image: 'paintpalette',
           action: true,
           disclosure: true,
           navigates: true,
@@ -245,25 +95,145 @@ function View() {
     },
   ];
 
-  if (auth.account)
-    sections.splice(1, 0, {
-      id: 'remote',
-      header: t('settings.section.workspace'),
-      rows: (['machine', 'agent', 'mcp'] as const).map((kind) => ({
-        id: `remote-${kind}`,
-        title: t(`settings.remote.${kind}`),
-        image: {
-          machine: 'desktopcomputer',
-          agent: 'sparkles',
-          mcp: 'puzzlepiece.extension',
-        }[kind],
+  if (auth.account) {
+    const rows: NativeListSection['rows'] = [];
+    let footer: string | undefined;
+    if (workspace) {
+      if (!onLan) {
+        rows.push({
+          id: 'workspace-general',
+          title: t('settings.workspace.general'),
+          subtitle: t('settings.workspace.generalSubtitle'),
+          image: 'building.2',
+          action: true,
+          disclosure: true,
+        });
+      }
+      for (const kind of ['machine', 'agent', 'mcp'] as const) {
+        rows.push({
+          id: `remote-${kind}`,
+          title: t(`settings.remote.${kind}`),
+          image: {
+            machine: 'desktopcomputer',
+            agent: 'sparkles',
+            mcp: 'puzzlepiece.extension',
+          }[kind],
+          action: true,
+          disclosure: true,
+          navigates: true,
+        });
+        if (kind === 'agent')
+          rows.push({
+            id: 'agent-roles',
+            title: t('settings.roles.title'),
+            image: 'person.crop.square',
+            action: true,
+            disclosure: true,
+            navigates: true,
+          });
+      }
+      rows.push({
+        id: 'memory-settings',
+        title: t('settings.memory.title'),
+        image: 'brain',
         action: true,
         disclosure: true,
         navigates: true,
-      })),
+      });
+      if (!onLan) {
+        rows.push({
+          id: 'prompt-shortcuts',
+          title: t('settings.shortcuts.title'),
+          image: 'doc.text',
+          action: true,
+          disclosure: true,
+          navigates: true,
+        });
+      }
+      if (!onLan) {
+        rows.push({
+          id: 'project-visibility',
+          title: t('settings.projects.title'),
+          image: 'folder',
+          action: true,
+          disclosure: true,
+          navigates: true,
+        });
+      }
+      if (!onLan) {
+        rows.push({
+          id: 'github-settings',
+          title: t('settings.github.title'),
+          imageAsset: 'lody-mark-github',
+          action: true,
+          disclosure: true,
+          navigates: true,
+        });
+      }
+      if (!onLan) {
+        rows.push({
+          id: 'ai-usage',
+          title: t('settings.aiUsage.title'),
+          image: 'chart.bar.xaxis',
+          action: true,
+          disclosure: true,
+          navigates: true,
+        });
+      }
+      if (!onLan) {
+        rows.push({
+          id: 'published-shares',
+          title: t('settings.shares.title'),
+          image: 'link',
+          action: true,
+          disclosure: true,
+          navigates: true,
+        });
+      }
+      footer = [
+        t(`settings.connection.${connection.state}`),
+        tp('settings.machineCount', connection.machines, {
+          count: connection.machines,
+        }),
+        connection.syncedAt
+          ? t('settings.connection.syncedAt', {
+              time: relativeTime(new Date(connection.syncedAt).toISOString()),
+            })
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      if (connection.state === 'offline') {
+        rows.push({
+          id: 'resync',
+          title: t('settings.connection.resync'),
+          image: 'arrow.clockwise',
+          action: true,
+        });
+        if (connection.syncedAt)
+          footer += `\n${t('settings.connection.cached')}`;
+      }
+    } else {
+      rows.push({
+        id: 'workspace-unavailable',
+        title: t('settings.workspace.unavailable'),
+        subtitle: t('settings.workspace.unavailableHint'),
+        wrapSubtitle: true,
+        image: 'building.2',
+      });
+    }
+    sections.push({
+      id: 'remote',
+      header: workspace
+        ? t('settings.section.workspaceNamed', { name: workspace.name })
+        : t('settings.section.workspace'),
+      footer,
+      rows,
     });
-  if (auth.account)
-    sections.splice(1, 0, {
+  }
+
+  if (workspace) {
+    sections.push({
       id: 'sessions',
       header: t('settings.section.sessions'),
       rows: [
@@ -285,8 +255,33 @@ function View() {
         },
       ],
     });
+  }
 
-  if (__DEV__ || uiVerify)
+  sections.push({
+    id: 'other',
+    header: t('settings.section.additional'),
+    rows: [
+      {
+        id: 'about',
+        title: t('settings.section.about'),
+        subtitle: t('settings.about.subtitle'),
+        image: 'info.circle',
+        action: true,
+        disclosure: true,
+        navigates: true,
+      },
+      {
+        id: 'diagnostics',
+        title: t('diagnostics.title'),
+        image: 'waveform.path.ecg',
+        action: true,
+        disclosure: true,
+        navigates: true,
+      },
+    ],
+  });
+
+  if (__DEV__ || uiVerify) {
     sections.push({
       id: 'developer',
       header: t('settings.section.developer'),
@@ -302,6 +297,7 @@ function View() {
         },
       ],
     });
+  }
 
   return (
     <NativeGroupedList
@@ -309,57 +305,53 @@ function View() {
       accent={colors.accent}
       sections={sections}
       placeholder=""
-      onRowAction={({ nativeEvent: { id, actionId } }) => {
-        if (id === 'accent-color' && isAccentColor(actionId))
-          setAccentColor(actionId);
-        if (id === 'accent-color' && actionId === 'custom')
-          void showAccentColorPicker(t('settings.appearance.accent')).catch(
-            () => showToast(t('settings.appearance.colorFailed')),
+      onRowPress={({ nativeEvent: { id } }) => {
+        if (id === 'workspace-general' && workspace)
+          void present(
+            WorkspaceEditorScreen,
+            {
+              workspaceId: workspace.id,
+              name: workspace.name,
+              image: workspace.image,
+              color: colors.accent,
+            },
+            { title: t('settings.workspace.general') },
           );
-        if (
-          id === 'appearance' &&
-          (actionId === 'soft' || actionId === 'black')
-        )
-          setDarkBackground(actionId);
-        if (
-          id === 'queued-message-behavior' &&
-          (actionId === 'queue' || actionId === 'guide')
-        )
-          setQueuedMessageBehavior(actionId);
-        if (id === 'voice-agent') voice.choose(actionId);
-      }}
-      onRowToggle={({ nativeEvent: { id, value } }) => {
-        if (id === 'voice-dictation') voice.setEnabled(value);
-      }}
-      onRowPress={({ nativeEvent }) => {
-        if (nativeEvent.id.startsWith('remote-')) {
-          const kind = nativeEvent.id.slice(7) as RemoteSetting['kind'];
-          void push(
-            RemoteSettingsScreen,
-            { kind },
-            { title: settingsTitle(kind) },
-          );
+        for (const kind of ['machine', 'agent', 'mcp'] as const) {
+          if (id === `remote-${kind}` && workspace)
+            void push(
+              RemoteSettingsScreen,
+              { kind },
+              { title: settingsTitle(kind) },
+            );
         }
-        if (nativeEvent.id === 'app-icon') void push(AppIconScreen);
-        if (nativeEvent.id === 'notifications')
-          void push(NotificationSettingsScreen, {});
-        if (nativeEvent.id === 'quick-replies') void push(QuickRepliesScreen);
-        if (nativeEvent.id === 'project-history')
+        if (id === 'memory-settings' && workspace)
+          void push(MemorySettingsScreen);
+        if (id === 'published-shares' && workspace)
+          void push(PublishedSharesScreen);
+        if (id === 'ai-usage' && workspace) void push(AIUsageScreen);
+        if (id === 'agent-roles' && workspace) void push(AgentRolesScreen);
+        if (id === 'github-settings' && workspace)
+          void push(GitHubSettingsScreen);
+        if (id === 'project-visibility' && workspace)
+          void push(ProjectVisibilityScreen);
+        if (id === 'prompt-shortcuts' && workspace)
+          void push(PromptShortcutsScreen);
+        if (id === 'preferences') void push(PreferencesScreen);
+        if (id === 'appearance') void push(AppearanceScreen);
+        if (id === 'about') void push(AboutScreen);
+        if (id === 'project-history' && workspace)
           void push(ProjectHistoryScreen);
-        if (nativeEvent.id === 'archived') void push(ArchivedSessionsScreen);
-        if (nativeEvent.id === 'licenses') void push(LicensesScreen);
-        if (nativeEvent.id === 'debug-open') {
+        if (id === 'archived' && workspace) void push(ArchivedSessionsScreen);
+        if (id === 'diagnostics') void push(DiagnosticsScreen);
+        if (id === 'account' && auth.account) void push(AccountScreen);
+        if (id === 'connection' && auth.account) void push(ConnectionScreen);
+        if (id === 'resync' && workspace && connection.state === 'offline')
+          refresh();
+        if (id === 'debug-open') {
           cancel();
           router.push('/debug');
         }
-        if (nativeEvent.id === 'account' && auth.account)
-          void push(AccountScreen);
-        if (nativeEvent.id === 'connection' && auth.account)
-          void push(ConnectionScreen);
-        if (nativeEvent.id === 'credit-flowdown')
-          void Linking.openURL('https://github.com/Lakr233/FlowDown').catch(
-            () => showToast(t('settings.toast.openProjectLinkFailed')),
-          );
       }}
     />
   );

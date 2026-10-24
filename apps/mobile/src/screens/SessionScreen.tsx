@@ -2,9 +2,11 @@ import { useMessageDetailsSheet } from '@/hooks/screens/useMessageDetailsSheet';
 import { openMessageShare } from '@/screens/MessageShareScreen';
 import { EditMessageScreen } from './EditMessageScreen';
 import { useEditableMessage } from '@/features/sessions/useEditableMessage';
+import { useProposedPlan } from '@/features/sessions/useProposedPlan';
+import { planExecutionChoice } from '@/features/sessions/proposedPlan';
 import { useAgentErrorRetry } from '@/features/sessions/useAgentErrorRetry';
 import { openAgentError } from '@/hooks/screens/openAgentError';
-import { openSubagentTask } from '@/hooks/screens/openSubagentTask';
+import { findSessionItem } from '@/features/sessions/subagentHistory';
 import {
   fastModeFor,
   withFastMode,
@@ -17,7 +19,7 @@ import { useFocusEffect } from 'expo-router';
 import { usePendingSends } from '@/cloud/send/pendingSends';
 import { useConnection } from '@/cloud/catalog/connection';
 import { useMachinePresence } from '@/cloud/catalog/machines';
-import { machineState } from '@/models/machines';
+import { machineState } from '@lody/cloud-runtime/models/machines';
 import { useSessionControl } from '@/features/sessions/useSessionControl';
 import { useSessionSend } from '@/features/sessions/useSessionSend';
 import { useQueuedMessageBehavior } from '@/features/settings/queued-message-behavior';
@@ -58,8 +60,12 @@ import { messageLinkAction } from '@/features/sessions/messageLink';
 import { requestOpenSession } from '@/features/sessions/sessionNav';
 import { sessionDebugText } from '@/features/sessions/sessionDebug';
 import { useAuth } from '@/cloud/auth/AuthProvider';
-import type { Session } from '@/models/catalog';
-import type { Capability, CreationOptions } from '@/models/send';
+import type { Session } from '@lody/cloud-runtime/models/catalog';
+import type {
+  Capability,
+  CreationOptions,
+  ModelChoice,
+} from '@lody/cloud-runtime/models/send';
 import { effortsFor } from '@/cloud/send/capability';
 
 import { useSessionRuntime } from '@/features/sessions/useSessionRuntime';
@@ -82,16 +88,12 @@ import { TerminalScreen } from '@/screens/TerminalScreen';
 import { DiffWebViewWarmer } from '@/features/diff/DiffWebViewWarmer';
 import { PermissionScreen } from '@/screens/PermissionScreen';
 import {
-  createPermissionGate,
   firstPermissionTarget,
+  permissionChannel,
   type PermissionTarget,
-  type PermissionTargetSource,
-  type PermissionTargetState,
 } from '@/features/sessions/permissionTarget';
 import { useOpenFile } from '@/hooks/screens/useOpenFile';
 import { useProcessSheet } from '@/hooks/screens/useProcessSheet';
-import { createProcessSource } from '@/screens/ProcessScreen';
-import type { ModelChoice } from '@/models/send';
 import { t } from '../lib/i18n/index.ts';
 import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
 import { useOpenPullRequest } from '@/hooks/screens/useOpenPullRequest';
@@ -307,7 +309,7 @@ function View() {
       session.projectId.startsWith('github:'));
   const onTurnChangesPress = (entryId: string, path: string) => {
     // Displayed native rows can lag the current JS replica; turnDiff validates the target.
-    void present(
+    void runtime.present(
       FileDiffScreen,
       { sessionId: session.id, entryId, path },
       { title: basename(path) },
@@ -427,18 +429,49 @@ function View() {
       configOptionValues: activeChoice.configOptionValues,
     },
   });
-  const gate = useRef(createPermissionGate()).current;
-  const listeners = useRef(new Set<(state: PermissionTargetState) => void>());
-  const targetState = useRef<PermissionTargetState>({ ready: false });
-  const permissionSource = useCallback<PermissionTargetSource>((onState) => {
-    listeners.current.add(onState);
-    onState(targetState.current);
-    return () => {
-      listeners.current.delete(onState);
-    };
-  }, []);
+  const executionChoice = planExecutionChoice(activeChoice, capability);
+  const proposedPlan = useProposedPlan({
+    sessionId: session.id,
+    entries: snapshot.entries,
+    enabled:
+      currentSession.agentType === 'codex' &&
+      currentSession.status === 'idle' &&
+      snapshot.status === 'live' &&
+      connection.state === 'live' &&
+      send.canSend &&
+      !send.sending &&
+      !send.awaitingReply &&
+      !control.running &&
+      !control.controlling &&
+      !errorRetry.pending &&
+      !overflow &&
+      !deleting &&
+      !quotaLocked &&
+      !currentSession.archived &&
+      !!account?.user.id,
+    payload: {
+      machineId: currentSession.machineId,
+      userId: account?.user.id,
+      cliType: currentSession.cliType,
+      agentType: currentSession.agentType,
+      resume: currentSession.resume,
+      modelId: capability
+        ? (executionChoice.modelId ?? null)
+        : executionChoice.modelId,
+      reasoningEffort: capability
+        ? (executionChoice.effort ?? null)
+        : executionChoice.effort,
+      reasoningEffortConfigId: capability?.reasoningEffortConfigId,
+      modeId: executionChoice.modeId,
+      configOptionValues: executionChoice.configOptionValues,
+    },
+  });
+  const permissions = permissionChannel(session.id);
+  const { gate } = permissions;
+  useEffect(() => permissions.retain(), [permissions]);
 
   const askPermission = async (target?: PermissionTarget) => {
+    const release = permissions.retain();
     gate.opened();
     try {
       gate.settled(
@@ -448,7 +481,7 @@ function View() {
             sessionId: session.id,
             generation: cursor.current.generation,
             target,
-            source: permissionSource,
+            source: permissions.source,
           },
           target?.kind === 'ask_user_question'
             ? { title: t('question.title') }
@@ -457,35 +490,29 @@ function View() {
       );
     } catch {
       gate.settled({ status: 'cancelled' });
+    } finally {
+      release();
     }
   };
 
   // Opening on entry beats waiting for the replica: the sheet resolves its own
-  // target through `permissionSource` once the transcript arrives.
+  // target through the channel source once the transcript arrives.
   useEffect(() => {
-    if (session.awaitingUserSince != null) void askPermission();
+    if (session.awaitingUserSince != null && gate.canPrompt())
+      void askPermission();
   }, []);
 
   useEffect(() => {
     const ready = snapshot.status === 'live';
     const target = ready ? firstPermissionTarget(snapshot.entries) : undefined;
-    targetState.current = { ready, target };
-    for (const notify of listeners.current) notify(targetState.current);
+    permissions.publish({ ready, target });
     if (target && gate.shouldOpen(target)) void askPermission(target);
   }, [snapshot]);
 
   const onActivityPress = (entryId: string, itemId: string) => {
     const entry = snapshot.entries.find((e) => e.id === entryId);
-    const item = entry?.items.find((i) => i.itemId === itemId);
-    if (
-      openAgentError(item) ||
-      openSubagentTask(item, {
-        sessionId: session.id,
-        entryId,
-        source: taskSource,
-      })
-    )
-      return;
+    const item = findSessionItem(snapshot.entries, entryId, itemId);
+    if (openAgentError(item) || openTask(entryId, itemId)) return;
     if (snapshot.status !== 'live') {
       Alert.alert(
         t('session.alert.syncing.title'),
@@ -493,13 +520,15 @@ function View() {
       );
       return;
     }
-    if (!entry || !item) return;
-    const target = firstPermissionTarget([{ ...entry, items: [item] }]);
+    if (!entry) return;
+    const target = item
+      ? firstPermissionTarget([{ ...entry, items: [item] }])
+      : undefined;
     if (target) {
       void askPermission(target);
       return;
     }
-    void present(ItemDetailScreen, {
+    void runtime.present(ItemDetailScreen, {
       sessionId: session.id,
       entryId,
       itemIds: [itemId],
@@ -545,9 +574,11 @@ function View() {
     }
   };
   const openMessageDetails = useMessageDetailsSheet(entriesJSON);
-  const openProcess = useProcessSheet(entriesJSON, onActivityPress, session.id);
-  const taskSource = useMemo(() => createProcessSource(entriesJSON), []);
-  useLayoutEffect(() => taskSource.update(entriesJSON), [entriesJSON]);
+  const { openProcess, openTask } = useProcessSheet(
+    entriesJSON,
+    onActivityPress,
+    session.id,
+  );
   let notice = '';
   if (overflow) notice = t('chat.notice.syncStopped');
   const mentions = useComposerMentions(
@@ -590,7 +621,12 @@ function View() {
   const composerJSON = JSON.stringify({
     preview: context.chip,
     editable: !currentSession.archived && !deleting && !quotaLocked,
-    canSend: send.canSend && !errorRetry.pending && !deleting && !quotaLocked,
+    canSend:
+      send.canSend &&
+      !proposedPlan.pending &&
+      !errorRetry.pending &&
+      !deleting &&
+      !quotaLocked,
     sending: send.sending,
     running: control.running || send.awaitingReply,
     canStop: control.canStop,
@@ -638,14 +674,14 @@ function View() {
   });
   const openProjectFiles = useCallback(() => {
     if (!browsable || !account || !selected) return;
-    void present(FilesScreen, {
+    void runtime.present(FilesScreen, {
       workspaceId: selected.id,
       sessionId: session.id,
       userId: account.user.id,
       path: '',
       title: project?.name ?? t('session.action.projectFiles'),
     });
-  }, [account, browsable, project?.name, selected, session.id]);
+  }, [account, browsable, project?.name, runtime, selected, session.id]);
   const titleMenuJSON = JSON.stringify([
     ...(browsable && account
       ? [
@@ -756,7 +792,9 @@ function View() {
       ...workspaceMenuActions({
         openChanges: reviewable
           ? () =>
-              void present(WorkspaceChangesScreen, { sessionId: session.id })
+              void runtime.present(WorkspaceChangesScreen, {
+                sessionId: session.id,
+              })
           : undefined,
         simulator,
       }),
@@ -926,6 +964,15 @@ function View() {
           sessionId: session.id,
         })}
         entriesJSON={entriesJSON}
+        planDecisionJSON={proposedPlan.stateJSON}
+        onPlanDecision={({ nativeEvent }) =>
+          void proposedPlan.decide(
+            nativeEvent.entryId,
+            nativeEvent.itemId,
+            nativeEvent.action,
+            nativeEvent.id,
+          )
+        }
         errorRetryJSON={errorRetry.stateJSON}
         onErrorRetry={({ nativeEvent }) =>
           void errorRetry.retry(
@@ -959,6 +1006,7 @@ function View() {
         onSteer={({ nativeEvent }) => control.steer(nativeEvent.id)}
         onSend={({ nativeEvent }) =>
           !deleting &&
+          !proposedPlan.pending &&
           send.submit({
             ...nativeEvent,
             phase: 'waiting',

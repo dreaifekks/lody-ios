@@ -377,7 +377,7 @@ test('the envelope carries a run as its latest step and the sheet reads the rest
   assert.equal(task.run.itemCount, 2);
   assert.deepEqual(
     task.run.items.map((item) => item.itemId),
-    ['child-edit-1'],
+    [JSON.stringify([task.itemId, 'child-edit-1'])],
   );
   assert.ok(
     JSON.stringify(envelope).length < 8000,
@@ -392,8 +392,8 @@ test('the envelope carries a run as its latest step and the sheet reads the rest
   assert.deepEqual(
     run.items.map((item) => [item.itemId, item.status, item.hasDetail]),
     [
-      ['child-read-1', 'completed', true],
-      ['child-edit-1', 'in_progress', true],
+      [JSON.stringify([task.itemId, 'child-read-1']), 'completed', true],
+      [JSON.stringify([task.itemId, 'child-edit-1']), 'in_progress', true],
     ],
   );
   assert.deepEqual(

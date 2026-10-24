@@ -302,6 +302,32 @@ assert(Set(operationReplyRows.map(\.id)).count == operationReplyRows.count,
   "A Lody Operation reply must not repeat the previous user turn's row identities")
 assert(operationReplyRows.first { $0.entryID == "assistant:operation-completion:s:op" && $0.kind == "duration" }?
   .workDurationMs == 1_000, "An Operation reply is timed from its completion turn")
+let orphanReplyJSON = """
+[{"id":"u1","role":"user","status":"completed","finished":true,"startedAt":1000,"items":[]},
+{"id":"a1","role":"assistant","userTurnId":"u1","status":"completed","finished":true,
+"startedAt":2000,"endedAt":4000,"items":[]},
+{"id":"a2","role":"assistant","userTurnId":"u2","status":"running","finished":false,
+"startedAt":6000,"items":[]}]
+"""
+var causalEntries = try JSONDecoder().decode([ChatEntry].self, from: Data(orphanReplyJSON.utf8))
+let orphanRows = ChatTranscript(entries: causalEntries).rows(now: 9000)
+assert(Set(orphanRows.map(\.id)).count == orphanRows.count,
+  "A reply arriving before its input must not make the conversation unrenderable")
+assert(orphanRows.last?.id == "u2:duration" && orphanRows.last?.workDurationMs == 3000,
+  "An orphan reply uses its own clock, never an unrelated user's start")
+let causalUserJSON = """
+{"id":"u2","role":"user","status":"completed","finished":true,"startedAt":5000,"items":[]}
+"""
+causalEntries.append(try JSONDecoder().decode(ChatEntry.self, from: Data(causalUserJSON.utf8)))
+let lateUserRows = ChatTranscript(entries: causalEntries).rows(now: 9000)
+assert(lateUserRows.first { $0.entryID == "a2" }?.workDurationMs == 4000,
+  "A causal user arriving after its reply supplies the correct submission clock")
+causalEntries.swapAt(2, 3)
+let orderedRows = ChatTranscript(entries: causalEntries).rows(now: 9000, turnStartedAt: ["u2": 4500])
+assert(Set(orderedRows.map(\.id)).count == orderedRows.count)
+assert(orderedRows.last?.id == orphanRows.last?.id && orderedRows.last?.workDurationMs == 4500,
+  "Causal reordering preserves the pending-send identity and local clock")
+print("Chat causal duration: orphan reply, late input and pending-send takeover passed")
 
 let finishedDurationJSON = """
 [{"id":"timed-finished","role":"assistant","status":"completed","finished":true,
@@ -768,6 +794,12 @@ let pendingRows = localPending.rows(entries: [])
 precondition(pendingRows.map(\.kind) == ["delivery", "attachments", "user"],
   "Delivery belongs above text and attachments")
 precondition(pendingRows.first?.text == localPending.status)
+let blankStatus = try! JSONDecoder().decode(ChatPendingSend.self, from: Data(#"{"id":"blank-status","text":"hello","attachments":[],"status":""}"#.utf8))
+precondition(
+  blankStatus.rows(entries: []).contains {
+    $0.kind == "delivery" && $0.text == LodyStrings.text("send.status.awaitingConnection")
+  },
+  "An empty pending status must still show the awaiting-connection line")
 precondition(!ChatWorkDuration.needsTimer(pendingRows),
   "An unconfirmed send must not show a working duration")
 precondition(ChatWorkDuration.needsTimer(liveDurationRows))
@@ -794,6 +826,18 @@ precondition(acceptedRows.first?.running == false,
   "An accepted send must stop upload indicators before history arrives")
 precondition(acceptedRows.last?.kind == "duration" && acceptedRows.last?.text != LodyStrings.text("native.chat.transcript.status.confirming"),
   "An accepted send must show working duration before history arrives")
+let causalPendingJSON = """
+{"id":"u2","text":"Second request","attachments":[],"status":"Confirming","phase":"accepted"}
+"""
+let causalPending = try JSONDecoder().decode(ChatPendingSend.self, from: Data(causalPendingJSON.utf8))
+let orphanEntries = try JSONDecoder().decode([ChatEntry].self, from: Data(orphanReplyJSON.utf8))
+let takeoverRows = ChatTranscript(entries: orphanEntries).rows(now: 9000) + causalPending.rows(entries: orphanEntries)
+assert(Set(takeoverRows.map(\.id)).count == takeoverRows.count,
+  "An orphan reply takes over its local pending timer without requiring the user row first")
+var unrelatedReply = orphanEntries.last!
+unrelatedReply.userTurnId = "another-user"
+assert(causalPending.rows(entries: [causalEntries[2], unrelatedReply]).contains { $0.kind == "duration" },
+  "Another turn's explicit reply must not acknowledge this pending send")
 precondition(pendingRows.first(where: { $0.kind == "attachments" })?.running == true && failedRows.first?.running == false,
   "Loading belongs to attachment tiles and must stop on failure")
 precondition(failedRows.first?.attachments == pendingRows.first(where: { $0.kind == "attachments" })?.attachments && failedRows.last?.actionable == true,
@@ -971,6 +1015,13 @@ transcript.entries[0].finished = true
 assert(transcript.rows().filter { $0.kind == "subagent_task" }.map(\.itemID) == ["explore", "done"])
 print("Chat: subagent task cards stay in the main list around the process and skip housekeeping")
 
+transcript.entries = try JSONDecoder().decode([ChatEntry].self, from: Data(#"[{"id":"child","role":"assistant","status":"completed","finished":true,"items":[{"itemId":"header","type":"text","text":"Explore"},{"itemId":"thought","type":"thought","text":"Check callers"},{"itemId":"read","type":"tool_call","kind":"read","title":"Read composer","hasDetail":true},{"itemId":"answer","type":"text","text":"Found the chip row"}]}]"#.utf8))
+let childRows = transcript.rows(processEntryID: "child", processStartID: "__subagent__")
+assert(childRows.map(\.itemID) == ["header", "thought", "read", "answer"])
+assert(childRows.first { $0.itemID == "read" }?.actionable == true)
+assert(childRows.last?.text == "Found the chip row")
+print("Chat: subtask process retains the task header, thinking, tool navigation and final reply")
+
 let screen = ChatImagePreviewGeometry.Size(width: 400, height: 800)
 assert(
   ChatImagePreviewGeometry.fitContain(ChatImagePreviewGeometry.Size(width: 1600, height: 900), in: screen)
@@ -1078,3 +1129,21 @@ assert(userAlbum.map(\.id) == [
   "turn:attachment:ui-verify-image-2",
 ])
 print("Image gallery: list order, skip files, attachment ids, and lookup passed")
+
+let proposedJSON = ##"[{"id":"proposed","role":"assistant","status":"completed","finished":true,"items":[{"itemId":"old","type":"proposed_plan","markdown":"Earlier body","status":"completed","isLatest":false},{"itemId":"doc","type":"proposed_plan","markdown":"# Full document","status":"delta","isLatest":true},{"itemId":"approval","type":"tool_call","kind":"switch_mode","permission":{"pending":true,"requestId":"request"}},{"itemId":"cleared","type":"proposed_plan","markdown":"Removed","status":"cleared"},{"itemId":"blank","type":"proposed_plan","markdown":"  ","status":"delta"}]}]"##
+let proposedEntries = try JSONDecoder().decode([ChatEntry].self, from: Data(proposedJSON.utf8))
+let proposedTranscript = ChatTranscript(entries: proposedEntries)
+let proposedRows = proposedTranscript.rows().filter { $0.kind == "proposed_plan" }
+assert(proposedRows.map(\.itemID) == ["old", "doc"])
+assert(proposedRows[0].planPermissionItemID.isEmpty && !proposedRows[0].planIsLatest)
+assert(proposedRows[1].text == "# Full document" && proposedRows[1].streaming)
+assert(proposedRows[1].planPermissionItemID == "approval")
+assert(!proposedTranscript.rows(processEntryID: "proposed").contains { $0.kind == "proposed_plan" })
+var executingPlan = proposedEntries[0]
+executingPlan.executionId = "execution"
+executingPlan.executionFinished = true
+let answerJSON = #"{"itemId":"answer","type":"text","text":"Done"}"#
+executingPlan.items.append(try JSONDecoder().decode(ChatItem.self, from: Data(answerJSON.utf8)))
+let executionTranscript = ChatTranscript(entries: [executingPlan])
+assert(executionTranscript.rows().filter { $0.kind == "proposed_plan" }.map(\.itemID) == ["old", "doc"])
+assert(!executionTranscript.rows(processEntryID: "proposed", processStartID: "__execution__").contains { $0.kind == "proposed_plan" })

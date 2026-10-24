@@ -1,3 +1,13 @@
+import { AIUsagePreviewScreen } from './AIUsagePreviewScreen';
+import {
+  PublishedSharesPreviewScreen,
+  publishedShareStatePages,
+} from './PublishedSharesPreviewScreen';
+import { GitHubSettingsPreviewScreen } from './GitHubSettingsPreviewScreen';
+import { ProjectVisibilityPreviewScreen } from './ProjectVisibilityPreviewScreen';
+import { PromptShortcutsPreviewScreen } from './PromptShortcutsPreviewScreen';
+import { ProposedPlanPreviewScreen } from './ProposedPlanPreviewScreen';
+import { MermaidPreviewScreen } from './MermaidPreviewScreen';
 import { AppIconFailurePreviewScreen } from './AppIconFailurePreviewScreen';
 import { ConnectionPreviewScreen } from './ConnectionPreviewScreen';
 import { MessageSharePreviewScreen } from './MessageSharePreviewScreen';
@@ -16,9 +26,15 @@ import { openOutboxPreview } from './OutboxPreviewScreen';
 import { BackgroundPreviewScreen } from './BackgroundPreviewScreen';
 import { pushStatus, verifyPushSubscription } from '@lody-ios/kit';
 import { NotificationPreviewScreen } from './NotificationPreviewScreen';
+import { DiagnosticsPreviewScreen } from './DiagnosticsPreviewScreen';
 import { LiveActivityPreviewScreen } from './LiveActivityPreviewScreen';
 import { ReplyHapticsPreviewScreen } from './ReplyHapticsPreviewScreen';
 import { uiVerify } from './uiVerify';
+import {
+  openSettingsBaseline,
+  settingsBaselineScenarios,
+  switchSettingsBaselineAccount,
+} from './settingsBaseline';
 import {
   openCreateLanBranch,
   openCreateParity,
@@ -43,15 +59,20 @@ import { SessionTreePreviewScreen } from './SessionTreePreviewScreen';
 import { SubagentsPreviewScreen } from './SubagentsPreviewScreen';
 import { InboxPreviewScreen } from './InboxPreviewScreen';
 import { SettingsPreviewScreen } from './SettingsPreviewScreen';
+import { McpSettingsPreviewScreen } from './McpSettingsPreviewScreen';
+import {
+  MemoryPreviewScreen,
+  memoryStatePages,
+  MemoryStatesPreviewScreen,
+} from './MemoryPreviewScreen';
+import { AgentRolesPreviewScreen } from './AgentRolesPreviewScreen';
+import { MachineSettingsPreviewScreen } from './MachineSettingsPreviewScreen';
+import { SettingsFormsPreviewScreen } from './SettingsFormsPreviewScreen';
 import { SettingsScreen } from '../SettingsScreen';
+import { PreferencesScreen } from '../PreferencesScreen';
 import { QuickRepliesPreviewScreen } from './QuickRepliesPreviewScreen';
 import { OnboardingPreviewScreen } from './OnboardingPreviewScreen';
-import {
-  useLocalSearchParams,
-  useNavigation,
-  useRouter,
-  useTheme,
-} from 'expo-router';
+import { useLocalSearchParams, useRouter, useTheme } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Text, View as RNView } from 'react-native';
 import {
@@ -67,7 +88,7 @@ import {
 } from '@lody-ios/kit';
 import { EnvironmentScreen } from '@/screens/debug/EnvironmentScreen';
 import { useCatalog } from '@/cloud/catalog/CatalogProvider';
-import type { Session } from '@/models/catalog';
+import type { Session } from '@lody/cloud-runtime/models/catalog';
 import { latestSession, probeSimulatorList } from './simulatorProbe';
 import {
   definePage,
@@ -84,7 +105,6 @@ function openRow(id: string, title: string, image: string): NativeListRow {
 
 function View() {
   const router = useRouter();
-  const navigation = useNavigation();
   const { verifyCase, request } = useLocalSearchParams<{
     verifyCase?: string;
     request?: string;
@@ -92,15 +112,11 @@ function View() {
   const openedRequest = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!uiVerify) return;
-    globalThis.__lodyUiVerifyReset = () =>
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'debug' as never, key: `verify-${Date.now()}` }],
-      });
+    globalThis.__lodyUiVerifyReset = () => router.dismissTo('/debug');
     return () => {
       delete globalThis.__lodyUiVerifyReset;
     };
-  }, [navigation]);
+  }, [router]);
   const colors = usePalette();
   const { catalog, selected } = useCatalog();
   const [runtime, setRuntime] = useState<{
@@ -177,6 +193,11 @@ function View() {
         openRow('permission-preview', '权限验收', 'hand.raised'),
         openRow('file-preview', '文件预览验收', 'doc'),
         openRow('terminal-preview', 'LAN 终端验收', 'apple.terminal'),
+        openRow(
+          'mermaid-preview',
+          'Mermaid 图表验收',
+          'point.3.connected.trianglepath.dotted',
+        ),
         openRow('onboarding-preview', '登录引导验收', 'hand.wave'),
         {
           id: 'community-notice',
@@ -191,6 +212,23 @@ function View() {
         ),
         openRow('settings-preview', '远程设置验收', 'gear'),
         openRow('connection-preview', '连接状态验收', 'network'),
+        openRow('mcp-settings-preview', 'MCP 设置验收', 'server.rack'),
+        openRow('memory-preview', 'Memory acceptance', 'brain'),
+        openRow(
+          'published-shares-preview',
+          'Published shares acceptance',
+          'link',
+        ),
+        openRow('memory-states-preview', 'Memory states', 'brain'),
+        openRow('agent-roles-preview', 'Agent 角色验收', 'person.crop.square'),
+        openRow('machine-settings-preview', '机器设置验收', 'desktopcomputer'),
+        openRow(
+          'settings-forms-preview',
+          '设置表单背景验收',
+          'rectangle.inset.filled',
+        ),
+        openRow('preferences-preview', '偏好设置验收', 'slider.horizontal.3'),
+        openRow('diagnostics-preview', 'Diagnostics', 'waveform.path.ecg'),
         openRow('app-icon-failure-preview', 'Icon failure', 'app.dashed'),
         openRow('appearance-preview', '外观验收', 'circle.lefthalf.filled'),
         openRow(
@@ -235,6 +273,7 @@ function View() {
         openRow('mention-chat', '@ 引用交互 · 聊天', 'at'),
         openRow('mention-sheet', '@ 引用交互 · 新会话', 'at'),
         openRow('composer-preview', '输入框验收', 'square.and.pencil'),
+        openRow('proposed-plan-preview', 'Proposed plan', 'doc.text'),
         openRow('edit-message-preview', 'Message editing', 'pencil'),
         openRow('scroll-edge-pages', '分页表单滚动边缘', 'rectangle.split.2x1'),
         openRow('scroll-edge-diff', 'Diff 滚动边缘', 'doc.text'),
@@ -263,6 +302,13 @@ function View() {
         openRow('session-share-preview', 'Conversation sharing', 'link'),
         openRow('steer-preview', '连续引导验收', 'arrow.triangle.branch'),
         openRow('send-guide', '引导发送验收', 'arrow.uturn.forward'),
+        openRow(
+          'send-scroll-guide',
+          '长上下文 · 直接插话',
+          'arrow.uturn.forward',
+        ),
+        openRow('send-scroll-queue', '长上下文 · 队列插话', 'list.bullet'),
+        openRow('send-scroll-normal', '长上下文 · 普通发送', 'paperplane'),
         openRow('outbox-preview', '后台发件箱验收', 'tray.and.arrow.up'),
         openRow('send-interrupt', 'Queue 中断验收', 'stop.circle'),
         openRow('send-handoff', '新建发送交接', 'arrow.triangle.swap'),
@@ -345,10 +391,19 @@ function View() {
       .catch((error) => setRuntime({ title: String(error) }));
   };
   const actions: Record<string, () => void> = {
+    ...Object.fromEntries(
+      settingsBaselineScenarios.map((scenario) => [
+        `settings-baseline-${scenario}`,
+        () => void openSettingsBaseline(scenario),
+      ]),
+    ),
+    'mermaid-preview': () => void present(MermaidPreviewScreen, {}),
     'reply-haptics-preview': () => void present(ReplyHapticsPreviewScreen, {}),
     'notification-preview': () => {
       void present(NotificationPreviewScreen, {});
     },
+    'diagnostics-preview': () => void present(DiagnosticsPreviewScreen, {}),
+    'diagnostics-settings-preview': () => void present(SettingsScreen, {}),
     'live-activity-preview': () => void present(LiveActivityPreviewScreen, {}),
     'push-subscription-verify': () => {
       void pushStatus().then(async (status) => {
@@ -379,12 +434,47 @@ function View() {
         fixture: true,
       }),
     'project-picker-preview': () => void openCreateParity(),
+    'ai-usage-preview': () => void present(AIUsagePreviewScreen, {}),
+    'github-settings-preview': () =>
+      void present(GitHubSettingsPreviewScreen, {}),
+    'project-visibility-preview': () =>
+      void present(ProjectVisibilityPreviewScreen, {}),
+    'prompt-shortcuts-preview': () =>
+      void present(PromptShortcutsPreviewScreen, {}),
     'settings-preview': () => void present(SettingsPreviewScreen, {}),
     'connection-preview': () => void present(ConnectionPreviewScreen, {}),
+    'mcp-settings-preview': () => void present(McpSettingsPreviewScreen, {}),
+    ...Object.fromEntries(
+      memoryStatePages.map((page) => [page.id, () => void present(page, {})]),
+    ),
+    'memory-preview': () => void present(MemoryPreviewScreen, {}),
+    'published-shares-preview': () =>
+      void openPublishedShares(PublishedSharesPreviewScreen),
+    ...Object.fromEntries(
+      publishedShareStatePages.map((page) => [
+        page.id,
+        () => void openPublishedShares(page),
+      ]),
+    ),
+    'memory-states-preview': () => void present(MemoryStatesPreviewScreen, {}),
+    'agent-roles-preview': () => void present(AgentRolesPreviewScreen, {}),
+    'machine-settings-preview': () =>
+      void present(MachineSettingsPreviewScreen, {}),
+    'settings-forms-preview': () =>
+      void present(SettingsFormsPreviewScreen, {}),
     'app-icon-failure-preview': () =>
       void present(AppIconFailurePreviewScreen, {}),
     'appearance-preview': () => void present(SettingsScreen, {}),
-    'queued-message-behavior-preview': () => void present(SettingsScreen, {}),
+    'preferences-preview': () =>
+      void present(PreferencesScreen, undefined, {
+        style: 'formSheet',
+        sheetAllowedDetents: [1],
+      }),
+    'queued-message-behavior-preview': () =>
+      void present(PreferencesScreen, undefined, {
+        style: 'formSheet',
+        sheetAllowedDetents: [1],
+      }),
     'quick-replies-preview': () =>
       void present(QuickRepliesPreviewScreen, undefined),
     'session-tree-preview': () => void present(SessionTreePreviewScreen),
@@ -439,6 +529,7 @@ function View() {
         { host: 'chat', outcome: 'failure' },
         { style: 'push' },
       ),
+    'proposed-plan-preview': () => void present(ProposedPlanPreviewScreen, {}),
     'agent-error-preview': () => void present(AgentErrorPreviewScreen, {}),
     'edit-message-preview': () => void present(EditMessagePreviewScreen),
     'simulator-preview': () => void present(SimulatorPreviewScreen),
@@ -453,6 +544,12 @@ function View() {
     'session-share-preview': () => void present(SessionSharePreviewScreen),
     'steer-preview': () => void present(SteerPreviewScreen, {}),
     'send-guide': () => void openSendPreview(false, true, true, 'guide'),
+    'send-scroll-guide': () =>
+      void openSendPreview(false, true, true, 'guide', true),
+    'send-scroll-queue': () =>
+      void openSendPreview(false, true, true, 'queue', true),
+    'send-scroll-normal': () =>
+      void openSendPreview(false, false, true, 'queue', true),
     'outbox-preview': () => void openOutboxPreview(),
     'send-interrupt': () => void openSendPreview(false, true, false),
     'send-handoff': () => void openSendPreview(true),
@@ -565,3 +662,12 @@ export const DebugScreen = definePage({
   Component: View,
   presentation: { style: 'push', headerVariant: 'transparent' },
 });
+
+async function openPublishedShares(page: typeof PublishedSharesPreviewScreen) {
+  const restore = switchSettingsBaselineAccount('published-shares-user');
+  try {
+    await present(page, {});
+  } finally {
+    restore();
+  }
+}

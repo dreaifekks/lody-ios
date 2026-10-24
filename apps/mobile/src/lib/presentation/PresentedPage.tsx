@@ -13,7 +13,7 @@ import {
   useState,
 } from 'react';
 
-import { Platform, type ColorValue } from 'react-native';
+import type { ColorValue } from 'react-native';
 import { dismissSheetZoom, navigationScrollEdgeEffects } from '@lody-ios/kit';
 
 import {
@@ -23,6 +23,7 @@ import {
   type PageRuntime,
   PageRuntimeProvider,
 } from './page';
+import { getLayoutMode } from './layoutMode';
 import { sheetContentBackground } from './sheetContentBackground';
 import { SheetStack } from './SheetStack';
 import {
@@ -128,7 +129,7 @@ export function nativePresentationOptions(
       backgroundColor: sheetContentBackground(
         style,
         backgroundColor,
-        Platform.OS === 'ios' && Platform.isPad,
+        getLayoutMode() !== 'compact',
       ),
     },
     gestureEnabled: dismissible,
@@ -172,14 +173,10 @@ function usePresentedPageSession(expectedPage?: PageDefinitionBase) {
       return;
     }
 
-    const unsubscribe = navigation.addListener('beforeRemove', () => {
-      cancelPresentation(session.id);
-    });
     return () => {
-      unsubscribe();
       cancelPresentation(session.id);
     };
-  }, [navigation, session]);
+  }, [session]);
 
   if (session && expectedPage && session.page.id !== expectedPage.id) {
     throw new Error(
@@ -214,11 +211,11 @@ function usePresentedPageSession(expectedPage?: PageDefinitionBase) {
     } else dismissPresentedPage();
   }, [navigation, session]);
   const close = useCallback(
-    async (settle: () => boolean) => {
+    async (settle: () => boolean, transition?: () => Promise<void>) => {
       if (!session || closing.current) return;
       closing.current = true;
       try {
-        if (session.presentation.zoomSourceLabel) await dismissSheetZoom();
+        if (transition) await transition();
       } finally {
         if (settle()) dismiss();
       }
@@ -226,11 +223,18 @@ function usePresentedPageSession(expectedPage?: PageDefinitionBase) {
     [dismiss, session],
   );
   const cancel = useCallback(() => {
+    // Cancellation goes through the Router immediately. Awaiting a separate
+    // UIKit dismissal can leave this session and the creation button pending.
     if (session) void close(() => cancelPresentation(session.id));
   }, [close, session]);
   const finish = useCallback(
     (value?: unknown) => {
-      if (session) void close(() => completePresentation(session.id, value));
+      if (!session) return;
+      // Sending retains its window-hosted composer until UIKit has settled.
+      void close(
+        () => completePresentation(session.id, value),
+        session.presentation.zoomSourceLabel ? dismissSheetZoom : undefined,
+      );
     },
     [close, session],
   ) as PageFinish<unknown>;

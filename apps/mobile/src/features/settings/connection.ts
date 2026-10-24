@@ -1,5 +1,5 @@
 import type { NativeListRow, NativeListSection } from '@lody-ios/kit';
-import type { Connection } from '../../models/catalog.ts';
+import type { Connection } from '@lody/cloud-runtime/models/catalog';
 import type {
   MachineReach,
   WorkspaceMachine,

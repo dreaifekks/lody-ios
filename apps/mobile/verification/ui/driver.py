@@ -56,7 +56,8 @@ def allow_custom_scheme(ui):
                 ui.axe('tap', '-x', '280', '-y', '450', '--post-delay', '1', timeout=3, recover=False)
                 return
             except (subprocess.CalledProcessError, RuntimeError) as error:
-                if 'no accessibility element matched' not in str(error).casefold():
+                message = getattr(error, 'output', None) or str(error)
+                if 'no accessibility element matched' not in message.casefold():
                     ui.axe('tap', '-x', '280', '-y', '450', '--post-delay', '1', timeout=3, recover=False)
                     return
         time.sleep(0.4)
@@ -89,7 +90,7 @@ class UI:
         while True:
             try:
                 bound = 30 if not self._axe_ready else timeout
-                output = subprocess.check_output(['axe', *args, '--udid', self.udid], text=True, timeout=bound)
+                output = subprocess.check_output(['axe', *args, '--udid', self.udid], text=True, stderr=subprocess.STDOUT, timeout=bound)
                 if output.startswith('Error:'):
                     raise RuntimeError(output.strip())
                 self._axe_ready = True
@@ -107,6 +108,10 @@ class UI:
         """Batch input under the runner's shared English keyboard baseline."""
         self.axe('type', text)
         got = self.element(identifier).get('AXValue') or ''
+        if got.casefold() != text.casefold():
+            self.axe('tap', '--id', identifier, '--post-delay', '.4')
+            self.axe('type', text)
+            got = self.element(identifier).get('AXValue') or ''
         assert got.casefold() == text.casefold(), f'Typed text did not commit: {got!r}'
 
     def paste_file(self, identifier):

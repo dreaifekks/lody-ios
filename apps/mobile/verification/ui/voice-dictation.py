@@ -5,7 +5,7 @@ from driver import UI
 import catalog
 
 ui = UI(sys.argv[1], sys.argv[2])
-close_settings = catalog.text('accessibility.closeSheet', title=catalog.text('tabs.settings'))
+close_settings = catalog.text('accessibility.closeSheet', title=catalog.text('settings.preferences.title'))
 close_composer = catalog.text('accessibility.closeSheet', title='输入框验收')
 
 
@@ -30,13 +30,7 @@ def scroll_to(identifier, start='600', end='400'):
 
 
 def open_debug(row, ready):
-    for attempt in range(16):
-        if present(row):
-            break
-        start, end = ('700', '500') if attempt < 8 else ('300', '700')
-        ui.axe('swipe', '--start-x', '200', '--start-y', start, '--end-x', '200', '--end-y', end, '--duration', '.5', '--post-delay', '.6')
-    scroll_to(row)
-    ui.axe('tap', '--id', row, '--pre-delay', '.6', '--post-delay', '.8', '--tap-style', 'physical')
+    ui.open_case(row)
     ui.element(ready)
 
 
@@ -62,6 +56,8 @@ def microphone():
     return button
 
 
+ui.open_case('preferences-preview')
+
 # Off by default: Settings shows only the switch, and signed out there is no agent to choose.
 set_voice(False)
 assert not present('voice-agent'), 'The voice agent row appeared while dictation is off'
@@ -75,7 +71,7 @@ assert not present('session-voice'), 'The microphone shows while dictation is of
 ui.capture('create-off')
 ui.axe('tap', '--label', close_composer, '--post-delay', '1')
 
-open_debug('queued-message-behavior-preview', 'queued-message-behavior')
+open_debug('preferences-preview', 'queued-message-behavior')
 set_voice(True)
 assert not present('voice-agent'), 'Signed out, there is no workspace agent to choose'
 ui.capture('settings-on')
@@ -95,7 +91,7 @@ ui.capture('chat-on')
 ui.axe('swipe', '--start-x', '2', '--start-y', '400', '--end-x', '370', '--end-y', '400', '--duration', '.5', '--post-delay', '.8')
 
 # Restore the default so later cases see the production composer.
-open_debug('queued-message-behavior-preview', 'queued-message-behavior')
+open_debug('preferences-preview', 'queued-message-behavior')
 set_voice(False)
 ui.capture('settings-restored')
 print('PASS: dictation is opt-in from Settings, shows a 44 pt microphone beside send in the create and chat composers, and hides again when turned off.')

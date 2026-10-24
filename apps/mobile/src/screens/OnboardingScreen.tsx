@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Platform,
   ScrollView,
   View as RNView,
 } from 'react-native';
@@ -295,7 +294,7 @@ export const OnboardingScreen = definePage({
   title: t('onboarding.title'),
   Component: View,
   presentation: {
-    style: Platform.OS === 'ios' && Platform.isPad ? 'formSheet' : 'pageSheet',
+    style: 'pageSheet',
     dismissible: false,
     headerShown: false,
   },

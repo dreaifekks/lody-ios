@@ -75,6 +75,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   let onStop = EventDispatcher()
   let onSteer = EventDispatcher()
   let onErrorRetry = EventDispatcher()
+  let onPlanDecision = EventDispatcher()
+  var planDecisionState: ChatPlanDecisionState?
   var errorRetryState: ChatErrorRetryState?
   let onActivityPress = EventDispatcher()
   let onTurnInfoPress = EventDispatcher()
@@ -104,6 +106,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   private var navigationBranch = ""
   private var titleDisappearing = false
   private let navigation = ChatNavigationController()
+  let findClip = CALayer()
   let collection: UICollectionView
   let measuringText = CKTextView()
   var measurements: [String: (width: CGFloat, text: NSAttributedString, height: CGFloat)] = [:]
@@ -123,6 +126,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   let edgeFade = LodyEdgeFade()
   let overlay = ChatOverlay()
   var localAttachments: [String: [ChatMessageAttachment]] = [:]
+  var expandedPlans = Set<String>()
   var expandedMessages = Set<String>()
   var expandedAttachments = Set<String>()
   var collapsedMessageHeights: [String: CGFloat] = [:]
@@ -299,6 +303,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       }
     }
     backgroundColor = .lodyBackground
+    registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (view: LodyChatView, _: UITraitCollection) in
+      view.backgroundColor = view.processBackground
+    }
     collection.backgroundColor = .clear
     collection.accessibilityIdentifier = "chat-transcript"
     collection.alwaysBounceVertical = true
@@ -323,6 +330,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     collection.register(ChatSubagentCell.self, forCellWithReuseIdentifier: "subagent")
     collection.register(ChatCell.self, forCellWithReuseIdentifier: "message")
     collection.register(ChatMetaCell.self, forCellWithReuseIdentifier: "meta")
+    collection.register(ChatPlanCell.self, forCellWithReuseIdentifier: "proposed-plan")
     collection.register(ChatMarkdownCell.self, forCellWithReuseIdentifier: "markdown")
     dataSource = UICollectionViewDiffableDataSource<String, String>(collectionView: collection) { [weak self] collection, index, id in
       guard let self, let row = self.rows[id] else { return nil }
@@ -376,6 +384,17 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         cell.configure(row, workspace: self.imageWorkspace, session: self.imageSession)
         return cell
       }
+      if row.kind == "proposed_plan" {
+        let cell = collection.dequeueReusableCell(withReuseIdentifier: "proposed-plan", for: index) as! ChatPlanCell
+        let width = max(1, ChatReadingColumn.itemWidth(in: collection.bounds.width) - 32)
+        let markdown = self.store.view(id: id, text: row.text, secondary: false, streaming: row.streaming, width: width)
+        markdown.onLink = { [weak self] in self?.openMessageLink($0) }
+        cell.configure(row, markdown: markdown, expanded: self.expandedPlans.contains(id))
+        cell.onToggle = { [weak self] in self?.toggleExpansion(row) }
+        cell.onDecision = { [weak self] action in self?.onPlanDecision(["entryId": row.entryID, "itemId": row.itemID, "action": action, "id": UUID().uuidString.lowercased()]) }
+        cell.onReview = { [weak self] in self?.onActivityPress(["entryId": row.entryID, "itemId": row.planPermissionItemID]) }
+        return cell
+      }
       if row.kind == "text" || row.kind == "thought" {
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "markdown", for: index) as! ChatMarkdownCell
         let secondary = row.kind == "thought"
@@ -419,7 +438,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         self.setPendingSend(pending)
       }
       if payload["queue"] as? Bool != true {
-        self.awaitingUserAnchor = true
+        self.awaitingUserAnchor = payload["guide"] as? Bool != true
         self.trackingPausedByGesture = false
         self.followsBottom = true
       }
@@ -443,7 +462,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     addSubview(edgeFade)
     addSubview(composer)
     overlay.onReconnect = { [weak self] in self?.onReconnect([:]) }
-    overlay.onTasksPress = { [weak self] in
+    composer.onTasksPress = { [weak self] in
       guard let self else { return }
       self.onActivityPress([
         "entryId": self.transcript.entries.last(where: { $0.role == "assistant" })?.id ?? "",
@@ -465,7 +484,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     edgeFade.translatesAutoresizingMaskIntoConstraints = false
     composer.translatesAutoresizingMaskIntoConstraints = false
     composer.allowsFullScreen = true
-    let composerWidth = composer.widthAnchor.constraint(equalTo: widthAnchor)
+    let composerWidth = composer.widthAnchor.constraint(equalTo: safeAreaLayoutGuide.widthAnchor)
     composerWidth.priority = .defaultHigh
     NSLayoutConstraint.activate([
       overlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 16),
@@ -473,14 +492,14 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       overlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
       overlay.heightAnchor.constraint(equalToConstant: ChatOverlay.controlSize),
       collection.topAnchor.constraint(equalTo: topAnchor),
-      collection.leadingAnchor.constraint(equalTo: leadingAnchor),
-      collection.trailingAnchor.constraint(equalTo: trailingAnchor),
+      collection.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+      collection.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
       collection.bottomAnchor.constraint(equalTo: bottomAnchor),
       edgeFade.topAnchor.constraint(equalTo: composer.topAnchor, constant: -LodyEdgeFade.overlap),
       edgeFade.leadingAnchor.constraint(equalTo: leadingAnchor),
       edgeFade.trailingAnchor.constraint(equalTo: trailingAnchor),
       edgeFade.bottomAnchor.constraint(equalTo: bottomAnchor),
-      composer.centerXAnchor.constraint(equalTo: centerXAnchor),
+      composer.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
       composer.widthAnchor.constraint(lessThanOrEqualToConstant: ChatReadingColumn.maximumWidth),
       composerWidth,
     ])
@@ -644,8 +663,19 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     refreshTextRendering()
   }
 
+  // Off-window views have no size class yet; fall back to the idiom until the
+  // window reports one.
+  var processBackground: UIColor {
+    guard !processEntryID.isEmpty else { return .lodyBackground }
+    switch window?.traitCollection.horizontalSizeClass ?? .unspecified {
+    case .compact: return .clear
+    case .regular: return .lodyBackground
+    default: return traitCollection.userInterfaceIdiom == .phone ? .clear : .lodyBackground
+    }
+  }
+
   override func lodyAppearanceDidChange() {
-    backgroundColor = !processEntryID.isEmpty && traitCollection.userInterfaceIdiom == .phone ? .clear : .lodyBackground
+    backgroundColor = processBackground
     edgeFade.color = .lodyBackground
     refreshTextRendering()
   }
@@ -668,6 +698,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
+    backgroundColor = processBackground
     if window == nil {
       for group in markdownSelections.values { group.labels = [] }
       markdownSelections.removeAll()
@@ -787,7 +818,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     if changed { composerHasAcknowledgedSend = false }
     if changed && value.queue != true {
       handoffID = value.id
-      anchoredUserID = value.id + ":user"
+      anchoredUserID = value.guide == true ? nil : value.id + ":user"
       followsBottom = true
       trackingPausedByGesture = false
       replyHaptics.arm()
@@ -898,6 +929,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     incoming.onSteer = old.onSteer
     incoming.onReconnect = old.onReconnect
     incoming.onPreview = old.onPreview
+    incoming.onTasksPress = old.onTasksPress
+    incoming.taskCount = old.taskCount
     incoming.onMentionBrowse = old.onMentionBrowse
     incoming.onComposerOptionChange = old.onComposerOptionChange
     incoming.onDraftChange = old.onDraftChange

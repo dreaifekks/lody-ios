@@ -5,7 +5,7 @@ import {
   sharedVoiceAgent,
   voiceAgentOptions,
   voiceReply,
-} from '../../modules/lody-kit/data-runtime/voice.ts';
+} from '../../../../packages/cloud-runtime/src/runtime/voice.ts';
 
 const meta = (values) => ({ get: (key) => values[JSON.stringify(key)] });
 const flock = (rows) => ({ scan: () => rows });

@@ -1,3 +1,4 @@
+import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { View as RNView } from 'react-native';
 import { NativeChat } from '@lody-ios/kit';
@@ -6,7 +7,7 @@ import { usePalette } from '@/lib/theme/palette';
 import { useProcessSheet } from '@/hooks/screens/useProcessSheet';
 import { openSubagentTask } from '@/hooks/screens/openSubagentTask';
 import { createProcessSource } from '@/screens/ProcessScreen';
-import type { ItemSummary } from '@/models/session';
+import type { ItemSummary } from '@lody/cloud-runtime/models/session';
 
 const steps = [
   { type: 'thought', text: 'Find every caller of verifyToken first.' },
@@ -157,6 +158,7 @@ function entries(progress: number, stopped: boolean) {
 
 function View() {
   const colors = usePalette();
+  const { present } = usePageRuntime();
   const [progress, setProgress] = useState(1);
   const [stopped, setStopped] = useState(false);
   useEffect(() => {
@@ -172,13 +174,18 @@ function View() {
     const item = list
       .find((entry) => entry.id === entryId)
       ?.items.find((candidate) => candidate.itemId === itemId);
-    return openSubagentTask(item as ItemSummary | undefined, {
-      entryId,
-      source,
-      onStop: () => setStopped(true),
-    });
+    return openSubagentTask(
+      item as ItemSummary | undefined,
+      {
+        entryId,
+        source,
+        onStop: () => setStopped(true),
+        onActivityPress: openItem,
+      },
+      present,
+    );
   };
-  const openProcess = useProcessSheet(entriesJSON, (entryId, itemId) => {
+  const { openProcess } = useProcessSheet(entriesJSON, (entryId, itemId) => {
     openItem(entryId, itemId);
   });
   return (

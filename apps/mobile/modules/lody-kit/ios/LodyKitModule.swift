@@ -1,3 +1,4 @@
+import LodyCore
 import ExpoModulesCore
 import UIKit
 import SafariServices
@@ -63,6 +64,9 @@ public final class LodyKitModule: Module, @unchecked Sendable {
 
   @JS
   var initialDarkBackground: String { LodyDarkBackground.current.rawValue }
+
+  @JS
+  var initialLocale: String { Bundle.main.preferredLocalizations.first ?? "en" }
 
   @JS
   var initialQueuedMessageBehavior: String {
@@ -429,6 +433,49 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     }.runOnQueue(.main)
     AsyncFunction("setPushVisibleRoute") { (route: String) in MainActor.assumeIsolated { PushNotifications.shared.visibleRoute = route } }.runOnQueue(.main)
 
+    AsyncFunction("diagnosticCount") { (window: Double) in try DiagnosticsStore.shared.count(since: window) }
+    AsyncFunction("clearDiagnostics") { try DiagnosticsStore.shared.clear() }
+    AsyncFunction("recordPushNavigation") { (id: String, source: String, outcome: String, reason: String) in
+      DiagnosticsStore.shared.navigation(id: id, source: source, outcome: outcome, reason: reason)
+    }
+    AsyncFunction("shareDiagnostics") { (window: Double, promise: Promise) in
+      do {
+        let file = try DiagnosticsStore.shared.export(since: window)
+        DispatchQueue.main.async {
+          MainActor.assumeIsolated {
+            guard let controller = self.appContext?.utilities?.currentViewController(), controller.viewIfLoaded?.window != nil,
+                  controller.presentedViewController == nil else {
+              try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+              promise.reject("DIAGNOSTICS_SHARE_UNAVAILABLE", "Could not open diagnostic sharing")
+              return
+            }
+            DiagnosticsSharing.present(file, from: controller) { error in
+              if let error { promise.reject(error) }
+              else { promise.resolve(nil) }
+            }
+          }
+        }
+      } catch { promise.reject(error) }
+    }
+    AsyncFunction("debugSeedDiagnostics") {
+      guard LodyUIVerify.enabled else { throw NSError(domain: "Lody.Diagnostics.Fixture", code: 1) }
+      try DiagnosticsStore.shared.clear()
+      let root = DiagnosticsStore.shared.directory
+      let date = Date()
+      let message = "3327c0d1-727b-4af6-8e0f-3f27098d15df"
+      let app = DiagnosticsStore(directory: root, process: .app, now: { date.addingTimeInterval(-60) })
+      app.record("live-activity", "snapshot", fields: ["active": "1", "activity": DiagnosticsStore.correlation("fixture-activity")])
+      app.flush()
+      let extensionStore = DiagnosticsStore(directory: root, process: .notificationService, now: { date.addingTimeInterval(-120) })
+      extensionStore.record("notification", "extension_received", fields: ["message": message])
+      extensionStore.flush()
+      for (seconds, source) in [(1800.0, DiagnosticsStore.Process.app), (7200.0, .app), (172800.0, .notificationService), (691200.0, .app)] {
+        let store = DiagnosticsStore(directory: root, process: source, now: { date.addingTimeInterval(-seconds) })
+        store.record("notification", "status", fields: ["permission": "denied"])
+        store.flush()
+      }
+    }
+
     AsyncFunction("githubPullRequest") { (payload: String) async throws -> String in
       try await GitHubPullRequests.run(payload)
     }
@@ -460,9 +507,16 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       }
     }.runOnQueue(.main)
     AsyncFunction("localProjects") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("localProjects", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("workspaceSettings") { (payload: String) async throws -> String in
+      try await WorkspaceSettingsCloud.run(payload)
+    }
+    AsyncFunction("promptShortcuts") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("promptShortcuts", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("remoteSettings") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("remoteSettings", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("machineStatus") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("machineStatus", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("voiceAgents") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("voiceAgents", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("memorySettings") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("memorySettings", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("publishedShares") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("publishedShares", payload: payload, promise: promise) } }.runOnQueue(.main)
+    AsyncFunction("agentRoles") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.command("agentRoles", payload: payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("createSession") { (payload: String, promise: Promise) in MainActor.assumeIsolated { self.dataRuntime.createSession(payload, promise: promise) } }.runOnQueue(.main)
     AsyncFunction("workspaceBillingEntitlement") { (workspace: String, user: String, promise: Promise) in
       MainActor.assumeIsolated { self.dataRuntime.workspaceBillingEntitlement(workspace: workspace, user: user, promise: promise) }
@@ -512,7 +566,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
           let data = payload.data(using: .utf8),
           let params = try? JSONSerialization.jsonObject(with: data) as? [String: String],
           params["sessionId"] == "ui-verify-diff", params["entryId"] == "diff-preview",
-          let path = params["path"], ["docs/superpowers/.diff-check.md", "src/very-long-directory-name/nested/components/another-long-file-name.ts"].contains(path) {
+          let path = params["path"], ["docs/superpowers/.diff-check.md", "src/very-long-directory-name/nested/components/another-long-file-name.ts", "docs/interactive.html"].contains(path) {
           let added = path.hasSuffix(".ts")
             ? """
               import { readFileSync } from 'node:fs';
@@ -747,7 +801,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
         view.performanceProbe?.stop()
         view.performanceProbe = ChatPerformanceProbe(view)
       }
-      Events("onStop", "onSteer", "onSend", "onEditMessage", "onShareImage", "onTurnInfoPress", "onActivityPress", "onFilePress", "onLinkPress", "onTurnChangesPress", "onErrorRetry", "onRetrySend", "onReconnect", "onTitlePress", "onComposerOptionChange", "onMentionBrowse", "onPreview", "onTitleMenu")
+      Events("onStop", "onSteer", "onSend", "onEditMessage", "onShareImage", "onTurnInfoPress", "onActivityPress", "onFilePress", "onLinkPress", "onTurnChangesPress", "onErrorRetry", "onPlanDecision", "onRetrySend", "onReconnect", "onTitlePress", "onComposerOptionChange", "onMentionBrowse", "onPreview", "onTitleMenu")
       Prop("editableMessageId") { (view: LodyChatView, value: String) in view.editableMessageID = value }
       Prop("editedMessageId") { (view: LodyChatView, value: String) in view.editedMessageID = value }
       Prop("navigationTitle") { (view: LodyChatView, value: String) in view.setNavigationTitle(value) }
@@ -758,6 +812,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       Prop("titleMenuJSON") { (view: LodyChatView, value: String) in view.setTitleMenu(value) }
       Prop("mentionRepository") { (view: LodyChatView, value: String) in view.mentionRepository = value }
       Prop("attachmentContextJSON") { (view: LodyChatView, value: String) in view.setAttachmentContext(value) }
+      Prop("planDecisionJSON") { (view: LodyChatView, value: String) in view.setPlanDecisionState(value) }
       Prop("errorRetryJSON") { (view: LodyChatView, value: String) in view.setErrorRetryState(value) }
       Prop("turnInfoEnabled") { (view: LodyChatView, value: Bool) in view.turnInfoEnabled = value }
       Prop("entriesJSON") { (view: LodyChatView, value: String) in view.setEntries(value) }
@@ -792,6 +847,12 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       Prop("del") { (view: LodyDiffToolbar, value: Int?) in view.pendingDel = value ?? 0; view.applyStats() }
       Prop("base") { (view: LodyDiffToolbar, value: String?) in view.pendingBase = value ?? ""; view.applyStats() }
       Prop("diffStyle") { (view: LodyDiffToolbar, value: String?) in view.setStyle(value ?? "unified") }
+    }
+
+    View(LodyHTMLPreviewView.self) {
+      Events("onResourceRequest", "onIssues", "onLoad", "onFail")
+      Prop("handle") { (view: LodyHTMLPreviewView, value: String) in view.setHandle(value) }
+      Prop("responsesJSON") { (view: LodyHTMLPreviewView, value: String) in view.setResponses(value) }
     }
 
     View(LodyMarkdownDocumentView.self) {
@@ -845,8 +906,11 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       Prop("contentStyle") { (view: LodyGroupedList, value: Bool) in
         view.setContentStyle(value)
       }
-      Events("onRowPress", "onRowToggle", "onRowAction", "onReorder", "onRefresh", "onSegmentChange", "onSearchChange")
+      Events("onRowPress", "onRowToggle", "onRowAction", "onReorder", "onRefresh", "onSegmentChange", "onSearchChange", "onNoticeAction", "onUnavailableAction")
       Prop("reordering") { (view: LodyGroupedList, value: Bool) in view.setReordering(value) }
+      Prop("loading") { (view: LodyGroupedList, value: Bool) in view.setLoading(value) }
+      Prop("notice") { (view: LodyGroupedList, value: LodyListNotice?) in view.setNotice(value) }
+      Prop("unavailable") { (view: LodyGroupedList, value: LodyListUnavailable?) in view.setUnavailable(value) }
       Prop("segments") { (view: LodyGroupedList, labels: [String]) in view.setSegments(labels) }
       Prop("selectedSegment") { (view: LodyGroupedList, index: Int) in view.setSelectedSegment(index) }
       Prop("segmentsStyle") { (view: LodyGroupedList, value: String) in view.setSegmentsStyle(value) }
@@ -952,13 +1016,20 @@ public final class LodyKitModule: Module, @unchecked Sendable {
       }
     }
 
+    View(LodyLayoutProbe.self) {
+      Events("onTraits")
+    }
+
     View(LodySplitView.self) {
       Events("onColumnLayout")
-      Prop("hasDetail") { (view: LodySplitView, value: Bool) in
-        view.setHasDetail(value)
-      }
       Prop("detailRequest") { (view: LodySplitView, value: Int) in
         view.setDetailRequest(value)
+      }
+      Prop("layoutMode") { (view: LodySplitView, value: String) in
+        view.setLayoutMode(value)
+      }
+      Prop("panelOpen") { (view: LodySplitView, value: Bool) in
+        view.setPanelOpen(value)
       }
     }
 

@@ -2,14 +2,17 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { NativeGroupedList } from '@lody-ios/kit';
 import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
 import { definePage } from '@/lib/presentation';
-import { memoryRemoteSettingsCache } from '@/features/settings/remote-settings';
+import {
+  memoryRemoteSettingsCache,
+  remoteSettingId,
+} from '@/features/settings/remote-settings';
 import {
   RemoteSettingsView,
   settingsTitle,
   type SettingsService,
 } from '../RemoteSettingsScreen';
-import type { RemoteSetting } from '@/models/settings';
-import type { Catalog } from '@/models/catalog';
+import type { RemoteSetting } from '@lody/cloud-runtime/models/settings';
+import type { Catalog } from '@lody/cloud-runtime/models/catalog';
 import { projectRows } from '@/cloud/catalog/model';
 import { t } from '../../lib/i18n/index.ts';
 
@@ -52,11 +55,28 @@ function View() {
       machineName: 'Studio Mac',
     },
     {
+      kind: 'agent',
+      id: 'a5',
+      machineId: 'm1',
+      name: 'Codex Work',
+      detail: 'codex',
+      machineName: 'Studio Mac',
+    },
+    {
       kind: 'mcp',
       id: 'c1',
       name: 'Documentation',
       detail: 'http',
       enabledByDefault: false,
+    },
+    {
+      kind: 'agent',
+      id: 'a1',
+      machineId: 'm2',
+      name: 'Codex',
+      prompt: 'Laptop instructions.',
+      detail: 'codex',
+      machineName: 'Studio Mac',
     },
   ]);
   const failLoad = useRef(true),
@@ -73,7 +93,7 @@ function View() {
       }
       const edit = request.edit;
       rows.current = rows.current.map((row) =>
-        row.id === edit.item.id
+        remoteSettingId(row) === remoteSettingId(edit.item)
           ? {
               ...row,
               name: edit.name.trim(),
@@ -143,6 +163,7 @@ const SettingsListPreviewScreen = definePage<{
         service={service}
         workspaceId="offline-settings"
         agentUsage={agentUsage}
+        machinePresence={{ state: 'live', onlineMachineIds: ['m1', 'm2'] }}
         connected={!offline}
         cache={cache}
         refreshUsage={() => {
@@ -159,11 +180,13 @@ const SettingsListPreviewScreen = definePage<{
 });
 
 function previewUsage(percent: number): Catalog['agentUsage'] {
+  const now = Math.floor(Date.now() / 1000);
   const configs = [
     ['a1', 'Codex', 'codex'],
     ['a2', 'Claude', 'claude'],
     ['a3', 'Kimi', 'kimi'],
     ['a4', 'Custom API', 'codex'],
+    ['a5', 'Codex Work', 'codex'],
   ].map(([id, name, provider]) => ({
     key: ['agentConfig', id],
     value: {
@@ -175,7 +198,7 @@ function previewUsage(percent: number): Catalog['agentUsage'] {
       env: id === 'a4' ? { API_KEY: 'offline-fixture' } : {},
     },
   }));
-  return projectRows(
+  const first = projectRows(
     [
       ...configs,
       ...[
@@ -186,12 +209,12 @@ function previewUsage(percent: number): Catalog['agentUsage'] {
             {
               usedPercent: percent,
               windowDurationSeconds: 18000,
-              resetsAtEpochSeconds: 1900000000,
+              resetsAtEpochSeconds: now + 2 * 3600 + 14 * 60,
             },
             {
               usedPercent: 61,
               windowDurationSeconds: 604800,
-              resetsAtEpochSeconds: 1900400000,
+              resetsAtEpochSeconds: now + 6 * 86400 + 6 * 3600,
             },
           ],
         },
@@ -213,7 +236,7 @@ function previewUsage(percent: number): Catalog['agentUsage'] {
             {
               usedPercent: 100,
               windowDurationSeconds: 18000,
-              resetsAtEpochSeconds: 1,
+              resetsAtEpochSeconds: now + 65 * 60,
             },
           ],
         },
@@ -228,6 +251,19 @@ function previewUsage(percent: number): Catalog['agentUsage'] {
     ],
     'm1',
   ).agentUsage;
+  return {
+    ...first,
+    m2: {
+      configs: [{ id: 'a1', name: 'Codex', provider: 'codex', eligible: true }],
+      quotas: [
+        {
+          id: 'codex',
+          provider: 'codex',
+          windows: [{ usedPercent: 44, duration: 18000, resetsAt: null }],
+        },
+      ],
+    },
+  };
 }
 
 export const SettingsPreviewScreen = definePage({

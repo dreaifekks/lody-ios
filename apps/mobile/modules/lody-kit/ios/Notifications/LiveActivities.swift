@@ -9,7 +9,8 @@ import UIKit
 final class LiveActivities {
   static let shared = LiveActivities()
   private let defaults = UserDefaults(suiteName: "group.app.innei.lody")
-  private var tokenTasks: [String: (stamp: UUID, nativeId: String, task: Task<Void, Never>, lifecycle: Task<Void, Never>)] = [:]
+  private var tokenTasks: [String: (stamp: UUID, nativeId: String, task: Task<Void, Never>, lifecycle: Task<Void, Never>, content: Task<Void, Never>)] = [:]
+  private var lastContentLog: [String: (signature: String, time: Date)] = [:]
   private var pushToStartTask: Task<Void, Never>?
   private var activityTask: Task<Void, Never>?
   private var syncTask: Task<Void, Never>?
@@ -18,6 +19,24 @@ final class LiveActivities {
   private var workStarts: [String: Double] = [:]
   private var userId: String?
   private var identityResolved = false
+  private lazy var registrations = LiveActivityRegistration(
+    enter: { id, token in
+      self.publishEnter(id, token: token)
+      Self.diagnostic("enter_submitted", id: id)
+    },
+    exit: { id in
+      self.publishExit(id)
+      Self.diagnostic("exit_submitted", id: id)
+    },
+    restart: {
+      // 5.5.1 retains retryable failures in its cache but needs another start
+      // to poll them. Re-entering an identical cached token alone is a no-op.
+      guard PushNotifications.shared.configured else { return }
+      OneSignalLiveActivitiesManagerImpl.start()
+      Self.diagnostic("registration_recovery_requested")
+    },
+    now: { ProcessInfo.processInfo.systemUptime }
+  )
 
   func syncAppIcon() {
     let name = UIApplication.shared.alternateIconName ?? "default"
@@ -47,7 +66,7 @@ final class LiveActivities {
         start()
         return
       }
-      endAll()
+      endAll(reason: "toggle_off")
       removePushToStart()
     }
   }
@@ -64,6 +83,7 @@ final class LiveActivities {
       userId = OneSignal.User.externalId
       identityResolved = userId != nil
     }
+    diagnosticSnapshot("start")
     guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
     registerPushToStart()
     observeCurrentActivities()
@@ -73,7 +93,22 @@ final class LiveActivities {
     }
   }
 
-  // Called before OneSignal switches identity so old bindings are detached first.
+  func recoverRegistrations() {
+    start()
+    guard PushNotifications.shared.providerReady else { return }
+    // Lifecycle streams may resume after this foreground callback. Fence ended
+    // or dismissed native instances before re-submitting their cached tokens.
+    let live = Set(Activity<LodyActivityAttributes>.activities.filter {
+      enabled && ActivityAuthorizationInfo().areActivitiesEnabled &&
+        $0.attributes.userId == userId && ($0.activityState == .active || $0.activityState == .stale)
+    }.map(\.id))
+    for (id, observation) in tokenTasks where !live.contains(observation.nativeId) {
+      unregister(id, reason: "recovery_not_active")
+    }
+    registrations.recover()
+  }
+
+  // Called before OneSignal switches identity to invalidate old observers and queue cleanup.
   func identify(_ id: String?) {
     // On a push-to-start cold launch, SDK identity restoration can trail ActivityKit.
     // Preserve a matching server-started activity until app auth resolves its owner.
@@ -82,19 +117,20 @@ final class LiveActivities {
       userId = id
       if id == nil {
         removePushToStart()
-        endAll()
+        endAll(reason: "identity_missing")
       }
       return
     }
     guard userId != id || id == nil else { return }
     removePushToStart()
-    endAll()
+    endAll(reason: "identity_changed")
     userId = id
   }
 
   private func removePushToStart() {
     pushToStartTask?.cancel()
     pushToStartTask = nil
+    Self.diagnostic("push_to_start_remove")
     publishPushToStart(nil)
   }
 
@@ -104,10 +140,12 @@ final class LiveActivities {
     pushToStartTask = Task { @MainActor in
       guard !Task.isCancelled, enabled, userId == owner else { return }
       if let token = Activity<LodyActivityAttributes>.pushToStartToken {
+        Self.diagnostic("push_to_start_token", fields: ["source": "current"])
         publishPushToStart(token)
       }
       for await token in Activity<LodyActivityAttributes>.pushToStartTokenUpdates {
         guard !Task.isCancelled, enabled, userId == owner else { return }
+        Self.diagnostic("push_to_start_token", fields: ["source": "stream"])
         publishPushToStart(token)
       }
     }
@@ -153,6 +191,11 @@ final class LiveActivities {
     guard let root = try? JSONSerialization.jsonObject(with: Data(catalogJSON.utf8)) as? [String: Any],
           let sessions = root["sessions"] as? [[String: Any]] else { return }
     var state = LiveActivityCatalog.state(sessions: sessions, labels: Self.labels)
+    if !state.isActive, Activity<LodyActivityAttributes>.activities.contains(where: {
+      Self.id(of: $0) == id && ($0.activityState == .active || $0.activityState == .stale)
+    }) {
+      Self.diagnostic("catalog_inactive", id: id, fields: ["sessions": String(sessions.count)])
+    }
     let failed = LiveActivityCatalog.failedSessionIds(sessions: sessions)
     // A machine that drops off writes nothing more, so the catalog may never
     // change again; judge it once more when its heartbeat expires.
@@ -217,7 +260,8 @@ final class LiveActivities {
         let detailed = LiveActivityCatalog.carryingRemoteDetail(summary, from: activity.content.state)
         await activity.update(ActivityContent(state: detailed, staleDate: content.staleDate))
       } else {
-        if !isDebug(attributes) { await shared.unregister(id) }
+        diagnostic("end_requested", id: id, fields: ["reason": "catalog_inactive", "native": correlation(activity.id)])
+        if !isDebug(attributes) { await shared.unregister(id, reason: "catalog_inactive") }
         let ended = completed(summary, previous: activity.content.state, failed: failed, at: now)
         await activity.end(ActivityContent(state: ended, staleDate: nil), dismissalPolicy: .after(state.dismissalDate(from: now) ?? now))
       }
@@ -227,15 +271,18 @@ final class LiveActivities {
       await activity.end(nil, dismissalPolicy: .immediate)
     }
     guard !Task.isCancelled else { return }
+    diagnostic("create_requested", id: id, fields: ["active": String(state.activeCount)])
     do {
       let activity = try Activity.request(attributes: attributes, content: content, pushType: isDebug(attributes) ? nil : .token)
+      diagnostic("created", id: id, fields: ["native": correlation(activity.id), "active": String(state.activeCount)])
       if Task.isCancelled {
+        diagnostic("end_requested", id: id, fields: ["reason": "create_cancelled", "native": correlation(activity.id)])
         await activity.end(nil, dismissalPolicy: .immediate)
       } else {
         await shared.observeCurrentActivities()
       }
     } catch {
-      log.error("activity request failed: \(error.localizedDescription, privacy: .public)")
+      diagnostic("create_failed", id: id, fields: ["code": String((error as NSError).code)])
     }
   }
 
@@ -288,26 +335,64 @@ final class LiveActivities {
 
   private nonisolated static let log = Logger(subsystem: "app.innei.lody", category: "live-activity")
 
-  private func unregister(_ id: String) {
+  // Correlates with Convex's SHA-256 prefix; never hash or log an APNs token.
+  private nonisolated static func correlation(_ value: String) -> String {
+    DiagnosticsStore.correlation(value)
+  }
+
+  private nonisolated static func diagnostic(_ event: StaticString, id: String? = nil, fields: [String: String] = [:]) {
+    var record = fields
+    if let id { record["activity"] = correlation(id) }
+    DiagnosticsStore.shared.record("live-activity", event, fields: record)
+    record["event"] = event.description
+    guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
+          let line = String(data: data, encoding: .utf8) else { return }
+    // Notice persists across suspension; SDK verbose logs can contain tokens.
+    log.notice("\(line, privacy: .public)")
+  }
+
+  func diagnosticSnapshot(_ reason: String) {
+    Self.diagnostic("snapshot", fields: [
+      "reason": reason, "enabled": String(enabled), "identified": String(userId != nil),
+      "authorized": String(ActivityAuthorizationInfo().areActivitiesEnabled),
+      "appState": String(UIApplication.shared.applicationState.rawValue),
+      "observed": String(tokenTasks.count), "activities": String(Activity<LodyActivityAttributes>.activities.count),
+      "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+      "oneSignalApp": Bundle.main.object(forInfoDictionaryKey: "LodyOneSignalAppId") as? String ?? "none",
+    ])
+    for activity in Activity<LodyActivityAttributes>.activities {
+      Self.diagnostic("activity_snapshot", id: Self.id(of: activity), fields: [
+        "native": Self.correlation(activity.id), "state": String(describing: activity.activityState),
+        "hasToken": String(activity.pushToken != nil), "active": String(activity.content.state.activeCount),
+        "serverUpdatedAt": String(activity.content.state.updatedAt ?? 0),
+        "staleDate": String(activity.content.staleDate?.timeIntervalSince1970 ?? 0),
+      ])
+    }
+  }
+
+  private func unregister(_ id: String, reason: String) {
+    Self.diagnostic("unregister", id: id, fields: ["reason": reason])
+    stopObserving(id)
+    registrations.exit(id)
+  }
+
+  private func stopObserving(_ id: String) {
     if let observation = tokenTasks.removeValue(forKey: id) {
       observation.task.cancel()
       observation.lifecycle.cancel()
+      observation.content.cancel()
     }
-    publishExit(id)
+    lastContentLog.removeValue(forKey: id)
   }
 
-  func endAll() {
+  func endAll(reason: String = "explicit_end_all") {
     syncTask?.cancel()
     heartbeatTask?.cancel()
     heartbeatTask = nil
     let ids = Set(tokenTasks.keys).union(Activity<LodyActivityAttributes>.activities
       .filter { !Self.isDebug($0.attributes) }.map { Self.id(of: $0) })
-    tokenTasks.values.forEach {
-      $0.task.cancel()
-      $0.lifecycle.cancel()
-    }
-    tokenTasks = [:]
-    for id in ids { publishExit(id) }
+    for id in ids { unregister(id, reason: reason) }
+    Self.diagnostic("end_all", fields: ["reason": reason, "count": String(ids.count)])
     Self.endActivities()
     workStarts = [:]
   }
@@ -318,7 +403,7 @@ final class LiveActivities {
       let other = Self.id(of: activity)
       guard other != id else { continue }
       stale = true
-      unregister(other)
+      unregister(other, reason: "workspace_changed")
     }
     guard stale else { return }
     Self.endActivities { !Self.isDebug($0) && Self.activityId(of: $0) != id }
@@ -359,6 +444,7 @@ final class LiveActivities {
     guard identityResolved || !enabled else { return }
     guard enabled, let owner = userId, activity.attributes.userId == owner else {
       let nativeId = activity.id
+      Self.diagnostic("end_requested", id: id, fields: ["reason": "owner_or_toggle_rejected", "native": Self.correlation(nativeId)])
       Task.detached {
         for rejected in Activity<LodyActivityAttributes>.activities where rejected.id == nativeId {
           await rejected.end(nil, dismissalPolicy: .immediate)
@@ -384,29 +470,56 @@ final class LiveActivities {
         }
         return
       }
-      unregister(id)
+      stopObserving(id)
     }
     let stamp = UUID()
+    registrations.observe(id, stamp: stamp)
+    Self.diagnostic("observe", id: id, fields: ["native": Self.correlation(activity.id), "hasToken": String(activity.pushToken != nil)])
     let tokens = Task { @MainActor in
       guard !Task.isCancelled, enabled, userId == owner else { return }
       if let token = activity.pushToken {
-        publishEnter(id, token: token)
+        register(id, token: token, stamp: stamp)
       }
       for await token in activity.pushTokenUpdates {
         guard !Task.isCancelled, enabled, userId == owner else { return }
-        publishEnter(id, token: token)
+        register(id, token: token, stamp: stamp)
       }
     }
     let lifecycle = Task { @MainActor in
       for await state in activity.activityStateUpdates {
         guard !Task.isCancelled, tokenTasks[id]?.stamp == stamp else { return }
+        Self.diagnostic("lifecycle", id: id, fields: ["state": String(describing: state), "native": Self.correlation(activity.id)])
         if state == .ended || state == .dismissed {
-          unregister(id)
+          unregister(id, reason: "system_\(state)")
           return
         }
       }
     }
-    tokenTasks[id] = (stamp, activity.id, tokens, lifecycle)
+    let content = Task { @MainActor in
+      for await content in activity.contentUpdates {
+        guard !Task.isCancelled, tokenTasks[id]?.stamp == stamp else { return }
+        // Local catalog writes can be frequent. Log changed counts immediately,
+        // otherwise at most once/minute. Observation is not an APNs receipt.
+        let state = content.state
+        let signature = "\(state.statusCounts):\(state.updatedAt ?? 0)"
+        let now = Date()
+        if let previous = lastContentLog[id], previous.signature == signature,
+           now.timeIntervalSince(previous.time) < 60 { continue }
+        lastContentLog[id] = (signature, now)
+        Self.diagnostic("content_observed", id: id, fields: [
+          "native": Self.correlation(activity.id), "active": String(state.activeCount),
+          "unread": String(state.statusCounts.unread), "serverUpdatedAt": String(state.updatedAt ?? 0),
+          "staleDate": String(content.staleDate?.timeIntervalSince1970 ?? 0),
+          "appState": String(UIApplication.shared.applicationState.rawValue),
+        ])
+      }
+    }
+    tokenTasks[id] = (stamp, activity.id, tokens, lifecycle, content)
+  }
+
+  private func register(_ id: String, token: Data, stamp: UUID) {
+    guard tokenTasks[id]?.stamp == stamp else { return }
+    registrations.enter(id, token: token, stamp: stamp)
   }
 
   private func observeCurrentActivities() {
@@ -439,7 +552,12 @@ final class LiveActivities {
       waiting: LodyStrings.text("native.liveActivity.caption.waiting"),
       took: LodyStrings.text("native.liveActivity.caption.took"),
       allow: LodyStrings.text("native.liveActivity.allow"),
-      deny: LodyStrings.text("native.liveActivity.deny")
+      deny: LodyStrings.text("native.liveActivity.deny"),
+      smallAttention: LodyStrings.text("native.liveActivity.small.attention"),
+      smallWaiting: LodyStrings.text("native.liveActivity.small.waiting"),
+      smallDone: LodyStrings.text("native.liveActivity.small.done"),
+      smallFailed: LodyStrings.text("native.liveActivity.small.failed"),
+      smallStale: LodyStrings.text("native.liveActivity.small.stale")
     )
   }
 
@@ -579,6 +697,11 @@ final class LiveActivities {
     copy.took = labels.took
     copy.allow = labels.allow
     copy.deny = labels.deny
+    copy.smallAttention = labels.smallAttention
+    copy.smallWaiting = labels.smallWaiting
+    copy.smallDone = labels.smallDone
+    copy.smallFailed = labels.smallFailed
+    copy.smallStale = labels.smallStale
     return copy
   }
 }
