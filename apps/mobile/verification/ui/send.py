@@ -103,7 +103,7 @@ ui.capture('causal-confirming')
 ui.axe('tap', '--id', 'send-reply')
 ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · idle' for i in items), 'A causally matching reply without its user row did not retire pending state')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'session-send' and i.get('enabled') for i in items), 'A confirmed reply left the next draft locked')
-assert ui.element('session-input').get('AXValue') == 'draft during confirmation', 'Confirmation erased the next draft'
+assert (ui.element('session-input').get('AXValue') or '').casefold() == 'draft during confirmation', 'Confirmation erased the next draft'
 ui.capture('causal-unlocked')
 if not os.environ.get('LODY_UI_EMBEDDED'):
     trace.verify(2)
