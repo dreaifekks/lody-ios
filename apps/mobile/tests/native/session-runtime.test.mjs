@@ -3031,3 +3031,54 @@ test('proposed documents preserve identity across streaming, completion and clea
     'cleared',
   );
 });
+
+test('a guide whose target finishes during MCP selection uses ordinary dispatch', async () => {
+  const requests = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      requests.push(request);
+      return { result: { accepted: true, applied: false } };
+    },
+  });
+  try {
+    const history = fixture.server.getList('history');
+    const reply = history.pushContainer(new LoroMap());
+    reply.set('id', 'running');
+    reply.set('role', 'assistant');
+    reply.set('finished', false);
+    reply.set('items', []);
+    fixture.server.commit();
+    await fixture.pushUpdate();
+    const sent = await fixture.runtime.sendTurn(
+      {
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        text: 'follow-up',
+        cliType: 'builtin',
+        agentType: 'codex',
+        guide: true,
+      },
+      undefined,
+      undefined,
+      async () => {
+        reply.set('finished', true);
+        fixture.server.commit();
+        await fixture.pushUpdate();
+        return [];
+      },
+    );
+    assert.equal(sent.state, 'accepted');
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ['session/dispatch-turn'],
+    );
+    const turn = fixture.server
+      .toJSON()
+      .history.find((entry) => entry.id === sent.id);
+    assert.notEqual(turn.status, 'pending_apply');
+    assert.equal(turn.inputConfig._lodySteerTarget, undefined);
+  } finally {
+    fixture.close();
+  }
+});

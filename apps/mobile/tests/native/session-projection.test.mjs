@@ -402,3 +402,65 @@ test('the envelope carries a run as its latest step and the sheet reads the rest
   );
   assert.ok(JSON.stringify(run).length < 4000);
 });
+
+test('streaming run projection skips provider payloads and keeps raw-only tool details live', () => {
+  const doc = new LoroDoc();
+  seed(doc);
+  const entry = lastReply(doc);
+  const items = entry.get('items');
+  const task = items.get(2);
+  const run = task.get('run');
+  const steps = run.get('items');
+  const rawOnly = setAll(steps.pushContainer(new LoroMap()), {
+    type: 'tool_call',
+    toolCallId: 'raw-only',
+    title: 'MCP call',
+    status: 'completed',
+  });
+  const payload = rawOnly.setContainer('rawInput', new LoroMap());
+  payload.set('data', IMAGE.repeat(25));
+  const topOnly = setAll(items.pushContainer(new LoroMap()), {
+    type: 'tool_call',
+    toolCallId: 'top-raw-only',
+    title: 'Top call',
+    status: 'completed',
+  });
+  topOnly.set('rawOutput', { result: 'first' });
+  doc.commit();
+  const protectedIds = new Set([run.id, rawOnly.id, payload.id]);
+  const original = LoroMap.prototype.toJSON;
+  LoroMap.prototype.toJSON = function () {
+    assert.ok(
+      !protectedIds.has(this.id),
+      'Projection traversed a complete run or provider payload',
+    );
+    return original.call(this);
+  };
+  try {
+    const first = projectSession(doc, 'live');
+    const before = first.entries.find((entry) => entry.id === 'a1').items;
+    assert.equal(before.at(-1).hasDetail, true);
+    const beforeTask = before.find((item) => item.type === 'subagent_task');
+    const beforeTool = beforeTask.run.items.at(-1);
+    assert.equal(beforeTool.hasDetail, true);
+    const detail = subagentRun(doc, 'a1', beforeTask.itemId, task);
+    assert.equal(detail.items.at(-1).hasDetail, true);
+    assert.ok(!JSON.stringify(detail).includes(IMAGE));
+    payload.set('data', 'updated');
+    topOnly.set('rawOutput', { result: 'updated' });
+    doc.commit();
+    const after = projectSession(doc, 'live').entries.find(
+      (entry) => entry.id === 'a1',
+    ).items;
+    assert.ok(after.at(-1).rev > before.at(-1).rev);
+    const afterTask = after.find((item) => item.type === 'subagent_task');
+    assert.ok(afterTask.rev > beforeTask.rev);
+    assert.ok(afterTask.run.items.at(-1).rev > beforeTool.rev);
+  } finally {
+    LoroMap.prototype.toJSON = original;
+  }
+  assert.deepEqual(
+    comparable(projectSession(doc, 'live')),
+    comparable(projectSessionFull(doc, 'live')),
+  );
+});

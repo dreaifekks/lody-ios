@@ -153,6 +153,8 @@ type CachedEntry = {
 };
 type Projection = {
   revs: Map<string, { rev: number; fingerprint: string }>;
+  /** Invalidate tool details from change events without reading provider payloads. */
+  detailVersions: Map<string, number>;
   /** History entries by container: a moved or re-inserted entry is a new one. */
   entries: Map<ContainerID, CachedEntry>;
   /** Entries a change reached since the last projection. */
@@ -169,6 +171,7 @@ function projectionFor(doc: LoroDoc) {
   const history = doc.getList(HISTORY);
   const projection: Projection = {
     revs: new Map(),
+    detailVersions: new Map(),
     entries: new Map(),
     dirty: new Set(),
     stale: true,
@@ -179,16 +182,35 @@ function projectionFor(doc: LoroDoc) {
   projection.unsubscribe = doc.subscribe((batch) => {
     if (batch.by === 'checkout') {
       projection.stale = true;
+      projection.detailVersions.clear();
       return;
     }
+    const changed = new Set<string>();
     for (const event of batch.events) {
       const [root, index] = event.path;
       // Inserting or deleting entries changes only which containers are read.
       if (root !== HISTORY || event.path.length < 2) continue;
       const entry = typeof index === 'number' ? history.get(index) : undefined;
+      const detailsChanged =
+        event.path.some((part) =>
+          ['content', 'rawInput', 'rawOutput'].includes(String(part)),
+        ) ||
+        (event.diff.type === 'map' &&
+          Object.keys(event.diff.updated).some((key) =>
+            ['content', 'rawInput', 'rawOutput', 'run', 'items'].includes(key),
+          ));
+      if (detailsChanged && isMap(entry)) {
+        const id = plain(entry.get('id'));
+        if (typeof id === 'string') changed.add(id);
+      }
       if (isContainer(entry)) projection.dirty.add(entry.id);
       else projection.stale = true;
     }
+    for (const id of changed)
+      projection.detailVersions.set(
+        id,
+        (projection.detailVersions.get(id) ?? 0) + 1,
+      );
   });
   projections.set(doc, projection);
   return projection;
@@ -236,14 +258,27 @@ function lightItems(value: unknown) {
   return Array.isArray(value) ? value.map(lightItem) : plain(value);
 }
 function lightRun(run: unknown) {
-  return plain(run);
+  if (isMap(run)) {
+    const value: Record<string, unknown> = {};
+    for (const key of run.keys())
+      value[key] =
+        key === 'items' ? lightItems(run.get(key)) : plain(run.get(key));
+    return value;
+  }
+  const value = run as any;
+  return value && typeof value === 'object' && 'items' in value
+    ? { ...value, items: lightItems(value.items) }
+    : value;
 }
 /** An item without provider payloads or the bodies of its content blocks. */
 function lightItem(item: unknown): any {
   if (isMap(item)) {
     const value: Record<string, unknown> = {};
     for (const key of item.keys()) {
-      if (PAYLOAD_KEYS.has(key)) continue;
+      if (PAYLOAD_KEYS.has(key)) {
+        if (key !== '_meta' && item.get(key) != null) value[key] = true;
+        continue;
+      }
       const field = item.get(key);
       if (key === 'content') value.content = lightContent(field);
       else if (key === 'run') value.run = lightRun(field);
@@ -254,7 +289,10 @@ function lightItem(item: unknown): any {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
   const value: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(item)) {
-    if (PAYLOAD_KEYS.has(key)) continue;
+    if (PAYLOAD_KEYS.has(key)) {
+      if (key !== '_meta' && field != null) value[key] = true;
+      continue;
+    }
     if (key === 'content') value.content = lightContent(field);
     else if (key === 'run') value.run = lightRun(field);
     else value[key] = field;
@@ -518,9 +556,8 @@ function summarizeItem(
       key,
       JSON.stringify({
         ...summary,
-        content: parentItemId ? raw.content : lightContent(raw.content),
-        rawInput: parentItemId ? raw.rawInput : undefined,
-        rawOutput: parentItemId ? raw.rawOutput : undefined,
+        content: lightContent(raw.content),
+        detailVersion: projection.detailVersions.get(entryId) ?? 0,
       }),
     );
     return summary as ItemSummary;

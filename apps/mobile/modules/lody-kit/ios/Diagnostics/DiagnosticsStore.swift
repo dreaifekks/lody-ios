@@ -15,7 +15,8 @@ final class DiagnosticsStore: @unchecked Sendable {
 
   private static var storageRoot: URL {
     #if os(iOS)
-    let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.app.innei.lody")
+    let identifier = Bundle.main.object(forInfoDictionaryKey: "OneSignal_app_groups_key") as? String ?? "group.app.innei.lody"
+    let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
     let root = group ?? URL.applicationSupportDirectory
     #else
     let root = URL.applicationSupportDirectory

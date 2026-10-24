@@ -747,9 +747,11 @@ export async function sendTurn(
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
-    const raw = state.doc.toJSON();
-    const history = (raw.history ?? []) as any[];
-    const configs = conversationConfigs(history, raw.mq ?? []);
+    const configSnapshot = state.doc.toJSON();
+    const configs = conversationConfigs(
+      configSnapshot.history ?? [],
+      configSnapshot.mq ?? [],
+    );
     const previous = configs[0] ?? {};
     // Lody keeps a Role sticky from the newest turn that names one, or None.
     const roleTurn = configs.find(
@@ -861,8 +863,10 @@ export async function sendTurn(
         inputConfig.memory = undefined;
       }
     }
+    const raw = state.doc.toJSON();
+    const history = (raw.history ?? []) as any[];
     const lastUser = history.findLastIndex((entry) => entry.role === 'user');
-    // Re-evaluate after attachment upload and mention expansion. A completed
+    // Re-evaluate after attachment upload, mention expansion and MCP selection. A completed
     // target must follow the ordinary dispatch/queue path, never orphan a guide.
     const guide =
       args.guide === true

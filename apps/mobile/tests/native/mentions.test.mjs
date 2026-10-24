@@ -440,6 +440,15 @@ test('a LAN Role retains same-machine v2 target identities in mentions', () => {
     items.map((item) => item.path),
     ['review@mac@opus', 'review@mac@sol'],
   );
+  for (const target of rows[0].value.targets) delete target.alias;
+  const unaliased = mentions.roleMentions(rows, 'me', machines, {
+    state: 'live',
+    onlineMachineIds: ['mac'],
+  });
+  assert.deepEqual(
+    unaliased.items.map((item) => item.name),
+    ['claude · mac', 'codex · mac'],
+  );
   assert.equal(
     mentions.expandMentionText('@role:review@mac@sol', items),
     'use lody mcp to create a session with agent role[id: review, agentRoleMachineId: mac, agentRoleInstanceId: sol, name: Review]',

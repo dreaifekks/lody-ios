@@ -71,8 +71,15 @@ export function roleMentions(
       let path = multi ? `${role.id}@${target.machineId}` : role.id;
       if (sameMachine && target.id) path += `@${target.id}`;
       let name = role.name;
+      if (
+        sameMachine &&
+        !target.alias &&
+        typeof agent.name === 'string' &&
+        agent.name
+      )
+        name = agent.name;
       if (multi)
-        name = `${target.alias || role.name} · ${machineNames.get(target.machineId) ?? target.machineId}`;
+        name = `${target.alias || name} · ${machineNames.get(target.machineId) ?? target.machineId}`;
       itemMachines.set(path, target.machineId);
       items.push({
         path,
