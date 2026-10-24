@@ -1,5 +1,7 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
+export const createSendId = () => expo.uuidv4();
+
 export interface RuntimeInfo {
   offlineProbe?: boolean;
   uiVerifyHome: boolean;
@@ -13,7 +15,7 @@ export type InboxSearchHits = {
 };
 export type DataRuntimeEvent = {
   machinePresence?: string;
-  shareProgress?: import('../../../../src/models/session-sharing').ShareProgress;
+  shareProgress?: import('@lody/cloud-runtime/models/session-sharing').ShareProgress;
   sessionId?: string;
   session?: string;
   owner: string;
@@ -60,6 +62,16 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   >;
   acknowledgePushClick(id: string): Promise<void>;
   setPushVisibleRoute(route: string): Promise<void>;
+  diagnosticCount(window: number): Promise<number>;
+  shareDiagnostics(window: number): Promise<void>;
+  clearDiagnostics(): Promise<void>;
+  debugSeedDiagnostics(): Promise<void>;
+  recordPushNavigation(
+    id: string,
+    source: string,
+    outcome: string,
+    reason: string,
+  ): Promise<void>;
   readLocalStartup(): Promise<{
     account?: string;
     workspace?: string;
@@ -86,6 +98,7 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   getAppIcon(): Promise<string>;
   setAppIcon(name: string): Promise<string>;
   readonly initialDarkBackground: string;
+  readonly initialLocale: string;
   saveDarkBackground(value: string): void;
   readonly initialQueuedMessageBehavior: string;
   saveQueuedMessageBehavior(value: string): void;
@@ -124,6 +137,10 @@ declare class LodyKitNativeModule extends NativeModule<Events> {
   localProjects(payload: string): Promise<string>;
   remoteSettings(payload: string): Promise<string>;
   machineStatus(payload: string): Promise<string>;
+  agentRoles(payload: string): Promise<string>;
+  memorySettings(payload: string): Promise<string>;
+  publishedShares(payload: string): Promise<string>;
+  promptShortcuts(payload: string): Promise<string>;
   createSession(payload: string): Promise<string>;
   archiveSession(payload: string): Promise<string>;
   deleteSession(payload: string): Promise<string>;
@@ -202,6 +219,8 @@ export const remoteSettingsRaw = (payload: string): Promise<string> =>
   native.remoteSettings(payload);
 export const machineStatusRaw = (payload: string): Promise<string> =>
   native.machineStatus(payload);
+export const agentRolesRaw = (payload: string): Promise<string> =>
+  native.agentRoles(payload);
 export const sessionSharingRaw = (payload: string): Promise<string> =>
   native.sessionSharing(payload);
 export const runtimeInfo = native.runtimeInfo;
@@ -219,6 +238,7 @@ export const addAccentColorListener = (
 export const getAppIcon = () => native.getAppIcon();
 export const setAppIcon = (name: string) => native.setAppIcon(name);
 export const initialDarkBackground = native.initialDarkBackground;
+export const initialLocale = native.initialLocale;
 export const saveDarkBackground = (value: string) =>
   native.saveDarkBackground(value);
 export const initialQueuedMessageBehavior = native.initialQueuedMessageBehavior;
@@ -496,3 +516,12 @@ export const localProjects = (payload: string) => native.localProjects(payload);
 
 export const debugBackgroundDataRuntime = (action: string) =>
   native.debugBackgroundDataRuntime(action);
+
+export const promptShortcutsRaw = (payload: string) =>
+  native.promptShortcuts(payload);
+
+export const memorySettingsRaw = (payload: string): Promise<string> =>
+  native.memorySettings(payload);
+
+export const publishedSharesRaw = (payload: string): Promise<string> =>
+  native.publishedShares(payload);

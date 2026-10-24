@@ -10,13 +10,13 @@ LODY_SHARE_SOURCES = %w[
   List/LodyListCellBackground.swift List/LodyListPhoto.swift List/LodyListRowInteractions.swift
   List/LodyListSectionAnimation.swift List/LodyProgressRowView.swift List/LodyProjectRowView.swift
   List/LodyRowDensity.swift List/LodySessionRowView.swift List/LodyStepStrip.swift
-  List/LodyUnreadNavigationHold.swift
+  List/LodyUnreadNavigationHold.swift List/LodyListStatus.swift List/LodyListVisualView.swift
   Chat/LodyAgentIcon.swift Chat/ChatAttachments.swift Chat/ChatAttachmentSheet.swift Chat/ChatCameraCapture.swift Chat/ChatAttachmentCamera.swift
   Chat/ChatComposerView.swift Chat/ChatComposerFormatBar.swift Chat/ChatReferenceNode.swift Chat/ChatComposerModelPanel.swift Chat/ChatComposerSurfaceLayout.swift
-  Chat/ChatComposerLiquidGlassSurfaceLayout.swift Chat/ChatQuickReplies.swift Chat/ChatMentionPanel.swift
+  Chat/ChatComposerLiquidGlassSurfaceLayout.swift Chat/ChatComposerAttachmentStack.swift Chat/ChatComposerGrabber.swift Chat/ChatQuickReplies.swift Chat/ChatMentionPanel.swift
   Chat/ChatSendHandoff.swift Chat/ChatThrowCurve.swift Chat/ChatNumericText.swift Chat/ChatPendingSend.swift
   Toast/LodyToastOverlay.swift Toast/LodyToastPillView.swift Toast/LodySessionBannerView.swift
-  CreateSession/CreateSessionModels.swift CreateSession/CreateSessionLogic.swift CreateSession/CreateSessionForm.swift
+  CreateSession/CreateSessionForm.swift
   CreateSession/CreateSessionSections.swift CreateSession/CreateModelOptions.swift
   CreateSession/CreateSessionController.swift CreateSession/CreateSessionPickers.swift CreateSession/ShareStore.swift
 ].freeze
@@ -55,7 +55,7 @@ def lody_share_extension(bundle_id)
     reference = group.files.find { |f| f.path == path } || group.new_file(path)
     target.source_build_phase.add_file_reference(reference, true)
   end
-  { '../../../packages/chat-kit' => ['ChatKit'], '../../../packages/lexical-swift' => %w[Lexical LexicalListPlugin LexicalLinkPlugin LexicalMarkdown EditorHistoryPlugin LexicalHTML] }.each do |package_path, product_names|
+  { '../../../packages/lody-core' => ['LodyCore'], '../../../packages/chat-kit' => ['ChatKit'], '../../../packages/lexical-swift' => %w[Lexical LexicalListPlugin LexicalLinkPlugin LexicalMarkdown EditorHistoryPlugin LexicalHTML] }.each do |package_path, product_names|
     package = project.root_object.package_references.find { |ref| ref.isa == 'XCLocalSwiftPackageReference' && ref.relative_path == package_path }
     unless package
       package = project.new(Xcodeproj::Project::Object::XCLocalSwiftPackageReference)

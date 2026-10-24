@@ -104,6 +104,8 @@ struct ChatItem: Decodable {
   let entries: [Plan]?
   let description: String?
   let actor: String?
+  var markdown: String? = nil
+  var isLatest: Bool? = nil
   var lastToolName: String? = nil
   var summary: String? = nil
   var error: String? = nil
@@ -111,8 +113,13 @@ struct ChatItem: Decodable {
   var skipTranscript: Bool? = nil
   var run: ChatSubagentRun? = nil
   var processDurationMs: Int? = nil
-  var isProcess: Bool { type != "text" && !isAttachment && !isChatFailure && type != "subagent_task" }
-  var hidesFromTranscript: Bool { type == "subagent_task" && skipTranscript == true }
+  var isProcess: Bool { type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  var hidesFromTranscript: Bool {
+    if type == "proposed_plan" {
+      return !["delta", "completed"].contains(status ?? "") || (markdown ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    return type == "subagent_task" && skipTranscript == true
+  }
   var isLiveSubagent: Bool {
     type == "subagent_task" && skipTranscript != true && ["in_progress", "pending"].contains(ChatSubagentCard.status(self))
   }
@@ -136,6 +143,9 @@ struct ChatRow: Equatable {
   var text: String
   var errorMeta: ChatItem.NoticeMeta? = nil
   var errorRetry: ChatErrorRetryState? = nil
+  var planIsLatest = true
+  var planPermissionItemID = ""
+  var planDecision: ChatPlanDecisionState? = nil
   var symbol = ""
   var itemID = ""
   var processStartID = ""
@@ -360,7 +370,8 @@ struct ChatTranscript {
       return executionProcess(members)
     }
     if !processEntryID.isEmpty {
-      return entryRows(processEntryID: processEntryID, processStartID: processStartID, now: now, turnStartedAt: turnStartedAt)
+      return entryRows(processEntryID: processEntryID, processStartID: processStartID, now: now, turnStartedAt: turnStartedAt,
+        flatItems: processStartID == "__subagent__")
     }
     let ordinary = Dictionary(grouping: entryRows(now: now, turnStartedAt: turnStartedAt).groupedSubagents(), by: \.entryID)
     var emitted = Set<String>()
@@ -378,6 +389,9 @@ struct ChatTranscript {
           result.append(ChatRow(id: groupID + ":execution", entryID: tail.id, kind: "summary",
             text: LodyStrings.text("native.chat.transcript.execution", ["count": String(tail.steerCount ?? 0)]),
             symbol: "circle.fill", processStartID: "__execution__", actionable: true))
+        }
+        result += members.filter { $0.role == "assistant" }.flatMap {
+          ChatTranscript(entries: [$0]).entryRows(processEntryID: $0.id, flatItems: true).filter { $0.kind == "proposed_plan" }
         }
         let ids = executionResultIDs(tail)
         result += ChatTranscript(entries: [tail]).entryRows(processEntryID: tail.id, flatItems: true).filter { ids.contains($0.itemID) }
@@ -418,7 +432,7 @@ struct ChatTranscript {
     let resultIDs = executionResultIDs(tail)
     return assistants.flatMap { entry in
       ChatTranscript(entries: [entry]).entryRows(processEntryID: entry.id, flatItems: true).filter {
-        entry.id != tail.id || !resultIDs.contains($0.itemID)
+        $0.kind != "proposed_plan" && (entry.id != tail.id || !resultIDs.contains($0.itemID))
       }
     }
   }
@@ -434,7 +448,7 @@ struct ChatTranscript {
       var entry = source
       // Older cached projections omitted notice names. Neither these placeholders nor
       // agent warnings belong in the conversation's execution process.
-      entry.items.removeAll { $0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning") }
+      entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning")) }
       let processOnly = !processEntryID.isEmpty
       if processOnly && entry.id != processEntryID { return [] }
       if entry.role == "user" {
@@ -475,22 +489,22 @@ struct ChatTranscript {
         if flatItems {
           visible = entry.items.indices.filter { !entry.items[$0].hidesFromTranscript }
         } else if !processStartID.isEmpty, let start = entry.items.firstIndex(where: { $0.itemId == processStartID }) {
-          let end = entry.items.indices.dropFirst(start + 1).first { entry.items[$0].type == "text" || entry.items[$0].isAttachment } ?? entry.items.endIndex
-          visible = Array(start..<end).filter { !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && !entry.items[$0].hidesFromTranscript }
+          let end = entry.items.indices.dropFirst(start + 1).first { entry.items[$0].type == "text" || entry.items[$0].type == "proposed_plan" || entry.items[$0].isAttachment } ?? entry.items.endIndex
+          visible = Array(start..<end).filter { entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && !entry.items[$0].hidesFromTranscript }
         } else {
           let answer = ChatAnswerText.visibleIndices(entry.items)
-          visible = entry.items.indices.filter { !answer.contains($0) && !entry.items[$0].isAttachment && !entry.items[$0].hidesFromTranscript }
+          visible = entry.items.indices.filter { !answer.contains($0) && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].hidesFromTranscript }
         }
       } else if entry.finished {
         let answer = ChatAnswerText.visibleIndices(entry.items)
         let process = entry.items.indices.filter {
-          !answer.contains($0) && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task"
+          !answer.contains($0) && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task"
         }
         if let first = process.first { groups[first] = process }
         visible = process.first.map { [$0] } ?? []
         visible.append(contentsOf: answer)
         visible.append(contentsOf: entry.items.indices.filter {
-          entry.items[$0].isAttachment || entry.items[$0].isChatFailure
+          entry.items[$0].type == "proposed_plan" || entry.items[$0].isAttachment || entry.items[$0].isChatFailure
             || (entry.items[$0].type == "subagent_task" && !entry.items[$0].hidesFromTranscript)
         })
         visible.sort()
@@ -500,7 +514,7 @@ struct ChatTranscript {
             if !entry.items[index].hidesFromTranscript { visible.append(index) }
             continue
           }
-          if entry.items[index].type == "text" || entry.items[index].isAttachment || entry.items[index].isChatFailure {
+          if entry.items[index].type == "text" || entry.items[index].type == "proposed_plan" || entry.items[index].isAttachment || entry.items[index].isChatFailure {
             visible.append(index)
           } else if let previous = visible.last, groups[previous] != nil {
             groups[previous]!.append(index)
@@ -513,11 +527,14 @@ struct ChatTranscript {
       var result: [ChatRow] = []
       var absorbedProcess = false
       if entry.role == "assistant", !processOnly {
-        // A Lody Operation reply answers a system completion turn. Borrowing the
-        // user turn before it would repeat that turn's duration row identity.
-        let operationTurn = entries[..<entryIndex].last { $0.id == entry.userTurnId && $0.role == "system" }
-        let turn = operationTurn ?? entries[..<entryIndex].last { $0.role == "user" }
-        let turnID = turn?.id ?? entry.id
+        let turn: ChatEntry?
+        if let userTurnID = entry.userTurnId {
+          // A reply may arrive before its input; never borrow a neighboring turn's clock.
+          turn = entries.first { ($0.role == "user" || $0.role == "system") && $0.id == userTurnID }
+        } else {
+          turn = entries[..<entryIndex].last { $0.role == "user" }
+        }
+        let turnID = entry.userTurnId ?? turn?.id ?? entry.id
         let start = turnStartedAt[turnID] ?? turn.flatMap(ChatWorkDuration.startMilliseconds)
         if let duration = ChatWorkDuration.milliseconds(for: entry, now: now, startOverride: start) {
           var row = ChatRow(
@@ -596,6 +613,15 @@ struct ChatTranscript {
           row.text = file.fileName
           row.symbol = "doc"
           row.actionable = true
+        case "proposed_plan":
+          row.text = item.markdown ?? ""
+          row.streaming = item.status == "delta"
+          row.planIsLatest = item.isLatest == true
+          if row.planIsLatest {
+            row.planPermissionItemID = entry.items.first {
+              $0.type == "tool_call" && $0.kind == "switch_mode" && $0.permission?.pending == true
+            }?.itemId ?? ""
+          }
         case "text": break
         case "thought": row.symbol = "brain"
         case "tool_call":
@@ -687,7 +713,7 @@ extension ChatTranscript {
       running: running,
       attention: status == "failed"
     )
-    row.symbol = "person.2"
+    row.symbol = "point.3.connected.trianglepath.dotted"
     row.actionable = true
     row.subagent = card
     return row
@@ -889,12 +915,16 @@ extension ChatPendingSend {
         actionable: true, attention: true))
       return result
     }
-    let acceptedIndex = entries.firstIndex { $0.id == id }
-    let hasReply = acceptedIndex.map { entries.dropFirst($0 + 1).contains { $0.role == "assistant" } } ?? false
+    var precedingUserID: String?
+    let hasReply = entries.contains { entry in
+      if entry.role == "user" { precedingUserID = entry.id }
+      return entry.role == "assistant" && (entry.userTurnId ?? precedingUserID) == id
+    }
     let hasDelivery = entries.contains { $0.id == id && $0.delivery != nil }
     let acknowledged = phase == "accepted"
     if !hasReply && !acknowledged && !hasDelivery {
-      result.insert(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: status,
+      let delivery = status.isEmpty ? LodyStrings.text("send.status.awaitingConnection") : status
+      result.insert(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: delivery,
         attention: phase == "unknown"), at: 0)
     }
     if !hasReply && acknowledged && !hasDelivery {
@@ -948,4 +978,12 @@ extension ChatFailure {
     if message.isEmpty || message.hasPrefix("{") || message.hasPrefix("[") { return LodyStrings.text("native.chat.error.summary") }
     return String(message.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ").prefix(260))
   }
+}
+
+struct ChatPlanDecisionState: Decodable, Equatable {
+  let entryId: String
+  let itemId: String
+  let enabled: Bool
+  let pending: Bool
+  let message: String
 }

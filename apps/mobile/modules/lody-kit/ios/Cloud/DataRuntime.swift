@@ -1,3 +1,5 @@
+import LodyRuntime
+import LodyCore
 import ExpoModulesCore
 import WebKit
 import UIKit
@@ -126,23 +128,15 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   private func build(reason: String) {
     guard workspace != nil else { return }
     disposeView(); lastStartReason = reason; generation += 1; health.started(at: now); acknowledgements = 0
-    let config = WKWebViewConfiguration()
-    config.websiteDataStore = .nonPersistent()
-    // The view never joins a window, and iOS suspends a detached web view by
-    // default: its reads then advance only when the heartbeat wakes it, and a
-    // machine ping's three requests miss their deadline.
-    config.preferences.inactiveSchedulingPolicy = .none
-    config.userContentController.add(self, name: "dataRuntime")
-    if let lan, !backgroundProbe {
-      let handler = LanHubSchemeHandler(invite: lan)
-      config.setURLSchemeHandler(handler, forURLScheme: LanHubSchemeHandler.scheme)
-      lanHandler = handler
+    let view = RuntimeDocument.makeWebView(handler: self, delegate: self) { config in
+      // Detached WebViews must keep serving LAN presence and machine RPCs.
+      config.preferences.inactiveSchedulingPolicy = .none
+      if let lan, !backgroundProbe {
+        let handler = LanHubSchemeHandler(invite: lan)
+        config.setURLSchemeHandler(handler, forURLScheme: LanHubSchemeHandler.scheme)
+        lanHandler = handler
+      }
     }
-    let view = WKWebView(frame: .zero, configuration: config)
-    #if DEBUG
-    view.isInspectable = true
-    #endif
-    view.navigationDelegate = self
     // A signature drift silently drops the optional policy witness, and with it the navigation guard.
     assert(responds(to: #selector(webView(_:decidePolicyFor:decisionHandler:) as (WKWebView, WKNavigationAction, @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) -> Void)))
     webView = view
@@ -157,10 +151,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       return
     }
     do {
-      guard let url = Bundle(for: LodyKitModule.self).url(forResource: "DataRuntime", withExtension: "html") ?? Bundle.main.url(forResource: "DataRuntime", withExtension: "html") else { throw NSError(domain: "MissingDataRuntime", code: 1) }
-      // A bundled document with the official site's origin, or the LAN hub's
-      // `lody-hub` origin; no remote scripts are loaded.
-      view.loadHTMLString(try String(contentsOf: url, encoding: .utf8), baseURL: URL(string: pageOrigin))
+      try RuntimeDocument.load(in: view, bundle: Bundle(for: LodyKitModule.self), origin: pageOrigin)
     } catch { disposeView(); publish("failed", reason: "missing_resource") }
   }
   private func disposeView() {
@@ -261,10 +252,29 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       }
       let user = userId
       shareTasks[id] = Task { [weak self, weak view] in
-        let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user)
+        let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user, useLink: { action, url in
+          if action == "copy" {
+            UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: url.absoluteString]], options: [.localOnly: true])
+          } else if action == "open" {
+            guard await UIApplication.shared.open(url) else { throw SessionSharing.ManagementFailure(code: "shares_link_failed") }
+          }
+        })
         guard !Task.isCancelled, let self, let view, self.webView === view, self.workspace == workspace, self.userId == user else { return }
         self.shareTasks.removeValue(forKey: id)
         view.callAsyncJavaScript("globalThis.dataRuntime.shareResult(id, value, failed)", arguments: ["id": id, "value": result ?? NSNull(), "failed": result == nil], in: nil, in: .page, completionHandler: nil)
+      }
+    case "shortcutCloud":
+      guard let workspace, body["workspaceId"] as? String == workspace,
+            let id = body["id"] as? String, UUID(uuidString: id) != nil,
+            let operation = body["operation"] as? String, let args = body["args"] as? [String: Any],
+            githubTasks[id] == nil, githubTasks.count < 8 else { return }
+      let user = userId
+      githubTasks[id] = Task { [weak self, weak view] in
+        let result = try? await PromptShortcutCloud.call(operation: operation, workspace: workspace, args: args)
+        guard !Task.isCancelled, let self, let view, self.webView === view,
+              self.workspace == workspace, self.userId == user else { return }
+        self.githubTasks.removeValue(forKey: id)
+        view.callAsyncJavaScript("globalThis.dataRuntime.shortcutCloudResult(id, value, failed)", arguments: ["id": id, "value": result ?? NSNull(), "failed": result == nil], in: nil, in: .page, completionHandler: nil)
       }
     case "githubMentions":
       guard let workspace, body["workspaceId"] as? String == workspace,
@@ -690,7 +700,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     if method == "createSession" || method == "sendTurn" || method == "editSession" || method == "checkTurnQuota" {
       args["billingEntitlement"] = billing ?? NSNull()
     }
-    if method == "remoteSettings" || method == "localProjects" || method == "mentionCatalog" { args["userId"] = userId }
+    if method == "publishedShares" || method == "memorySettings" || method == "agentRoles" || method == "promptShortcuts" || method == "remoteSettings" || method == "localProjects" || method == "mentionCatalog" { args["userId"] = userId }
     if method == "editSession" || method == "sessionPreview" || method == "iosSimulatorControl" { args["userId"] = userId }
     let id = UUID(); commands[id] = sink
     if (method == "sendTurn" || (method == "editSession" && args["action"] as? String == "send")), args["backgroundTaskId"] == nil, !backgrounded {
@@ -699,7 +709,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     let backgroundTaskId = args["backgroundTaskId"] as? String
     var timeout: Double = 45
     if method == "editSession" { timeout = 130 }
-    if method == "sessionSharing" { timeout = 130 }
+    if method == "sessionSharing" || method == "promptShortcuts" { timeout = 130 }
+    if method == "publishedShares" { timeout = 70 }
     if method == "sessionPreview" { timeout = 330 }
     if method == "iosSimulatorControl" { timeout = 100 }
     // A voice start may first download the machine's Codex runtime.
@@ -807,9 +818,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     view.callAsyncJavaScript("globalThis.dataRuntime.grant(value)", arguments: ["value": grant as Any? ?? NSNull()], in: nil, in: .page, completionHandler: nil)
   }
   func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-    let url = navigationAction.request.url
-    let bundledLoad = navigationAction.navigationType == .other && (url?.absoluteString == "about:blank" || url?.absoluteString == pageOrigin)
-    decisionHandler(bundledLoad ? .allow : .cancel)
+    decisionHandler(RuntimeDocument.allows(navigationAction, origin: pageOrigin) ? .allow : .cancel)
   }
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { if self.webView === webView { recover("process_terminated") } }
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { if self.webView === webView { recover("navigation_failed") } }

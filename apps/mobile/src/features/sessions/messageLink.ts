@@ -1,5 +1,5 @@
 import { parseSessionLink } from '../../lib/sessionLink.ts';
-import type { Session } from '../../models/catalog.ts';
+import type { Session } from '@lody/cloud-runtime/models/catalog';
 
 /** What a link in a message opens; native code opens ordinary web links itself. */
 export type MessageLinkAction =

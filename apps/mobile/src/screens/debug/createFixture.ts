@@ -2,8 +2,8 @@ import { githubProject } from '@/cloud/catalog/model';
 import { writeLocal } from '@/cloud/kv';
 import { createPrefsKey } from '@/features/sessions/createPrefs';
 import { present } from '@/lib/presentation';
-import type { Project } from '@/models/catalog';
-import type { CreationOptions } from '@/models/send';
+import type { Project } from '@lody/cloud-runtime/models/catalog';
+import type { CreationOptions } from '@lody/cloud-runtime/models/send';
 import { CreateSessionScreen } from '../CreateSessionScreen';
 import { readLocalValue, writeLocalValue } from '@lody-ios/kit';
 

@@ -9,6 +9,96 @@ import {
   frame,
 } from '../helpers.mjs';
 
+test('continuing a Role session preserves its frozen identity through dispatch and queue', async () => {
+  const calls = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      calls.push(request);
+      return { result: { accepted: true } };
+    },
+  });
+  const previous = {
+    cliType: 'builtin',
+    agentType: 'codex',
+    modelId: 'frozen-model',
+    modeId: 'plan',
+    configOptionValues: { effort: 'high', fast: false },
+    agentRoleId: 'role-coder',
+    agentRoleRevision: 7,
+    mcpServerIds: ['workspace-files'],
+  };
+  try {
+    fixture.server.getList('history').push({
+      id: 'previous',
+      role: 'user',
+      status: 'handled',
+      finished: true,
+      inputConfig: previous,
+      items: [],
+    });
+    fixture.server.commit();
+    await fixture.pushUpdate();
+    const args = {
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Continue the review',
+    };
+    assert.equal((await fixture.runtime.sendTurn(args)).state, 'accepted');
+    const input = calls[0].params.inputConfig;
+    for (const key of Object.keys(previous))
+      assert.deepEqual(input[key], previous[key]);
+    assert.deepEqual(fixture.server.toJSON().history.at(-1).inputConfig, input);
+    assert.equal(
+      (await fixture.runtime.sendTurn({ ...args, queue: true })).state,
+      'queued',
+    );
+    const queued = fixture.server.toJSON().mq[0].acpSessionConfig;
+    for (const key of Object.keys(previous))
+      assert.deepEqual(queued[key], previous[key]);
+    for (const override of [
+      { modelId: 'different-model' },
+      { modelId: null },
+      { modeId: 'code' },
+      { reasoningEffort: 'low' },
+      { configOptionValues: { fast: true } },
+    ]) {
+      assert.equal(
+        (await fixture.runtime.sendTurn({ ...args, ...override, queue: true }))
+          .state,
+        'queued',
+      );
+      const changed = fixture.server.toJSON().mq.at(-1).acpSessionConfig;
+      assert.equal(
+        changed.agentRoleId,
+        null,
+        'Overrides explicitly detach the frozen Role',
+      );
+      assert.equal(changed.agentRoleRevision, undefined);
+    }
+    assert.equal(
+      (
+        await fixture.runtime.sendTurn({
+          ...args,
+          queue: true,
+          modelId: previous.modelId,
+          configOptionValues: { fast: false, effort: 'high' },
+        })
+      ).state,
+      'queued',
+    );
+    assert.equal(
+      fixture.server.toJSON().mq.at(-1).acpSessionConfig.agentRoleId,
+      null,
+      'Restoring controls does not resurrect a Role detached by a newer queued turn',
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
 test('independent configuration reaches durable history before RPC, inherits on later turns and rejects malformed overrides', async () => {
   const calls = [];
   const fixture = await openTestSession({
@@ -715,7 +805,7 @@ test('send persists user before dispatch; duplicate incremental imports preserve
     }
   };
   const bundle = await build({
-    entryPoints: ['apps/mobile/modules/lody-kit/data-runtime/session.ts'],
+    entryPoints: ['packages/cloud-runtime/src/runtime/session.ts'],
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -1136,7 +1226,7 @@ test('the envelope carries the latest run step; the run sheet reads every step i
       ['text', 'Six callers.'],
     ],
   );
-  assert.equal(full.items[1].itemId, 'grep-1');
+  assert.equal(full.items[1].itemId, JSON.stringify([item.itemId, 'grep-1']));
   assert.equal(full.items.at(-1).rev, item.run.items[0].rev);
   // A step before the latest one still moves the task's rev.
   tool.set('status', 'failed');
@@ -1163,6 +1253,121 @@ test('the envelope carries the latest run step; the run sheet reads every step i
   const next = projectSession(doc, 'live').entries[0].items[0];
   assert.equal(next.run.items[0].text, 'Six callers. Two misorder the cookie.');
   assert.ok(next.rev > before);
+});
+
+test('subtask run projection and tool details survive live updates and cache restoration', async () => {
+  const fixture = await openTestSession();
+  try {
+    const run = {
+      sessionId: 'child',
+      snapshot: { state: 'running' },
+      items: [
+        { type: 'thought', text: 'Trace the composer' },
+        {
+          type: 'tool_call',
+          toolCallId: 'read',
+          kind: 'read',
+          title: 'Read composer',
+          status: 'completed',
+          content: [{ type: 'output', output: 'first' }],
+        },
+        {
+          type: 'plan',
+          entries: [{ content: 'Move task chip', status: 'in_progress' }],
+        },
+        { type: 'text', text: 'Found the chip row' },
+        { type: 'subagent_task', taskId: 'ignored' },
+      ],
+    };
+    const entry = fixture.server
+      .getList('history')
+      .pushContainer(new LoroMap());
+    entry.set('id', 'reply');
+    entry.set('role', 'assistant');
+    const task = entry
+      .setContainer('items', new LoroList())
+      .pushContainer(new LoroMap());
+    task.set('type', 'subagent_task');
+    task.set('taskId', 'task');
+    task.set('status', 'in_progress');
+    task.set('run', run);
+    fixture.server.commit();
+    await fixture.pushUpdate();
+    const beforeTask = fixture.runtime.projectSession(fixture.server, 'live')
+      .entries[0].items[0];
+    const before = {
+      ...beforeTask,
+      run: (
+        await fixture.runtime.itemDetail({
+          sessionId: 's1',
+          entryId: 'reply',
+          itemId: beforeTask.itemId,
+          run: true,
+        })
+      ).run,
+    };
+    assert.deepEqual(
+      before.run.items.map((item) => item.type),
+      ['thought', 'tool_call', 'plan', 'text'],
+    );
+    assert.equal(before.run.items[0].text, 'Trace the composer');
+    const tool = before.run.items[1];
+    assert.equal(tool.hasDetail, true);
+    const detail = await fixture.runtime.itemDetail({
+      sessionId: 's1',
+      entryId: 'reply',
+      itemId: tool.itemId,
+    });
+    assert.equal(detail.blocks[0].output, 'first');
+    run.items[1].content[0].output = 'updated';
+    run.snapshot.state = 'completed';
+    task.set('run', run);
+    fixture.server.commit();
+    await fixture.pushUpdate();
+    const afterTask = fixture.runtime.projectSession(fixture.server, 'live')
+      .entries[0].items[0];
+    const after = {
+      ...afterTask,
+      run: (
+        await fixture.runtime.itemDetail({
+          sessionId: 's1',
+          entryId: 'reply',
+          itemId: afterTask.itemId,
+          run: true,
+        })
+      ).run,
+    };
+    assert.equal(after.run.items[1].itemId, tool.itemId);
+    assert.ok(after.run.items[1].rev > tool.rev);
+    assert.ok(after.rev > before.rev);
+    assert.equal(
+      (
+        await fixture.runtime.itemDetail({
+          sessionId: 's1',
+          entryId: 'reply',
+          itemId: tool.itemId,
+        })
+      ).blocks[0].output,
+      'updated',
+    );
+    const restored = new LoroDoc();
+    restored.import(fixture.server.export({ mode: 'snapshot' }));
+    assert.equal(
+      fixture.runtime.projectSession(restored, 'live').entries[0].items[0].run
+        .state,
+      'completed',
+    );
+    await assert.rejects(
+      fixture.runtime.itemDetail({
+        sessionId: 's1',
+        entryId: 'reply',
+        itemId: JSON.stringify(['missing', 'read']),
+      }),
+      /item_not_found/,
+    );
+  } finally {
+    fixture.close();
+  }
 });
 
 test('MCP image groups survive projection, cache updates and history bootstrap', async () => {
@@ -2162,7 +2367,7 @@ test('busy turns use the OSS FIFO queue, durable before watermark; lost ACK is n
   }
 });
 
-test('guide writes a steer history turn instead of the FIFO queue', async () => {
+test('guide writes a steer history turn instead of the FIFO queue and retains its Role', async () => {
   const requests = [];
   const fixture = await openTestSession({
     onRpc: (request) => {
@@ -2181,6 +2386,19 @@ test('guide writes a steer history turn instead of the FIFO queue', async () => 
     },
   });
   try {
+    fixture.server.getList('history').push({
+      id: 'role-input',
+      role: 'user',
+      finished: true,
+      status: 'handled',
+      items: [],
+      inputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        agentRoleId: 'role-coder',
+        agentRoleRevision: 3,
+      },
+    });
     fixture.server.getList('history').push({
       id: 'running',
       role: 'assistant',
@@ -2214,6 +2432,9 @@ test('guide writes a steer history turn instead of the FIFO queue', async () => 
     assert.equal(requests[0].method, 'session/steer');
     assert.equal(requests[0].params.expectedTurnId, 'running');
     assert.equal(requests[0].params.userTurnId, result.id);
+    assert.equal(requests[0].params.inputConfig.agentRoleId, 'role-coder');
+    assert.equal(requests[0].params.inputConfig.agentRoleRevision, 3);
+    assert.equal(entry.inputConfig.agentRoleId, 'role-coder');
   } finally {
     fixture.close();
   }
@@ -2766,6 +2987,97 @@ test('multiple durable guides await independent receipts without locking the ses
     assert.equal(receipts.size, 3);
     receipts.get(third.id)({ result: { applied: true } });
     await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    fixture.close();
+  }
+});
+
+test('proposed documents preserve identity across streaming, completion and clearing', async () => {
+  const { projectSession } = await loadProject();
+  const doc = new LoroDoc();
+  const entry = doc.getList('history').pushContainer(new LoroMap());
+  entry.set('id', 'plan');
+  entry.set('role', 'assistant');
+  const items = entry.setContainer('items', new LoroList());
+  const plan = items.pushContainer(new LoroMap());
+  for (const [key, value] of Object.entries({
+    type: 'proposed_plan',
+    markdown: '# Plan',
+    turnId: 'turn',
+    status: 'delta',
+    isLatest: true,
+  }))
+    plan.set(key, value);
+  doc.commit();
+  const first = projectSession(doc, 'live').entries[0].items[0];
+  assert.equal(first.markdown, '# Plan');
+  plan.set('markdown', '# Plan\n\nComplete body');
+  plan.set('status', 'completed');
+  doc.commit();
+  const complete = projectSession(doc, 'live').entries[0].items[0];
+  assert.equal(complete.itemId, first.itemId);
+  assert.notEqual(complete.rev, first.rev);
+  assert.equal(complete.markdown, '# Plan\n\nComplete body');
+  assert.equal(complete.status, 'completed');
+  plan.set('isLatest', false);
+  doc.commit();
+  const historical = projectSession(doc, 'live').entries[0].items[0];
+  assert.equal(historical.isLatest, false);
+  assert.notEqual(historical.rev, complete.rev);
+  plan.set('status', 'cleared');
+  doc.commit();
+  assert.equal(
+    projectSession(doc, 'live').entries[0].items[0].status,
+    'cleared',
+  );
+});
+
+test('a guide whose target finishes during MCP selection uses ordinary dispatch', async () => {
+  const requests = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      requests.push(request);
+      return { result: { accepted: true, applied: false } };
+    },
+  });
+  try {
+    const history = fixture.server.getList('history');
+    const reply = history.pushContainer(new LoroMap());
+    reply.set('id', 'running');
+    reply.set('role', 'assistant');
+    reply.set('finished', false);
+    reply.set('items', []);
+    fixture.server.commit();
+    await fixture.pushUpdate();
+    const sent = await fixture.runtime.sendTurn(
+      {
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        text: 'follow-up',
+        cliType: 'builtin',
+        agentType: 'codex',
+        guide: true,
+      },
+      undefined,
+      undefined,
+      async () => {
+        reply.set('finished', true);
+        fixture.server.commit();
+        await fixture.pushUpdate();
+        return [];
+      },
+    );
+    assert.equal(sent.state, 'accepted');
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ['session/dispatch-turn'],
+    );
+    const turn = fixture.server
+      .toJSON()
+      .history.find((entry) => entry.id === sent.id);
+    assert.notEqual(turn.status, 'pending_apply');
+    assert.equal(turn.inputConfig._lodySteerTarget, undefined);
   } finally {
     fixture.close();
   }

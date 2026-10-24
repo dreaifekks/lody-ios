@@ -1,5 +1,13 @@
 # Offline UI verification
 
+`composer-motion` records two empty-composer keyboard round trips with the context
+chip and quick replies in English light/dark. It checks the expanded input,
+restored capsule aligned to both message-text edges, the context chip's leading
+edge, and 44 pt Add target. Screenshot rim detection also verifies visible glass
+alignment independently of accessibility frames; `motion-events.json` marks actions for
+frame-by-frame video review. Reuse `composer-rest-draft` and `composer-glass`
+for attachment/text retention and the standalone sheet host.
+
 `branch-picker` exercises the native new-session branch selector without an account:
 repository defaults, pagination during case-insensitive search, selection and back
 cancellation, long names, failed-load retry, and empty repositories. It captures
@@ -23,9 +31,14 @@ retaining edits, and successful replacement. Screenshots and video capture the s
 The service boundary is synthetic; no cloud history is rewritten. Protocol tests cover
 eligibility, server-owned history replacement and non-replay of uncertain requests.
 
-`composer-fullscreen` types past the chat input's inline cap, expands it in place to
-full screen, checks the upward growth and format bar, collapses it, then sends from full
-screen. It uses the offline chat-success fixture in English light/dark.
+`composer-fullscreen` types past the chat input's inline cap, drags the sheet's grabber
+up to full screen, checks the upward growth and format bar, drags it back down, toggles it
+with a grabber tap, sends from full screen, then drags the default sheet down to close it.
+It uses the offline chat-success fixture in English light/dark.
+
+`composer-rest-draft` pastes a file and types a two-line draft, dismisses the sheet, and
+checks the resting capsule stays 48 points with the attachment stack and Send inside, then
+reopens the sheet with the draft intact. It uses the chat-success fixture.
 
 `--suite chat-kit` exercises the Swift Package migration through the
 production streaming transcript, standalone Composer sheet and attachment send
@@ -39,6 +52,11 @@ and replaces the transcript to verify stale selections are cleared. The Selectio
 Fixture uses production rendering without account or cloud access. User bubbles,
 tool rows and unloaded history form selection boundaries; changing visible group
 membership clears selection. Table selections keep their upstream group and menu.
+
+`--suite markdown-files` verifies table scrolling back to the first column and
+file previews together in both appearances. Quick Look checks wait for image/PDF
+loading to finish, then close, reopen and dismiss by dragging the sheet grabber;
+closing during loading must not reopen a preview after its response arrives.
 
 Pinned [Litext](https://github.com/Lakr233/Litext) 3.6.2 uses UIKit's public `UITextSelectionDisplayInteraction`
 for highlights/handles and `UITextLoupeSession` on iOS 17 and later. `markdown`
@@ -55,6 +73,14 @@ The chat check also verifies annotation readings, selectable base text and incre
 line height during streaming and after completion. The `local-store` native check
 covers parsed Ruby in lists, headings, tables and links, with literal code and
 incomplete or unsupported markup preserved.
+
+`mermaid` exercises the shared native Beautiful Mermaid renderer in chat and
+Markdown file preview: six diagram types, Chinese labels, source copy, plan expansion,
+invalid/unsupported/oversized input fallback, and streaming-to-completed handoff.
+In-flight messages retain code until completion. Inputs above 12 KiB, 128 nonempty
+lines, 128 flow/state nodes plus edges, or 8192 pt layout dimensions retain their
+original code blocks. Diagram colors follow UIKit semantic light/dark colors.
+Quoted fences retain the existing parser behavior, which flattens them into text.
 
 `session-share` exercises the production SwiftUI conversation-sharing Form with an
 independently resettable Debug source: default scope, sub-conversation selection,
@@ -249,12 +275,91 @@ task's locked Simulator or Metro.
 
 ## Baseline inventory
 
+`--suite html-files` checks HTML previews and existing file previews in English,
+light and dark. `html-preview` exercises the native source/preview icon in file
+and Diff hosts, real page-button taps with relative CSS/JS, dynamic resource errors,
+and feedback payloads and sent/failed/queued states. Missing relative files,
+unmapped root paths, computer filesystem URLs and localhost are distinct failures.
+Feedback uses an offline service boundary; no real agent turn is sent.
+
 `quick-replies` exercises the production composer and Settings editor: idle-only
 visibility, draft preservation, full-message sending and explicit failure retry,
 stable transcript/input geometry across repeated first-character and last-delete transitions,
 adding/editing/reordering/deleting replies, and local persistence after process
 restart. Both English appearances record screenshots and video; no cloud turn
 is dispatched.
+
+`chat-chrome` also opens a normalized subtask run through the production task
+sheet, checks thinking and tool rows, observes the parent source adding its reply,
+and opens a nested tool detail. The task chip disappears when that run completes.
+The `settings` scene includes identically named Agent configs on two computers;
+checks verify machine headers, usage/read-only states, editing identity and cache
+refresh without cloud access.
+
+`queued-message-behavior` enters Preferences, checks signed-out notification
+navigation and cancelled/completed edge-pop, then cold-launches to prove the saved
+Steer choice restores. `preferences-preview` is the direct Debug entry; product
+Settings reaches it through the Personal group and no longer repeats its options.
+
+`workspace-general` uses the existing offline Home providers to exercise only
+Settings → Workspace → General: the shared editor, seeded system icon picker,
+name save/readback, cancellation, home-name projection and the target after a
+workspace switch. No cloud workspace is changed; no iPad or full Home flow runs.
+
+`agent-roles` uses the production role list, target picker and editor with resettable
+service outcomes. English light/dark screenshots and video cover ownership,
+unavailable bindings, v2 target display, conflicts, retained drafts, private
+creation, sharing, readback, uncertain deletion followed by refresh, and closing a pending
+editor after an account switch. It also
+opens the actual Settings entry without cloud credentials. `role-mention-chat`
+and `role-mention-sheet` prove that an explicit role/machine token survives both
+native input hosts and expands into the sent transcript. Runtime checks observe
+the durable history/queue and machine payload without executing a real MCP tool.
+
+`mcp-settings` uses production MCP settings and editor components in a resettable
+offline scene. English light/dark screenshots and video cover explicit default
+labels, incomplete connections, read-only rows, duplicate names, failed-save draft
+retention, exact readback, delete confirmation/cancellation, conflict recovery and
+deleted-row readback. Runtime checks additionally inspect the actual persisted
+history/queue and machine dispatch payload, without a real MCP connection.
+
+`agents-settings` exercises only the production Agents list and editor: separate
+configuration/subscription groups, per-provider quota display, cached refresh,
+read-only ownership, failed-save draft retention and machine-scoped prompt readback.
+It uses the resettable offline Settings scene in English light/dark with video,
+and checks the Agent form's grouped background.
+
+`--suite settings-workspace` runs `prompt-shortcuts`, `project-visibility`,
+`github-settings` and `ai-usage` in English light/dark with `--require-video`.
+The resettable offline scenes use production screens and services injected at
+request boundaries: shortcut validation/readback, owner-only project visibility,
+independent GitHub identity/repository state, and server-range usage with unknown
+costs, retained refresh data and late-response fencing. They do not authorize
+GitHub, mutate a real workspace or cover iPad. Use a signed Release app with
+`--embedded` when another task is editing the shared Metro sources.
+
+`machine-settings` opens a resettable machine-only fixture using the production
+remote list and editor. It checks same-name machine IDs, unknown status after a
+failed cached read, presence recovery, read-only behavior, conflict draft retention,
+cancel/reopen and rename readback. Run it explicitly in English light/dark with
+video; it does not run the Agent/MCP flows from `settings` or touch real machines.
+
+`settings-form-backgrounds` checks the five Settings form variants (machine,
+Agent, MCP, workspace and quick reply). It samples rendered card/background
+contrast in English light/dark before and after keyboard expansion, then cancels.
+It does not save, pick an icon or exercise notification/chat/service workflows.
+
+`settings-baseline` checks the reorganized production Settings layout in six
+resettable contexts: signed out, signed in without a workspace, live, syncing,
+offline, and an offline cached projection. It captures each list's top/bottom,
+checks workspace-scoped visibility and resync, and exercises the moved Preferences,
+Appearance and About entries plus native child-page return. Account still covers
+a cancelled edge-pop. Only entry seams are checked; chat/model/Share Extension
+flows and full notification/editor business cases are outside this layout check.
+The original pre-reorganization captures remain in `.artifacts/settings-set-01/`.
+The projection fixture does not prove SQLite startup restoration or a real cloud connection.
+Both English appearances require screenshots and video. Run it explicitly with
+`--case settings-baseline`; it is not added to the default regression batch.
 
 `context-chip` reuses that scene and cycles its Preview fixture through
 connecting, ready, simulator and unavailable. The composer's single context
@@ -290,8 +395,8 @@ visual smoothness. The probe contains fixture IDs and geometry only.
 | project-history         | ProjectHistoryView + NativeGroupedList                | Device/project/agent drill-down, delayed loading vs failed/empty results, native toolbar placement and disabled states, select/deselect all, partial import retry, conflict confirmation and return-time toolbar cleanup                                                                                                                                                                                                                                                                                                                                                                              |
 | project-picker          | ProjectPickerScreen + NativeGroupedList segments      | Local and GitHub occupy separate segments; search sits in the scrolling list under the pinned segments; a long GitHub fixture cannot bury local projects; switching segments restores each list and its own search                                                                                                                                                                                                                                                                                                                                                                                    |
 | settings                | RemoteSettingsView + RemoteSettingEditorScreen        | Leading Cancel/trailing Save while typing, compact Machine/MCP sheets, Agent prompt, empty loading until a confirmed list exists, navigation refresh with a loading indicator, refresh time on cached/live rows, failed load retry, failed-save Toast with draft retention, and saved-value readback                                                                                                                                                                                                                                                                                                  |
-| queued-message-behavior | QueuedMessageBehaviorScreen                           | Local Queue / Steer choice, exclusive selection, and restore to Queue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| voice-dictation         | SettingsScreen + ChatComposerView                     | Experimental voice switch is off by default; turning it on shows a 44 pt microphone beside send in the create-session and chat composers, and turning it off hides it again                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| queued-message-behavior | PreferencesScreen                                     | Local Queue / Steer choice, exclusive selection, and restore to Queue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| voice-dictation         | PreferencesScreen + ChatComposerView                  | Experimental voice switch is off by default; turning it on shows a 44 pt microphone beside send in the create-session and chat composers, and turning it off hides it again                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | home                    | InboxScreen header + glass FAB + settings Sheet       | Workspace chip loads `user.image` (letter fallback); inbox header search, archived results, cancellation restore; view menu switches Projects / Activity / Chat and project sort; Projects puts pinned sessions in a top outline above project cards; chat-only sessions sit in a trailing 对话 group; empty project shows `0`; project/session long-press context menus and session transcript peek; bottom-right glass create opens a 项目 / 对话 title segment and cancels back; long-press Settings opens Debug and returns; push remote settings and archive in settings sheet with close/return |
 | machine-view            | InboxScreen By Machine view                           | A machine title carries its project count above its first card; tapping it collapses only that machine’s projects (pinned and chat groups stay) and tapping again restores them                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ipad                    | PadHomeScreen + native panel stack + session detail   | Floating responsive panel, panel-local New Session sheet with two detents and swipe dismissal, project push/back with its own native header, session detail behind the retained panel, collapse/restore, opaque centered Settings sheet, portrait/landscape rotation, and light/dark appearance                                                                                                                                                                                                                                                                                                       |
@@ -308,14 +413,14 @@ visual smoothness. The probe contains fixture IDs and geometry only.
 | duration                | NativeChat assistant duration row                     | Static (non-shiny) first-row duration advances each second; server process follows below while live; completion freezes the OSS-compatible duration (wall span, then span minus `permissionWaitMs`) and absorbs the folded process into that same row above the final answer                                                                                                                                                                                                                                                                                                                          |
 | process-counts          | NativeChat folded process row                         | Debug fixture increments tool and edited-file counts; digits use SwiftUI `numericText`; the row stays on the 44 pt floor                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | process-failed          | NativeChat folded row + process Sheet                 | Live thinking row with a failed tool keeps its warning treatment; opening the Sheet shows the active detail with traveling text shine and no trailing spinner; screenshots plus video                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| chat-chrome             | NativeChat composer overlay                           | Connecting/paused/live-subtask glass above the composer; one item centered independently of the trailing scroll action; 30 pt scroll glass with send's 14 pt bold medium-scale arrow; 44 pt touch target; paired glasses share a bottom baseline; dropping scroll returns status to center; tapping live tasks opens the subtask sheet                                                                                                                                                                                                                                                                |
+| chat-chrome             | NativeChat composer overlay                           | Connecting/paused glass centered above the composer; 30 pt trailing scroll glass with a 44 pt target; live subtask counts in the composer chip row open the task list; native subtask details show thinking, tools, plans and live replies, with nested tool details and legacy summary/copy support                                                                                                                                                                                                                                                                                                  |
 | tracking                | NativeChat                                            | User drag releases following, stable history, return button during/after streaming                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | model-memory            | CreateSessionScreen + ModelScreen + NativeComposer    | Per-model effort and permission restoration across both selection hosts, full-access default; Grok independent permission, boolean fast mode, collaboration and agent preset options; config-only effort                                                                                                                                                                                                                                                                                                                                                                                              |
 | fast-chat / fast-sheet  | ChatComposerModelPanel in chat and new-session hosts  | Fast outline/solid toggle, RN echo, reopen, 44 pt target and non-Ultra particle motion in both themes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | model-options           | ChatComposerView                                      | Model/effort controls, RN echo, reopen persistence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | image-preview           | ChatImageCell + ChatImagePreview                      | Synthetic bitmap, zoom/restore, button and gesture dismissal; MCP gallery swipe, zoom blocking paging                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | composer                | NativeComposer in a real form sheet                   | Floating list inset, half/full sheet contrast, last-row reachability, file paste, iOS 26 focus glass fusion with balanced Add/Send controls and trailing model selector, keyboard clearance, rejection restore, duplicate suppression                                                                                                                                                                                                                                                                                                                                                                 |
-| composer-glass          | NativeComposer in a real form sheet                   | Separate unfocused Add/input glass, focus merge animation and unified final surface, mirrored Add/Send centers, shared baseline, trailing model selector, light/dark screenshots and video                                                                                                                                                                                                                                                                                                                                                                                                            |
+| composer-glass          | NativeComposer in a real form sheet                   | Resting capsule with Add inside and Send only for draft content, edge-to-edge sheet on the keyboard after focus, toolbar Add/Send ends on one baseline, trailing model selector, collapse back to the capsule, light/dark screenshots and video                                                                                                                                                                                                                                                                                                                                                       |
 | composer-video          | NativeChat composer                                   | Paste a movie that also registers a PNG poster; the chip and sent user row keep the video filename and never open an image cell                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | composer-success        | NativeChat composer                                   | File paste, pending clear/lock, text and attachments stay cleared after acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | markdown                | MarkdownView code block + table                       | Copy preserves complete code and indentation through the Simulator clipboard; a wide table stays inside its border during selection and horizontal scrolling                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -446,6 +551,8 @@ percentage. Its fixtures pass through the production catalog projector; screensh
 and video cover both appearances without provider credentials or live quota queries.
 
 The `live-activity` case uses the offline `debug` workspace and production activity reconciliation, without OneSignal or credentials. It checks the injected settings toggle, a multiple-task overview, permission priority, removal of a completed turn, ending all work and starting again. Island captures background the app first; the Lock Screen captures include the completion summary and its 10-second dismissal. Both appearances record video. It also switches the real app icon from default to Aqua during an active overview, captures the compact/expanded Island and Lock Screen artwork, verifies a newly started activity, and switches back to default. The runner handles the system's Live Activity consent prompt on reused pool devices. Overview links reject an unavailable account, and unavailable session links preserve the current page. Push-to-start and remote background updates still require a real device; these local checks do not establish APNs delivery.
+
+The `diagnostics` case uses an isolated App Group store with events from both the app and notification extension. It checks all four time ranges, the real chronological export, native share dismissal and temporary-file removal, read/export/clear failure recovery, clear cancellation and the signed-out Settings entry. Both appearances capture screenshots and video. It never initializes OneSignal or requests cloud access; APNs delivery requires separate real-device verification.
 
 The background case runs via `--case background`, dwelling on the Simulator Home screen for 40 seconds. Counts originate from real offscreen WebView callbacks; cloud events are substituted with local scripts without network or credential access. If the system denies sustained background tasks, this case only verifies retention/restoration and request-failure degradation, and cannot be used to claim that sustained background execution has passed. Prolonged physical-device network connectivity and power consumption require separate real-device testing.
 
@@ -800,6 +907,19 @@ fixtures activate under `--ui-verify` in Debug and Release fixture builds.
 
 ### Continuous steer
 
+`--suite guidance-scroll` compares ordinary sends, direct guidance and queued
+Steer against the same three completed conversation rounds plus a long current
+reply. Each case scrolls into the older context, returns to the tail, dismisses
+the keyboard before sending, and records the visible message position before
+and after delivery. It checks that the transcript exceeds two full viewports,
+guidance lands beside the composer with no reserved space, and an ordinary
+send lands at the top with reply space below it. Debug exposes the three
+independently resettable `长上下文` scenes for manual comparison.
+
+`send-guide` and `send-queue` check that direct and queued guidance keep the
+current reply visible without reserving a new turn's empty viewport. `send-rounds`
+checks that ordinary sends still reserve space for their reply.
+
 `--case steer` opens an offline scene backed by the execution projector and NativeChat.
 It covers three accepted guidance messages, the completed user-message sequence above
 one AI process summary, both final text blocks, and opening the earlier AI process.
@@ -936,3 +1056,9 @@ Reuse `attachment-overlay-chat`, `attachment-overlay-sheet` and
 selection at both top corners, repeated edge/inset layout switching, partially
 scrolled selection, renumbering and draft-preserving import in both appearances.
 Review the screenshots and videos for border continuity and stale highlights.
+
+`proposed-plan` verifies the native embedded Markdown document: capped preview, inline expansion/collapse, complete copy, expansion retained through streaming updates, earlier/cleared/short plans, dismissal of the existing permission sheet without a response, and search that expands hidden prose and removes cleared matches. The fixture uses production `NativeChat`, the production plan-decision hook and local permission services in both appearances. Business checks record the outgoing execute payload, verify planning is disabled while model/effort/permissions and the composer draft remain intact, and exercise continue-discussing, definite failure/retry, busy gating and ambiguous-delivery blocking. After changing native locale strings, run `pnpm prebuild` and `pnpm --filter @lody-ios/mobile pods` before `pnpm verify:build` so the app contains the updated string catalog.
+
+`memory-settings` 验证生产记忆列表与详情的读取失败恢复、身份／来源区分、导入确认／取消与读回、解除关联结果不明禁重放、账户切换及正式设置入口；`memory-states` 验证目录权限拒绝、提供方未安装／未运行、旧 daemon、失败／无权限、未知状态、未知提供方详情、缓存列表／详情和空列表。分别用一次 `--case` 运行两个用例，重复传入 `--case` 只会执行最后一个。均为离线边界注入，英文浅色／深色，不读取真实记忆或调用真实 provider。
+
+`published-shares` 验证正式分享列表／详情、分页失败恢复、原生复制、跨设备密钥缺失、管理员范围、确认／取消撤销、冲突、回执不明禁重放与账号切换。`published-share-states` 分别重置空列表、权限拒绝、只读和撤销后读回权限丢失。分别以单个 `--case` 运行，英文浅色／深色；fixture 不发布真实内容、不访问 Cloud、不读取或复制真实 reader secret。

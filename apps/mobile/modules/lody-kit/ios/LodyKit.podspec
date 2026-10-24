@@ -23,12 +23,17 @@ Pod::Spec.new do |s|
   system('/bin/bash', File.join(__dir__, '..', 'datachannel', 'build.sh'), exception: true)
   s.vendored_frameworks = 'Vendor/LodyDataChannel.xcframework'
   # Precompiled ExpoModulesCore skips autolinking's macro-plugin injection.
-  macros_plugin = File.join(File.dirname(`node --print "require.resolve('@expo/expo-modules-macros-plugin/package.json')"`.strip), 'apple')
+  macros_package = `node --print "require.resolve('expo-modules-macros/package.json')"`.strip
+  raise '[LodyKit] Could not resolve expo-modules-macros' unless $?.success? && !macros_package.empty?
+  macros_plugin = File.join(File.dirname(macros_package), 'apple')
   s.pod_target_xcconfig = {
-    'OTHER_SWIFT_FLAGS' => "$(inherited) -Xfrontend -load-plugin-executable -Xfrontend \"#{macros_plugin}/ExpoModulesMacros-tool#ExpoModulesMacros\""
+    'OTHER_SWIFT_FLAGS' => "$(inherited) -Xfrontend -load-plugin-executable -Xfrontend \"#{macros_plugin}/ExpoModulesMacros#ExpoModulesMacros\""
   }
   s.spm_dependency 'MarkdownView/MarkdownView'
   s.spm_dependency 'MarkdownView/MarkdownParser'
+  s.spm_dependency 'BeautifulMermaidSwift/BeautifulMermaid'
+  s.spm_dependency 'LodyCore/LodyCore'
+  s.spm_dependency 'LodyCore/LodyRuntime'
   s.spm_dependency 'ChatKit/ChatKit'
   s.spm_dependency 'Lexical/Lexical'
   s.spm_dependency 'Lexical/LexicalListPlugin'

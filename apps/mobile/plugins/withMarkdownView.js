@@ -4,6 +4,11 @@ const path = require('path');
 
 const PACKAGES = [
   {
+    name: 'LodyCore',
+    path: '../../../packages/lody-core',
+    products: ['LodyCore', 'LodyRuntime'],
+  },
+  {
     name: 'ChatKit',
     path: '../../../packages/chat-kit',
   },
@@ -15,6 +20,12 @@ const PACKAGES = [
     name: 'MarkdownView',
     url: 'https://github.com/Lakr233/MarkdownView.git',
     version: '4.6.5',
+  },
+  {
+    name: 'BeautifulMermaidSwift',
+    url: 'https://github.com/lukilabs/beautiful-mermaid-swift.git',
+    version: '1.0.4',
+    products: ['BeautifulMermaid'],
   },
   {
     name: 'swift-collections',
@@ -75,6 +86,20 @@ module LodySPMFileLists
   end
 end
 Pod::SPM::UpdateScript::Mixin.prepend(LodySPMFileLists)
+# cocoapods-spm rewrites every pod xcconfig after integration from in-memory
+# settings, dropping the macro plugin flag Expo writes only to disk. Source-built
+# ExpoModulesCore then cannot expand its macros, so reapply Expo's flags last.
+module LodyExpoMacroFlags
+  private
+
+  def run_spm_post_integrate_hooks
+    super
+    aggregate_targets.group_by(&:user_project).each_value do |targets|
+      Expo::ProjectIntegrator.integrate_core_macro_plugins(targets)
+    end
+  end
+end
+Pod::Installer.prepend(LodyExpoMacroFlags)
 `;
 
 const spmPkg = (pkg) => {

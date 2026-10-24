@@ -12,7 +12,7 @@ import type {
   PendingSession,
   usePendingSends,
 } from '@/cloud/send/pendingSends';
-import type { Session } from '@/models/catalog';
+import type { Session } from '@lody/cloud-runtime/models/catalog';
 import type { Snapshot } from './useSessionRuntime';
 import { sessionState } from './status';
 import { resolveSessionMessageSubmitRoute } from './messageSubmitRoute';
@@ -146,16 +146,18 @@ export function useSessionSend({
     const userIndex = snapshot.entries.findIndex(
       (entry) => entry.id === send.id,
     );
+    let precedingUserId: string | undefined;
+    const hasReply = snapshot.entries.some((entry) => {
+      if (entry.role === 'user') precedingUserId = entry.id;
+      return (
+        entry.role === 'assistant' &&
+        (entry.userTurnId ?? precedingUserId) === send.id
+      );
+    });
     // A cached user row can come from a write whose ACK was lost. Only an
     // actual reply or the send receipt confirms delivery; never replay the row.
-    if (
-      userIndex >= 0 &&
-      !send.creation &&
-      snapshot.entries
-        .slice(userIndex + 1)
-        .some((entry) => entry.role === 'assistant')
-    ) {
-      if (cleared.current !== send.id) {
+    if (!send.creation && hasReply) {
+      if (!send.preserveDraft && cleared.current !== send.id) {
         cleared.current = send.id;
         setClearDraftToken((token) => token + 1);
       }
@@ -173,6 +175,7 @@ export function useSessionSend({
     }
     if (
       ['accepted', 'uploaded', 'queued'].includes(send.phase) &&
+      !send.preserveDraft &&
       cleared.current !== send.id
     ) {
       cleared.current = send.id;
@@ -288,7 +291,11 @@ export function useSessionSend({
             ...record,
             send: { ...send, guide: guiding, phase },
           });
-          if (phase !== 'unknown' && cleared.current !== send.id) {
+          if (
+            !send.preserveDraft &&
+            phase !== 'unknown' &&
+            cleared.current !== send.id
+          ) {
             cleared.current = send.id;
             setClearDraftToken((token) => token + 1);
           }

@@ -93,7 +93,7 @@ test('persistent runtime applies live increments to the existing replica and adv
     },
   };
   const bundle = await build({
-    entryPoints: ['apps/mobile/modules/lody-kit/data-runtime/index.ts'],
+    entryPoints: ['packages/cloud-runtime/src/runtime/index.ts'],
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -110,11 +110,11 @@ test('persistent runtime applies live increments to the existing replica and adv
           }));
           build.onLoad({ filter: /.*/, namespace: 'send-test' }, () => ({
             resolveDir: new URL(
-              '../../modules/lody-kit/data-runtime/',
+              '../../../../packages/cloud-runtime/src/runtime/',
               import.meta.url,
             ).pathname,
             contents: `
-              export * from ${JSON.stringify(new URL('../../modules/lody-kit/data-runtime/session.ts', import.meta.url).pathname)};
+              export * from ${JSON.stringify(new URL('../../../../packages/cloud-runtime/src/runtime/session.ts', import.meta.url).pathname)};
               export async function sendTurn(args, expand, protocolCapabilities) {
                 return { text: await expand(args.text), protocolCapabilities };
               }
@@ -191,6 +191,25 @@ test('persistent runtime applies live increments to the existing replica and adv
     undefined,
     'capabilities belong to the target machine, not another upgraded machine',
   );
+
+  globalThis.location.protocol = 'lody-hub:';
+  assert.equal(
+    (
+      await globalThis.dataRuntime.sendTurn({
+        sessionId: 'other',
+        machineId: 'm1',
+        userId: 'local:hub',
+        text: '/shortcut:example @session:s1',
+      })
+    ).text,
+    '/shortcut:example [@Before](lody://session/s1?workspace=synthetic-workspace)',
+  );
+  assert.equal(
+    events.some((event) => event.type === 'shortcutCloud'),
+    false,
+    'LAN text never asks the Cloud shortcut broker',
+  );
+  delete globalThis.location.protocol;
 
   const fileArgs = { sessionId: 's1', path: 'README.md', entryId: 'turn' };
   for (const method of [
@@ -364,7 +383,7 @@ test('lost results settle from reads issued after the attempt; an upload left un
   };
   globalThis.location = { origin: 'https://example.invalid' };
   const bundle = await build({
-    entryPoints: ['apps/mobile/modules/lody-kit/data-runtime/index.ts'],
+    entryPoints: ['packages/cloud-runtime/src/runtime/index.ts'],
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -534,7 +553,7 @@ test('a catalog read that fails on the network resumes from its cursor instead o
   };
   globalThis.location = { origin: 'https://example.invalid' };
   const bundle = await build({
-    entryPoints: ['apps/mobile/modules/lody-kit/data-runtime/index.ts'],
+    entryPoints: ['packages/cloud-runtime/src/runtime/index.ts'],
     bundle: true,
     format: 'esm',
     platform: 'browser',

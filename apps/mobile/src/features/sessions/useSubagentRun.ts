@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ItemSummary } from '@/models/session';
+import type { ItemSummary } from '@lody/cloud-runtime/models/session';
 import { fetchSubagentRun } from './itemDetail';
 import { runComplete, withRunItems, type SubagentTask } from './subagentRun';
 

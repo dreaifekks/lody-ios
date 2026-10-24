@@ -2,6 +2,10 @@ export {
   sessionSharingRaw,
   remoteSettingsRaw,
   machineStatusRaw,
+  agentRolesRaw,
+  memorySettingsRaw,
+  publishedSharesRaw,
+  promptShortcutsRaw,
   runtimeInfo,
   initialAccentColor,
   showAccentColorPicker,
@@ -12,6 +16,7 @@ export {
   getAppIcon,
   setAppIcon,
   initialDarkBackground,
+  initialLocale,
   saveDarkBackground,
   initialQueuedMessageBehavior,
   saveQueuedMessageBehavior,
@@ -116,9 +121,12 @@ export {
 
 export {
   NativeGroupedList,
+  type NativeGroupedListProps,
   type NativeListAction,
   type NativeListRow,
   type NativeListSection,
+  type NativeListStatus,
+  type NativeListVisual,
 } from './list/NativeGroupedList';
 export {
   NativePagedList,
@@ -141,6 +149,10 @@ export {
   type NativeSplitLayout,
   type NativeSplitFrame,
 } from './chrome/NativeSplit';
+export {
+  NativeLayoutProbe,
+  type NativeLayoutTraits,
+} from './chrome/NativeLayoutProbe';
 export {
   NativeEmbeddedSheet,
   type NativeEmbeddedSheetProps,
@@ -217,6 +229,11 @@ export {
   type DirectoryListing,
 } from './diff/files';
 export { readContentText, previewContent, openFile } from './runtime/LodyKit';
+export { createSendId } from './runtime/LodyKit';
+export {
+  NativeHTMLPreviewView,
+  type HTMLPreviewIssue,
+} from './html-preview/NativeHTMLPreviewView';
 export {
   NativeInlineDiff,
   type NativeInlineDiffProps,
@@ -232,6 +249,7 @@ export {
 } from './diff/NativeDiffToolbar';
 
 export * from './notifications/notifications';
+export * from './diagnostics/diagnostics';
 
 export { NativeMentionPicker } from './chat/NativeMentionPicker';
 
@@ -263,3 +281,5 @@ export {
   type VoiceAgent,
   type VoicePreferences,
 } from './voice/Voice';
+
+export { workspaceSettingsRaw } from './settings/WorkspaceSettings';

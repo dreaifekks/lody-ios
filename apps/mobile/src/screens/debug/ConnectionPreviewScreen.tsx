@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ConnectionView } from '../ConnectionScreen';
 import type { ConnectionService } from '@/cloud/catalog/machineStatus';
-import type { Connection } from '@/models/catalog';
+import type { Connection } from '@lody/cloud-runtime/models/catalog';
 import { definePage } from '@/lib/presentation';
 import { t } from '../../lib/i18n/index.ts';
 

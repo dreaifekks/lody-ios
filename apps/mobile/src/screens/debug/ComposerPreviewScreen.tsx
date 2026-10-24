@@ -1,5 +1,5 @@
-import type { MentionItem } from '@/models/mentions';
-import { expandMentionText } from '../../../modules/lody-kit/data-runtime/mention-expansion';
+import type { MentionItem } from '@lody/cloud-runtime/models/mentions';
+import { expandMentionText } from '@lody/cloud-runtime/mention-expansion';
 import { MentionPickerPreviewScreen } from './MentionPickerPreviewScreen';
 import { PickerScreen } from '../PickerScreen';
 import { ComposerSheet } from '@/ui/ComposerSheet';
@@ -81,7 +81,15 @@ const mentionItems: MentionItem[] = [
     kind: 'role',
     subtitle: 'Review changes',
     insertText: '@role:role-reviewer',
-    role: { id: 'reviewer', name: 'Reviewer', instance: 'Claude Code' },
+    roleName: 'Reviewer',
+  },
+  {
+    path: 'role-multi@m2',
+    name: 'Multi reviewer · Laptop',
+    roleName: 'Multi reviewer',
+    kind: 'role',
+    subtitle: 'Review on Laptop',
+    insertText: '@role:role-multi@m2',
   },
   {
     path: 'issue:11',

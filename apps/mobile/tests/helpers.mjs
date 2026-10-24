@@ -6,8 +6,10 @@ import { pathToFileURL } from 'node:url';
 export async function loadRuntime() {
   const bundle = await build({
     entryPoints: [
-      new URL('../modules/lody-kit/data-runtime/session.ts', import.meta.url)
-        .pathname,
+      new URL(
+        '../../../packages/cloud-runtime/src/runtime/session.ts',
+        import.meta.url,
+      ).pathname,
     ],
     bundle: true,
     format: 'esm',
@@ -46,8 +48,10 @@ export async function loadRuntime() {
 export async function loadProject() {
   const bundle = await build({
     entryPoints: [
-      new URL('../modules/lody-kit/data-runtime/project.ts', import.meta.url)
-        .pathname,
+      new URL(
+        '../../../packages/cloud-runtime/src/runtime/project.ts',
+        import.meta.url,
+      ).pathname,
     ],
     bundle: true,
     format: 'esm',
