@@ -5,6 +5,7 @@ export type RoleAgent = {
   name: string;
 };
 export type RoleTarget = {
+  id?: string;
   machineId: string;
   agentConfigId: string;
   alias?: string;

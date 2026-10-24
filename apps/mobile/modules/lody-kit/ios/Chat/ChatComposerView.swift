@@ -608,7 +608,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// Experimental dictation through a Codex agent; shown only once enabled in Settings.
   private let voiceButton = UIButton(type: .system)
   private var voiceWidth: NSLayoutConstraint!
-  #if !LODY_SHARE_EXTENSION
+  #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
   private lazy var dictation = makeDictation()
   private var dictationBase = ""
   #endif
@@ -814,7 +814,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     mentionButton.addTarget(self, action: #selector(openMentions), for: .touchUpInside)
     voiceButton.accessibilityIdentifier = "session-voice"
     voiceButton.addTarget(self, action: #selector(toggleDictation), for: .touchUpInside)
-    #if !LODY_SHARE_EXTENSION
+    #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
     NotificationCenter.default.addObserver(self, selector: #selector(voicePreferencesChanged), name: VoicePreferences.didChange, object: nil)
     #endif
     permissionButton.setImage(UIImage(systemName: "shield.lefthalf.filled", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular)), for: .normal)
@@ -1756,7 +1756,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   // MARK: - Dictation
 
   private func updateVoiceButton(expanded: Bool, sending: Bool) {
-    #if LODY_SHARE_EXTENSION
+    #if LODY_SHARE_EXTENSION || LODY_COMPOSER_VERIFY
     voiceButton.isHidden = true
     #else
     let active = dictation.state != .idle
@@ -1776,14 +1776,14 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
 
   private func stopDictation() {
-    #if !LODY_SHARE_EXTENSION
+    #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
     guard dictation.state != .idle else { return }
     dictation.stop()
     #endif
   }
 
   @objc private func toggleDictation() {
-    #if !LODY_SHARE_EXTENSION
+    #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
     if dictation.state != .idle {
       dictation.stop()
       return
@@ -1795,7 +1795,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     #endif
   }
 
-  #if !LODY_SHARE_EXTENSION
+  #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
   private func makeDictation() -> VoiceDictation {
     let dictation = VoiceDictation()
     dictation.onState = { [weak self] _ in self?.updateComposer() }

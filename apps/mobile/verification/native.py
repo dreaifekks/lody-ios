@@ -164,6 +164,8 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             ios = '26.0'
             command += ['-sdk', sdk, '-target', f'{arch}-apple-ios{ios}-simulator']
         if name == 'composer':
+            # Standalone layout checks do not host the app's WebRTC/runtime service.
+            command += ['-D', 'LODY_COMPOSER_VERIFY']
             manifest = subprocess.check_output([
                 'node', '-p', 'require.resolve("@rien7/anchored-overlay-kit/package.json")',
             ], cwd=root / 'apps/mobile', text=True).strip()

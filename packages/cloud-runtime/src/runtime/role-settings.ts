@@ -47,6 +47,7 @@ export function roleSnapshot(
         if (!machines.has(target.machineId)) state = 'machineUnavailable';
         else if (!agent) state = 'agentUnavailable';
         return {
+          ...(target.id ? { id: target.id } : {}),
           machineId: target.machineId,
           agentConfigId: target.agentConfigId,
           ...(target.alias ? { alias: target.alias } : {}),
@@ -128,6 +129,7 @@ export async function roleSettings(
     ] as const;
     const targets = (value: AgentRoleItem) =>
       value.targets.map((target) => [
+        target.id ?? '',
         target.machineId,
         target.agentConfigId,
         target.alias ?? '',

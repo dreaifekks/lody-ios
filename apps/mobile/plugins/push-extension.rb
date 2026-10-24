@@ -49,6 +49,7 @@ def lody_extension(bundle_id, name:, suffix:, source_dir:, point_identifier:, di
     'CFBundlePackageType' => 'XPC!',
     'CFBundleShortVersionString' => '$(MARKETING_VERSION)',
     'CFBundleVersion' => '$(CURRENT_PROJECT_VERSION)',
+    'LodyAppGroup' => "group.#{bundle_id}",
     'NSExtension' => extension_info
   }.merge(extra_plist), File.join(folder, 'Info.plist'))
   Xcodeproj::Plist.write_to_path({ 'com.apple.security.application-groups' => ["group.#{bundle_id}"] }, File.join(folder, "#{name}.entitlements"))

@@ -55,7 +55,7 @@ function View() {
       }),
       role('multi', 'Everywhere', {
         targets: [
-          target,
+          { ...target, id: 'studio-coder', alias: 'Studio Reviewer' },
           {
             ...target,
             machineId: 'm2',

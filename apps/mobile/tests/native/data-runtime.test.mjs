@@ -192,6 +192,25 @@ test('persistent runtime applies live increments to the existing replica and adv
     'capabilities belong to the target machine, not another upgraded machine',
   );
 
+  globalThis.location.protocol = 'lody-hub:';
+  assert.equal(
+    (
+      await globalThis.dataRuntime.sendTurn({
+        sessionId: 'other',
+        machineId: 'm1',
+        userId: 'local:hub',
+        text: '/shortcut:example @session:s1',
+      })
+    ).text,
+    '/shortcut:example [@Before](lody://session/s1?workspace=synthetic-workspace)',
+  );
+  assert.equal(
+    events.some((event) => event.type === 'shortcutCloud'),
+    false,
+    'LAN text never asks the Cloud shortcut broker',
+  );
+  delete globalThis.location.protocol;
+
   const fileArgs = { sessionId: 's1', path: 'README.md', entryId: 'turn' };
   for (const method of [
     'readFile',

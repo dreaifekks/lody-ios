@@ -37,12 +37,14 @@ unavailable(ui,'settings.roles.unavailable');ui.capture('roles-load-failed');try
 ui.element('role:review');no_header_refresh(ui)
 assert catalog.text('settings.roles.ownerOnly') in spoken(ui.element('role:search'))
 assert catalog.text('settings.roles.agentUnavailable') in spoken(ui.element('role:missing'))
+assert 'Studio Reviewer' in spoken(ui.element('role:multi'))
 ui.capture('roles-list')
 tap('role:search');ui.element('role-name')
 assert not any(item.get('AXLabel')==catalog.text('common.save') for item in ui.state()),'Non-owner can save'
 assert not any(item.get('AXUniqueId')=='role-delete' for item in ui.state()),'Non-owner can delete'
 ui.capture('roles-readonly');toolbar('common.cancel')
 tap('role:multi');assert 'Laptop' in spoken(ui.element('role-targets'));assert 'Studio' in spoken(ui.element('role-targets'))
+assert 'Studio Reviewer' in spoken(ui.element('role-targets'))
 ui.capture('roles-multiple-targets');toolbar('common.cancel')
 tap('role:review');name('Search');toolbar('common.save');failure('settings.roles.duplicate');reveal_name();ui.capture('roles-duplicate')
 name('Mobile');toolbar('common.save');failure('settings.remote.conflict')

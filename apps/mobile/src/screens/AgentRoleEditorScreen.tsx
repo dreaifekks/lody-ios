@@ -11,6 +11,7 @@ import { useCatalog } from '@/cloud/catalog/CatalogProvider';
 import {
   roleEditable,
   roleReadOnlyHint,
+  roleTargetLabel,
 } from '@/features/settings/agent-roles';
 import { definePage } from '@/lib/presentation';
 import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
@@ -221,9 +222,7 @@ function View() {
       >
         {item ? (
           <AppText testID="role-targets" style={{ padding: 16 }}>
-            {item.targets
-              .map((target) => `${target.machineName} · ${target.agentName}`)
-              .join('\n')}
+            {item.targets.map(roleTargetLabel).join('\n')}
           </AppText>
         ) : (
           <Button

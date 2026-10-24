@@ -1545,14 +1545,17 @@ Object.assign(globalThis, {
       );
       return sendSessionTurn(
         args,
-        (text) =>
-          expandShortcuts(text, access.list, access.read, (part) =>
+        (text) => {
+          const expand = (part: string) =>
             expandMentions(
               part,
               (category) => getMentions({ ...source, category }),
               sourceWorkspace,
-            ),
-          ),
+            );
+          if (globalThis.location?.protocol === 'lody-hub:')
+            return expand(text);
+          return expandShortcuts(text, access.list, access.read, expand);
+        },
         protocolCapabilities,
         async (persisted) => {
           if (workspace !== sourceWorkspace || runtimeUserId !== args.userId)

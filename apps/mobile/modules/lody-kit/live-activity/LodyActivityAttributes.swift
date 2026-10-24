@@ -8,7 +8,10 @@ import ActivityKit
 typealias LodyActivityAttributes = LodyConversationLiveActivityAttributes
 
 enum LodyActivityIcon {
-  static var defaults: UserDefaults? { UserDefaults(suiteName: "group.app.innei.lody") }
+  static var defaults: UserDefaults? {
+    let group = Bundle.main.object(forInfoDictionaryKey: "LodyAppGroup") as? String ?? "group.app.innei.lody"
+    return UserDefaults(suiteName: group)
+  }
   static let key = "appIcon"
 
   static var name: String { defaults?.string(forKey: key) ?? "default" }

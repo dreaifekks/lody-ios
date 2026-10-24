@@ -86,7 +86,10 @@ export function readRole(value: unknown, id: unknown): StoredRole | undefined {
     (value.additionalTargets === undefined ||
       Array.isArray(value.additionalTargets))
   )
-    targets = [value, ...((value.additionalTargets as unknown[]) ?? [])];
+    targets = [
+      { ...value, id: undefined },
+      ...((value.additionalTargets as unknown[]) ?? []),
+    ];
   else return;
   if (
     !targets.length ||
@@ -96,6 +99,7 @@ export function readRole(value: unknown, id: unknown): StoredRole | undefined {
         !record(target) ||
         !identifier(target.machineId) ||
         !identifier(target.agentConfigId) ||
+        (target.id !== undefined && !identifier(target.id)) ||
         (target.alias !== undefined && typeof target.alias !== 'string') ||
         !runConfig(target.runConfig),
     )
@@ -103,7 +107,7 @@ export function readRole(value: unknown, id: unknown): StoredRole | undefined {
     return;
   const unique = new Map<string, StoredTarget>();
   for (const target of targets as StoredTarget[]) {
-    const key = target.id ?? target.machineId;
+    const key = target.id ? `id:${target.id}` : `machine:${target.machineId}`;
     if (!unique.has(key)) {
       const alias = Array.from(target.alias?.trim() ?? '')
         .slice(0, 60)

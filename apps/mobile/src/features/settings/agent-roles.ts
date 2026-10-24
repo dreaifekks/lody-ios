@@ -1,6 +1,15 @@
 import type { NativeListSection } from '@lody-ios/kit';
-import type { AgentRoleItem } from '@lody/cloud-runtime/models/agent-roles';
+import type {
+  AgentRoleItem,
+  RoleTarget,
+} from '@lody/cloud-runtime/models/agent-roles';
 import { t } from '@/lib/i18n';
+export function roleTargetLabel(target: RoleTarget) {
+  const parts = [target.alias, target.machineName, target.agentName];
+  if (target.state !== 'configured')
+    parts.push(t(`settings.roles.${target.state}`));
+  return parts.filter(Boolean).join(' · ');
+}
 export const roleEditable = (role: AgentRoleItem, userId: string) =>
   role.ownerUserId === userId &&
   Array.from(role.name).length <= 60 &&
@@ -29,10 +38,7 @@ export function roleSections(
         image: 'person.crop.square',
         subtitle: [
           role.description,
-          ...role.targets.map(
-            (target) =>
-              `${target.machineName} · ${target.agentName}${target.state === 'configured' ? '' : ` · ${t(`settings.roles.${target.state}`)}`}`,
-          ),
+          ...role.targets.map(roleTargetLabel),
           role.ownerUserId !== userId ? t('settings.roles.ownerOnly') : '',
         ]
           .filter(Boolean)

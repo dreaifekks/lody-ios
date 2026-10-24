@@ -469,3 +469,48 @@ test('Role references are global across authorized machines and require current 
   );
   assert.equal(c.writes(), 0);
 });
+
+test('legacy Role primary targets do not borrow the Role id and target key namespaces stay distinct', async () => {
+  const { readRole } =
+    await import('../../../../packages/cloud-runtime/src/protocol/agent-roles.ts');
+  const legacy = row('legacy', {
+    additionalTargets: [
+      { machineId: 'm1', agentConfigId: 'a1' },
+      { machineId: 'm2', agentConfigId: 'a2' },
+    ],
+  });
+  const targets = readRole(legacy, 'legacy').targets;
+  assert.deepEqual(
+    targets.map((target) => [target.machineId, target.id]),
+    [
+      ['m1', undefined],
+      ['m2', undefined],
+    ],
+  );
+  const v2 = row('multi', {
+    v: 2,
+    targets: [
+      { id: 'm2', machineId: 'm1', agentConfigId: 'a1' },
+      { machineId: 'm2', agentConfigId: 'a2' },
+    ],
+  });
+  assert.equal(readRole(v2, 'multi').targets.length, 2);
+  for (const id of ['', 'bad id', 'bad@id', 7]) {
+    const invalid = {
+      ...v2,
+      targets: [{ id, machineId: 'm1', agentConfigId: 'a1' }],
+    };
+    assert.equal(readRole(invalid, 'multi'), undefined);
+  }
+});
+
+test('Role settings preserve target ids and reject editing a replaced target', async () => {
+  const c = catalog();
+  const target = { id: 'original', machineId: 'm1', agentConfigId: 'a1' };
+  c.put('stable', { v: 2, targets: [target] });
+  const base = (await c.list()).roles[0];
+  assert.equal(base.targets[0].id, 'original');
+  c.put('stable', { v: 2, targets: [{ ...target, id: 'replacement' }] });
+  await assert.rejects(c.save(base, { name: 'Stale edit' }), /role_conflict/);
+  assert.equal(c.writes(), 0);
+});
