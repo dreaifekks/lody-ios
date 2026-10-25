@@ -1147,3 +1147,10 @@ executingPlan.items.append(try JSONDecoder().decode(ChatItem.self, from: Data(an
 let executionTranscript = ChatTranscript(entries: [executingPlan])
 assert(executionTranscript.rows().filter { $0.kind == "proposed_plan" }.map(\.itemID) == ["old", "doc"])
 assert(!executionTranscript.rows(processEntryID: "proposed", processStartID: "__execution__").contains { $0.kind == "proposed_plan" })
+
+let authorJSON = """
+[{"id":"forwarded","role":"user","status":"completed","finished":true,"author":{"kind":"agent","name":"Codex","role":{"name":"Reviewer","instanceLabel":"mini"},"model":"GPT-6 Sol"},"items":[{"itemId":"text","type":"text","text":"Review this"}]}]
+"""
+let authored = try JSONDecoder().decode([ChatEntry].self, from: Data(authorJSON.utf8))
+assert(ChatTranscript(entries: authored).rows().first?.author == "Reviewer · mini · Codex · GPT-6 Sol")
+assert(ChatEntry.Author(kind: "human", name: nil, role: nil, model: nil).title == nil)

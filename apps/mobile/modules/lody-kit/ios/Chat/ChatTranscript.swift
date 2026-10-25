@@ -22,6 +22,23 @@ struct ChatEntry: Decodable {
         .filter { !$0.isEmpty }.joined(separator: " · ")
     }
   }
+  struct Author: Decodable {
+    struct Role: Decodable {
+      let name: String
+      let instanceLabel: String?
+    }
+    let kind: String
+    let name: String?
+    let role: Role?
+    let model: String?
+
+    var title: String? {
+      guard kind == "agent", let name else { return nil }
+      let roleTitle = role.map { [$0.name, $0.instanceLabel].compactMap { $0 }.joined(separator: " · ") }
+      return [roleTitle, name, model].compactMap { $0 }.joined(separator: " · ")
+    }
+  }
+  var author: Author? = nil
   let id: String
   let role: String
   let status: String
@@ -146,6 +163,7 @@ struct ChatRow: Equatable {
   var planIsLatest = true
   var planPermissionItemID = ""
   var planDecision: ChatPlanDecisionState? = nil
+  var author: String? = nil
   var symbol = ""
   var itemID = ""
   var processStartID = ""
@@ -471,7 +489,7 @@ struct ChatTranscript {
         }
         let text = entry.items.compactMap { $0.type == "text" ? $0.text : nil }.joined(separator: "\n\n")
         if !text.isEmpty {
-          result.append(ChatRow(id: entry.id + (result.isEmpty ? ":user" : ":user-text"), entryID: entry.id, kind: "user", text: text))
+          result.append(ChatRow(id: entry.id + (result.isEmpty ? ":user" : ":user-text"), entryID: entry.id, kind: "user", text: text, author: entry.author?.title))
         }
         if let delivery = entry.delivery, delivery != "accepted" {
           let key = "native.chat.message.guide." + delivery
