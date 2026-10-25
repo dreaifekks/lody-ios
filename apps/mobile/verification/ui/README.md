@@ -139,13 +139,16 @@ Home cases keep their native launch fixtures. Use `UI.open_case` for later fixtu
 entries and relaunches as well; no case should scroll the Debug menu merely to
 reach its fixture. Results include `caseEntrySeconds` and `checkSeconds`.
 
-The runner establishes English and software-keyboard mode once per batch.
+The runner establishes English and the initial keyboard mode once per batch.
 Cases reuse that baseline. `UI.axe("type", text)` / `UI.type_into` submit text
-through one AXe composite HID batch rather than individual key submissions;
-do not repeat keyboard setup, switch IMEs, or erase/retry a mismatched draft.
-A mismatch fails immediately. Individual software-key taps remain only when the
-specific key interaction is under test (for example, the `$` mention trigger).
-Retain keyboard geometry assertions where keyboard behavior is the requirement.
+through one AXe composite HID batch rather than individual key submissions,
+including the `/` and `$` mention triggers. Do not switch IMEs or erase/retry a
+mismatched draft; a mismatch fails immediately. `mention-sheet` is the only
+input-session setup exception: before opening any completion panel it types `7`,
+checks it, deletes it, and checks that the draft is empty. This establishes the
+batch input session without changing a query in flight. Individual software-key
+taps are reserved for cases testing that specific key interaction. Retain geometry
+assertions for a visible keyboard; keyboard visibility is not an input-focus assertion.
 Recording starts after shared startup is ready, immediately before scene entry.
 
 `session-search` and `session-search-pad` run the production Inbox/sidebar and
@@ -268,10 +271,13 @@ products. Do not pass a per-task `-derivedDataPath` and do not copy the checkout
 into the temp directory to build; both leave a multi-GB directory that nothing
 reviews. `pnpm verify:clean` reports those leftovers with their sizes, and
 `--apply` removes them. The runner owns only its Metro
-process group and app process. A small host-only CoreSimulator helper disconnects
-hardware keyboard input for the leased device so keyboard geometry is actually
-tested. No global Simulator preferences are changed. It never shuts down another
-task's locked Simulator or Metro.
+process group and app process. A small host-only CoreSimulator helper initially
+disconnects hardware keyboard input for the leased device. AXe composite input can
+subsequently retain hardware-keyboard mode across focus and appearance changes.
+When the software keyboard is hidden, composer clearance is checked against the
+screen bottom; when visible, it is checked against the keyboard top. No global
+Simulator preferences are changed. It never shuts down another task's locked
+Simulator or Metro.
 
 ## Baseline inventory
 
@@ -774,8 +780,22 @@ composer with an offline catalog injected by `ComposerPreviewScreen`. The Debug
 entries are **@ 引用交互 · 聊天** and **@ 引用交互 · 新会话**. Both appearances
 capture the two-category entry, compact touch autocomplete, full-screen
 file/skill search sheets with navigation-owned bottom search on iPhone,
-directory navigation/reference, and selection/cancel
-returning to the draft and keyboard.
+directory navigation/reference, and selection/cancel returning to the draft and
+focus. After cancellation, a batch `7` input and Backspace must change and restore
+the original draft without another tap on the editor.
+
+Known cold-input observation (AXe 1.8.0, iOS 27.0 Verify Simulator): without the
+`mention-sheet` input-session setup above, the first batch query can leave
+`@auth` committed while the completion panel still shows categories. This occurs
+in both the exact `ba246eee` baseline and the pending adaptation; its cause is
+unresolved. A standalone cold dark run can also reproduce it, so it is not a
+light-mode-only issue. The setup is an explicit verification precondition, not a
+product fix and not evidence that cold HID entry passes. Do not copy this setup
+to other cases. Reproduction evidence is retained in
+`.artifacts/pending-baseline-ui/mention-sheet`,
+`.artifacts/pending-ui/mention-sheet-clean`, and
+`.artifacts/pending-ui/mention-sheet-focus-cold` in the pending checkout. Actual
+iPad/Bluetooth-keyboard cold-entry behavior has not been verified.
 
 `--case mentions-production` opens the actual chat and new-session screens through
 the offline Home fixture. A launch-scoped native provider supplies deterministic
