@@ -56,6 +56,7 @@ function View() {
       tokenUsage:
         fixture !== 'no-meta' && (fixture !== 'late-usage' || lateUsage)
           ? {
+              costUSD: fixture === 'partial-cost' ? null : 0.01234,
               inputTokens: 1234,
               outputTokens: 6640,
               reasoningOutputTokens: 2000,
@@ -95,6 +96,7 @@ function View() {
           {[
             'short',
             'long',
+            'partial-cost',
             'no-meta',
             'late-usage',
             'image',

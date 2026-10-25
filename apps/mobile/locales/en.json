@@ -1463,5 +1463,7 @@
   "native.chat.board.status.done": "Completed",
   "native.chat.board.status.unsupported": "Unsupported",
   "native.chat.board.status.failed": "Failed",
-  "native.chat.board.status.interrupted": "Interrupted"
+  "native.chat.board.status.interrupted": "Interrupted",
+  "message.details.cost": "Cost estimate",
+  "message.details.costHint": "Estimated from the provider’s reported usage, not an invoice."
 }

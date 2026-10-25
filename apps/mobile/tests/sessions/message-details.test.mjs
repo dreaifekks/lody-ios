@@ -44,3 +44,23 @@ test('turn details distinguish missing usage, sum output once and prefer recorde
     undefined,
   );
 });
+
+test('turn cost follows desktop precision and omits partial or absent pricing', () => {
+  const base = {
+    inputTokens: 1,
+    outputTokens: 1,
+    reasoningOutputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
+  const cost = (value) =>
+    messageDetailSections({ tokenUsage: { ...base, ...value } })
+      .flatMap((s) => s.rows)
+      .find((r) => r.id === 'cost');
+  assert.equal(cost({}), undefined);
+  assert.equal(cost({ costUSD: null }), undefined);
+  assert.equal(cost({ costUSD: 0 }).value, '$0.00');
+  assert.equal(cost({ costUSD: 0.01234 }).value, '$0.0123');
+  assert.equal(cost({ costUSD: 0.00001234 }).value, '$0.00001234');
+  assert.equal(cost({ costUSD: 12.345 }).value, '$12.35');
+});
