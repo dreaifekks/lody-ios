@@ -105,7 +105,39 @@ struct ChatMessageAttachment: Decodable, Equatable {
 struct ChatItem: Decodable {
   struct Permission: Decodable { let requestId: String; let pending: Bool }
   struct Plan: Decodable { let content: String; let status: String }
-  struct NoticeMeta: Decodable, Equatable { let reason: String?; let code: String?; let message: String? }
+  struct ProposalFields: Decodable, Equatable {
+    let name: String?
+    let description: String?
+    let promptPrefix: String?
+  }
+  struct ProposalCommand: Decodable, Equatable {
+    let action: String
+    let name: String?
+    let description: String?
+    let promptPrefix: String?
+    let patch: ProposalFields?
+  }
+  struct NoticeMeta: Decodable, Equatable {
+    let reason: String?; let code: String?; let message: String?
+    var trigger: String? = nil
+    var status: String? = nil
+    var kind: String? = nil
+    var command: ProposalCommand? = nil
+    var before: ProposalFields? = nil
+    var outcome: String? = nil
+  }
+  struct OperationMember: Decodable {
+    let title: String
+    let status: String
+    let detail: String?
+  }
+  var memberCount: Int? = nil
+  var members: [OperationMember]? = nil
+  var deliveryStatus: String? = nil
+  var isOrchestration: Bool {
+    type == "operation_completion_batch" || type == "operation_completion"
+      || (type == "system_notice" && ["board_context_maintenance", "board_chain_limit", "agent_role_proposal"].contains(name ?? ""))
+  }
   var meta: NoticeMeta? = nil
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
   let itemId: String
@@ -130,7 +162,7 @@ struct ChatItem: Decodable {
   var skipTranscript: Bool? = nil
   var run: ChatSubagentRun? = nil
   var processDurationMs: Int? = nil
-  var isProcess: Bool { type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  var isProcess: Bool { !isOrchestration && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   var hidesFromTranscript: Bool {
     if type == "proposed_plan" {
       return !["delta", "completed"].contains(status ?? "") || (markdown ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -455,6 +487,20 @@ struct ChatTranscript {
     }
   }
 
+  private static func roleProposal(_ meta: ChatItem.NoticeMeta?) -> String {
+    guard let command = meta?.command else { return LodyStrings.text("native.chat.board.roleProposal") }
+    let fields = command.patch ?? ChatItem.ProposalFields(name: command.name, description: command.description, promptPrefix: command.promptPrefix)
+    let name = fields.name ?? meta?.before?.name ?? ""
+    var lines = [LodyStrings.text("native.chat.board.role." + command.action, ["name": name])]
+    for (key, value) in [("name", fields.name), ("description", fields.description), ("promptPrefix", fields.promptPrefix)] {
+      if let value {
+        lines.append(LodyStrings.text("native.chat.board.field." + key) + ": " + value)
+      }
+    }
+    if let outcome = meta?.outcome { lines.append(LodyStrings.text("native.chat.board.role." + outcome)) }
+    return lines.joined(separator: "\n")
+  }
+
   private func entryRows(
     processEntryID: String = "",
     processStartID: String = "",
@@ -464,6 +510,8 @@ struct ChatTranscript {
   ) -> [ChatRow] {
     entries.enumerated().flatMap { entryIndex, source -> [ChatRow] in
       var entry = source
+      if entry.role == "system", !entry.items.isEmpty,
+         entry.items.allSatisfy({ $0.name == "board_context_maintenance" && $0.meta?.trigger == "idle" && $0.meta?.status == "interrupted" }) { return [] }
       // Older cached projections omitted notice names. Neither these placeholders nor
       // agent warnings belong in the conversation's execution process.
       entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning")) }
@@ -619,6 +667,28 @@ struct ChatTranscript {
           row.attention = true
           row.errorMeta = item.meta
           row.actionable = false
+        case "operation_completion_batch", "operation_completion":
+          row.kind = "orchestration"
+          let key = item.deliveryStatus == "unknown" ? "native.chat.board.resultsUnknown" : "native.chat.board.results"
+          row.text = LodyStrings.text(key, ["count": String(item.memberCount ?? 0)])
+          let members = (item.members ?? []).prefix(3).map { $0.title + " · " + $0.status }
+          if !members.isEmpty { row.text += "\n" + members.joined(separator: "\n") }
+          row.symbol = "checklist"
+        case "system_notice" where item.name == "board_context_maintenance":
+          row.kind = "noticeDivider"
+          let kind = item.meta?.kind ?? "compact"
+          let status = item.meta?.status ?? "running"
+          row.text = LodyStrings.text("native.chat.board.maintenance", [
+            "kind": LodyStrings.text("native.chat.board.kind." + kind),
+            "status": LodyStrings.text("native.chat.board.status." + status),
+          ])
+        case "system_notice" where item.name == "board_chain_limit":
+          row.kind = "noticeDivider"
+          row.text = LodyStrings.text("native.chat.board.chainLimit")
+        case "system_notice" where item.name == "agent_role_proposal":
+          row.kind = "orchestration"
+          row.symbol = "person.crop.rectangle"
+          row.text = Self.roleProposal(item.meta)
         case "file":
           guard let file = item.file else { continue }
           // A LAN keeps a picture an agent sends as a file of an image type.

@@ -6,7 +6,7 @@ import { messageLinkAction } from '@/features/sessions/messageLink';
 import { NativeChat } from '@lody-ios/kit';
 import { definePage } from '@/lib/presentation';
 
-const entries = [
+const entries: object[] = [
   {
     id: 'delegated',
     role: 'user',
@@ -40,7 +40,7 @@ const entries = [
     ],
   },
 ];
-const links = [
+const links: object[] = [
   {
     id: 'bare',
     role: 'assistant',
@@ -65,11 +65,105 @@ const links = [
     ],
   },
 ];
+const board = [
+  {
+    id: 'silent',
+    role: 'system',
+    status: 'completed',
+    finished: true,
+    items: [
+      {
+        itemId: 'notice',
+        type: 'system_notice',
+        name: 'board_context_maintenance',
+        meta: { trigger: 'idle', status: 'interrupted', kind: 'compact' },
+      },
+    ],
+  },
+  {
+    id: 'batch',
+    role: 'system',
+    status: 'completed',
+    finished: true,
+    items: [
+      {
+        itemId: 'results',
+        type: 'operation_completion_batch',
+        memberCount: 52,
+        members: [
+          { title: 'Native review', status: 'succeeded' },
+          { title: 'UI validation', status: 'failed' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'report',
+    role: 'system',
+    status: 'completed',
+    finished: true,
+    items: [
+      {
+        itemId: 'result',
+        type: 'operation_completion',
+        memberCount: 1,
+        members: [{ title: 'Board thread finished', status: 'finished' }],
+      },
+    ],
+  },
+  {
+    id: 'maintenance',
+    role: 'system',
+    status: 'completed',
+    finished: true,
+    items: [
+      {
+        itemId: 'notice',
+        type: 'system_notice',
+        name: 'board_context_maintenance',
+        meta: { trigger: 'manual', status: 'done', kind: 'compact' },
+      },
+    ],
+  },
+  {
+    id: 'chain',
+    role: 'system',
+    status: 'completed',
+    finished: true,
+    items: [
+      { itemId: 'notice', type: 'system_notice', name: 'board_chain_limit' },
+    ],
+  },
+  {
+    id: 'proposal',
+    role: 'system',
+    status: 'completed',
+    finished: true,
+    items: [
+      {
+        itemId: 'notice',
+        type: 'system_notice',
+        name: 'agent_role_proposal',
+        meta: {
+          before: { name: 'Reviewer' },
+          command: {
+            action: 'update',
+            patch: {
+              description: 'Review native code',
+              promptPrefix: 'Read-only review',
+            },
+          },
+        },
+      },
+    ],
+  },
+];
 function View() {
   const [fixture, setFixture] = useState('author');
   const [opened, setOpened] = useState('');
   const openFile = useOpenFile('ui-verify-files');
   let displayed = entries;
+  if (fixture === 'board') displayed = board;
   if (fixture === 'links') displayed = links;
   if (fixture === 'tg')
     displayed = [
@@ -94,7 +188,7 @@ function View() {
           icon="slider.horizontal.3"
           accessibilityLabel="Pending fixtures"
         >
-          {['author', 'links', 'tg'].map((value) => (
+          {['author', 'links', 'tg', 'board'].map((value) => (
             <Stack.Toolbar.MenuAction
               key={value}
               onPress={() => {

@@ -1154,3 +1154,14 @@ let authorJSON = """
 let authored = try JSONDecoder().decode([ChatEntry].self, from: Data(authorJSON.utf8))
 assert(ChatTranscript(entries: authored).rows().first?.author == "Reviewer · mini · Codex · GPT-6 Sol")
 assert(ChatEntry.Author(kind: "human", name: nil, role: nil, model: nil).title == nil)
+
+let boardJSON = """
+[{"id":"silent","role":"system","status":"completed","finished":true,"items":[{"itemId":"n","type":"system_notice","name":"board_context_maintenance","meta":{"trigger":"idle","status":"interrupted","kind":"compact"}}]},
+{"id":"manual","role":"system","status":"completed","finished":true,"items":[{"itemId":"n","type":"system_notice","name":"board_context_maintenance","meta":{"trigger":"manual","status":"interrupted","kind":"compact"}}]},
+{"id":"batch","role":"system","status":"completed","finished":true,"items":[{"itemId":"b","type":"operation_completion_batch","memberCount":52,"members":[{"title":"Review","status":"succeeded"}]}]}]
+"""
+let boardEntries = try JSONDecoder().decode([ChatEntry].self, from: Data(boardJSON.utf8))
+let boardRows = ChatTranscript(entries: boardEntries).rows()
+assert(!boardRows.contains { $0.entryID == "silent" })
+assert(boardRows.contains { $0.entryID == "manual" && $0.kind == "noticeDivider" })
+assert(boardRows.contains { $0.text.contains("52") && $0.text.contains("Review") && !$0.actionable })
