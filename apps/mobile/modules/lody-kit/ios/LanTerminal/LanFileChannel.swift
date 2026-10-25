@@ -94,10 +94,11 @@ final class LanFileChannel: @unchecked Sendable {
   }
 
   /// Sends one request line and reads its answer line, within `timeout`.
-  func request(_ value: [String: Any], timeout: TimeInterval) async throws -> [String: Any] {
+  func request(_ value: [String: Any], timeout: TimeInterval,
+               maxBytes: Int = LanFileProtocol.answerMaxBytes) async throws -> [String: Any] {
     try await withTaskCancellationHandler {
       try await writeLine(value)
-      let line = try await readLine(maxBytes: LanFileProtocol.answerMaxBytes, deadline: timeout)
+      let line = try await readLine(maxBytes: maxBytes, deadline: timeout)
       guard let answer = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw Self.unexpected }
       if answer["type"] as? String == "error" {
         throw Failure(code: "remote_unreachable", message: answer["message"] as? String ?? "the machine refused")

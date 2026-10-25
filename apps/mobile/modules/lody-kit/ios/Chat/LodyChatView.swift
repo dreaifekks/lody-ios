@@ -739,9 +739,14 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     if let target = ChatFileLink(href) {
       onFilePress(["path": target.path, "line": target.line ?? 0])
-    } else if let url = URL(string: href), ["http", "https", "mailto", "tel"].contains(url.scheme?.lowercased() ?? ""),
+    } else if let url = URL(string: href), ["http", "https", "mailto", "tel", "tg"].contains(url.scheme?.lowercased() ?? ""),
               !Self.isLoopback(url) {
-      UIApplication.shared.open(url)
+      if LodyUIVerify.enabled {
+        let record = FileManager.default.temporaryDirectory.appendingPathComponent("lody-opened-url.txt")
+        try? url.absoluteString.write(to: record, atomically: true, encoding: .utf8)
+      } else {
+        UIApplication.shared.open(url)
+      }
     } else {
       // `lody://session/` (or legacy `session://`) mentions, `file://` paths and the session machine's own
       // loopback address need the catalog to resolve.

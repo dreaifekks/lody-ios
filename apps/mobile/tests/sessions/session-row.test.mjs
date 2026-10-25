@@ -14,16 +14,18 @@ import { accent } from '../../src/lib/theme/tokens.ts';
 setLocale('zh-Hans');
 
 const ACCENT = accent.light;
-const now = Date.parse('2026-09-06T15:00:00+08:00');
-const at = (iso) => relativeTime(iso, now);
+// Calendar boundaries use local time; construct wall-clock fixtures in that same zone.
+const now = new Date(2026, 8, 6, 15).getTime();
+const at = (hour, minute = 0, second = 0, day = 6) =>
+  relativeTime(new Date(2026, 8, day, hour, minute, second).getTime(), now);
 
 test('relative time degrades from minutes to a calendar date', () => {
-  assert.equal(at('2026-09-06T14:59:30+08:00'), '刚刚');
-  assert.equal(at('2026-09-06T14:57:00+08:00'), '3 分钟前');
-  assert.equal(at('2026-09-06T11:00:00+08:00'), '4 小时前');
-  assert.equal(at('2026-09-05T23:00:00+08:00'), '昨天');
-  assert.equal(at('2026-09-02T10:00:00+08:00'), '9月2日');
-  assert.equal(at('not a date'), '');
+  assert.equal(at(14, 59, 30), '刚刚');
+  assert.equal(at(14, 57), '3 分钟前');
+  assert.equal(at(11), '4 小时前');
+  assert.equal(at(23, 0, 0, 5), '昨天');
+  assert.equal(at(10, 0, 0, 2), '9月2日');
+  assert.equal(relativeTime('not a date', now), '');
 });
 
 test('archived overrides the backend status', () => {

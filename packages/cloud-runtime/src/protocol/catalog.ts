@@ -84,7 +84,8 @@ export function projectRows(
     machineIds = new Set<string>(),
     machineNames: Record<string, string> = {},
     machineTerminals: NonNullable<Catalog['machineTerminals']> = {},
-    machineSimulators: NonNullable<Catalog['machineSimulators']> = {};
+    machineSimulators: NonNullable<Catalog['machineSimulators']> = {},
+    machineLanSimulators: NonNullable<Catalog['machineLanSimulators']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -137,6 +138,12 @@ export function projectRows(
       if (value.os === 'darwin')
         machineSimulators[machineId] =
           Number(object(value.protocolCapabilities).iosSimulator) >= 1
+            ? 'available'
+            : 'upgrade-required';
+      // `machineSupportsLanIosSimulator`: a member that serves others its simulators.
+      if (terminal && value.os === 'darwin')
+        machineLanSimulators[machineId] =
+          Number(object(value.protocolCapabilities).lanIosSimulator) >= 1
             ? 'available'
             : 'upgrade-required';
       // Match the CLI's legacy metadata + machine Flock project merge.
@@ -220,6 +227,9 @@ export function projectRows(
     machineIds: [...machineIds],
     machineNames,
     ...(Object.keys(machineTerminals).length ? { machineTerminals } : {}),
+    ...(Object.keys(machineLanSimulators).length
+      ? { machineLanSimulators }
+      : {}),
     machineSimulators,
     agentUsage,
   };

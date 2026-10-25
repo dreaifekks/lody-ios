@@ -34,6 +34,7 @@ Inline math: $e^{i\\pi} + 1 = 0$.
 function View() {
   const [fixture, setFixture] = useState('short');
   const [lateUsage, setLateUsage] = useState(false);
+  const costUSD = fixture === 'partial-cost' ? null : 0.01234;
   let text = prose;
   if (fixture === 'long') text = rich;
   if (fixture === 'large') text = 'A very long reply.\n\n'.repeat(8000);
@@ -56,6 +57,7 @@ function View() {
       tokenUsage:
         fixture !== 'no-meta' && (fixture !== 'late-usage' || lateUsage)
           ? {
+              costUSD,
               inputTokens: 1234,
               outputTokens: 6640,
               reasoningOutputTokens: 2000,
@@ -95,6 +97,7 @@ function View() {
           {[
             'short',
             'long',
+            'partial-cost',
             'no-meta',
             'late-usage',
             'image',

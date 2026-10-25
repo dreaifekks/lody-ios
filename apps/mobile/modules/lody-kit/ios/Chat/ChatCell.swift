@@ -244,7 +244,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
     else { messageContent.isHidden = false }
     bubble.isHidden = row.kind != "user"
     applyLeadingMark(for: row, previousSymbol: previousSymbol, sameRow: sameRow)
-    separator.isHidden = row.kind != "duration"
+    separator.isHidden = row.kind != "duration" && row.kind != "noticeDivider"
     accessibilityIdentifier = row.id
     accessibilityLabel = text.string.replacingOccurrences(of: "\u{FFFC}", with: "")
     updateEditAccessibility()
@@ -363,7 +363,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
 
   static func leading(_ row: ChatRow) -> CGFloat {
     switch row.kind {
-    case "text", "user", "duration", "delivery": return 0
+    case "text", "user", "duration", "delivery", "noticeDivider": return 0
     case "summary": return 12
     default: return 24
     }

@@ -12,10 +12,11 @@ final class FileMarkdownView: MarkdownTextView {
   private static let htmlMarker = "\u{F0000}lody-html:"
   static let searchExcluded = NSAttributedString.Key("lody-search-excluded")
 
-  static func content(_ source: MarkdownContent, streaming: Bool = false) -> MarkdownContent {
+  static func content(_ source: MarkdownContent, streaming: Bool = false, linkify: Bool = false) -> MarkdownContent {
     let ruby = MarkdownRuby.blocks(source.blocks)
     let rendered = streaming ? ruby : MarkdownMermaid.blocks(ruby)
-    let blocks = rendered.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
+    let linked = linkify ? linkified(rendered) : rendered
+    let blocks = linked.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
       if case let .image(source, _) = node { return [.text(imageMarker + source)] }
       if case let .html(source) = node { return [.text(htmlMarker + source)] }
       guard case let .link(destination, children) = node,
@@ -23,6 +24,38 @@ final class FileMarkdownView: MarkdownTextView {
       return [.link(destination: destination, children: [.text(marker + destination)] + children)]
     }
     return MarkdownContent(blocks: blocks, rendered: source.rendered, highlightMaps: source.highlightMaps, locale: source.locale)
+  }
+
+  /// Walk parents first so explicit links and images keep their literal labels.
+  private static func linkified(_ blocks: [MarkdownBlockNode]) -> [MarkdownBlockNode] {
+    func inline(_ node: MarkdownInlineNode) -> [MarkdownInlineNode] {
+      switch node {
+      case .link, .image: return [node]
+      case let .text(value):
+        return ChatBareLinks.split(value).map { segment in
+          if let href = segment.href { return .link(destination: href, children: [.text(segment.text)]) }
+          return .text(segment.text)
+        }
+      case let .code(value):
+        if let path = ChatBareLinks.wholeFile(value) { return [.link(destination: path, children: [.text(path)])] }
+        return [node]
+      default:
+        var copy = node
+        copy.children = node.children.flatMap(inline)
+        return [copy]
+      }
+    }
+    return blocks.rewrite { (block: MarkdownBlockNode) -> [MarkdownBlockNode] in
+      switch block {
+      case let .paragraph(content): return [.paragraph(content: content.flatMap(inline))]
+      case let .heading(level, content): return [.heading(level: level, content: content.flatMap(inline))]
+      case let .table(alignments, rows):
+        return [.table(columnAlignments: alignments, rows: rows.map { row in
+          RawTableRow(cells: row.cells.map { RawTableCell(content: $0.content.flatMap(inline)) })
+        })]
+      default: return [block]
+      }
+    }
   }
 
   override func layoutSubviews() {

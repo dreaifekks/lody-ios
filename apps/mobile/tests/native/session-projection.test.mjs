@@ -464,3 +464,95 @@ test('streaming run projection skips provider payloads and keeps raw-only tool d
     comparable(projectSessionFull(doc, 'live')),
   );
 });
+
+test('Board results preserve bounded member summaries and notices refresh through projection', () => {
+  const doc = new LoroDoc();
+  const entry = setAll(doc.getList('history').pushContainer(new LoroMap()), {
+    id: 'board',
+    role: 'system',
+    finished: true,
+  });
+  const items = entry.setContainer('items', new LoroList());
+  const completion = {
+    type: 'operation_completion',
+    operationKind: 'board_report',
+    completion: {
+      type: 'result',
+      value: {
+        items: [],
+        boardReport: {
+          events: [
+            {
+              sessionId: 'child',
+              title: 'Native review',
+              kind: 'finished',
+              output: { text: 'Done' },
+            },
+          ],
+        },
+      },
+    },
+  };
+  setAll(items.pushContainer(new LoroMap()), {
+    type: 'operation_completion_batch',
+    memberCount: 60,
+    members: Array.from({ length: 60 }, () => completion),
+  });
+  const maintenance = setAll(items.pushContainer(new LoroMap()), {
+    type: 'system_notice',
+    name: 'board_context_maintenance',
+    meta: { trigger: 'idle', status: 'interrupted', kind: 'compact' },
+  });
+  setAll(items.pushContainer(new LoroMap()), {
+    type: 'system_notice',
+    name: 'agent_role_proposal',
+    meta: {
+      command: { action: 'update', patch: { description: 'Read-only' } },
+      before: { name: 'Reviewer' },
+    },
+  });
+  doc.commit();
+  const first = projectSession(doc, 'board-fixture');
+  const projected = first.entries[0].items;
+  assert.equal(projected[0].memberCount, 60);
+  assert.equal(projected[0].members.length, 50);
+  assert.deepEqual(projected[0].members[0], {
+    title: 'Native review',
+    status: 'finished',
+  });
+  assert.equal(projected[1].meta.trigger, 'idle');
+  assert.ok(!JSON.stringify(projected[0]).includes('Done'));
+  assert.equal(projected[2].meta.command.patch.description, 'Read-only');
+  maintenance.set('meta', {
+    trigger: 'manual',
+    status: 'done',
+    kind: 'compact',
+  });
+  doc.commit();
+  const next = projectSession(doc, 'board-fixture');
+  assert.ok(next.entries[0].items[1].rev > projected[1].rev);
+  releaseProjection(doc);
+});
+
+test('failed board reports remain visible without unused output payloads', () => {
+  const doc = new LoroDoc();
+  const entry = setAll(doc.getList('history').pushContainer(new LoroMap()), {
+    id: 'board-error',
+    role: 'system',
+    finished: true,
+  });
+  setAll(
+    entry.setContainer('items', new LoroList()).pushContainer(new LoroMap()),
+    {
+      type: 'operation_completion',
+      operationKind: 'board_report',
+      completion: { type: 'error', error: { message: 'Delivery failed' } },
+    },
+  );
+  doc.commit();
+  assert.deepEqual(
+    projectSession(doc, 'board-error').entries[0].items[0].members,
+    [{ title: 'Delivery failed', status: 'failed' }],
+  );
+  releaseProjection(doc);
+});

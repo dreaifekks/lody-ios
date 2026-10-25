@@ -4,6 +4,7 @@ export type TurnTokenUsage = {
   cacheReadInputTokens: number;
   cacheCreationInputTokens: number;
   reasoningOutputTokens: number;
+  costUSD?: number | null;
 };
 export type TurnMetadata = {
   tokenUsage?: TurnTokenUsage;
@@ -31,6 +32,14 @@ export function readTurnMetadata(entry: any): TurnMetadata {
     tokenUsage = Object.fromEntries(
       keys.map((key) => [key, usage[key]]),
     ) as TurnTokenUsage;
+  if (
+    tokenUsage &&
+    (usage.costUSD === null ||
+      (typeof usage.costUSD === 'number' &&
+        Number.isFinite(usage.costUSD) &&
+        usage.costUSD >= 0))
+  )
+    tokenUsage.costUSD = usage.costUSD;
   const input = entry?.inputConfig;
   const modeId =
     typeof input?.modeId === 'string' ? input.modeId.trim() : undefined;
