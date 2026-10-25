@@ -69,7 +69,24 @@ function View() {
   const [fixture, setFixture] = useState('author');
   const [opened, setOpened] = useState('');
   const openFile = useOpenFile('ui-verify-files');
-  const displayed = fixture === 'links' ? links : entries;
+  let displayed = entries;
+  if (fixture === 'links') displayed = links;
+  if (fixture === 'tg')
+    displayed = [
+      {
+        id: 'tg',
+        role: 'assistant',
+        status: 'completed',
+        finished: true,
+        items: [
+          {
+            itemId: 'link',
+            type: 'text',
+            text: '[Open Telegram](tg://resolve?domain=lody_fixture)',
+          },
+        ],
+      },
+    ];
   return (
     <>
       <Stack.Toolbar placement="right">
@@ -77,7 +94,7 @@ function View() {
           icon="slider.horizontal.3"
           accessibilityLabel="Pending fixtures"
         >
-          {['author', 'links'].map((value) => (
+          {['author', 'links', 'tg'].map((value) => (
             <Stack.Toolbar.MenuAction
               key={value}
               onPress={() => {
