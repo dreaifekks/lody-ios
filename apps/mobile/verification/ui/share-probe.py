@@ -101,8 +101,9 @@ def open_extension(name):
     subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, bundle_id], capture_output=True, timeout=30)
     subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, probe_bundle_id], capture_output=True, timeout=30)
     sim('launch', args.udid, probe_bundle_id, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
-    ui.element('share-probe-host.open')
-    ui.axe('tap', '--id', 'share-probe-host.open', '--tap-style', 'physical', '--post-delay', '1')
+    source = ui.element('share-probe-host.open')['frame']
+    ui.capture(f'{name}-source')
+    ui.axe('tap', '-x', str(source['x'] + source['width'] / 2), '-y', str(source['y'] + source['height'] / 2), '--tap-style', 'physical', '--post-delay', '1')
     ui.capture(f'{name}-tray')
     items = ui.state()
     if any(item.get('AXLabel') == 'Lody' for item in items):
