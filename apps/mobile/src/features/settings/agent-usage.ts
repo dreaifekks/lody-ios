@@ -101,13 +101,16 @@ export function agentUsageRings(
     : usage!.quotas.filter(
         (q) => !q.configId && q.provider === config.provider,
       );
-  // Antigravity's Claude/GPT group always reads full, so Lody shows only Gemini.
+  // Antigravity reports independent Gemini and Argon groups.
   return quotas
-    .filter((q) => config.provider !== ANTIGRAVITY || q.id === 'gemini')
+    .filter(
+      (q) =>
+        config.provider !== ANTIGRAVITY || ['gemini', 'argon'].includes(q.id),
+    )
     .flatMap((q) =>
       q.windows.map((w, i) => {
         const label = [
-          q.name || agentName(config.provider),
+          q.id === 'argon' ? 'Argon' : q.name || agentName(config.provider),
           windowDuration(w.duration),
           w.label,
         ]

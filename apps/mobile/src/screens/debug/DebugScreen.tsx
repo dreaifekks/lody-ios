@@ -1,3 +1,4 @@
+import { ArgonUsagePreviewScreen } from './SettingsPreviewScreen';
 import { PendingPreviewScreen } from './PendingPreviewScreen';
 import { AIUsagePreviewScreen } from './AIUsagePreviewScreen';
 import {
@@ -546,6 +547,7 @@ function View() {
     'free-turn-notice-preview': () =>
       void present(FreeTurnNoticePreviewScreen, {}),
     'send-queue': () => void openSendPreview(false, true),
+    'argon-usage-preview': () => void present(ArgonUsagePreviewScreen),
     'pending-preview': () => void present(PendingPreviewScreen, {}),
     'message-share-preview': () => void present(MessageSharePreviewScreen, {}),
     'session-share-preview': () => void present(SessionSharePreviewScreen),

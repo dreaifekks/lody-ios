@@ -272,3 +272,47 @@ export const SettingsPreviewScreen = definePage({
   presentation: { headerVariant: 'transparent' },
   Component: View,
 });
+
+const antigravity = {
+  kind: 'agent' as const,
+  id: 'ag',
+  machineId: 'm1',
+  name: 'Antigravity',
+  detail: 'antigravity-acp',
+  machineName: 'Studio Mac',
+};
+export const ArgonUsagePreviewScreen = definePage({
+  id: 'argon-usage-preview',
+  title: 'Antigravity usage',
+  presentation: { style: 'push', headerVariant: 'transparent' },
+  Component: () => (
+    <RemoteSettingsView
+      kind="agent"
+      service={async () => [antigravity]}
+      workspaceId="offline-argon"
+      connected
+      machinePresence={{ state: 'live', onlineMachineIds: ['m1'] }}
+      agentUsage={{
+        m1: {
+          configs: [
+            {
+              id: 'ag',
+              name: 'Antigravity',
+              provider: 'antigravity-acp',
+              eligible: true,
+            },
+          ],
+          quotas: ['gemini', 'argon', 'third-party'].map((id, i) => ({
+            id,
+            configId: 'ag',
+            provider: 'antigravity-acp',
+            name: id === 'gemini' ? 'Gemini' : id,
+            windows: [
+              { usedPercent: 30 + i * 10, duration: 604800, resetsAt: null },
+            ],
+          })),
+        },
+      }}
+    />
+  ),
+});

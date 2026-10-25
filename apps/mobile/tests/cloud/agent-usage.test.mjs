@@ -149,7 +149,7 @@ test('legacy Claude ratios and timestamps migrate while current windows and inde
   assert.equal(claude[0].windows[0].usedPercent, 0.5);
 });
 
-test('a provider shows the quota it reported itself, and Antigravity only its Gemini group', () => {
+test('a provider shows the quota it reported itself, and Antigravity its Gemini and Argon groups', () => {
   const machine = new Flock('usage-provider-scoped');
   for (const [id, cliType, agentType] of [
     ['work', 'builtin', 'claude'],
@@ -187,6 +187,10 @@ test('a provider shows the quota it reported itself, and Antigravity only its Ge
     ['rateLimit', 'ag', 'antigravity-acp', 'third-party'],
     snapshot('third-party', 0),
   );
+  machine.set(
+    ['rateLimit', 'ag', 'antigravity-acp', 'argon'],
+    snapshot('argon', 40),
+  );
   machine.commit();
   const usage = projectRows(machine.scan(), 'm1').agentUsage.m1;
   const merged = { ...usage, quotas: mergeAgentQuotas([], usage.quotas) };
@@ -203,6 +207,7 @@ test('a provider shows the quota it reported itself, and Antigravity only its Ge
   );
   assert.deepEqual(
     rows('ag').map((row) => row.fraction),
-    [0.3],
+    [0.3, 0.4],
   );
+  assert.match(rows('ag')[1].label, /^Argon/);
 });
