@@ -225,7 +225,20 @@ function View() {
               key={value}
               onPress={() => {
                 setOpened('');
-                setFixture(value);
+                if (value === 'find-author' || value === 'find-body') {
+                  setFixture('author');
+                  setFindRequest(
+                    JSON.stringify({
+                      open: true,
+                      id: String(Date.now()),
+                      query: value === 'find-author' ? 'Codex' : 'review',
+                      keyboard: false,
+                    }),
+                  );
+                } else {
+                  setFindRequest('{}');
+                  setFixture(value);
+                }
               }}
             >
               {value}

@@ -552,7 +552,7 @@ test('failed board reports remain visible without unused output payloads', () =>
   doc.commit();
   assert.deepEqual(
     projectSession(doc, 'board-error').entries[0].items[0].members,
-    [{ title: 'board_report: Delivery failed', status: 'failed' }],
+    [{ title: 'Delivery failed', status: 'failed' }],
   );
   releaseProjection(doc);
 });

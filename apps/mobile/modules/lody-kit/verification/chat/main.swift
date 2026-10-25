@@ -1164,7 +1164,8 @@ let boardEntries = try JSONDecoder().decode([ChatEntry].self, from: Data(boardJS
 let boardRows = ChatTranscript(entries: boardEntries).rows()
 assert(!boardRows.contains { $0.entryID == "silent" })
 assert(boardRows.contains { $0.entryID == "manual" && $0.kind == "noticeDivider" })
-assert(boardRows.contains { $0.text.contains("52") && $0.text.contains("Review") && !$0.actionable })
+assert(boardEntries[2].items[0].memberCount == 52)
+assert(boardRows.contains { $0.kind == "orchestration" && $0.text.contains("Review") && !$0.actionable })
 
 var manyResults = boardEntries[2]
 manyResults.items[0].members = (0..<50).map { ChatItem.OperationMember(title: "Member \($0)", status: "succeeded") }

@@ -455,7 +455,7 @@ function summarizeItem(
         if (completion?.type === 'error')
           return [
             {
-              title: member.operationKind + ': ' + completion.error.message,
+              title: completion.error.message,
               status: 'failed',
             },
           ];
