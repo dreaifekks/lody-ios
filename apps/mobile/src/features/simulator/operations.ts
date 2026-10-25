@@ -1,8 +1,11 @@
 import { useSyncExternalStore } from 'react';
 import {
   iosSimulatorControl,
+  lanSimulatorControl,
+  lanSimulatorRelease,
   type IosSimulatorDevice,
   type IosSimulatorPreview,
+  type LanSimulatorTarget,
   type SimulatorSource,
 } from '@lody-ios/kit';
 import type { TranslationKey } from '../../lib/i18n/index.ts';
@@ -31,13 +34,54 @@ export const simulatorPhaseKey: Record<
 };
 
 type Control = typeof iosSimulatorControl;
-let control: Control = iosSimulatorControl;
+
+/** Sessions another LAN member runs, which this device asks directly. */
+const lanTargets = new Map<string, LanSimulatorTarget>();
+const route: Control = (workspaceId, sessionId, command) => {
+  const lan = lanTargets.get(sessionId);
+  return lan
+    ? lanSimulatorControl(lan, sessionId, command)
+    : iosSimulatorControl(workspaceId, sessionId, command);
+};
+let control: Control = route;
 
 export const simulatorControl: Control = (...args) => control(...args);
 
 /** Debug scenes inject deterministic outcomes at this boundary. */
 export function setSimulatorControl(next?: Control) {
-  control = next ?? iosSimulatorControl;
+  control = next ?? route;
+}
+
+/** How many times a LAN session's port was released or its preview stopped here. */
+const lanEnds = new Map<string, number>();
+
+/**
+ * Sends the session's simulator commands to the LAN member that runs it,
+ * whose viewer this device carries on a loopback port. The returned release
+ * ends that port and forgets the operation here; the member keeps it, and
+ * opening the simulator again adopts it with a fresh port.
+ */
+export function attachLanSimulator(
+  sessionId: string,
+  target: LanSimulatorTarget,
+) {
+  lanTargets.set(sessionId, target);
+  return () => {
+    if (lanTargets.get(sessionId) !== target) return;
+    lanTargets.delete(sessionId);
+    lanEnds.set(sessionId, (lanEnds.get(sessionId) ?? 0) + 1);
+    update(sessionId, undefined);
+    void lanSimulatorRelease(sessionId);
+  };
+}
+
+/**
+ * Changes once a LAN session's port is released or its preview stopped, so
+ * an opening begun before stops instead of adopting what the member says
+ * afterwards. Constant off a LAN.
+ */
+export function simulatorStamp(sessionId: string) {
+  return lanTargets.has(sessionId) ? String(lanEnds.get(sessionId) ?? 0) : '';
 }
 
 const POLL_LIMIT = 180;
@@ -133,15 +177,18 @@ export function startSimulator(
 
 /** Adopts the session's current operation, such as one the agent started. */
 export async function resumeSimulator(workspaceId: string, sessionId: string) {
+  const stamp = simulatorStamp(sessionId);
   const reply = await simulatorControl(workspaceId, sessionId, {
     action: 'status',
   }).catch(() => undefined);
   const preview = reply?.success ? reply.preview : undefined;
   if (!preview || ['failed', 'closed'].includes(preview.phase))
     return undefined;
+  if (simulatorStamp(sessionId) !== stamp) return undefined;
   const devices = await simulatorControl(workspaceId, sessionId, {
     action: 'list',
   }).catch(() => undefined);
+  if (simulatorStamp(sessionId) !== stamp) return undefined;
   const name =
     devices?.devices?.find((item) => item.udid === preview.udid)?.name ??
     preview.udid;
@@ -160,6 +207,8 @@ export async function resumeSimulator(workspaceId: string, sessionId: string) {
 
 export async function stopSimulator(sessionId: string) {
   const operation = operations.get(sessionId);
+  if (lanTargets.has(sessionId))
+    lanEnds.set(sessionId, (lanEnds.get(sessionId) ?? 0) + 1);
   update(sessionId, undefined);
   if (operation?.operationId)
     await simulatorControl(operation.workspaceId, sessionId, {

@@ -1,25 +1,32 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
+import type { LanSimulatorTarget } from '@lody-ios/kit';
+import type { SimulatorAvailability } from '@/features/simulator/availability';
 import {
+  attachLanSimulator,
   resumeSimulator,
   simulatorPhaseKey,
+  simulatorStamp,
   simulatorSource,
   startSimulator,
   stopSimulator,
   useSimulatorOperation,
 } from '@/features/simulator/operations';
-import type { Catalog } from '@lody/cloud-runtime/models/catalog';
 import { present } from '@/lib/presentation';
 import { t } from '../../lib/i18n/index.ts';
-
-type Availability = NonNullable<Catalog['machineSimulators']>[string];
 
 export function useSessionSimulator(
   workspaceId: string | undefined,
   sessionId: string,
-  availability: Availability | undefined,
+  availability: SimulatorAvailability | undefined,
   requestId?: string,
+  lan?: LanSimulatorTarget,
 ) {
+  // The viewer port of a LAN member's simulator lives as long as this page.
+  const lanKey = lan && JSON.stringify(lan);
+  useEffect(() => {
+    if (lanKey) return attachLanSimulator(sessionId, JSON.parse(lanKey));
+  }, [lanKey, sessionId]);
   const operation = useSimulatorOperation(sessionId);
   const [hidden, setHidden] = useState<string>();
   const source = simulatorSource(operation);
@@ -61,7 +68,10 @@ export function useSessionSimulator(
     await exclusive(async () => {
       if (running && operation) return show(operation.name);
       setResolving(true);
+      // A LAN session's page that left or stopped meanwhile ends this opening.
+      const stamp = simulatorStamp(sessionId);
       const resumed = await resumeSimulator(workspaceId, sessionId);
+      if (simulatorStamp(sessionId) !== stamp) return;
       if (resumed) return show(resumed);
       const { SimulatorPickerScreen } =
         await import('@/screens/SimulatorPickerScreen');
@@ -71,6 +81,7 @@ export function useSessionSimulator(
         sessionId,
       });
       if (result.status !== 'completed') return;
+      if (simulatorStamp(sessionId) !== stamp) return;
       void startSimulator(workspaceId, sessionId, result.value);
       await show(result.value.name);
     });

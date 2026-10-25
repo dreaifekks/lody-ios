@@ -40,6 +40,8 @@ export type Catalog = {
   /** Where each LAN member accepts terminal connections; absent off a LAN. */
   machineTerminals?: Record<string, LanTerminalEndpoint>;
   machineSimulators?: Record<string, 'available' | 'upgrade-required'>;
+  /** LAN members whose simulators this device previews through them; absent off a LAN. */
+  machineLanSimulators?: Record<string, 'available' | 'upgrade-required'>;
 };
 export type LanTerminalEndpoint = { host: string; port: number };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };

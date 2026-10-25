@@ -1083,6 +1083,7 @@
   "simulator.action.volumeDown": "音量减",
   "simulator.action.actionButton": "操作按钮",
   "native.simulator.unavailable": "无法加载这个模拟器",
+  "native.simulator.lan.portBusy": "本机端口 {port} 已被占用，请重新开始预览。",
   "native.simulator.button.action": "操作按钮",
   "native.simulator.button.volume-up": "音量加",
   "native.simulator.button.volume-down": "音量减",

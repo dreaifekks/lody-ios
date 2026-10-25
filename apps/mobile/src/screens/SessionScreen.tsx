@@ -36,6 +36,7 @@ import {
 import { View as RNView, Alert, Linking } from 'react-native';
 import { useSessionPreview } from '@/hooks/screens/useSessionPreview';
 import { useSessionSimulator } from '@/hooks/screens/useSessionSimulator';
+import { sessionSimulatorAvailability } from '@/features/simulator/availability';
 import { composerContext } from '@/hooks/screens/composerContext';
 import { showToast } from '@/ui/toast';
 import { usePalette } from '@/lib/theme/palette';
@@ -597,14 +598,18 @@ function View() {
     session.id,
     account?.lan ? undefined : snapshot.preview,
   );
+  // On a LAN the member that runs the session serves its simulators directly.
+  const simulatorAccess = sessionSimulatorAvailability(
+    catalog,
+    currentSession,
+    account?.lan ? selected?.id : undefined,
+  );
   const simulator = useSessionSimulator(
     selected?.id,
     session.id,
-    // LAN members do not serve the Simulator gateway.
-    account?.lan
-      ? undefined
-      : catalog.machineSimulators?.[currentSession.machineId],
+    simulatorAccess.availability,
     currentSession.iosSimulatorPreviewRequestId,
+    simulatorAccess.lan,
   );
   const context = composerContext([
     {

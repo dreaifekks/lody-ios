@@ -273,6 +273,11 @@ export { NativeAppIconGrid } from './appearance/NativeAppIconGrid';
 export { NativeSessionShare } from './session-share/NativeSessionShare';
 
 export { SimulatorView, type SimulatorSource } from './simulator/SimulatorView';
+export {
+  lanSimulatorControl,
+  lanSimulatorRelease,
+  type LanSimulatorTarget,
+} from './simulator/LanSimulator';
 export { TerminalView, type TerminalState } from './terminal/TerminalView';
 export {
   readVoicePreferences,

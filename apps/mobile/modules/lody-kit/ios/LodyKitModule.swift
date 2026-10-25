@@ -303,6 +303,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     AsyncFunction("clearLanHub") { () async throws in
       // The hub must stop pushing here before the credential to tell it is gone.
       await LanPush.shared.leave()
+      await LanSimulatorPorts.shared.closeAll()
       try await MainActor.run {
         self.dataRuntime.stop()
         PushNotifications.shared.identify(nil)
@@ -329,6 +330,26 @@ public final class LodyKitModule: Module, @unchecked Sendable {
     AsyncFunction("iosSimulatorControl") { (payload: String, promise: Promise) in
       MainActor.assumeIsolated { self.dataRuntime.command("iosSimulatorControl", payload: payload, promise: promise) }
     }.runOnQueue(.main)
+    /// A simulator command for a session another LAN member runs. RN names the
+    /// member and its endpoint; the LAN credential never leaves native code.
+    AsyncFunction("lanSimulatorControl") { (payload: String) async -> String in
+      let args = (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any] ?? [:]
+      var reply: [String: Any] = ["success": false, "error": "unavailable",
+                                  "message": LodyStrings.text("native.simulator.unavailable")]
+      if let invite = LanHub.credential(for: args["workspaceId"] as? String ?? ""),
+         let machineId = args["machineId"] as? String, let host = args["host"] as? String,
+         let port = (args["port"] as? Int).flatMap(UInt16.init(exactly:)),
+         let sessionId = args["sessionId"] as? String, let command = args["command"] as? [String: Any] {
+        let target = LanSimulator.Target(endpoint: LanTerminalEndpoint(host: host, port: port), machineId: machineId)
+        reply = await LanSimulator.control(invite: invite, target: target, sessionId: sessionId, command: command)
+      }
+      let data = (try? JSONSerialization.data(withJSONObject: reply)) ?? Data("{}".utf8)
+      return String(decoding: data, as: UTF8.self)
+    }
+    /// Ends the loopback port that carries a session's viewer, when its page leaves.
+    AsyncFunction("lanSimulatorRelease") { (sessionId: String) async in
+      await LanSimulatorPorts.shared.release(sessionId)
+    }
     AsyncFunction("openPreviewBrowser") { (address: String) in
       try MainActor.assumeIsolated {
         guard let url = Self.previewURL(address),
