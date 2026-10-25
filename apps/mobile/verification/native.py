@@ -48,7 +48,7 @@ checks = {
     'chat-chrome': ['LodyStrings.swift', 'Chat/ChatOverlay.swift'],
     'context-chip': ['LodyStrings.swift', 'Chat/ChatQuickReplies.swift'],
     'model-panel': ['LodyStrings.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Chat/ChatComposerModelPanel.swift'],
-    'composer': ['Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyStrings.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatComposerAttachmentStack.swift', 'Chat/ChatComposerGrabber.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift'],
+    'composer': ['Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyStrings.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatComposerAttachmentStack.swift', 'Chat/ChatComposerGrabber.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatComposerFormatBar.swift', 'Voice/VoicePreferences.swift', 'Voice/VoiceDictation.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift'],
     'attachments': ['LodyStrings.swift', 'Diagnostics/DiagnosticsStore.swift', 'Cloud/SessionAttachments.swift'],
     'inline-diff': ['UIFont+Dynamic.swift', 'Diff/InlineDiffModel.swift', 'Diff/InlineDiffRenderer.swift'],
     'list': [
@@ -82,7 +82,6 @@ if args.case:
 for files in checks.values():
     if 'Chat/ChatComposerView.swift' in files:
         files.append('Chat/ChatQuickReplies.swift')
-        files.append('Chat/ChatComposerFormatBar.swift')
     if 'Chat/ChatTranscript.swift' in files:
         files.append('Chat/ChatPendingSend.swift')
     if 'Chat/ChatSendHandoff.swift' in files or 'Chat/ChatMentionPanel.swift' in files:
@@ -164,8 +163,9 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             ios = '26.0'
             command += ['-sdk', sdk, '-target', f'{arch}-apple-ios{ios}-simulator']
         if name == 'composer':
-            # Standalone layout checks do not host the app's WebRTC/runtime service.
-            command += ['-D', 'LODY_COMPOSER_VERIFY']
+            # Compile the production dictation path; the check injects only an inactive runtime.
+            rtc = root / 'apps/mobile/ios/Pods/WebRTC-lib/WebRTC.xcframework/ios-arm64_x86_64-simulator'
+            command += ['-F', str(rtc), '-framework', 'WebRTC', '-Xlinker', '-rpath', '-Xlinker', str(rtc)]
             manifest = subprocess.check_output([
                 'node', '-p', 'require.resolve("@rien7/anchored-overlay-kit/package.json")',
             ], cwd=root / 'apps/mobile', text=True).strip()

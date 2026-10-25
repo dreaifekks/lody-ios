@@ -35,6 +35,12 @@ if not args.udid:
 
 app = Path(args.app).resolve()
 assert (app / 'PlugIns/LodyShare.appex').is_dir(), 'Build the Share Extension target first'
+app_info = plistlib.loads((app / 'Info.plist').read_bytes())
+bundle_id = os.environ.get('LODY_VERIFY_BUNDLE_ID') or app_info['CFBundleIdentifier']
+share_bundle_id = plistlib.loads((app / 'PlugIns/LodyShare.appex/Info.plist').read_bytes())['CFBundleIdentifier']
+probe_bundle_id = bundle_id + '.share-probe-host'
+app_group = os.environ.get('LODY_APP_GROUP') or 'group.' + bundle_id
+
 output = Path(args.output).resolve()
 output.mkdir(parents=True, exist_ok=True)
 
@@ -46,7 +52,7 @@ def sim(*command, **kwargs):
 host = output / 'ShareProbeHost.app'
 host.mkdir(exist_ok=True)
 (host / 'Info.plist').write_bytes(plistlib.dumps({
-    'CFBundleIdentifier': 'app.innei.lody.share-probe-host',
+    'CFBundleIdentifier': probe_bundle_id,
     'CFBundleExecutable': 'ShareProbeHost',
     'CFBundleName': 'ShareProbeHost',
     'CFBundlePackageType': 'APPL',
@@ -75,11 +81,11 @@ subprocess.run(['codesign', '--force', '--sign', '-', str(host)], check=True, ti
 sim('install', args.udid, str(app))
 sim('install', args.udid, str(host))
 sim('ui', args.udid, 'appearance', args.appearance)
-for bundle in ['app.innei.lody.share', 'app.innei.lody.share-probe-host']:
+for bundle in [share_bundle_id, probe_bundle_id]:
     sim('spawn', args.udid, 'defaults', 'write', bundle, 'AppleLanguages', '-array', 'en')
     sim('spawn', args.udid, 'defaults', 'write', bundle, 'AppleLocale', 'en_US')
 group = Path(subprocess.check_output(
-    ['xcrun', 'simctl', 'get_app_container', args.udid, 'app.innei.lody', 'group.app.innei.lody'], text=True).strip())
+    ['xcrun', 'simctl', 'get_app_container', args.udid, bundle_id, app_group], text=True).strip())
 store = group / 'Library/LodyShare'
 ui = UI(args.udid, output)
 
@@ -92,9 +98,9 @@ def flatten(node):
 
 def open_extension(name):
     # The containing app stays stopped; the system hosts only its extension.
-    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, 'app.innei.lody'], capture_output=True, timeout=30)
-    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, 'app.innei.lody.share-probe-host'], capture_output=True, timeout=30)
-    sim('launch', args.udid, 'app.innei.lody.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
+    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, bundle_id], capture_output=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, probe_bundle_id], capture_output=True, timeout=30)
+    sim('launch', args.udid, probe_bundle_id, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
     ui.element('share-probe-host.open')
     ui.axe('tap', '--id', 'share-probe-host.open', '--tap-style', 'physical', '--post-delay', '1')
     ui.capture(f'{name}-tray')
