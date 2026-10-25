@@ -2,6 +2,7 @@
 session page. The chip resumes the member's running preview and the PiP follows it back to
 the chat; leaving the page ends the port and forgets the operation here, so a later visit
 shows no stale PiP until the simulator is opened again and adopts the member's operation."""
+import re
 import sys
 from driver import UI
 import catalog
@@ -18,7 +19,7 @@ def open_chip():
            '--post-delay', '1')
     stream = ui.element('simulator-stream')
     assert stream['AXLabel'] == 'Second Simulator', 'The chip did not adopt the member preview'
-    ui.wait(lambda _: ':frame:' in (ui.element('simulator-stream').get('AXValue') or '') or None,
+    ui.wait(lambda _: re.search(r',frame:[1-9]', ui.element('simulator-stream').get('AXValue') or '') or None,
             'The adopted preview decoded no frame')
 
 
