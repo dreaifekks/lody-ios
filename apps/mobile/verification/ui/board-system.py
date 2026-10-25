@@ -6,6 +6,7 @@ ui.axe('tap', '--label', 'Pending fixtures')
 ui.axe('tap', '--label', 'board', '--post-delay', '.5')
 assert '52 task results' in ui.element('batch:results')['AXLabel']
 assert 'Native review' in ui.element('batch:results')['AXLabel']
+assert 'Fourth result retained' in ui.element('batch:results')['AXLabel']
 assert 'Board thread finished' in ui.element('report:result')['AXLabel']
 assert 'Context compaction · Completed' in ui.element('maintenance:notice')['AXLabel']
 assert 'chain reached its limit' in ui.element('chain:notice')['AXLabel']
@@ -15,4 +16,8 @@ assert 'Reviewer' in proposal['AXLabel'] and 'Review native code' in proposal['A
 assert proposal['type'] != 'Button', 'Role proposal must remain read-only'
 assert not any(i.get('AXLabel') in ['Save', 'Approve'] for i in ui.state())
 ui.capture('board-summary-and-notices')
+ui.axe('tap', '--label', 'Pending fixtures')
+ui.axe('tap', '--label', 'board-requested', '--post-delay', '.5')
+assert ui.element('requested:notice')['AXLabel'] == 'New conversation · Requested'
+ui.capture('manual-maintenance-requested')
 print('PASS: batch/report summaries, silent maintenance, dividers and read-only Role fields')

@@ -36,10 +36,10 @@ if not args.udid:
 app = Path(args.app).resolve()
 assert (app / 'PlugIns/LodyShare.appex').is_dir(), 'Build the Share Extension target first'
 app_info = plistlib.loads((app / 'Info.plist').read_bytes())
-bundle_id = os.environ.get('LODY_VERIFY_BUNDLE_ID') or app_info['CFBundleIdentifier']
+bundle_id = app_info['CFBundleIdentifier']
 share_bundle_id = plistlib.loads((app / 'PlugIns/LodyShare.appex/Info.plist').read_bytes())['CFBundleIdentifier']
 probe_bundle_id = bundle_id + '.share-probe-host'
-app_group = os.environ.get('LODY_APP_GROUP') or 'group.' + bundle_id
+app_group = app_info['LodyAppGroup']
 
 output = Path(args.output).resolve()
 output.mkdir(parents=True, exist_ok=True)

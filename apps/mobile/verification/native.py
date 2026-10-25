@@ -164,7 +164,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             command += ['-sdk', sdk, '-target', f'{arch}-apple-ios{ios}-simulator']
         if name == 'composer':
             # Compile the production dictation path; the check injects only an inactive runtime.
-            rtc = root / 'apps/mobile/ios/Pods/WebRTC-lib/WebRTC.xcframework/ios-arm64_x86_64-simulator'
+            rtc = root / 'apps/mobile/ios/Pods/WebRTC-lib/WebRTC.xcframework/ios-x86_64_arm64-simulator'
             command += ['-F', str(rtc), '-framework', 'WebRTC', '-Xlinker', '-rpath', '-Xlinker', str(rtc)]
             manifest = subprocess.check_output([
                 'node', '-p', 'require.resolve("@rien7/anchored-overlay-kit/package.json")',

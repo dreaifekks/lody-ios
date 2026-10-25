@@ -109,7 +109,7 @@ enum ChatBareLinks {
   }
 
   private static func proseFile(_ value: String) -> String? {
-    let stripped = value.replacingOccurrences(of: #"[.,;:!?'")\]}>，。！？；：、）】」』》“”‘’]+$"#, with: "", options: .regularExpression)
+    let stripped = value.replacingOccurrences(of: #"[.,;:!?'")\]}>\uFF0C\u3002\uFF01\uFF1F\uFF1B\uFF1A\u3001\uFF09\u3011\u300D\u300F\u300B\u201C\u201D\u2018\u2019]+$"#, with: "", options: .regularExpression)
     return qualifies(stripped, prose: true) ? stripped : nil
   }
 
@@ -138,6 +138,7 @@ enum ChatBareLinks {
       if urlMatches.contains(where: { NSIntersectionRange($0.range, match.range).length > 0 }) { return nil }
       if match.range.location > 0, ["@", "~"].contains(source.substring(with: NSRange(location: match.range.location - 1, length: 1))) { return nil }
       let raw = source.substring(with: match.range)
+      if raw.range(of: #"[\\/:#]|\.[A-Za-z0-9]"#, options: .regularExpression) == nil { return nil }
       var path = proseFile(raw)
       if path == nil, raw.range(of: #"\P{ASCII}"#, options: .regularExpression) != nil,
          let ascii = asciiCandidate.firstMatch(in: raw, range: NSRange(location: 0, length: (raw as NSString).length)) {
@@ -148,7 +149,7 @@ enum ChatBareLinks {
     }
     for match in urlMatches {
       let raw = source.substring(with: match.range)
-      var url = raw.components(separatedBy: CharacterSet(charactersIn: "，。！？；：、（）【】「」『』《》　")).first!
+      var url = raw.components(separatedBy: CharacterSet(charactersIn: "\u{FF0C}\u{3002}\u{FF01}\u{FF1F}\u{FF1B}\u{FF1A}\u{3001}\u{FF08}\u{FF09}\u{3010}\u{3011}\u{300C}\u{300D}\u{300E}\u{300F}\u{300A}\u{300B}\u{3000}")).first!
       while let last = url.last, "]})\"'.,:;!?".contains(last) { url.removeLast() }
       if session(url) { paths.append((NSRange(location: match.range.location, length: (url as NSString).length), url)) }
     }

@@ -93,6 +93,8 @@ const board = [
         members: [
           { title: 'Native review', status: 'succeeded' },
           { title: 'UI validation', status: 'failed' },
+          { title: 'Third result', status: 'succeeded' },
+          { title: 'Fourth result retained', status: 'succeeded' },
         ],
       },
     ],
@@ -161,9 +163,31 @@ const board = [
 function View() {
   const [fixture, setFixture] = useState('author');
   const [opened, setOpened] = useState('');
+  const [findRequest, setFindRequest] = useState('{}');
   const openFile = useOpenFile('ui-verify-files');
   let displayed = entries;
   if (fixture === 'board') displayed = board;
+  if (fixture === 'board-requested')
+    displayed = [
+      {
+        id: 'requested',
+        role: 'system',
+        status: 'completed',
+        finished: true,
+        items: [
+          {
+            itemId: 'notice',
+            type: 'system_notice',
+            name: 'board_context_maintenance',
+            meta: {
+              trigger: 'manual',
+              status: 'requested',
+              kind: 'new_conversation',
+            },
+          },
+        ],
+      },
+    ];
   if (fixture === 'links') displayed = links;
   if (fixture === 'tg')
     displayed = [
@@ -188,7 +212,15 @@ function View() {
           icon="slider.horizontal.3"
           accessibilityLabel="Pending fixtures"
         >
-          {['author', 'links', 'tg', 'board'].map((value) => (
+          {[
+            'author',
+            'links',
+            'tg',
+            'board',
+            'board-requested',
+            'find-author',
+            'find-body',
+          ].map((value) => (
             <Stack.Toolbar.MenuAction
               key={value}
               onPress={() => {
@@ -204,6 +236,7 @@ function View() {
       <NativeChat
         style={{ flex: 1 }}
         entriesJSON={JSON.stringify(displayed)}
+        findRequestJSON={findRequest}
         composerJSON='{"editable":false,"canSend":false}'
         clearDraftToken={0}
         emptyText=""

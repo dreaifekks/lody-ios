@@ -1062,3 +1062,16 @@ Review the screenshots and videos for border continuity and stale highlights.
 `memory-settings` 验证生产记忆列表与详情的读取失败恢复、身份／来源区分、导入确认／取消与读回、解除关联结果不明禁重放、账户切换及正式设置入口；`memory-states` 验证目录权限拒绝、提供方未安装／未运行、旧 daemon、失败／无权限、未知状态、未知提供方详情、缓存列表／详情和空列表。分别用一次 `--case` 运行两个用例，重复传入 `--case` 只会执行最后一个。均为离线边界注入，英文浅色／深色，不读取真实记忆或调用真实 provider。
 
 `published-shares` 验证正式分享列表／详情、分页失败恢复、原生复制、跨设备密钥缺失、管理员范围、确认／取消撤销、冲突、回执不明禁重放与账号切换。`published-share-states` 分别重置空列表、权限拒绝、只读和撤销后读回权限丢失。分别以单个 `--case` 运行，英文浅色／深色；fixture 不发布真实内容、不访问 Cloud、不读取或复制真实 reader secret。
+
+`message-author`, `bare-links`, `telegram-link` and `board-system` use the
+independently resettable Pending adaptations Debug scene. They check delegated
+Role/instance/model provenance, Unicode/home/line file paths and session links,
+the external Telegram open boundary, and Board result/maintenance/proposal
+summaries. Whole-file inline code follows desktop file linking; other inline
+code and fenced code stay literal. The external URL boundary records intent
+under `--ui-verify`; no Telegram app or remote session is opened.
+
+`argon-usage` uses the production remote settings view with independent Gemini
+and Argon quotas, with no connected Machine. `message-details` also checks small
+USD cost precision and omits the row when partial pricing is `null`, matching
+desktop. Run each case separately in English light and dark.

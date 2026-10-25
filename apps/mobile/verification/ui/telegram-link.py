@@ -11,7 +11,7 @@ ui.axe('tap', '--label', 'Pending fixtures')
 ui.axe('tap', '--label', 'tg', '--post-delay', '.5')
 frame = ui.element('tg:link')['frame']
 ui.capture('telegram-link')
-ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.4')
+ui.axe('tap', '-x', str(frame['x'] + min(70, frame['width'] / 2)), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.4')
 ui.wait(lambda _: record.exists(), 'Telegram link did not reach system open boundary')
 assert record.read_text() == 'tg://resolve?domain=lody_fixture'
 assert not any(i.get('AXUniqueId') == 'pending-opened' for i in ui.state()), 'tg fell through to catalog routing'

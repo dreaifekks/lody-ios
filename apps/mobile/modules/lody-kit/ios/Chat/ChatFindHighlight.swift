@@ -31,6 +31,13 @@ import UIKit
         }
       } else if !query.isEmpty, let text = view as? CKTextView {
         ranges = TextSearch.ranges(in: text.attributedTextValue.string, query: query)
+        ranges.removeAll { range in
+          var excluded = false
+          text.attributedTextValue.enumerateAttribute(FileMarkdownView.searchExcluded, in: range) { value, _, _ in
+            if value != nil { excluded = true }
+          }
+          return excluded
+        }
         rectangles = { text.rectangles(for: $0) }
       }
       for range in ranges {

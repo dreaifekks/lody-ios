@@ -165,6 +165,7 @@ extension LodyChatView {
       let result = NSMutableAttributedString(string: author + "\n", attributes: [
         .font: UIFont.dynamic(of: 13, compatibleWith: traitCollection),
         .foregroundColor: UIColor.secondaryLabel,
+        FileMarkdownView.searchExcluded: true,
         .paragraphStyle: paragraph,
       ])
       result.append(body)

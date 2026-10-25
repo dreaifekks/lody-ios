@@ -33,12 +33,17 @@ def tap(identifier):
 def value():
     return ui.element(field).get('AXValue') or ''
 
-def keyboard_clear():
+def keyboard_clear(required=False):
+    def keyboard_top(items):
+        screen_height = items[0]['frame']['height']
+        return next((i['frame']['y'] for i in items if (i.get('AXUniqueId') or '').startswith('UIKeyboardLayoutStar') and i['frame']['y'] < screen_height - 150), None)
     items = ui.state()
     screen_height = items[0]['frame']['height']
-    keyboard = next((i['frame']['y'] for i in items if (i.get('AXUniqueId') or '').startswith('UIKeyboardLayoutStar') and i['frame']['y'] < screen_height - 150), None)
-    # Composite batch typing can dismiss the software keyboard. Both states are
-    # valid; the committed draft/picker assertions prove input and restoration.
+    keyboard = keyboard_top(items)
+    # Composite typing may dismiss the software keyboard. Explicit focus must
+    # still show it; all other checkpoints retain draft and geometry checks.
+    if required:
+        keyboard = ui.wait(keyboard_top, 'Software keyboard missing after explicit focus')
     bottom = keyboard if keyboard is not None else screen_height
     send = ui.element('session-send')['frame']
     assert send['y'] + send['height'] <= bottom + 1, 'Composer overlaps keyboard or screen edge'
@@ -70,7 +75,7 @@ assert not any('native.chat.mention.' in str(i.get('AXLabel') or '') for i in ui
 assert 44 <= category['frame']['height'] <= 52, 'Category entry must remain one compact tappable row'
 assert abs(ui.element('session-send')['frame']['y'] - resting_send['y']) <= 1, 'Opening references moved the composer'
 assert value() == '@', 'At button did not insert trigger'
-keyboard_clear()
+keyboard_clear(required=True)
 ui.capture('categories')
 type_keys('auth')
 ui.element('mention-item:src/auth')
@@ -127,7 +132,7 @@ ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title=catalog.
 ui.wait(lambda _: value() == '$auth-review @src/auth $swiftui-pro @src/auth/session.ts @', 'Cancelling the sheet changed the original draft')
 keyboard_clear()
 ui.capture('cancelled')
-print('PASS: compact touch autocomplete, full-screen category browsing/search, directory reference, file/skill insertion and cancellation restore the draft and keyboard')
+print('PASS: compact touch autocomplete, full-screen category browsing/search, directory reference, file/skill insertion and cancellation restore the draft and valid keyboard geometry')
 
 for kind, path, token in [
     ('session', 'session-review', '@session:session-review'),
@@ -162,7 +167,7 @@ assert value() == '', 'Cancelling slash left inserted command text'
 # Hardware modifier injection can deliver "4" instead of "$". Use the visible
 # software key so this still proves the user's actual trigger.
 tap(field)
-keyboard_clear()
+keyboard_clear(required=True)
 type_keys('$')
 assert value().strip() == '$', 'The software keyboard did not enter the skill trigger'
 ui.element('mention-item:skills/auth-review/SKILL.md')
@@ -172,4 +177,4 @@ ui.axe('tap', '--id', 'delete', '--tap-style', 'physical')
 assert not value().strip(), 'Cancelling skill completion changed the draft'
 
 tap(field)
-keyboard_clear()
+keyboard_clear(required=True)

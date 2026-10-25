@@ -1465,5 +1465,13 @@
   "native.chat.board.status.failed": "Failed",
   "native.chat.board.status.interrupted": "Interrupted",
   "message.details.cost": "Cost estimate",
-  "message.details.costHint": "Estimated from the provider’s reported usage, not an invoice."
+  "message.details.costHint": "Estimated from the provider’s reported usage, not an invoice.",
+  "native.chat.board.status.requested": "Requested",
+  "native.chat.board.status.active": "In progress",
+  "native.chat.board.status.created": "Created",
+  "native.chat.board.status.succeeded": "Completed",
+  "native.chat.board.status.finished": "Completed",
+  "native.chat.board.status.cancelled": "Cancelled",
+  "native.chat.board.status.waiting_user": "Waiting for you",
+  "native.chat.board.status.notice": "Notice"
 }

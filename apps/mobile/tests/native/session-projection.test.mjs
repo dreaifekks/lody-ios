@@ -519,9 +519,9 @@ test('Board results preserve bounded member summaries and notices refresh throug
   assert.deepEqual(projected[0].members[0], {
     title: 'Native review',
     status: 'finished',
-    detail: 'Done',
   });
   assert.equal(projected[1].meta.trigger, 'idle');
+  assert.ok(!JSON.stringify(projected[0]).includes('Done'));
   assert.equal(projected[2].meta.command.patch.description, 'Read-only');
   maintenance.set('meta', {
     trigger: 'manual',
@@ -531,5 +531,28 @@ test('Board results preserve bounded member summaries and notices refresh throug
   doc.commit();
   const next = projectSession(doc, 'board-fixture');
   assert.ok(next.entries[0].items[1].rev > projected[1].rev);
+  releaseProjection(doc);
+});
+
+test('failed board reports remain visible without unused output payloads', () => {
+  const doc = new LoroDoc();
+  const entry = setAll(doc.getList('history').pushContainer(new LoroMap()), {
+    id: 'board-error',
+    role: 'system',
+    finished: true,
+  });
+  setAll(
+    entry.setContainer('items', new LoroList()).pushContainer(new LoroMap()),
+    {
+      type: 'operation_completion',
+      operationKind: 'board_report',
+      completion: { type: 'error', error: { message: 'Delivery failed' } },
+    },
+  );
+  doc.commit();
+  assert.deepEqual(
+    projectSession(doc, 'board-error').entries[0].items[0].members,
+    [{ title: 'board_report: Delivery failed', status: 'failed' }],
+  );
   releaseProjection(doc);
 });

@@ -44,7 +44,6 @@ type RoleProposalFields = {
 export type OperationMemberSummary = {
   title: string;
   status: string;
-  detail?: string;
 };
 
 export type ItemSummary =
@@ -453,28 +452,26 @@ function summarizeItem(
           completion?.type === 'result'
             ? completion.value
             : completion?.partial;
+        if (completion?.type === 'error')
+          return [
+            {
+              title: member.operationKind + ': ' + completion.error.message,
+              status: 'failed',
+            },
+          ];
         if (
-          member.operationKind === 'board_report' ||
-          member.source === 'board_report'
+          completion?.type === 'result' &&
+          (member.operationKind === 'board_report' ||
+            member.source === 'board_report')
         ) {
           return (result?.boardReport?.events ?? []).map((event: any) => ({
             title: event.title ?? event.sessionId,
             status: event.kind,
-            detail: event.output?.text,
           }));
         }
-        if (completion?.type === 'error')
-          return [
-            {
-              title: member.operationKind,
-              status: 'failed',
-              detail: completion.error?.message,
-            },
-          ];
         return (result?.items ?? []).map((item: any) => ({
           title: item.label ?? item.target?.sessionId ?? member.operationKind,
           status: item.status,
-          detail: item.output?.text ?? item.error?.message,
         }));
       })
       .slice(0, 50);

@@ -205,9 +205,10 @@ test('a provider shows the quota it reported itself, and Antigravity its Gemini 
     rows('home').map((row) => row.fraction),
     [0.05],
   );
-  assert.deepEqual(
-    rows('ag').map((row) => row.fraction),
-    [0.3, 0.4],
-  );
-  assert.match(rows('ag')[1].label, /^Argon/);
+  const argon = rows('ag').find((row) => row.id.includes(':argon:'));
+  const gemini = rows('ag').find((row) => row.id.includes(':gemini:'));
+  assert.equal(argon.fraction, 0.4);
+  assert.equal(gemini.fraction, 0.3);
+  assert.equal(rows('ag').length, 2);
+  assert.match(argon.label, /^Argon/);
 });

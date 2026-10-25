@@ -10,3 +10,10 @@ assert plain['AXLabel'] == 'A human message without an author.', plain
 assert author['frame']['height'] > plain['frame']['height'], 'Author must occupy its own line'
 ui.capture('author-and-human')
 print('PASS: author provenance, Role instance/model, separate line and unlabelled human bubble')
+
+for name, expected in [('find-author', 'No results'), ('find-body', '1 / 1')]:
+    ui.axe('tap', '--label', 'Pending fixtures')
+    ui.axe('tap', '--label', name, '--post-delay', '.4')
+    assert expected in str(ui.element('chat-find-count'))
+    ui.capture(name)
+    ui.axe('tap', '--id', 'chat-find-close', '--post-delay', '.3')

@@ -12,10 +12,11 @@ final class FileMarkdownView: MarkdownTextView {
   private static let htmlMarker = "\u{F0000}lody-html:"
   static let searchExcluded = NSAttributedString.Key("lody-search-excluded")
 
-  static func content(_ source: MarkdownContent, streaming: Bool = false) -> MarkdownContent {
+  static func content(_ source: MarkdownContent, streaming: Bool = false, linkify: Bool = false) -> MarkdownContent {
     let ruby = MarkdownRuby.blocks(source.blocks)
     let rendered = streaming ? ruby : MarkdownMermaid.blocks(ruby)
-    let blocks = linkified(rendered).rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
+    let linked = linkify ? linkified(rendered) : rendered
+    let blocks = linked.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
       if case let .image(source, _) = node { return [.text(imageMarker + source)] }
       if case let .html(source) = node { return [.text(htmlMarker + source)] }
       guard case let .link(destination, children) = node,

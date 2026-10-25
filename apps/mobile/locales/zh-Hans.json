@@ -1465,5 +1465,13 @@
   "native.chat.board.status.failed": "失败",
   "native.chat.board.status.interrupted": "已中断",
   "message.details.cost": "预估费用",
-  "message.details.costHint": "根据提供方报告的用量估算，非账单金额。"
+  "message.details.costHint": "根据提供方报告的用量估算，非账单金额。",
+  "native.chat.board.status.requested": "已请求",
+  "native.chat.board.status.active": "进行中",
+  "native.chat.board.status.created": "已创建",
+  "native.chat.board.status.succeeded": "已完成",
+  "native.chat.board.status.finished": "已完成",
+  "native.chat.board.status.cancelled": "已取消",
+  "native.chat.board.status.waiting_user": "等待用户处理",
+  "native.chat.board.status.notice": "通知"
 }

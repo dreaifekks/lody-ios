@@ -129,7 +129,6 @@ struct ChatItem: Decodable {
   struct OperationMember: Decodable {
     let title: String
     let status: String
-    let detail: String?
   }
   var memberCount: Int? = nil
   var members: [OperationMember]? = nil
@@ -511,7 +510,7 @@ struct ChatTranscript {
     entries.enumerated().flatMap { entryIndex, source -> [ChatRow] in
       var entry = source
       if entry.role == "system", !entry.items.isEmpty,
-         entry.items.allSatisfy({ $0.name == "board_context_maintenance" && $0.meta?.trigger == "idle" && $0.meta?.status == "interrupted" }) { return [] }
+         entry.items.allSatisfy({ $0.type == "system_notice" && $0.name == "board_context_maintenance" && $0.meta?.trigger == "idle" && $0.meta?.status == "interrupted" }) { return [] }
       // Older cached projections omitted notice names. Neither these placeholders nor
       // agent warnings belong in the conversation's execution process.
       entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning")) }
@@ -671,7 +670,7 @@ struct ChatTranscript {
           row.kind = "orchestration"
           let key = item.deliveryStatus == "unknown" ? "native.chat.board.resultsUnknown" : "native.chat.board.results"
           row.text = LodyStrings.text(key, ["count": String(item.memberCount ?? 0)])
-          let members = (item.members ?? []).prefix(3).map { $0.title + " · " + $0.status }
+          let members = (item.members ?? []).map { $0.title + " · " + LodyStrings.text("native.chat.board.status." + $0.status) }
           if !members.isEmpty { row.text += "\n" + members.joined(separator: "\n") }
           row.symbol = "checklist"
         case "system_notice" where item.name == "board_context_maintenance":

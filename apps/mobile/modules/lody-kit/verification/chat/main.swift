@@ -1165,3 +1165,8 @@ let boardRows = ChatTranscript(entries: boardEntries).rows()
 assert(!boardRows.contains { $0.entryID == "silent" })
 assert(boardRows.contains { $0.entryID == "manual" && $0.kind == "noticeDivider" })
 assert(boardRows.contains { $0.text.contains("52") && $0.text.contains("Review") && !$0.actionable })
+
+var manyResults = boardEntries[2]
+manyResults.items[0].members = (0..<50).map { ChatItem.OperationMember(title: "Member \($0)", status: "succeeded") }
+let manyRows = ChatTranscript(entries: [manyResults]).rows()
+assert(manyRows.first?.text.contains("Member 49") == true, "Every projected member remains in the accessible summary")
