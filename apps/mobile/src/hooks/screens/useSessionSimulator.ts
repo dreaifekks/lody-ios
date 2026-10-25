@@ -6,6 +6,7 @@ import {
   attachLanSimulator,
   resumeSimulator,
   simulatorPhaseKey,
+  simulatorStamp,
   simulatorSource,
   startSimulator,
   stopSimulator,
@@ -67,7 +68,10 @@ export function useSessionSimulator(
     await exclusive(async () => {
       if (running && operation) return show(operation.name);
       setResolving(true);
+      // A LAN session's page that left or stopped meanwhile ends this opening.
+      const stamp = simulatorStamp(sessionId);
       const resumed = await resumeSimulator(workspaceId, sessionId);
+      if (simulatorStamp(sessionId) !== stamp) return;
       if (resumed) return show(resumed);
       const { SimulatorPickerScreen } =
         await import('@/screens/SimulatorPickerScreen');
@@ -77,6 +81,7 @@ export function useSessionSimulator(
         sessionId,
       });
       if (result.status !== 'completed') return;
+      if (simulatorStamp(sessionId) !== stamp) return;
       void startSimulator(workspaceId, sessionId, result.value);
       await show(result.value.name);
     });

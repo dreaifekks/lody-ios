@@ -47,6 +47,8 @@ enum LanSimulator {
       try await Self.ask(invite: invite, target: target, sessionId: sessionId, command: command)
     }
     let key = LanTerminalProtocol.key(token: invite.token)
+    // A release while the member answers (page left, stop, logout) wins over the answer.
+    let ticket = await ports.ticket(sessionId)
     let answer: [String: Any]
     do { answer = try await ask(command) } catch { return failure(error.localizedDescription) }
     guard answer["ok"] as? Bool == true else {
@@ -68,7 +70,7 @@ enum LanSimulator {
       LanTerminalProtocol.connection(to: target.endpoint, lanId: invite.id, key: key)
     }
     do {
-      try await ports.open(sessionId: sessionId, machineId: target.machineId, port: port, connect: connect)
+      try await ports.open(sessionId: sessionId, ticket: ticket, machineId: target.machineId, port: port, connect: connect)
     } catch {
       // The operation keeps its viewer port; only a new one gets another.
       if let operationId = preview?["operationId"] as? String {
@@ -85,23 +87,46 @@ enum LanSimulator {
 actor LanSimulatorPorts {
   static let shared = LanSimulatorPorts()
   private var forwards: [String: LanPortForward] = [:]
+  private var releases: [String: Int] = [:]
+  private var logouts = 0
 
-  /// Listens on `127.0.0.1:port` unless the session already does; throws when the port is taken.
-  func open(sessionId: String, machineId: String, port: UInt16,
+  /// What a release of the session has been up to now; a later release outdates it.
+  struct Ticket: Equatable, Sendable {
+    let releases: Int
+    let logouts: Int
+  }
+
+  func ticket(_ sessionId: String) -> Ticket {
+    Ticket(releases: releases[sessionId, default: 0], logouts: logouts)
+  }
+
+  /// Listens on `127.0.0.1:port` unless the session already does, while
+  /// `ticket` is current; a release during the wait closes it again. Throws
+  /// when the port is taken.
+  func open(sessionId: String, ticket: Ticket, machineId: String, port: UInt16,
             connect: @escaping @Sendable () -> NWConnection) async throws {
-    if let current = forwards[sessionId], current.machineId == machineId, current.port == port { return }
-    release(sessionId)
+    guard ticket == self.ticket(sessionId) else { return }
+    if let current = forwards[sessionId], current.machineId == machineId, current.port == port, current.alive { return }
+    forwards.removeValue(forKey: sessionId)?.close()
     let forward = LanPortForward(machineId: machineId, port: port, connect: connect)
-    try await forward.start()
+    // Registered while it binds, so a release meanwhile finds and closes it.
     forwards[sessionId] = forward
+    do {
+      try await forward.start()
+    } catch {
+      if forwards[sessionId] === forward { forwards[sessionId] = nil }
+      if ticket == self.ticket(sessionId) { throw error }
+    }
   }
 
   /// Stops listening and ends the connections the session's port carries.
   func release(_ sessionId: String) {
+    releases[sessionId, default: 0] += 1
     forwards.removeValue(forKey: sessionId)?.close()
   }
 
   func closeAll() {
+    logouts += 1
     forwards.values.forEach { $0.close() }
     forwards.removeAll()
   }
@@ -138,6 +163,9 @@ final class LanPortForward: @unchecked Sendable {
     }
   }
 
+  /// Whether it listens or is about to; one whose listening again failed is not.
+  var alive: Bool { queue.sync { listener != nil } }
+
   func close() {
     queue.async { [self] in
       closed = true
@@ -145,6 +173,7 @@ final class LanPortForward: @unchecked Sendable {
       listener = nil
       tunnels.values.forEach { $0.close() }
       tunnels.removeAll()
+      settle(.failure(CancellationError()))
     }
   }
 

@@ -192,7 +192,13 @@ final class Member: @unchecked Sendable {
     default:
       result["success"] = false
     }
-    write(connection, ["ok": true, "type": "lan/ios-simulator", "result": result], end: true)
+    let answer: [String: Any] = ["ok": true, "type": "lan/ios-simulator", "result": result]
+    // A slow member answers after this device may have released the session.
+    if sessionId.hasPrefix("slow") {
+      queue.asyncAfter(deadline: .now() + 1) { self.write(connection, answer, end: true) }
+    } else {
+      write(connection, answer, end: true)
+    }
   }
 
   func tunnel(_ connection: NWConnection, _ request: [String: Any], rest: Data) {
@@ -312,6 +318,20 @@ let old = await control("s1", ["action": "list"])
 check(old["success"] as? Bool == false && (old["message"] as? String ?? "").contains("serves no control"), "\(old)")
 member.terminalOnly.value = false
 
+// A release while the member answers wins: the late viewer is not carried.
+for (session, release) in [("slow-page", false), ("slow-logout", true)] {
+  let late = freePort()
+  member.carried.value[Int(late)] = viewerPort
+  member.viewers.value[session] = "http://127.0.0.1:\(late)/simulator/abc/?__lody_preview_token=t"
+  async let answer = control(session, ["action": "status"])
+  try await Task.sleep(for: .milliseconds(300))
+  if release { await ports.closeAll() } else { await ports.release(session) }
+  let reply = await answer
+  check((reply["preview"] as? [String: Any])?["viewerUrl"] != nil, "\(reply)")
+  check(await ports.port(of: session) == nil)
+  check(await get(late) == nil)
+}
+
 // Logging out ends every carried port.
 member.viewers.value["s4"] = "http://127.0.0.1:\(carried)/simulator/abc/?__lody_preview_token=t"
 _ = await control("s4", ["action": "status"])
@@ -327,4 +347,4 @@ try await Task.sleep(for: .milliseconds(300))
 let unreachable = await control("s1", ["action": "list"])
 check(unreachable["success"] as? Bool == false, "\(unreachable)")
 
-print("PASS: LAN simulator control request and long answer, same-port viewer tunnels, unknown and taken ports, release on stop/closed/logout, refusals")
+print("PASS: LAN simulator control request and long answer, same-port viewer tunnels, unknown and taken ports, release on stop/closed/logout and during a late answer, refusals")

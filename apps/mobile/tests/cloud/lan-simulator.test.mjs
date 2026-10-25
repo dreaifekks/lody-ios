@@ -99,30 +99,7 @@ test('on a LAN the member that runs the session serves its simulators', async ()
   );
 });
 
-test('a LAN session asks its member natively; leaving releases the port and forgets the operation', async () => {
-  const calls = [];
-  globalThis.__simulatorKit = {
-    iosSimulatorControl: async (workspaceId, sessionId, command) => {
-      calls.push(['cloud', sessionId, command.action]);
-      return { success: true };
-    },
-    lanSimulatorControl: async (target, sessionId, command) => {
-      calls.push(['lan', target.machineId, sessionId, command.action]);
-      return {
-        success: true,
-        preview: {
-          operationId: 'op-1',
-          udid: 'u1',
-          phase: 'ready',
-          transport: 'local',
-          viewerUrl:
-            'http://127.0.0.1:53610/simulator/x/?__lody_preview_token=t',
-        },
-      };
-    },
-    lanSimulatorRelease: async (sessionId) =>
-      calls.push(['release', sessionId]),
-  };
+async function load() {
   const bundle = await build({
     entryPoints: [
       new URL('../../src/features/simulator/operations.ts', import.meta.url)
@@ -150,9 +127,36 @@ test('a LAN session asks its member natively; leaving releases the port and forg
       },
     ],
   });
-  const operations = await import(
-    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+  return import(
+    `data:text/javascript;base64,${Buffer.from(`${bundle.outputFiles[0].text}\n// ${Math.random()}`).toString('base64')}`
   );
+}
+
+test('a LAN session asks its member natively; leaving releases the port and forgets the operation', async () => {
+  const calls = [];
+  globalThis.__simulatorKit = {
+    iosSimulatorControl: async (workspaceId, sessionId, command) => {
+      calls.push(['cloud', sessionId, command.action]);
+      return { success: true };
+    },
+    lanSimulatorControl: async (target, sessionId, command) => {
+      calls.push(['lan', target.machineId, sessionId, command.action]);
+      return {
+        success: true,
+        preview: {
+          operationId: 'op-1',
+          udid: 'u1',
+          phase: 'ready',
+          transport: 'local',
+          viewerUrl:
+            'http://127.0.0.1:53610/simulator/x/?__lody_preview_token=t',
+        },
+      };
+    },
+    lanSimulatorRelease: async (sessionId) =>
+      calls.push(['release', sessionId]),
+  };
+  const operations = await load();
   const target = {
     workspaceId: 'lw_x',
     machineId: 'm1',
@@ -191,4 +195,48 @@ test('a LAN session asks its member natively; leaving releases the port and forg
   assert.deepEqual(calls, [['release', 's1']]);
   await operations.simulatorControl('lw_x', 's1', { action: 'list' });
   assert.deepEqual(calls.at(-1), ['cloud', 's1', 'list']);
+});
+
+test('an opening begun before the page left adopts nothing the member says afterwards', async () => {
+  const calls = [];
+  let answerStatus;
+  globalThis.__simulatorKit = {
+    iosSimulatorControl: async (workspaceId, sessionId, command) => {
+      calls.push(['cloud', command.action]);
+      return { success: true, devices: [] };
+    },
+    lanSimulatorControl: (target, sessionId, command) => {
+      calls.push(['lan', command.action]);
+      return new Promise((resolve) => {
+        answerStatus = () =>
+          resolve({
+            success: true,
+            preview: {
+              operationId: 'op',
+              udid: 'u',
+              phase: 'ready',
+              transport: 'local',
+              viewerUrl: 'http://127.0.0.1:1/',
+            },
+          });
+      });
+    },
+    lanSimulatorRelease: async () => calls.push(['release']),
+  };
+  const operations = await load();
+  const release = operations.attachLanSimulator('s1', {
+    workspaceId: 'lw_x',
+    machineId: 'm1',
+    host: 'h',
+    port: 1,
+  });
+  const stamp = operations.simulatorStamp('s1');
+  const resumed = operations.resumeSimulator('lw_x', 's1');
+  release();
+  answerStatus();
+  assert.equal(await resumed, undefined);
+  assert.notEqual(operations.simulatorStamp('s1'), stamp);
+  assert.deepEqual(calls, [['lan', 'status'], ['release']]);
+  // Off a LAN the stamp never changes.
+  assert.equal(operations.simulatorStamp('cloud'), '');
 });

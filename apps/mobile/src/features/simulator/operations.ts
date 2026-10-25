@@ -52,6 +52,9 @@ export function setSimulatorControl(next?: Control) {
   control = next ?? route;
 }
 
+/** How many times a LAN session's port was released or its preview stopped here. */
+const lanEnds = new Map<string, number>();
+
 /**
  * Sends the session's simulator commands to the LAN member that runs it,
  * whose viewer this device carries on a loopback port. The returned release
@@ -66,9 +69,19 @@ export function attachLanSimulator(
   return () => {
     if (lanTargets.get(sessionId) !== target) return;
     lanTargets.delete(sessionId);
+    lanEnds.set(sessionId, (lanEnds.get(sessionId) ?? 0) + 1);
     update(sessionId, undefined);
     void lanSimulatorRelease(sessionId);
   };
+}
+
+/**
+ * Changes once a LAN session's port is released or its preview stopped, so
+ * an opening begun before stops instead of adopting what the member says
+ * afterwards. Constant off a LAN.
+ */
+export function simulatorStamp(sessionId: string) {
+  return lanTargets.has(sessionId) ? String(lanEnds.get(sessionId) ?? 0) : '';
 }
 
 const POLL_LIMIT = 180;
@@ -164,15 +177,18 @@ export function startSimulator(
 
 /** Adopts the session's current operation, such as one the agent started. */
 export async function resumeSimulator(workspaceId: string, sessionId: string) {
+  const stamp = simulatorStamp(sessionId);
   const reply = await simulatorControl(workspaceId, sessionId, {
     action: 'status',
   }).catch(() => undefined);
   const preview = reply?.success ? reply.preview : undefined;
   if (!preview || ['failed', 'closed'].includes(preview.phase))
     return undefined;
+  if (simulatorStamp(sessionId) !== stamp) return undefined;
   const devices = await simulatorControl(workspaceId, sessionId, {
     action: 'list',
   }).catch(() => undefined);
+  if (simulatorStamp(sessionId) !== stamp) return undefined;
   const name =
     devices?.devices?.find((item) => item.udid === preview.udid)?.name ??
     preview.udid;
@@ -191,6 +207,8 @@ export async function resumeSimulator(workspaceId: string, sessionId: string) {
 
 export async function stopSimulator(sessionId: string) {
   const operation = operations.get(sessionId);
+  if (lanTargets.has(sessionId))
+    lanEnds.set(sessionId, (lanEnds.get(sessionId) ?? 0) + 1);
   update(sessionId, undefined);
   if (operation?.operationId)
     await simulatorControl(operation.workspaceId, sessionId, {

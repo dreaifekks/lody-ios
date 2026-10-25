@@ -1,7 +1,8 @@
-"""On a LAN the viewer of a member's simulator rides a loopback port that lives with the
-session page. The chip resumes the member's running preview and the PiP follows it back to
-the chat; leaving the page ends the port and forgets the operation here, so a later visit
-shows no stale PiP until the simulator is opened again and adopts the member's operation."""
+"""LAN simulator page lifecycle. The chip resumes the member's running preview and the PiP
+follows it back to the chat; leaving the page forgets the operation here, so a later visit
+shows no stale PiP until the simulator is opened again and adopts the member's operation.
+The scene injects the control fixture: the native loopback port and its release are checked
+by `verify:native --case lan-simulator`, not here."""
 import re
 import sys
 from driver import UI
@@ -42,4 +43,4 @@ ui.capture('released')
 
 open_chip()
 ui.capture('resumed')
-print('PASS: LAN chip adopts the member preview, PiP follows it, leaving the page releases it, reopening adopts it again')
+print('PASS: LAN chip adopts the member preview, PiP follows it, leaving the page forgets the operation, reopening adopts it again')
