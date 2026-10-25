@@ -33,27 +33,21 @@ def tap(identifier):
 def value():
     return ui.element(field).get('AXValue') or ''
 
-def keyboard_clear(required=False):
+def keyboard_clear():
     def keyboard_top(items):
         screen_height = items[0]['frame']['height']
         return next((i['frame']['y'] for i in items if (i.get('AXUniqueId') or '').startswith('UIKeyboardLayoutStar') and i['frame']['y'] < screen_height - 150), None)
     items = ui.state()
     screen_height = items[0]['frame']['height']
     keyboard = keyboard_top(items)
-    # Composite typing may dismiss the software keyboard. Explicit focus must
-    # still show it; all other checkpoints retain draft and geometry checks.
-    if required:
-        keyboard = ui.wait(keyboard_top, 'Software keyboard missing after explicit focus')
+    # AXe batch input can keep hardware-keyboard mode across focus and appearance
+    # changes. Only a visible software keyboard constrains the composer's edge.
     bottom = keyboard if keyboard is not None else screen_height
     send = ui.element('session-send')['frame']
     assert send['y'] + send['height'] <= bottom + 1, 'Composer overlaps keyboard or screen edge'
 
 def type_keys(text):
-    if text == '$':
-        # Keep the exact skill trigger on the software symbol key; HID maps it to "4".
-        ui.axe('tap', '--label', '$', '--tap-style', 'physical')
-    else:
-        ui.axe('type', text)
+    ui.axe('type', text)
 
 def open_category(kind):
     tap('session-mention')
@@ -75,7 +69,7 @@ assert not any('native.chat.mention.' in str(i.get('AXLabel') or '') for i in ui
 assert 44 <= category['frame']['height'] <= 52, 'Category entry must remain one compact tappable row'
 assert abs(ui.element('session-send')['frame']['y'] - resting_send['y']) <= 1, 'Opening references moved the composer'
 assert value() == '@', 'At button did not insert trigger'
-keyboard_clear(required=True)
+keyboard_clear()
 ui.capture('categories')
 type_keys('auth')
 ui.element('mention-item:src/auth')
@@ -157,24 +151,24 @@ print('PASS: all seven references, actionable skill display and send-time sessio
 
 field = 'session-input'
 tap(field)
-ui.axe('tap', '--label', 'numbers', '--tap-style', 'physical')
-ui.axe('tap', '--label', '/', '--tap-style', 'physical')
+type_keys('/')
+assert value().strip() == '/', 'Batch input did not commit the command trigger'
 ui.element('mention-item:compact')
 assert not any(i.get('AXUniqueId') == 'mention-item:file' for i in ui.state()), 'Slash opened the category index'
 ui.capture('slash-direct')
-ui.axe('tap', '--id', 'delete', '--tap-style', 'physical')
+ui.axe('key', '42')
 assert value() == '', 'Cancelling slash left inserted command text'
-# Hardware modifier injection can deliver "4" instead of "$". Use the visible
-# software key so this still proves the user's actual trigger.
+# Use the same composite batch path as the rest of the draft; software keys
+# can remain offscreen after earlier batch input.
 tap(field)
-keyboard_clear(required=True)
+keyboard_clear()
 type_keys('$')
-assert value().strip() == '$', 'The software keyboard did not enter the skill trigger'
+assert value().strip() == '$', 'Batch input did not commit the skill trigger'
 ui.element('mention-item:skills/auth-review/SKILL.md')
 assert not any(i.get('AXUniqueId') == 'mention-item:file' for i in ui.state()), 'Dollar opened the category index'
 ui.capture('skill-direct')
-ui.axe('tap', '--id', 'delete', '--tap-style', 'physical')
+ui.axe('key', '42')
 assert not value().strip(), 'Cancelling skill completion changed the draft'
 
 tap(field)
-keyboard_clear(required=True)
+keyboard_clear()

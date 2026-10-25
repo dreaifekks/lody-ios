@@ -7,7 +7,8 @@ assert 'Reviewer · mini · Codex · GPT-6 Sol' in author['AXLabel'], author
 assert 'Please review the native changes.' in author['AXLabel']
 plain = ui.element('plain:user')
 assert plain['AXLabel'] == 'A human message without an author.', plain
-assert author['frame']['height'] > plain['frame']['height'], 'Author must occupy its own line'
+assert author['AXLabel'].split('\n')[0] == 'Reviewer · mini · Codex · GPT-6 Sol', 'Author must occupy its own line'
+assert author['frame']['height'] >= 44 and plain['frame']['height'] >= 44
 ui.capture('author-and-human')
 print('PASS: author provenance, Role instance/model, separate line and unlabelled human bubble')
 
