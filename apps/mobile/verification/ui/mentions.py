@@ -61,6 +61,13 @@ def open_category(kind):
 
 ui.capture('resting')
 tap(field)
+if field == 'create-session-input':
+    # Establish AXe's batch/hardware keyboard session before the form sheet
+    # opens a completion panel; do not switch input modes during that query.
+    type_keys('7')
+    assert value() == '7', 'Batch keyboard setup did not commit input'
+    ui.axe('key', '42')
+    assert value() == '', 'Batch keyboard setup left a draft'
 resting_send = ui.element('session-send')['frame']
 tap('session-mention')
 category = ui.element('mention-item:file')
@@ -126,6 +133,13 @@ ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title=catalog.
 ui.wait(lambda _: value() == '$auth-review @src/auth $swiftui-pro @src/auth/session.ts @', 'Cancelling the sheet changed the original draft')
 keyboard_clear()
 ui.capture('cancelled')
+# Prove restored focus with actual input, independent of software-keyboard mode.
+cancelled_draft = value()
+type_keys('7')
+assert value() == cancelled_draft + '7', 'Cancelling the picker did not restore editor focus'
+ui.axe('key', '42')
+assert value() == cancelled_draft, 'Focus probe changed the retained draft'
+ui.capture('cancelled-focus-restored')
 print('PASS: compact touch autocomplete, full-screen category browsing/search, directory reference, file/skill insertion and cancellation restore the draft and valid keyboard geometry')
 
 for kind, path, token in [
