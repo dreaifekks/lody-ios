@@ -533,6 +533,8 @@ function View() {
     'agent-error-preview': () => void present(AgentErrorPreviewScreen, {}),
     'edit-message-preview': () => void present(EditMessagePreviewScreen),
     'simulator-preview': () => void present(SimulatorPreviewScreen),
+    'simulator-preview-lan': () =>
+      void present(SimulatorPreviewScreen, { lan: true }),
     'chat-preview': () => void present(ChatPreviewScreen, {}),
     'chat-shine-preview': () => void present(ShinePreviewScreen, {}),
     'banner-preview': () => void present(BannerPreviewScreen, {}),

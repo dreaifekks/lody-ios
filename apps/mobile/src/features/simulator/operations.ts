@@ -1,8 +1,11 @@
 import { useSyncExternalStore } from 'react';
 import {
   iosSimulatorControl,
+  lanSimulatorControl,
+  lanSimulatorRelease,
   type IosSimulatorDevice,
   type IosSimulatorPreview,
+  type LanSimulatorTarget,
   type SimulatorSource,
 } from '@lody-ios/kit';
 import type { TranslationKey } from '../../lib/i18n/index.ts';
@@ -31,13 +34,41 @@ export const simulatorPhaseKey: Record<
 };
 
 type Control = typeof iosSimulatorControl;
-let control: Control = iosSimulatorControl;
+
+/** Sessions another LAN member runs, which this device asks directly. */
+const lanTargets = new Map<string, LanSimulatorTarget>();
+const route: Control = (workspaceId, sessionId, command) => {
+  const lan = lanTargets.get(sessionId);
+  return lan
+    ? lanSimulatorControl(lan, sessionId, command)
+    : iosSimulatorControl(workspaceId, sessionId, command);
+};
+let control: Control = route;
 
 export const simulatorControl: Control = (...args) => control(...args);
 
 /** Debug scenes inject deterministic outcomes at this boundary. */
 export function setSimulatorControl(next?: Control) {
-  control = next ?? iosSimulatorControl;
+  control = next ?? route;
+}
+
+/**
+ * Sends the session's simulator commands to the LAN member that runs it,
+ * whose viewer this device carries on a loopback port. The returned release
+ * ends that port and forgets the operation here; the member keeps it, and
+ * opening the simulator again adopts it with a fresh port.
+ */
+export function attachLanSimulator(
+  sessionId: string,
+  target: LanSimulatorTarget,
+) {
+  lanTargets.set(sessionId, target);
+  return () => {
+    if (lanTargets.get(sessionId) !== target) return;
+    lanTargets.delete(sessionId);
+    update(sessionId, undefined);
+    void lanSimulatorRelease(sessionId);
+  };
 }
 
 const POLL_LIMIT = 180;

@@ -1,6 +1,9 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
+import type { LanSimulatorTarget } from '@lody-ios/kit';
+import type { SimulatorAvailability } from '@/features/simulator/availability';
 import {
+  attachLanSimulator,
   resumeSimulator,
   simulatorPhaseKey,
   simulatorSource,
@@ -8,18 +11,21 @@ import {
   stopSimulator,
   useSimulatorOperation,
 } from '@/features/simulator/operations';
-import type { Catalog } from '@lody/cloud-runtime/models/catalog';
 import { present } from '@/lib/presentation';
 import { t } from '../../lib/i18n/index.ts';
-
-type Availability = NonNullable<Catalog['machineSimulators']>[string];
 
 export function useSessionSimulator(
   workspaceId: string | undefined,
   sessionId: string,
-  availability: Availability | undefined,
+  availability: SimulatorAvailability | undefined,
   requestId?: string,
+  lan?: LanSimulatorTarget,
 ) {
+  // The viewer port of a LAN member's simulator lives as long as this page.
+  const lanKey = lan && JSON.stringify(lan);
+  useEffect(() => {
+    if (lanKey) return attachLanSimulator(sessionId, JSON.parse(lanKey));
+  }, [lanKey, sessionId]);
   const operation = useSimulatorOperation(sessionId);
   const [hidden, setHidden] = useState<string>();
   const source = simulatorSource(operation);

@@ -1083,6 +1083,7 @@
   "simulator.action.volumeDown": "Volume Down",
   "simulator.action.actionButton": "Action Button",
   "native.simulator.unavailable": "This simulator couldn't be loaded",
+  "native.simulator.lan.portBusy": "Port {port} is in use on this device. Start the preview again.",
   "native.simulator.button.action": "Action Button",
   "native.simulator.button.volume-up": "Volume Up",
   "native.simulator.button.volume-down": "Volume Down",

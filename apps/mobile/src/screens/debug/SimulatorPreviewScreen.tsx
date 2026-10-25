@@ -17,8 +17,16 @@ import { present } from '@/lib/presentation';
 import { t } from '@/lib/i18n';
 import { definePage } from '@/lib/presentation';
 import { useSessionSimulator } from '@/hooks/screens/useSessionSimulator';
+import { usePageRuntime } from '@/hooks/screens/usePageRuntime';
 
-const SESSION = 'ui-verify-simulator-session';
+/** A LAN scene carries the viewer of a member: leaving it ends the port and forgets the operation. */
+type Params = { lan?: boolean };
+const LAN_TARGET = {
+  workspaceId: 'ui-verify',
+  machineId: 'ui-verify-member',
+  host: '127.0.0.1',
+  port: 1,
+};
 const device = (udid: string, name: string): IosSimulatorDevice => ({
   udid,
   name,
@@ -69,21 +77,33 @@ const fixture: typeof simulatorControl = async (
 };
 
 function View() {
+  const { params } = usePageRuntime<Params>();
+  const lan = params.lan === true;
+  const session = lan
+    ? 'ui-verify-simulator-lan-session'
+    : 'ui-verify-simulator-session';
   const [ready, setReady] = useState(false);
   useEffect(() => {
     setSimulatorControl(fixture);
+    if (lan) {
+      // The member keeps its operation across visits; only this device forgets it.
+      daemon ??= preview('agent-1', 'ui-verify-simulator-two');
+      setReady(true);
+      return () => setSimulatorControl();
+    }
     firstResumeDelay = 8000;
-    void stopSimulator(SESSION).then(() => {
+    void stopSimulator(session).then(() => {
       daemon = preview('agent-1', 'ui-verify-simulator-two');
       setReady(true);
     });
     return () => setSimulatorControl();
-  }, []);
+  }, [lan, session]);
   const simulator = useSessionSimulator(
     'ui-verify',
-    SESSION,
+    session,
     'available',
     'agent-1',
+    lan ? LAN_TARGET : undefined,
   );
   const [changesSource] = useState(() => {
     let reads = 0;

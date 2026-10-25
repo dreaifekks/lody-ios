@@ -42,6 +42,7 @@ checks = {
     'watchdog': [],
     'lan-terminal': ['LanTerminal/LanTerminalLink.swift'],
     'lan-files': ['LanTerminal/LanTerminalLink.swift', 'LanTerminal/LanFileChannel.swift'],
+    'lan-simulator': ['LodyStrings.swift', 'Auth/LanInvite.swift', 'LanTerminal/LanTerminalLink.swift', 'LanTerminal/LanFileChannel.swift', 'LanTerminal/LanSimulator.swift'],
     'local-store': ['Cloud/LocalStore.swift', 'Cloud/SessionProse.swift', 'Text/MarkdownPlainText.swift', 'Text/MarkdownRuby.swift', 'Text/TextSearch.swift', 'LodyStrings.swift'],
     'content-store': ['Cloud/ContentStore.swift'],
     'chat-render': ['LodyStrings.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift'],
