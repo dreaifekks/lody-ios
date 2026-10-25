@@ -1147,3 +1147,27 @@ executingPlan.items.append(try JSONDecoder().decode(ChatItem.self, from: Data(an
 let executionTranscript = ChatTranscript(entries: [executingPlan])
 assert(executionTranscript.rows().filter { $0.kind == "proposed_plan" }.map(\.itemID) == ["old", "doc"])
 assert(!executionTranscript.rows(processEntryID: "proposed", processStartID: "__execution__").contains { $0.kind == "proposed_plan" })
+
+let authorJSON = """
+[{"id":"forwarded","role":"user","status":"completed","finished":true,"author":{"kind":"agent","name":"Codex","role":{"name":"Reviewer","instanceLabel":"mini"},"model":"GPT-6 Sol"},"items":[{"itemId":"text","type":"text","text":"Review this"}]}]
+"""
+let authored = try JSONDecoder().decode([ChatEntry].self, from: Data(authorJSON.utf8))
+assert(ChatTranscript(entries: authored).rows().first?.author == "Reviewer · mini · Codex · GPT-6 Sol")
+assert(ChatEntry.Author(kind: "human", name: nil, role: nil, model: nil).title == nil)
+
+let boardJSON = """
+[{"id":"silent","role":"system","status":"completed","finished":true,"items":[{"itemId":"n","type":"system_notice","name":"board_context_maintenance","meta":{"trigger":"idle","status":"interrupted","kind":"compact"}}]},
+{"id":"manual","role":"system","status":"completed","finished":true,"items":[{"itemId":"n","type":"system_notice","name":"board_context_maintenance","meta":{"trigger":"manual","status":"interrupted","kind":"compact"}}]},
+{"id":"batch","role":"system","status":"completed","finished":true,"items":[{"itemId":"b","type":"operation_completion_batch","memberCount":52,"members":[{"title":"Review","status":"succeeded"}]}]}]
+"""
+let boardEntries = try JSONDecoder().decode([ChatEntry].self, from: Data(boardJSON.utf8))
+let boardRows = ChatTranscript(entries: boardEntries).rows()
+assert(!boardRows.contains { $0.entryID == "silent" })
+assert(boardRows.contains { $0.entryID == "manual" && $0.kind == "noticeDivider" })
+assert(boardEntries[2].items[0].memberCount == 52)
+assert(boardRows.contains { $0.kind == "orchestration" && $0.text.contains("Review") && !$0.actionable })
+
+var manyResults = boardEntries[2]
+manyResults.items[0].members = (0..<50).map { ChatItem.OperationMember(title: "Member \($0)", status: "succeeded") }
+let manyRows = ChatTranscript(entries: [manyResults]).rows()
+assert(manyRows.first?.text.contains("Member 49") == true, "Every projected member remains in the accessible summary")

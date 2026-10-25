@@ -23,9 +23,38 @@ export type SystemNoticeMeta = {
   reason?: string;
   code?: string;
   message?: string;
+  trigger?: string;
+  status?: string;
+  kind?: string;
+  command?: {
+    action: string;
+    name?: string;
+    description?: string;
+    promptPrefix?: string;
+    patch?: RoleProposalFields;
+  };
+  before?: RoleProposalFields;
+  outcome?: string;
+};
+type RoleProposalFields = {
+  name?: string;
+  description?: string;
+  promptPrefix?: string;
+};
+export type OperationMemberSummary = {
+  title: string;
+  status: string;
 };
 
 export type ItemSummary =
+  | {
+      itemId: string;
+      rev: number;
+      type: 'operation_completion' | 'operation_completion_batch';
+      memberCount: number;
+      deliveryStatus?: string;
+      members: OperationMemberSummary[];
+    }
   | {
       itemId: string;
       rev: number;
@@ -408,6 +437,56 @@ function summarizeItem(
     : localId;
   const key = `${entryId}/${itemId}`;
 
+  if (
+    type === 'operation_completion' ||
+    type === 'operation_completion_batch'
+  ) {
+    const members = (
+      type === 'operation_completion_batch'
+        ? (raw.members ?? []).slice(0, 50)
+        : [raw]
+    )
+      .flatMap((member: any): OperationMemberSummary[] => {
+        const completion = member.completion;
+        const result =
+          completion?.type === 'result'
+            ? completion.value
+            : completion?.partial;
+        if (completion?.type === 'error')
+          return [
+            {
+              title: completion.error.message,
+              status: 'failed',
+            },
+          ];
+        if (
+          completion?.type === 'result' &&
+          (member.operationKind === 'board_report' ||
+            member.source === 'board_report')
+        ) {
+          return (result?.boardReport?.events ?? []).map((event: any) => ({
+            title: event.title ?? event.sessionId,
+            status: event.kind,
+          }));
+        }
+        return (result?.items ?? []).map((item: any) => ({
+          title: item.label ?? item.target?.sessionId ?? member.operationKind,
+          status: item.status,
+        }));
+      })
+      .slice(0, 50);
+    const summary = {
+      itemId,
+      rev: 0,
+      type,
+      memberCount: raw.memberCount ?? members.length,
+      deliveryStatus: raw.deliveryStatus,
+      members,
+    };
+    summary.rev = bump(projection, key, JSON.stringify(summary));
+    return summary as ItemSummary;
+  }
+
   if (type === 'system_notice') {
     const name = typeof raw.name === 'string' ? raw.name : '';
     const meta = {
@@ -417,6 +496,29 @@ function summarizeItem(
       message:
         typeof raw.meta?.message === 'string' ? raw.meta.message : undefined,
     };
+    const noticeMeta: SystemNoticeMeta = meta;
+    if (name === 'board_context_maintenance') {
+      Object.assign(noticeMeta, {
+        trigger: raw.meta?.trigger,
+        status: raw.meta?.status,
+        kind: raw.meta?.kind,
+      });
+    }
+    if (name === 'agent_role_proposal' && raw.meta?.command) {
+      const fields = ({
+        name,
+        description,
+        promptPrefix,
+      }: RoleProposalFields) => ({ name, description, promptPrefix });
+      const command = raw.meta.command;
+      noticeMeta.command = {
+        action: command.action,
+        ...fields(command),
+        ...(command.patch ? { patch: fields(command.patch) } : {}),
+      };
+      if (raw.meta.before) noticeMeta.before = fields(raw.meta.before);
+      noticeMeta.outcome = raw.meta.outcome;
+    }
     return {
       itemId,
       rev: bump(projection, key, JSON.stringify({ name, meta })),

@@ -159,7 +159,18 @@ extension LodyChatView {
       .paragraphStyle: paragraph,
       .baselineOffset: (lineHeight - font.lineHeight) / 2,
     ])
-    if row.kind == "user" { return ChatUserMentions.decorate(text, repository: mentionRepository, traits: traitCollection) }
+    if row.kind == "user" {
+      let body = ChatUserMentions.decorate(text, repository: mentionRepository, traits: traitCollection)
+      guard let author = row.author else { return body }
+      let result = NSMutableAttributedString(string: author + "\n", attributes: [
+        .font: UIFont.dynamic(of: 13, compatibleWith: traitCollection),
+        .foregroundColor: UIColor.secondaryLabel,
+        FileMarkdownView.searchExcluded: true,
+        .paragraphStyle: paragraph,
+      ])
+      result.append(body)
+      return result
+    }
     return text
   }
 

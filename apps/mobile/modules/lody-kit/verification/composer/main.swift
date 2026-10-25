@@ -3,6 +3,15 @@ import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
 
+/// Only the Machine service boundary is absent; production voice sources compile.
+@MainActor final class DataRuntime {
+  static let active: DataRuntime? = nil
+  var workspaceId: String? { nil }
+  func command(_ name: String, payload: String) async throws -> String {
+    fatalError("Offline composer must not contact a Machine")
+  }
+}
+
 @MainActor func descendants(_ view: UIView) -> [UIView] {
   [view] + view.subviews.flatMap(descendants)
 }

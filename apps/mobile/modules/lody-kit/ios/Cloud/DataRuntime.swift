@@ -872,11 +872,6 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   func debugRestart() { recover("debug_process_loss") }
 }
 
-final class NotificationObservers {
-  private var tokens: [NSObjectProtocol] = []
-  func add(_ token: NSObjectProtocol) { tokens.append(token) }
-  deinit { for token in tokens { NotificationCenter.default.removeObserver(token) } }
-}
 
 /// `retryable` marks a send refused before anything was written, which goes again by itself.
 private func notSentJSON(_ key: String, retryable: Bool = false) -> String {

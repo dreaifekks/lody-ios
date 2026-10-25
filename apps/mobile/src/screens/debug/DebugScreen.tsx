@@ -1,3 +1,5 @@
+import { ArgonUsagePreviewScreen } from './SettingsPreviewScreen';
+import { PendingPreviewScreen } from './PendingPreviewScreen';
 import { AIUsagePreviewScreen } from './AIUsagePreviewScreen';
 import {
   PublishedSharesPreviewScreen,
@@ -298,6 +300,11 @@ function View() {
         openRow('send-preview', '离线发送验收', 'paperplane'),
         openRow('free-turn-notice-preview', '免费轮次提醒', 'text.bubble'),
         openRow('send-queue', 'Queue 验收', 'list.bullet'),
+        openRow(
+          'pending-preview',
+          'Pending adaptations',
+          'person.text.rectangle',
+        ),
         openRow('message-share-preview', 'Message sharing', 'photo'),
         openRow('session-share-preview', 'Conversation sharing', 'link'),
         openRow('steer-preview', '连续引导验收', 'arrow.triangle.branch'),
@@ -540,6 +547,8 @@ function View() {
     'free-turn-notice-preview': () =>
       void present(FreeTurnNoticePreviewScreen, {}),
     'send-queue': () => void openSendPreview(false, true),
+    'argon-usage-preview': () => void present(ArgonUsagePreviewScreen),
+    'pending-preview': () => void present(PendingPreviewScreen, {}),
     'message-share-preview': () => void present(MessageSharePreviewScreen, {}),
     'session-share-preview': () => void present(SessionSharePreviewScreen),
     'steer-preview': () => void present(SteerPreviewScreen, {}),

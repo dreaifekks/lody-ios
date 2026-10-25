@@ -95,6 +95,23 @@ export function messageDetailSections(
         value: number.format(usage.cacheCreationInputTokens),
       },
     );
+    if (typeof usage.costUSD === 'number') {
+      const cost = usage.costUSD;
+      let maximumFractionDigits = 2;
+      if (cost > 0 && cost < 0.01) maximumFractionDigits = 8;
+      else if (cost < 1) maximumFractionDigits = 4;
+      tokenRows.push({
+        id: 'cost',
+        title: t('message.details.cost'),
+        value: new Intl.NumberFormat(undefined, {
+          style: 'currency',
+          currency: 'USD',
+          minimumFractionDigits: 2,
+          maximumFractionDigits,
+        }).format(cost),
+        subtitle: t('message.details.costHint'),
+      });
+    }
     sections.push({
       id: 'tokens',
       header: t('message.details.tokens'),

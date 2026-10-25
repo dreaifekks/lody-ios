@@ -34,19 +34,20 @@ def value():
     return ui.element(field).get('AXValue') or ''
 
 def keyboard_clear():
-    def visible_keyboard(items):
+    def keyboard_top(items):
         screen_height = items[0]['frame']['height']
         return next((i['frame']['y'] for i in items if (i.get('AXUniqueId') or '').startswith('UIKeyboardLayoutStar') and i['frame']['y'] < screen_height - 150), None)
-    top = ui.wait(visible_keyboard, 'Software keyboard disappeared while choosing references')
+    items = ui.state()
+    screen_height = items[0]['frame']['height']
+    keyboard = keyboard_top(items)
+    # AXe batch input can keep hardware-keyboard mode across focus and appearance
+    # changes. Only a visible software keyboard constrains the composer's edge.
+    bottom = keyboard if keyboard is not None else screen_height
     send = ui.element('session-send')['frame']
-    assert send['y'] + send['height'] <= top + 1, 'Composer overlaps the keyboard'
+    assert send['y'] + send['height'] <= bottom + 1, 'Composer overlaps keyboard or screen edge'
 
 def type_keys(text):
-    if text == '$':
-        # Keep the exact skill trigger on the software symbol key; HID maps it to "4".
-        ui.axe('tap', '--label', '$', '--tap-style', 'physical')
-    else:
-        ui.axe('type', text)
+    ui.axe('type', text)
 
 def open_category(kind):
     tap('session-mention')
@@ -60,6 +61,13 @@ def open_category(kind):
 
 ui.capture('resting')
 tap(field)
+if field == 'create-session-input':
+    # Establish AXe's batch/hardware keyboard session before the form sheet
+    # opens a completion panel; do not switch input modes during that query.
+    type_keys('7')
+    assert value() == '7', 'Batch keyboard setup did not commit input'
+    ui.axe('key', '42')
+    assert value() == '', 'Batch keyboard setup left a draft'
 resting_send = ui.element('session-send')['frame']
 tap('session-mention')
 category = ui.element('mention-item:file')
@@ -125,7 +133,14 @@ ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title=catalog.
 ui.wait(lambda _: value() == '$auth-review @src/auth $swiftui-pro @src/auth/session.ts @', 'Cancelling the sheet changed the original draft')
 keyboard_clear()
 ui.capture('cancelled')
-print('PASS: compact touch autocomplete, full-screen category browsing/search, directory reference, file/skill insertion and cancellation restore the draft and keyboard')
+# Prove restored focus with actual input, independent of software-keyboard mode.
+cancelled_draft = value()
+type_keys('7')
+assert value() == cancelled_draft + '7', 'Cancelling the picker did not restore editor focus'
+ui.axe('key', '42')
+assert value() == cancelled_draft, 'Focus probe changed the retained draft'
+ui.capture('cancelled-focus-restored')
+print('PASS: compact touch autocomplete, full-screen category browsing/search, directory reference, file/skill insertion and cancellation restore the draft and valid keyboard geometry')
 
 for kind, path, token in [
     ('session', 'session-review', '@session:session-review'),
@@ -150,23 +165,23 @@ print('PASS: all seven references, actionable skill display and send-time sessio
 
 field = 'session-input'
 tap(field)
-ui.axe('tap', '--label', 'numbers', '--tap-style', 'physical')
-ui.axe('tap', '--label', '/', '--tap-style', 'physical')
+type_keys('/')
+assert value().strip() == '/', 'Batch input did not commit the command trigger'
 ui.element('mention-item:compact')
 assert not any(i.get('AXUniqueId') == 'mention-item:file' for i in ui.state()), 'Slash opened the category index'
 ui.capture('slash-direct')
-ui.axe('tap', '--id', 'delete', '--tap-style', 'physical')
+ui.axe('key', '42')
 assert value() == '', 'Cancelling slash left inserted command text'
-# Hardware modifier injection can deliver "4" instead of "$". Use the visible
-# software key so this still proves the user's actual trigger.
+# Use the same composite batch path as the rest of the draft; software keys
+# can remain offscreen after earlier batch input.
 tap(field)
 keyboard_clear()
 type_keys('$')
-assert value().strip() == '$', 'The software keyboard did not enter the skill trigger'
+assert value().strip() == '$', 'Batch input did not commit the skill trigger'
 ui.element('mention-item:skills/auth-review/SKILL.md')
 assert not any(i.get('AXUniqueId') == 'mention-item:file' for i in ui.state()), 'Dollar opened the category index'
 ui.capture('skill-direct')
-ui.axe('tap', '--id', 'delete', '--tap-style', 'physical')
+ui.axe('key', '42')
 assert not value().strip(), 'Cancelling skill completion changed the draft'
 
 tap(field)

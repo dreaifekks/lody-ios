@@ -94,7 +94,7 @@ final class ChatMarkdownStore {
     let blocks: [ChatMarkdownBlock]
     if !streaming, let first = parsed.document.first {
       // Completed messages keep one native selection range across paragraphs.
-      blocks = [ChatMarkdownBlock(node: first, content: FileMarkdownView.content(context))]
+      blocks = [ChatMarkdownBlock(node: first, content: FileMarkdownView.content(context, linkify: true))]
     } else {
       blocks = parsed.document.enumerated().map { index, node -> ChatMarkdownBlock in
         if sameContext, let previous, previous.streaming == streaming,
@@ -102,7 +102,7 @@ final class ChatMarkdownStore {
           return previous.blocks[index]
         }
         let content = MarkdownContent(blocks: [node], rendered: context.rendered, highlightMaps: context.highlightMaps)
-        return ChatMarkdownBlock(node: node, content: FileMarkdownView.content(content, streaming: streaming))
+        return ChatMarkdownBlock(node: node, content: FileMarkdownView.content(content, streaming: streaming, linkify: true))
       }
     }
     entries[id] = Entry(text: text, secondary: secondary, streaming: streaming, context: context, math: parsed.mathContext, blocks: blocks)
