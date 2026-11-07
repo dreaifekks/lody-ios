@@ -134,7 +134,7 @@ final class TerminalKeyboardAccessory: UIInputView, UIInputViewAudioFeedback {
     button.configurationUpdateHandler = { button in
       var configuration = button.configuration
       configuration?.baseForegroundColor = button.isSelected ? .lodySignal : .label
-      configuration?.baseBackgroundColor = button.isSelected ? .lodySignal : .tertiarySystemFill
+      configuration?.baseBackgroundColor = button.isSelected ? .lodySignal.withAlphaComponent(0.2) : .tertiarySystemFill
       button.configuration = configuration
     }
     button.addAction(UIAction { [weak self] _ in self?.perform(key) }, for: .primaryActionTriggered)

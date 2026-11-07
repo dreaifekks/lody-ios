@@ -33,6 +33,9 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     photo.accessibilityTraits = .image
     scroll.addSubview(photo)
     spinner.color = .label
+    spinner.backgroundColor = .secondarySystemBackground
+    spinner.layer.cornerRadius = 12
+    spinner.frame.size = CGSize(width: 64, height: 64)
     spinner.hidesWhenStopped = true
     spinner.isAccessibilityElement = true
     spinner.accessibilityIdentifier = "chat-image-loading"
