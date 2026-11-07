@@ -24,7 +24,8 @@ final class Notices {
 }
 let notices = await Notices()
 let observer = NotificationCenter.default.addObserver(forName: LanImageCache.didCache, object: nil, queue: .main) { event in
-  MainActor.assumeIsolated { notices.scopes.append(event.userInfo?["scope"] as? String ?? "missing") }
+  let scope = event.userInfo?["scope"] as? String ?? "missing"
+  MainActor.assumeIsolated { notices.scopes.append(scope) }
 }
 defer { NotificationCenter.default.removeObserver(observer) }
 
