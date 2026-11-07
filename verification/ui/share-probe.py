@@ -255,6 +255,14 @@ def remote_back():
 
 # On this Simulator launchctl prints no bytes for absence and a newline for a
 # defined empty value. Preserve the raw observation to restore either exactly.
+def stop_probe(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
+for stop_signal in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(stop_signal, stop_probe)
+
+
 offline_key = 'LODY_VERIFY_OFFLINE'
 previous_offline = sim('spawn', args.udid, 'launchctl', 'getenv', offline_key, capture_output=True, text=True).stdout
 video = None

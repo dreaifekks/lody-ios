@@ -17,14 +17,14 @@ def check_shortcuts(ui):
         identifier = 'terminal-key-' + name
         if name == 'hide':
             item = ui.element(identifier)
-            assert item['frame']['width'] >= 44 and item['frame']['height'] >= 44, item
+            assert round(item['frame']['width'], 6) >= 44 and round(item['frame']['height'], 6) >= 44, item
             return item
         for _ in range(8):
             items = ui.state()
             item = next((i for i in items if i.get('AXUniqueId') == identifier), None)
             if item:
                 f = item['frame']
-                assert f['width'] >= 44 and f['height'] >= 44, item
+                assert round(f['width'], 6) >= 44 and round(f['height'], 6) >= 44, item
                 if f['x'] >= scroll['x'] - .5 and f['x'] + f['width'] <= scroll['x'] + scroll['width'] + .5:
                     return item
             y = scroll['y'] + scroll['height'] / 2
@@ -62,6 +62,7 @@ def check_shortcuts(ui):
         tap(name, value)
     tap('control')
     assert key('control').get('AXValue') == catalog.text('terminal.key.on')
+    ui.capture('shortcut-control-on')
     # Punctuation, Esc and Tab bypass the software Ctrl modifier in SwiftTerm.
     tap('tilde', '7e')
     assert key('control').get('AXValue') == catalog.text('terminal.key.on')
@@ -80,6 +81,7 @@ def check_shortcuts(ui):
     assert key('mouse').get('AXValue') == catalog.text('terminal.key.off')
     tap('mouse')
     assert key('mouse').get('AXValue') == catalog.text('terminal.key.on')
+    ui.capture('shortcut-mouse-on')
     for number, value in enumerate(['1b4f50', '1b4f51', '1b4f52', '1b4f53',
         '1b5b31357e', '1b5b31377e', '1b5b31387e', '1b5b31397e', '1b5b32307e', '1b5b32317e'], 1):
         tap(f'f{number}', value)
