@@ -72,6 +72,7 @@ def destination(explicit, sdk=SDK):
 
 
 def xcodebuild(arguments):
+    # The destination selects each target's SDK; a global SDKROOT also retargets host package tools.
     command = [
         'xcodebuild',
         '-project',
@@ -80,8 +81,6 @@ def xcodebuild(arguments):
         arguments.scheme,
         '-configuration',
         arguments.configuration,
-        '-sdk',
-        arguments.sdk,
         '-destination',
         arguments.destination,
     ]

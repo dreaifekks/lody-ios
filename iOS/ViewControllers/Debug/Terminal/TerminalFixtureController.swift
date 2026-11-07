@@ -100,7 +100,7 @@ private final class TerminalFixtureChannel: TerminalChannel {
     switch command.type {
     case "list": completion(.success(.terminals(requestId: nil, sessionId: "fixture", terminals: [])))
     case "open":
-      let open = { [self] in
+      let open: @MainActor @Sendable () -> Void = { [self] in
         fixture.releaseOpen = nil
         fixture.opens += 1
         // Emulate a late server answer; cleanup still belongs to the transport.

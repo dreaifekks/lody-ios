@@ -270,3 +270,10 @@ LODY_BUNDLE_ID=com.dreaife.lody LODY_APPLE_TEAM_ID=ALZ45VUZFN pnpm prebuild
 ```
 
 The app, Share, notification service, Live Activity and verification targets derive their identifiers and App Group (`group.com.dreaife.lody`) from the same configuration. Signing stays enabled. In GitHub Actions set the repository variables `LODY_BUNDLE_ID` and `LODY_APPLE_TEAM_ID`; the fork ships only from `tf-*` tags or its manual Fork TestFlight workflow. Ordinary fork branch pushes do not ship.
+
+SwiftTerm is pinned to 1.19.0 and uses a build-information plugin. On a fresh
+machine, review and enable only `SwiftTermBuildInfoPlugin` for the pinned revision
+`464df5207fc2432e16c9a23abe538187196daf5f` in Xcode before a CLI build. The plugin
+reads the package's Git version metadata and writes its generated Swift file.
+Keep package-plugin validation and code signing enabled. Verification selects
+SDKs through the destination, allowing package build tools to build for macOS.
