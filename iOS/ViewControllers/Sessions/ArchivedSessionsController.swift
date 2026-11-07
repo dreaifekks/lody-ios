@@ -54,7 +54,7 @@ class ArchivedSessionsController: UIViewController {
     list.setPreviewUserId(state.userId)
     list.setPreviewWorkspaceId(state.workspaceId)
     list.setPlaceholder(String(localized: String.LocalizationValue(state.loading ? "common.loading" : "settings.archived.empty"), bundle: .lody))
-    list.setSections(rows.isEmpty ? [] : [section])
+    list.setSections(SessionRows.restrictingCloud(rows.isEmpty ? [] : [section], lan: LanInvite.isWorkspace(state.workspaceId)))
   }
 
   private func loadViews(_ state: SessionListState) {

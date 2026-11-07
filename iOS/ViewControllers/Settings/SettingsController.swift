@@ -42,6 +42,7 @@ class SettingsController: UIViewController {
   }
 
   private func open(_ id: String) {
+    if state.account?.lan != nil, ["workspace-general", "prompt-shortcuts", "project-visibility", "github-settings", "ai-usage", "published-shares"].contains(id) { return }
     let workspace = state.account == nil ? nil : state.workspace
     let pages = [
       "preferences": "preferences", "appearance": "appearance-settings", "about": "about",
@@ -67,7 +68,7 @@ class SettingsController: UIViewController {
         WorkspaceEditorController(params: params), title: text("workspace.general"), detents: [0.5]
       )
     } else if id == "account", state.account != nil {
-      LodyShell.shared.push(AccountController(source: source), title: String(localized: "account.title", bundle: .lody), from: self)
+      LodyShell.shared.push(AccountController(source: source), title: state.account?.lan == nil ? String(localized: "account.title", bundle: .lody) : String(localized: "lan.leave.action", bundle: .lody), from: self)
     } else if id == "archived", workspace != nil {
       push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
     } else if id == "project-history", workspace != nil {

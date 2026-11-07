@@ -99,6 +99,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var findFocusRequest: Bool?
   let findHighlightedViews = NSHashTable<UIView>.weakObjects()
   var composer = ChatComposerView(frame: .zero)
+  var usesLAN: @MainActor () -> Bool = { LanComposerPolicy.isLAN }
   var composerBottom: NSLayoutConstraint!
   var composerRetired = false
   let edgeFade = LodyEdgeFade()
@@ -336,6 +337,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       }
       return header
     }
+    composer.prepareSend = { [weak self] in LanComposerPolicy.rejects($0, lan: self?.usesLAN()) }
     composer.onSend = { [weak self] payload in
       guard let self else { return }
       if let data = try? JSONSerialization.data(withJSONObject: payload.merging(["status": String(localized: "native.chat.status.sending", bundle: .lody)]) { _, new in new }),
@@ -416,6 +418,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    LanComposerPolicy.apply(to: composer, lan: { [weak self] in self?.usesLAN() ?? LanComposerPolicy.isLAN })
     layoutFind()
     simulatorPreview.layout(in: CGRect(
       x: safeAreaInsets.left, y: safeAreaInsets.top,
@@ -769,6 +772,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   }
   func setComposerState(_ json: String) {
     composer.setComposerState(json)
+    LanComposerPolicy.apply(to: composer, lan: { [weak self] in self?.usesLAN() ?? LanComposerPolicy.isLAN })
     let retired = composer.suppressesComposer
     if retired != composerRetired {
       composerRetired = retired
@@ -850,6 +854,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     old.removeFromSuperview()
     composer = incoming
     source.completeRelay()
+    incoming.prepareSend = old.prepareSend
     UIView.performWithoutAnimation {
       addSubview(incoming)
       incoming.translatesAutoresizingMaskIntoConstraints = false

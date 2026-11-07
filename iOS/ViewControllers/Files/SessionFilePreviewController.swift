@@ -39,6 +39,7 @@ final class SessionFilePreviewController: QLPreviewController, QLPreviewControll
     let attempt = fixtureAttempt
     download = Task { [weak self, file, workspace, session, directory] in
       do {
+        guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else { throw SessionAttachments.error(String(localized: "lan.attachments.unavailable", bundle: .lody)) }
         guard file.transport == nil || file.transport == "r2" else {
           throw SessionAttachments.error(String(localized: "native.attachment.error.pending", bundle: .lody))
         }

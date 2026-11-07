@@ -19,6 +19,7 @@ class OnboardingController: UIViewController {
   private let footnote = UIStackView()
   private let errorLabel = UILabel()
   private let button = UIButton(configuration: .prominentGlass())
+  private let joinLAN = UIButton(type: .system)
   private var panelBottom: NSLayoutConstraint?
   private var observers: [NSObjectProtocol] = []
   private var state = OnboardingState()
@@ -151,7 +152,15 @@ class OnboardingController: UIViewController {
     button.translatesAutoresizingMaskIntoConstraints = false
     button.heightAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
 
-    let panel = UIStackView(arrangedSubviews: [footer, button])
+    joinLAN.setTitle(String(localized: "lan.join.title", bundle: .lody), for: .normal)
+    joinLAN.accessibilityIdentifier = "onboarding-join-lan"
+    joinLAN.tintColor = .lodyAccent
+    joinLAN.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+    joinLAN.addAction(UIAction { [weak self] _ in
+      guard let self, !state.waiting else { return }
+      LodyShell.shared.push(JoinLanController(join: service.joinLAN), title: String(localized: "lan.join.title", bundle: .lody), from: self)
+    }, for: .primaryActionTriggered)
+    let panel = UIStackView(arrangedSubviews: [footer, button, joinLAN])
     panel.axis = .vertical
     panel.spacing = 14
     panel.translatesAutoresizingMaskIntoConstraints = false
@@ -178,6 +187,7 @@ class OnboardingController: UIViewController {
     }
     let resumed = state.waiting && !next.waiting
     state = next
+    joinLAN.isHidden = next.waiting
     featureStack.isHidden = next.waiting
     footer.isHidden = next.waiting
     waitingView.isHidden = !next.waiting

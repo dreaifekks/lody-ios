@@ -4,7 +4,7 @@ import UIKit
 
 extension SessionController {
   func prepareSimulator(_ state: SessionListState, _ session: SessionItem) {
-    guard simulator == nil, state.catalog.machineSimulators[session.machineId] != nil else { return }
+    guard !LanComposerPolicy.isLAN, simulator == nil, state.catalog.machineSimulators[session.machineId] != nil else { return }
     let store = SessionSimulator(sessionId: sessionId,
       service: simulatorService ?? .live(workspaceId: state.workspaceId, userId: state.userId, sessionId: sessionId))
     simulator = store
@@ -18,6 +18,7 @@ extension SessionController {
   }
 
   var simulatorChip: [String: Any]? {
+    guard !LanComposerPolicy.isLAN else { return nil }
     guard let session = source.state.catalog.session(sessionId),
       source.state.catalog.machineSimulators[session.machineId] == "available", let simulator,
       session.iosSimulatorPreviewRequestId != nil || simulator.running else { return nil }
@@ -29,6 +30,7 @@ extension SessionController {
   }
 
   func simulatorMenu() -> [UIMenuElement] {
+    guard !LanComposerPolicy.isLAN else { return [] }
     guard let session = source.state.catalog.session(sessionId),
       let availability = source.state.catalog.machineSimulators[session.machineId] else { return [] }
     let action = UIAction(title: String(localized: "simulator.menu", bundle: .lody), image: UIImage(systemName: "iphone")) { [weak self] _ in self?.openSimulator() }
@@ -38,7 +40,7 @@ extension SessionController {
   }
 
   func openSimulator() {
-    guard !openingSimulator, let session = source.state.catalog.session(sessionId), let simulator else { return }
+    guard !LanComposerPolicy.isLAN, !openingSimulator, let session = source.state.catalog.session(sessionId), let simulator else { return }
     if source.state.catalog.machineSimulators[session.machineId] == "upgrade-required" {
       let alert = UIAlertController(title: String(localized: "simulator.menu", bundle: .lody), message: String(localized: "simulator.upgradeRequired", bundle: .lody), preferredStyle: .alert)
       alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default)); present(alert, animated: true); return
@@ -97,7 +99,7 @@ extension SessionController {
 
 extension SessionController {
   var browserChip: [String: Any]? {
-    guard let preview = feed?.state.preview else { return nil }
+    guard AuthSession.shared.snapshot.account?.lan == nil, let preview = feed?.state.preview else { return nil }
     var actions: [[String: Any]] = [["id": "copy", "title": String(localized: "session.preview.copyLink", bundle: .lody), "symbol": "link"]]
     if preview.active { actions.append(["id": "stop", "title": String(localized: "session.preview.stop", bundle: .lody), "symbol": "stop.circle", "destructive": true]) }
     return ["label": browserBusy ? String(localized: "session.preview.connecting", bundle: .lody) : preview.label,
@@ -154,7 +156,7 @@ extension SessionController {
   }
 
   private func browserAction(_ action: String) {
-    guard !browserBusy else { return }
+    guard AuthSession.shared.snapshot.account?.lan == nil, !browserBusy else { return }
     let state = source.state
     browserBusy = true; renderComposer()
     Task { [weak self] in

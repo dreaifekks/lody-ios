@@ -38,7 +38,7 @@ struct CreateSessionHostParams: Decodable {
 class CreateSessionHostController: UIViewController {
   private let params: CreateSessionHostParams
   private let service: CreateSessionService
-  private let input = LodyComposerView(frame: .zero)
+  let input = LodyComposerView(frame: .zero)
   private let controller: CreateSessionController
   private let navigation: UINavigationController
   private var mentions: MentionCatalogStore?
@@ -147,7 +147,10 @@ class CreateSessionHostController: UIViewController {
       machineNames: params.machineNames, prefs: prefs)
     controller.form.open(projectId: params.projectId, context: params.context)
     if let text = params.initialText, !text.isEmpty { input.composer.setInitialDraft(text) }
-    if let attachments = params.initialAttachmentsJSON, !attachments.isEmpty { input.composer.setInitialAttachments(attachments) }
+    if let attachments = params.initialAttachmentsJSON, !attachments.isEmpty, attachments != "[]" {
+      if LanComposerPolicy.isLAN { LanComposerPolicy.unavailable() }
+      else { input.composer.setInitialAttachments(attachments) }
+    }
     refreshKey = currentRefreshKey()
     for name in refreshNotifications {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in

@@ -25,6 +25,8 @@ enum LiveActivityCatalog {
     var elapsed: String = "elapsed"
     var waiting: String = "waiting"
     var took: String = "took"
+    var allow: String = "Allow"
+    var deny: String = "Deny"
     var smallAttention: String = "Waiting for you"
     var smallWaiting: String = "Waiting"
     var smallDone: String = "Done"
@@ -33,17 +35,21 @@ enum LiveActivityCatalog {
   }
 
   static let runningStatuses: Set<String> = ["running", "initializing", "processing", "in_progress", "queued"]
+  static let attentionStatuses: Set<String> = ["requestPermission", "waiting"]
+  /// Lody's `HEARTBEAT_TTL_MS`. A session whose machine stamped `lastRunningSeen`
+  /// longer ago than this is not live, whatever status it was left in.
+  static let heartbeatTTL: Double = 180_000
   private static let glyphs = ["codex": "CX", "claude": "CC"]
 
-  static func state(catalogJSON: String, labels: Labels) -> LodyActivityAttributes.ContentState {
+  static func state(catalogJSON: String, labels: Labels, now: Date = Date(), requireHeartbeat: Bool = false) -> LodyActivityAttributes.ContentState {
     let root = (try? JSONSerialization.jsonObject(with: Data(catalogJSON.utf8))) as? [String: Any]
     let sessions = (root?["sessions"] as? [[String: Any]]) ?? []
-    return state(sessions: sessions, labels: labels)
+    return state(sessions: sessions, labels: labels, now: now, requireHeartbeat: requireHeartbeat)
   }
 
-  static func state(sessions: [[String: Any]], labels: Labels) -> LodyActivityAttributes.ContentState {
-    let requestedAt = Date().timeIntervalSince1970 * 1000
-    let items = sessions.compactMap { item($0, labels: labels, requestedAt: requestedAt) }
+  static func state(sessions: [[String: Any]], labels: Labels, now: Date = Date(), requireHeartbeat: Bool = false) -> LodyActivityAttributes.ContentState {
+    let requestedAt = now.timeIntervalSince1970 * 1000
+    let items = sessions.compactMap { item($0, labels: labels, requestedAt: requestedAt, requireHeartbeat: requireHeartbeat) }
     var counts = LodyActivityAttributes.ContentState.Counts()
     counts.permission = items.count { $0.status == .permission }
     counts.running = items.count { $0.status == .running }
@@ -56,6 +62,8 @@ enum LiveActivityCatalog {
     copy.elapsed = labels.elapsed
     copy.waiting = labels.waiting
     copy.took = labels.took
+    copy.allow = labels.allow
+    copy.deny = labels.deny
     copy.smallAttention = labels.smallAttention
     copy.smallWaiting = labels.smallWaiting
     copy.smallDone = labels.smallDone
@@ -70,6 +78,29 @@ enum LiveActivityCatalog {
     )
   }
 
+  /// The catalog the app reads holds no reasoning, current tool or permission
+  /// choices; a LAN host pushes them. A local refresh keeps what the host sent
+  /// for a session that is still in the same state.
+  static func carryingRemoteDetail(
+    _ state: LodyActivityAttributes.ContentState,
+    from previous: LodyActivityAttributes.ContentState
+  ) -> LodyActivityAttributes.ContentState {
+    var merged = state
+    let earlier = Dictionary(previous.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    for index in merged.items.indices {
+      guard let before = earlier[merged.items[index].id], before.status == merged.items[index].status else { continue }
+      merged.items[index].machineName = merged.items[index].machineName ?? before.machineName
+      merged.items[index].activity = merged.items[index].activity ?? before.activity
+      merged.items[index].thought = merged.items[index].thought ?? before.thought
+      if merged.items[index].permissionOptions == nil {
+        merged.items[index].permissionOptions = before.permissionOptions
+        merged.items[index].permissionRequestId = merged.items[index].permissionRequestId ?? before.permissionRequestId
+        merged.items[index].permissionCommand = merged.items[index].permissionCommand ?? before.permissionCommand
+      }
+    }
+    return merged
+  }
+
   static func failedSessionIds(sessions: [[String: Any]]) -> Set<String> {
     Set(sessions.compactMap { session in
       guard session["status"] as? String == "error", let id = session["id"] as? String else { return nil }
@@ -77,10 +108,23 @@ enum LiveActivityCatalog {
     })
   }
 
-  private static func item(_ session: [String: Any], labels: Labels, requestedAt: Double) -> Item? {
+  private static func item(_ session: [String: Any], labels: Labels, requestedAt: Double, requireHeartbeat: Bool) -> Item? {
     guard let id = session["id"] as? String, session["archived"] as? Bool != true else { return nil }
     let awaiting = session["awaitingUserSince"] as? Double
-    let status = resolveStatus(awaiting: awaiting, status: session["status"] as? String)
+    let lastRunningSeen = session["lastRunningSeen"] as? Double
+    let status: Item.Status?
+    let rawStatus = session["status"] as? String
+    if requireHeartbeat {
+      status = resolveStatus(awaiting: awaiting, status: rawStatus, lastRunningSeen: lastRunningSeen, now: requestedAt)
+    } else if ["completed", "error"].contains(rawStatus ?? "") {
+      status = nil
+    } else if attentionStatuses.contains(rawStatus ?? "") || awaiting != nil {
+      status = .permission
+    } else if runningStatuses.contains(rawStatus ?? "") {
+      status = .running
+    } else {
+      status = nil
+    }
     guard let status else { return nil }
     let agent = session["agentType"] as? String ?? session["cliType"] as? String ?? ""
     let lastMessageAt = session["lastMessageAt"] as? Double
@@ -96,7 +140,7 @@ enum LiveActivityCatalog {
       title: session["title"] as? String ?? "",
       updatedAt: stamps.max() ?? requestedAt,
       updatedAtLabel: "",
-      startedAt: startedAt(status: status, awaiting: awaiting, lastRunningSeen: session["lastRunningSeen"] as? Double, lastMessageAt: lastMessageAt)
+      startedAt: startedAt(status: status, awaiting: awaiting, lastRunningSeen: lastRunningSeen, lastMessageAt: lastMessageAt)
     )
   }
 
@@ -111,12 +155,36 @@ enum LiveActivityCatalog {
     }
   }
 
-  private static func resolveStatus(awaiting: Double?, status: String?) -> Item.Status? {
-    if ["completed", "error"].contains(status ?? "") { return nil }
-    if status == "requestPermission" || status == "waiting" { return .permission }
-    if awaiting != nil { return .permission }
-    guard let status, runningStatuses.contains(status) else { return nil }
+  /// Lody's `resolveStatus` without presence (`live-activity-summary.ts`): an
+  /// active status counts only while its heartbeat is fresh
+  /// (`isSessionActiveWithHeartbeat`), so a machine that dropped off mid-turn
+  /// or mid-request ends the activity instead of holding it open. Lody shows a
+  /// question as a permission request; `awaitingUserSince` only marks a live
+  /// session as waiting, it never revives one whose heartbeat stopped.
+  /// Times are milliseconds against the device clock; Lody compares with its
+  /// server-corrected clock, so a device clock skewed by minutes skews this.
+  static func resolveStatus(awaiting: Double?, status: String?, lastRunningSeen: Double?, now: Double) -> LodyActivityAttributes.ContentState.Item.Status? {
+    guard let status, attentionStatuses.contains(status) || runningStatuses.contains(status) else { return nil }
+    guard isHeartbeatFresh(lastRunningSeen, now: now) else { return nil }
+    if attentionStatuses.contains(status) || awaiting != nil { return .permission }
     return .running
+  }
+
+  static func isHeartbeatFresh(_ lastRunningSeen: Double?, now: Double) -> Bool {
+    guard let lastRunningSeen, lastRunningSeen.isFinite else { return false }
+    return now - lastRunningSeen < heartbeatTTL
+  }
+
+  /// When the first session that counts as live now stops counting without any
+  /// catalog change: a machine that went silent writes nothing more.
+  static func nextHeartbeatExpiry(sessions: [[String: Any]], now: Date = Date()) -> Double? {
+    let at = now.timeIntervalSince1970 * 1000
+    return sessions.compactMap { session -> Double? in
+      guard session["archived"] as? Bool != true, let seen = session["lastRunningSeen"] as? Double,
+            resolveStatus(awaiting: session["awaitingUserSince"] as? Double, status: session["status"] as? String, lastRunningSeen: seen, now: at) != nil
+      else { return nil }
+      return seen + heartbeatTTL
+    }.min()
   }
 
   private static func glyph(_ agent: String) -> String {

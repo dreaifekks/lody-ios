@@ -315,3 +315,18 @@ precondition(compactRoundTrip.smallFailed == "失败")
 precondition(compactRoundTrip.smallStale == "已过期")
 let legacyCopy = try JSONDecoder().decode(LodyActivityAttributes.ContentState.Copy.self, from: Data("{}".utf8))
 precondition(legacyCopy.smallAttention == nil && legacyCopy.smallDone == nil && legacyCopy.smallStale == nil)
+
+let lanNow = Date(timeIntervalSince1970: 1000)
+let lanLive: [[String: Any]] = [["id": "lan", "status": "running", "lastRunningSeen": 999_000.0]]
+precondition(LiveActivityCatalog.state(sessions: lanLive, labels: labels, now: lanNow, requireHeartbeat: true).isActive)
+precondition(!LiveActivityCatalog.state(sessions: lanLive, labels: labels, now: Date(timeIntervalSince1970: 1200), requireHeartbeat: true).isActive)
+precondition(LiveActivityCatalog.nextHeartbeatExpiry(sessions: lanLive, now: lanNow) == 1_179_000)
+var remote = LiveActivityCatalog.state(sessions: lanLive, labels: labels, now: lanNow, requireHeartbeat: true)
+remote.items[0].thought = "Tracing the current request"
+remote.items[0].activity = "Read source"
+let local = LiveActivityCatalog.state(sessions: lanLive, labels: labels, now: lanNow, requireHeartbeat: true)
+precondition(LiveActivityCatalog.carryingRemoteDetail(local, from: remote).items[0].thought == remote.items[0].thought)
+var permissionItem = item("permission", .permission, 100)
+permissionItem.permissionOptions = [.init(id: "always", label: "Always", kind: "allow_always"), .init(id: "once", label: "Once", kind: "allow_once")]
+precondition(permissionItem.allowOption?.id == "once")
+print("PASS: LAN heartbeat expiry, remote step preservation and one-time permission preference")

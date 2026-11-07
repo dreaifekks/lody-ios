@@ -18,6 +18,7 @@ private final class OnboardingFixture {
 
   private static let changed = Notification.Name("LodyOnboardingPreviewDidChange")
   private var phase = Phase.idle
+  private var joinAttempts = 0
 
   func service() -> OnboardingService {
     OnboardingService(
@@ -25,7 +26,13 @@ private final class OnboardingFixture {
       state: { [self] in state },
       login: { [self] in move([.idle: .waiting, .waiting: .waiting, .error: .signedIn, .signedIn: .signedIn][phase] ?? phase) },
       cancel: { [self] in move(.error) },
-      reopen: { [self] in authorizeInBrowser() }
+      reopen: { [self] in authorizeInBrowser() },
+      joinLAN: { [self] raw in
+        joinAttempts += 1
+        try await Task.sleep(for: .milliseconds(200))
+        guard !raw.isEmpty, joinAttempts > 1 else { throw CancellationError() }
+        move(.signedIn)
+      }
     )
   }
 

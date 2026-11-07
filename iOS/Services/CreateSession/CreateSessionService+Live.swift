@@ -21,6 +21,7 @@ extension CreateSessionService {
         return try JSONDecoder().decode(CreationOptions.self, from: JSONEncoder().encode(result))
       },
       repositories: { workspaceId in
+        if AuthSession.shared.snapshot.account?.lan != nil { return [] }
         if workspaceId == "ui-home", LodyUIVerify.mentions { return ["LodyAI/FreshProject"] }
         if LodyUIVerify.enabled, workspaceId == "ui-project-picker" { return (1...20).map { "Owner/Repo\($0)" } }
         return try await GitHubCloud.repositories(workspace: workspaceId)

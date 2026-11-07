@@ -8,6 +8,7 @@ final class InboxChrome {
     var devices: InboxDevices
     var mode: Int
     var sort: InboxSort
+    var allowsWorkspaceEditing = true
   }
 
   var selectWorkspace: ((String) -> Void)?
@@ -199,7 +200,7 @@ final class InboxChrome {
       item.selected = workspace.id == model.selected?.id
       return item
     }
-    if model.selected != nil {
+    if model.selected != nil, model.allowsWorkspaceEditing {
       var edit = LodyMenuItem()
       edit.id = Self.editId
       edit.title = String(localized: "workspace.edit.action", bundle: .lody)

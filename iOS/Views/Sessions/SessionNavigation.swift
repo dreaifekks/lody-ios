@@ -24,6 +24,7 @@ enum SessionNavigation {
       guard state.catalog.session(id) != nil else { throw OutboxError.scopeExpired }
       open(id, query: fields["findQuery"] as? String ?? "", source: source)
     case "share":
+      guard AuthSession.shared.snapshot.account?.lan == nil else { return nil }
       let id = fields["sessionId"] as! String
       guard state.catalog.session(id) != nil else { throw OutboxError.scopeExpired }
       let content = PageFactory.make("session-share", params: SessionController.json(["workspaceId": state.workspaceId, "sessionId": id]))!

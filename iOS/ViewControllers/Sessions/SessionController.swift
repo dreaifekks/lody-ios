@@ -246,7 +246,7 @@ class SessionController: UIViewController {
         [weak self] _ in self?.openWorkspaceChanges()
       })
     }
-    more.menu = UIMenu(children: changes + simulatorMenu() + [
+    var menuActions: [UIMenuElement] = [
       UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
         self?.find(query: "", keyboard: true)
       },
@@ -263,7 +263,9 @@ class SessionController: UIViewController {
           image: UIImage(systemName: "trash"), attributes: deleting ? [.destructive, .disabled] : .destructive
         ) { [weak self] _ in self?.perform("delete") },
       ]),
-    ])
+    ]
+    if AuthSession.shared.snapshot.account?.lan != nil { menuActions.remove(at: 1) }
+    more.menu = UIMenu(children: changes + simulatorMenu() + menuActions)
     moreItem = more
     let header = LodyNavigationHeader.of(navigationItem)
     if header.rightItems != [more] { header.rightItems = [more] }

@@ -11,6 +11,7 @@ final class CreateSessionPreviewController: CreateSessionHostController {
     self.scenario = scenario
     let fixture = CreateSessionFixture(scenario: scenario)
     super.init(params: fixture.params, service: fixture.service())
+    if scenario == "create-lan" { input.usesLAN = { true } }
   }
 
   @available(*, unavailable)

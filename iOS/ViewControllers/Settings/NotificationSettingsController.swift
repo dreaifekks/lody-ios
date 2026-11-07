@@ -4,6 +4,7 @@ struct NotificationService {
   struct Push: Equatable {
     var configured: Bool
     var permission: String
+    var hub: String? = nil
   }
 
   struct Live: Equatable {
@@ -24,7 +25,7 @@ struct NotificationService {
       await withCheckedContinuation { continuation in
         PushNotifications.shared.status { value in
           continuation.resume(returning: Push(
-            configured: value["configured"] as? Bool ?? false, permission: value["permission"] as? String ?? "denied"
+            configured: value["configured"] as? Bool ?? false, permission: value["permission"] as? String ?? "denied", hub: value["hub"] as? String
           ))
         }
       }
@@ -80,6 +81,9 @@ final class NotificationSettingsController: UIViewController {
     observers.append(NotificationCenter.default.addObserver(
       forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
     ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.refresh() }
+    })
+    observers.append(NotificationCenter.default.addObserver(forName: LanPush.changed, object: nil, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated { self?.refresh() }
     })
     for name in SettingsSource.live.changes {
@@ -195,6 +199,9 @@ final class NotificationSettingsController: UIViewController {
     guard signedIn else { return text("notifications.hint.signedOut") }
     guard let push else { return text("notifications.hint.loading") }
     guard push.configured else { return text("notifications.hint.unsupported") }
+    if push.permission == "authorized", let hub = push.hub, hub != "ready" {
+      return String(localized: String.LocalizationValue("lan.push." + hub), bundle: .lody)
+    }
     switch push.permission {
     case "authorized": return text("notifications.hint.authorized")
     case "denied": return text("notifications.hint.denied")

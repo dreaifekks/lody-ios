@@ -52,8 +52,14 @@ private final class SettingsBaselineFixture {
     let signedIn = scenario != "signed-out"
     let hasWorkspace = signedIn && scenario != "no-workspace"
     let user = AuthUser(id: "settings-baseline-user", name: "Settings Preview", email: "baseline@example.test", image: nil)
+    var account = AuthAccount(user: user, workspaces: hasWorkspace ? [Self.workspace] : [])
+    if scenario == "lan" {
+      // Credential-free account projection; no auth service or hub is touched.
+      let json = #"{"id":"fixture","name":"Offline LAN","url":"http://offline.invalid","workspaceId":"lw_fixture","userId":"local:fixture"}"#
+      account.lan = try! JSONDecoder().decode(LanHubSummary.self, from: Data(json.utf8))
+    }
     return SettingsState(
-      account: signedIn ? AuthAccount(user: user, workspaces: hasWorkspace ? [Self.workspace] : []) : nil,
+      account: signedIn ? account : nil,
       workspace: hasWorkspace ? Self.workspace : nil,
       connection: connection
     )

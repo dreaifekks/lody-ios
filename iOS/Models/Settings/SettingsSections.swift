@@ -12,7 +12,7 @@ enum SettingsSections {
       ]),
     ]
     if account != nil {
-      sections.append(remote(workspace, connection: state.connection, now: now))
+      sections.append(remote(workspace, connection: state.connection, now: now, lan: account?.lan != nil))
     }
     if workspace != nil {
       sections.append(section("sessions", header: text("section.sessions"), rows: [
@@ -28,7 +28,7 @@ enum SettingsSections {
     return sections
   }
 
-  private static func remote(_ workspace: AuthWorkspace?, connection: SettingsConnection, now: Double) -> LodyListSection {
+  private static func remote(_ workspace: AuthWorkspace?, connection: SettingsConnection, now: Double, lan: Bool) -> LodyListSection {
     guard let workspace else {
       var unavailable = row(
         "workspace-unavailable", text("workspace.unavailable"), subtitle: text("workspace.unavailableHint"),
@@ -57,6 +57,10 @@ enum SettingsSections {
       row("ai-usage", text("aiUsage.title"), image: "chart.bar.xaxis"),
       row("published-shares", text("shares.title"), image: "link"),
     ]
+    if lan {
+      let cloudRows: Set<String> = ["workspace-general", "prompt-shortcuts", "project-visibility", "github-settings", "ai-usage", "published-shares"]
+      rows.removeAll { cloudRows.contains($0.id) }
+    }
     var footer = [
       text("connection.\(connection.state)"),
       String.localizedStringWithFormat(String(localized: "settings.machineCount", bundle: .lody), connection.machines),
@@ -84,6 +88,9 @@ enum SettingsSections {
   }
 
   private static func accountRow(_ account: AuthAccount?) -> LodyListRow {
+    if let lan = account?.lan {
+      return row("account", lan.name, subtitle: String(localized: "lan.leave.action", bundle: .lody), image: "network")
+    }
     var result = row(
       "account", account?.user.name ?? text("account.welcome"), subtitle: account?.user.email ?? text("account.signInHint"),
       image: account?.user.image ?? "person.crop.circle", action: account != nil, navigates: account != nil

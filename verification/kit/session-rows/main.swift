@@ -198,3 +198,16 @@ precondition(toolsCatalog.session("with-tools")?.pullRequests.first?.number == 3
 precondition(toolsCatalog.session("with-tools")?.iosSimulatorPreviewRequestId == "preview-request")
 
 precondition(envelope.preview == SessionBrowserPreview(label: "localhost:5173", active: true))
+
+var lanSection = LodyListSection()
+var cloudRow = LodyListRow()
+cloudRow.id = "session"
+cloudRow.preview = "session"
+var shareAction = LodyListAction(); shareAction.id = "share"
+var archiveAction = LodyListAction(); archiveAction.id = "archive"
+cloudRow.menuActions = [shareAction, archiveAction]
+lanSection.rows = [cloudRow]
+let restricted = SessionRows.restrictingCloud([lanSection], lan: true)[0].rows[0]
+precondition(restricted.preview.isEmpty && restricted.menuActions.map(\.id) == ["archive"])
+precondition(SessionRows.restrictingCloud([lanSection], lan: false)[0].rows[0].preview == "session")
+print("PASS: LAN removes Cloud sharing and session previews while preserving native actions")

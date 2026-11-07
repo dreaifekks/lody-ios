@@ -51,6 +51,7 @@ final class SessionActions {
       if let project = SessionRows.projectId(ofRow: id) ?? session?.projectId { intent["projectId"] = project }
       Self.create(intent)
     case "share":
+      guard AuthSession.shared.snapshot.account?.lan == nil else { return }
       LodyShell.shared.sessionIntent("share", ["workspaceId": state.workspaceId, "sessionId": id])
     default:
       guard let session = state.catalog.session(id) else { return }

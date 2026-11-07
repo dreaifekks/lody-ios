@@ -84,6 +84,7 @@ enum PageFactory {
     "message-share": { params in MessageShareController(contentJSON: params["contentJSON"] as? String ?? "") },
     "notification-settings": { _ in NotificationSettingsController() },
     "onboarding": { _ in OnboardingController() },
+    "join-lan": { _ in JoinLanController() },
     "mention-picker": { params in MentionPickerController.page(params) },
     "create-session": { params in CreateSessionHostController(params: decode(CreateSessionHostParams.self, params) ?? CreateSessionHostParams()) },
   ]
@@ -108,6 +109,8 @@ enum PageFactory {
   }
 
   static func make(_ id: String, params: String?) -> UIViewController? {
+    if AuthSession.shared.snapshot.account?.lan != nil,
+       ["ai-usage", "project-visibility", "github-settings", "prompt-shortcuts", "workspace-editor", "published-shares", "session-share"].contains(id) { return nil }
     let object = params.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
     let parameters = object ?? [:]
     return factories[id]?(parameters) ?? debugSceneFactory?(id, parameters)

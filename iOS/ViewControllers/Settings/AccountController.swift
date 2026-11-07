@@ -45,6 +45,7 @@ final class AccountController: UIViewController {
       }
       return
     }
+    title = account.lan == nil ? String(localized: "account.title", bundle: .lody) : String(localized: "lan.leave.action", bundle: .lody)
     var user = LodyListRow()
     user.id = "name"
     user.title = account.user.name
@@ -53,6 +54,7 @@ final class AccountController: UIViewController {
     var logout = LodyListRow()
     logout.id = "logout"
     logout.title = String(localized: String.LocalizationValue(state.busy ? "account.signingOut" : "account.signOut"), bundle: .lody)
+    if account.lan != nil { logout.title = String(localized: "lan.leave.action", bundle: .lody) }
     logout.destructive = true
     logout.action = !state.busy
     var profile = LodyListSection()
@@ -62,16 +64,18 @@ final class AccountController: UIViewController {
     actions.id = "logout"
     actions.footer = state.error ?? ""
     actions.rows = [logout]
-    list.setSections([profile, actions])
+    list.setSections(account.lan == nil ? [profile, actions] : [actions])
   }
 
   private func confirmLogout() {
+    let lan = source.state.account?.lan != nil
     let alert = UIAlertController(
       title: String(localized: "account.signOutConfirm.title", bundle: .lody), message: String(localized: "account.signOutConfirm.message", bundle: .lody),
       preferredStyle: .alert
     )
+    if lan { alert.title = String(localized: "lan.leave.action", bundle: .lody); alert.message = String(localized: "lan.leave.hint", bundle: .lody) }
     alert.addAction(UIAlertAction(title: String(localized: "common.cancel", bundle: .lody), style: .cancel))
-    alert.addAction(UIAlertAction(title: String(localized: "account.signOut", bundle: .lody), style: .destructive) { [weak self] _ in
+    alert.addAction(UIAlertAction(title: lan ? String(localized: "lan.leave.action", bundle: .lody) : String(localized: "account.signOut", bundle: .lody), style: .destructive) { [weak self] _ in
       guard let self else { return }
       Task { await self.source.logout() }
     })

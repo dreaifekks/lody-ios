@@ -205,6 +205,7 @@ final class ChatSharePaper: UIView {
 
   private static func loadImage(image: ChatImage?, source: String?, content: ChatMessageShare) async throws -> UIImage {
     if LodyUIVerify.enabled, image.map({ ChatImageCell.isVerifyImage($0.id) }) == true { return ChatImageCell.verifyBitmap() }
+    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(content.workspace) else { throw Failure.image }
     var request: URLRequest
     if let image {
       guard !content.workspace.isEmpty, !content.session.isEmpty, let token = try AuthKeychain.read() else { throw Failure.image }

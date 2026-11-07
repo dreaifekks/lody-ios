@@ -16,6 +16,7 @@ struct OnboardingService {
   var login: () -> Void
   var cancel: () -> Void
   var reopen: () -> Void
+  var joinLAN: @MainActor (String) async throws -> Void = { _ in throw CancellationError() }
 
   static var live: OnboardingService {
     OnboardingService(
@@ -23,7 +24,8 @@ struct OnboardingService {
       state: { published() },
       login: { Task { try? await AuthSession.shared.login() } },
       cancel: { AuthSession.shared.cancel() },
-      reopen: { AuthSession.shared.reopen() }
+      reopen: { AuthSession.shared.reopen() },
+      joinLAN: { try await AuthSession.shared.joinLAN($0) }
     )
   }
 

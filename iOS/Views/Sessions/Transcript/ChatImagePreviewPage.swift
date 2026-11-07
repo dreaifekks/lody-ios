@@ -81,6 +81,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
       layoutImage()
       return
     }
+    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else { spinner.stopAnimating(); retry.isHidden = true; return }
     if let remote = item.remoteURL {
       fetch(remote, fallback: nil)
       return
@@ -91,6 +92,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
       layoutImage()
       return
     }
+    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else { spinner.stopAnimating(); retry.isHidden = true; return }
     let storage = item.image.storageSessionId ?? session
     let thumbnail = SessionAttachments.imageThumbnailURL(
       workspace: workspace, session: storage, imageId: item.image.id, width: 768

@@ -4,8 +4,18 @@
     "send.error.notDelivered": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "This message was not delivered. Try again." } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "消息未送达，请重试。" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This message was not delivered. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消息未送达，请重试。"
+          }
+        }
       }
     },
     "native.chat.mermaid.failed": {
@@ -23031,6 +23041,270 @@
           "stringUnit": {
             "state": "translated",
             "value": "Project index"
+          }
+        }
+      }
+    },
+    "lan.join.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Join a LAN"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入局域网"
+          }
+        }
+      }
+    },
+    "lan.join.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Join"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入"
+          }
+        }
+      }
+    },
+    "lan.join.invite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LAN invite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "局域网邀请"
+          }
+        }
+      }
+    },
+    "lan.join.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste the invite from your LAN hub. The credential stays on this device."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴局域网 Hub 的邀请。凭据仅保存在此设备。"
+          }
+        }
+      }
+    },
+    "lan.join.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not join this LAN. Check the invite and connection, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法加入此局域网。请检查邀请和连接后重试。"
+          }
+        }
+      }
+    },
+    "lan.leave.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave LAN"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出局域网"
+          }
+        }
+      }
+    },
+    "lan.leave.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disconnect this device from the LAN and remove its push registration?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将此设备从局域网断开并移除推送登记？"
+          }
+        }
+      }
+    },
+    "lan.attachments.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LAN attachments are not available yet. You can send text; remove attachments from an existing draft to continue."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "局域网暂不支持附件。可发送文本；请移除已有草稿中的附件后继续。"
+          }
+        }
+      }
+    },
+    "lan.push.pending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Registering with the LAN hub."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在向局域网 Hub 登记。"
+          }
+        }
+      }
+    },
+    "lan.push.noKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The LAN hub has no APNs key configured. Ask the hub owner to configure push notifications."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "局域网 Hub 尚未配置 APNs 密钥，请让 Hub 管理者配置推送。"
+          }
+        }
+      }
+    },
+    "lan.push.unreachable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not register with the LAN hub. Reconnect to your LAN and reopen this page to retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法向局域网 Hub 登记。请重新连接局域网后打开此页重试。"
+          }
+        }
+      }
+    },
+    "native.liveActivity.allow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow"
+          }
+        }
+      }
+    },
+    "native.liveActivity.deny": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deny"
+          }
+        }
+      }
+    },
+    "native.liveActivity.debug.machine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
+          }
+        }
+      }
+    },
+    "native.liveActivity.debug.activity1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading source files"
+          }
+        }
+      }
+    },
+    "native.liveActivity.debug.activity2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running checks"
+          }
+        }
+      }
+    },
+    "native.liveActivity.debug.thought1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tracing the active request"
+          }
+        }
+      }
+    },
+    "native.liveActivity.debug.thought2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the result"
           }
         }
       }

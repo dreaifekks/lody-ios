@@ -85,6 +85,7 @@ final class LodyUIKitHost: LodyHost {
   }
 
   func catalogDidUpdate(_ catalogJSON: String, workspaceId: String, workspaceSlug: String, workspaceName: String, userId: String) {
+    PushNotifications.shared.withdrawSettledPermissions(catalogJSON: catalogJSON)
     LiveActivities.shared.sync(catalogJSON: catalogJSON, workspaceId: workspaceId, workspaceSlug: workspaceSlug,
       workspaceName: workspaceName, userId: userId)
   }
@@ -93,8 +94,9 @@ final class LodyUIKitHost: LodyHost {
     ShareStore.clear()
   }
 
-  func forgetDevice() {
-    PushNotifications.shared.identify(nil)
+  func forgetDevice() async {
+    await LanPush.shared.leave()
+    PushNotifications.shared.identify(nil, refreshProvider: false)
     LiveActivities.shared.endAll()
   }
 }

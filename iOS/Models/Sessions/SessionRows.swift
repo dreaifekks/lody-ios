@@ -55,6 +55,20 @@ enum SessionRows {
     return nil
   }
 
+  static func restrictingCloud(_ sections: [LodyListSection], lan: Bool) -> [LodyListSection] {
+    guard lan else { return sections }
+    return sections.map { section in
+      var section = section
+      section.rows = section.rows.map { row in
+        var row = row
+        row.menuActions.removeAll { $0.id == "share" }
+        row.preview = ""
+        return row
+      }
+      return section
+    }
+  }
+
   static func row(_ session: SessionItem, projectName: String = "", now: Double = LodyRelativeTime.now()) -> LodyListRow {
     let state = SessionState(session)
     var row = LodyListRow()

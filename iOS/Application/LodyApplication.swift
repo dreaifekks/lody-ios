@@ -19,8 +19,6 @@ public final class LodyApplication {
   private var observers: [NSObjectProtocol] = []
   private var onboarding: PageContainerController?
   private var link: (route: String, user: String?)?
-  private var identified: String?
-  private var hasIdentified = false
   private let shares = ShareInboxCoordinator()
   private var offeredCommunity = false
 
@@ -36,7 +34,7 @@ public final class LodyApplication {
     AuthSession.shared.stopRuntime = { [weak self] in self?.runtime.stop() }
     OutboxSession.shared.attach(runtime)
     CatalogSession.shared.attach(runtime)
-    for name in [Notification.Name.lodyAuthDidChange, .lodyCatalogDidChange, UIApplication.didBecomeActiveNotification] {
+    for name in [Notification.Name.lodyAuthDidChange, .lodyCatalogDidChange, .lodyLANHubDidMove, UIApplication.didBecomeActiveNotification] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.reconcile() }
       })
@@ -77,11 +75,7 @@ public final class LodyApplication {
     let auth = AuthSession.shared.snapshot
     guard auth.localReady, !auth.busy else { return }
     let user = auth.account?.user.id
-    if !hasIdentified || identified != user {
-      hasIdentified = true
-      identified = user
-      PushNotifications.shared.identify(user)
-    }
+    PushNotifications.shared.identify(user)
     if auth.account == nil {
       shares.stop()
       guard onboarding == nil else { return }

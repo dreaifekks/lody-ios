@@ -56,6 +56,7 @@ final class SessionPreviewController: SessionController {
       pullRequest: { _, _ in PullRequestPreviewController(params: [:]) },
       browser: { _, _ in .init(url: "https://native-fixture.trycloudflare.com") }
     )
+    if scenario == "lan" { chat.usesLAN = { true } }
   }
 
   @available(*, unavailable)

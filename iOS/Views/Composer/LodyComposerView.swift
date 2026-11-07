@@ -8,6 +8,7 @@ final class LodyComposerView: UIView {
   var onComposerOptionChange: ([String: Any]) -> Void = { _ in }
   var onMentionBrowse: ([String: Any]) -> Void = { _ in }
   let composer = ChatComposerView(frame: .zero)
+  var usesLAN: @MainActor () -> Bool = { LanComposerPolicy.isLAN }
   var composerRelay = false
   var forwarded: ((String, [String: Any]) -> Void)?
   private var relayConstraints: [NSLayoutConstraint] = []
@@ -29,6 +30,7 @@ final class LodyComposerView: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     reportHeight()
+    LanComposerPolicy.apply(to: composer, lan: { [weak self] in self?.usesLAN() ?? LanComposerPolicy.isLAN })
     attachScrollEdge()
   }
 
@@ -93,6 +95,7 @@ final class LodyComposerView: UIView {
   deinit { NotificationCenter.default.removeObserver(self) }
 
   private func prepare(_ payload: [String: Any]) -> Bool {
+    guard !LanComposerPolicy.rejects(payload, lan: usesLAN()) else { return true }
     guard composerRelay, window != nil, let id = payload["id"] as? String else { return false }
     relayPayload = payload
     Self.relays[id] = self

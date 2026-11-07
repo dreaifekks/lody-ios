@@ -89,7 +89,7 @@ final class InboxController: UIViewController {
     chrome.update(InboxChrome.Model(
       workspaces: state.workspaces, selected: state.workspace,
       devices: InboxDevices(catalog: state.catalog, presence: state.presence),
-      mode: mode, sort: sort
+      mode: mode, sort: sort, allowsWorkspaceEditing: AuthSession.shared.snapshot.account?.lan == nil
     ))
     list.setPreviewUserId(state.userId)
     list.setPreviewWorkspaceId(state.workspaceId)
@@ -113,14 +113,14 @@ final class InboxController: UIViewController {
       projectBar.update(chips, selected: filter)
       list.setTopAccessory(shown ? projectBar : nil, height: InboxProjectBar.height)
       let sections = InboxSections.projects(catalog, expanded: expanded, sort: sort, pinOrder: pinOrder, filter: filter)
-      list.setSections(sections)
+      list.setSections(SessionRows.restrictingCloud(sections, lan: LanInvite.isWorkspace(state.workspaceId)))
       projectIndex.update(InboxProjectIndexModel.items(sectionIds: sections.map(\.id), chips: chips))
       projectIndex.enabled = shown && filter == InboxSections.allFilter
       view.setNeedsLayout()
     } else {
       projectIndex.enabled = false
       list.setTopAccessory(nil, height: 0)
-      list.setSections(InboxSections.inbox(catalog, chatOnly: mode == 2, pinOrder: pinOrder))
+      list.setSections(SessionRows.restrictingCloud(InboxSections.inbox(catalog, chatOnly: mode == 2, pinOrder: pinOrder), lan: LanInvite.isWorkspace(state.workspaceId)))
     }
   }
 
@@ -152,7 +152,7 @@ final class InboxController: UIViewController {
     if requested?.key != key || requested?.catalog != catalog { requestSearch(term, key: key, state: state, catalog: catalog) }
     let current = search.flatMap { $0.key == key && $0.catalog == catalog ? $0 : nil }
     list.setPlaceholder(String(localized: String.LocalizationValue(current == nil ? "search.placeholder.loading" : "search.placeholder.noMatch"), bundle: .lody))
-    list.setSections(InboxSections.search(catalog, hits: current?.hits ?? InboxSearchHits(), query: term))
+    list.setSections(SessionRows.restrictingCloud(InboxSections.search(catalog, hits: current?.hits ?? InboxSearchHits(), query: term), lan: LanInvite.isWorkspace(source.state.workspaceId)))
   }
 
   private func requestSearch(_ term: String, key: String, state: SessionListState, catalog: SessionCatalog) {
@@ -310,6 +310,7 @@ final class InboxController: UIViewController {
   }
 
   private func editWorkspace() {
+    guard !LanComposerPolicy.isLAN else { return }
     guard let workspace = source.state.workspace else { return }
     var params: [String: Any] = [
       "workspaceId": workspace.id, "name": workspace.name,

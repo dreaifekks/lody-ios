@@ -74,6 +74,11 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
       photo.image = nil; spinner.stopAnimating(); failure.isHidden = false
       return
     }
+    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else {
+      task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
+      spinner.stopAnimating(); failure.isHidden = false
+      return
+    }
     let storage = image.storageSessionId ?? session
     let thumbnail = SessionAttachments.imageThumbnailURL(
       workspace: workspace, session: storage, imageId: image.id, width: 768

@@ -8,27 +8,30 @@ import UIKit
 @MainActor
 final class LiveActivities {
   static let shared = LiveActivities()
-  private let defaults = UserDefaults(suiteName: Bundle.main.object(forInfoDictionaryKey: "LodyAppGroup") as? String ?? "group.app.innei.lody")
+  private let defaults = LodyActivityIcon.defaults
   private var tokenTasks: [String: (stamp: UUID, nativeId: String, task: Task<Void, Never>, lifecycle: Task<Void, Never>, content: Task<Void, Never>)] = [:]
   private var lastContentLog: [String: (signature: String, time: Date)] = [:]
   private var pushToStartTask: Task<Void, Never>?
   private var activityTask: Task<Void, Never>?
   private var syncTask: Task<Void, Never>?
+  /// Re-reads the last catalog when a live session's heartbeat runs out.
+  private var heartbeatTask: Task<Void, Never>?
   private var workStarts: [String: Double] = [:]
   private var userId: String?
   private var identityResolved = false
   private lazy var registrations = LiveActivityRegistration(
     enter: { id, token in
-      OneSignal.LiveActivities.enter(id, withToken: Self.hex(token))
+      self.publishEnter(id, token: token)
       Self.diagnostic("enter_submitted", id: id)
     },
     exit: { id in
-      OneSignal.LiveActivities.exit(id)
+      self.publishExit(id)
       Self.diagnostic("exit_submitted", id: id)
     },
     restart: {
       // 5.5.1 retains retryable failures in its cache but needs another start
       // to poll them. Re-entering an identical cached token alone is a no-op.
+      guard PushNotifications.shared.configured, !PushNotifications.shared.lanMode else { return }
       OneSignalLiveActivitiesManagerImpl.start()
       Self.diagnostic("registration_recovery_requested")
     },
@@ -58,6 +61,7 @@ final class LiveActivities {
     get { defaults?.object(forKey: "liveActivitiesEnabled") as? Bool ?? true }
     set {
       defaults?.set(newValue, forKey: "liveActivitiesEnabled")
+      defer { LanPush.shared.sync() }
       if newValue {
         start()
         return
@@ -69,8 +73,13 @@ final class LiveActivities {
 
   func start() {
     // Offline Debug scenes must never initialize/register with OneSignal.
-    guard PushNotifications.shared.configured else { return }
-    if !identityResolved {
+    guard PushNotifications.shared.providerReady else { return }
+    if !identityResolved, PushNotifications.shared.lanMode {
+      // A LAN has one user, known before the app restores the account; a background
+      // launch for a hub-started activity registers its token with it.
+      userId = LanPush.shared.invite?.userId
+      identityResolved = userId != nil
+    } else if !identityResolved {
       userId = OneSignal.User.externalId
       identityResolved = userId != nil
     }
@@ -86,7 +95,7 @@ final class LiveActivities {
 
   func recoverRegistrations() {
     start()
-    guard PushNotifications.shared.configured else { return }
+    guard PushNotifications.shared.providerReady else { return }
     // Lifecycle streams may resume after this foreground callback. Fence ended
     // or dismissed native instances before re-submitting their cached tokens.
     let live = Set(Activity<LodyActivityAttributes>.activities.filter {
@@ -97,6 +106,7 @@ final class LiveActivities {
       unregister(id, reason: "recovery_not_active")
     }
     registrations.recover()
+    if PushNotifications.shared.lanMode { LanPush.shared.sync() }
   }
 
   // Called before OneSignal switches identity to invalidate old observers and queue cleanup.
@@ -121,26 +131,58 @@ final class LiveActivities {
   private func removePushToStart() {
     pushToStartTask?.cancel()
     pushToStartTask = nil
-    guard PushNotifications.shared.configured else { return }
     Self.diagnostic("push_to_start_remove")
-    OneSignal.LiveActivities.removePushToStartToken(LodyActivityAttributes.self)
+    publishPushToStart(nil)
   }
 
   private func registerPushToStart() {
-    guard PushNotifications.shared.configured, let owner = userId, !owner.isEmpty,
+    guard PushNotifications.shared.providerReady, let owner = userId, !owner.isEmpty,
           enabled, pushToStartTask == nil, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
     pushToStartTask = Task { @MainActor in
       guard !Task.isCancelled, enabled, userId == owner else { return }
       if let token = Activity<LodyActivityAttributes>.pushToStartToken {
         Self.diagnostic("push_to_start_token", fields: ["source": "current"])
-        OneSignal.LiveActivities.setPushToStartToken(LodyActivityAttributes.self, withToken: Self.hex(token))
+        publishPushToStart(token)
       }
       for await token in Activity<LodyActivityAttributes>.pushToStartTokenUpdates {
         guard !Task.isCancelled, enabled, userId == owner else { return }
         Self.diagnostic("push_to_start_token", fields: ["source": "stream"])
-        OneSignal.LiveActivities.setPushToStartToken(LodyActivityAttributes.self, withToken: Self.hex(token))
+        publishPushToStart(token)
       }
     }
+  }
+
+  // MARK: Token delivery: OneSignal for Lody Cloud, the hub for a LAN.
+
+  private func publishPushToStart(_ token: Data?) {
+    if PushNotifications.shared.lanMode {
+      LanPush.shared.setPushToStart(token)
+      return
+    }
+    guard PushNotifications.shared.configured, !PushNotifications.shared.lanMode else { return }
+    if let token {
+      OneSignal.LiveActivities.setPushToStartToken(LodyActivityAttributes.self, withToken: Self.hex(token))
+    } else {
+      OneSignal.LiveActivities.removePushToStartToken(LodyActivityAttributes.self)
+    }
+  }
+
+  private func publishEnter(_ id: String, token: Data) {
+    if PushNotifications.shared.lanMode {
+      LanPush.shared.enter(id, token: token)
+      return
+    }
+    guard PushNotifications.shared.configured else { return }
+    OneSignal.LiveActivities.enter(id, withToken: Self.hex(token))
+  }
+
+  private func publishExit(_ id: String) {
+    if PushNotifications.shared.lanMode {
+      LanPush.shared.exit(id)
+      return
+    }
+    guard PushNotifications.shared.configured, !PushNotifications.shared.lanMode else { return }
+    OneSignal.LiveActivities.exit(id)
   }
 
   func sync(catalogJSON: String, workspaceId: String, workspaceSlug: String, workspaceName: String, userId: String) {
@@ -150,13 +192,25 @@ final class LiveActivities {
     endStale(keeping: id)
     guard let root = try? JSONSerialization.jsonObject(with: Data(catalogJSON.utf8)) as? [String: Any],
           let sessions = root["sessions"] as? [[String: Any]] else { return }
-    var state = LiveActivityCatalog.state(sessions: sessions, labels: Self.labels)
+    var state = LiveActivityCatalog.state(sessions: sessions, labels: Self.labels, requireHeartbeat: PushNotifications.shared.lanMode)
     if !state.isActive, Activity<LodyActivityAttributes>.activities.contains(where: {
       Self.id(of: $0) == id && ($0.activityState == .active || $0.activityState == .stale)
     }) {
       Self.diagnostic("catalog_inactive", id: id, fields: ["sessions": String(sessions.count)])
     }
     let failed = LiveActivityCatalog.failedSessionIds(sessions: sessions)
+    // A machine that drops off writes nothing more, so the catalog may never
+    // change again; judge it once more when its heartbeat expires.
+    heartbeatTask?.cancel()
+    heartbeatTask = nil
+    if PushNotifications.shared.lanMode, let expiry = LiveActivityCatalog.nextHeartbeatExpiry(sessions: sessions) {
+      let wait = max(0, expiry - Date().timeIntervalSince1970 * 1000) + 1000
+      heartbeatTask = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000))
+        guard !Task.isCancelled else { return }
+        sync(catalogJSON: catalogJSON, workspaceId: workspaceId, workspaceSlug: workspaceSlug, workspaceName: workspaceName, userId: userId)
+      }
+    }
     pinWorkStarts(&state)
     let attributes = LodyActivityAttributes(
       workspaceId: workspaceId,
@@ -205,7 +259,8 @@ final class LiveActivities {
     for activity in existing {
       guard !Task.isCancelled else { return }
       if state.isActive {
-        await activity.update(content)
+        let detailed = LiveActivityCatalog.carryingRemoteDetail(summary, from: activity.content.state)
+        await activity.update(ActivityContent(state: detailed, staleDate: content.staleDate))
       } else {
         diagnostic("end_requested", id: id, fields: ["reason": "catalog_inactive", "native": correlation(activity.id)])
         if !isDebug(attributes) { await shared.unregister(id, reason: "catalog_inactive") }
@@ -230,6 +285,31 @@ final class LiveActivities {
       }
     } catch {
       diagnostic("create_failed", id: id, fields: ["code": String((error as NSError).code)])
+    }
+  }
+
+  /// A request answered from the activity: drop its buttons at once rather than
+  /// waiting for the agent to resume and the host to say so.
+  func markAnswered(sessionId: String, owner: String?) {
+    let running = Self.labels.running
+    Task {
+      for activity in Activity<LodyActivityAttributes>.activities
+        where activity.activityState == .active || activity.activityState == .stale {
+        guard activity.attributes.userId == owner || (owner == nil && Self.isDebug(activity.attributes)) else { continue }
+        var state = activity.content.state
+        guard let index = state.items.firstIndex(where: { $0.id == sessionId && ($0.status == .permission || $0.status == .question) }) else { continue }
+        let previous = state.items[index].status
+        state.items[index].status = .running
+        state.items[index].statusLabel = running
+        state.items[index].permissionOptions = nil
+        state.items[index].permissionRequestId = nil
+        state.items[index].permissionCommand = nil
+        if previous == .permission { state.statusCounts.permission = max(0, state.statusCounts.permission - 1) }
+        if previous == .question { state.statusCounts.question = max(0, state.statusCounts.question - 1) }
+        state.statusCounts.running += 1
+        state.permissionAlert = nil
+        await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
+      }
     }
   }
 
@@ -310,6 +390,8 @@ final class LiveActivities {
 
   func endAll(reason: String = "explicit_end_all") {
     syncTask?.cancel()
+    heartbeatTask?.cancel()
+    heartbeatTask = nil
     let ids = Set(tokenTasks.keys).union(Activity<LodyActivityAttributes>.activities
       .filter { !Self.isDebug($0.attributes) }.map { Self.id(of: $0) })
     for id in ids { unregister(id, reason: reason) }
@@ -373,10 +455,24 @@ final class LiveActivities {
       }
       return
     }
-    guard PushNotifications.shared.configured,
+    guard PushNotifications.shared.providerReady,
           activity.activityState == .active || activity.activityState == .stale else { return }
     if let current = tokenTasks[id] {
       guard current.nativeId != activity.id else { return }
+      // One activity per workspace. A LAN host may start one while the app is
+      // starting its own; the one already followed stays and the newcomer goes.
+      let kept = current.nativeId
+      if PushNotifications.shared.lanMode, Activity<LodyActivityAttributes>.activities.contains(where: {
+        $0.id == kept && ($0.activityState == .active || $0.activityState == .stale)
+      }) {
+        let duplicate = activity.id
+        Task.detached {
+          for extra in Activity<LodyActivityAttributes>.activities where extra.id == duplicate {
+            await extra.end(nil, dismissalPolicy: .immediate)
+          }
+        }
+        return
+      }
       stopObserving(id)
     }
     let stamp = UUID()
@@ -458,12 +554,26 @@ final class LiveActivities {
       elapsed: String(localized: "native.liveActivity.caption.elapsed", bundle: .lody),
       waiting: String(localized: "native.liveActivity.caption.waiting", bundle: .lody),
       took: String(localized: "native.liveActivity.caption.took", bundle: .lody),
+      allow: String(localized: "native.liveActivity.allow", bundle: .lody),
+      deny: String(localized: "native.liveActivity.deny", bundle: .lody),
       smallAttention: String(localized: "native.liveActivity.small.attention", bundle: .lody),
       smallWaiting: String(localized: "native.liveActivity.small.waiting", bundle: .lody),
       smallDone: String(localized: "native.liveActivity.small.done", bundle: .lody),
       smallFailed: String(localized: "native.liveActivity.small.failed", bundle: .lody),
       smallStale: String(localized: "native.liveActivity.small.stale", bundle: .lody)
     )
+  }
+
+  /// Widget copy for activities the LAN hub updates while the app sleeps.
+  var remoteCopy: [String: String] {
+    guard let data = try? JSONEncoder().encode(Self.widgetCopy),
+          let copy = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return [:] }
+    return copy
+  }
+
+  var remoteLabels: [String: String] {
+    let labels = Self.labels
+    return ["permission": labels.permission, "question": labels.permission, "running": labels.running, "unread": labels.completed]
   }
 
   private static func hex(_ token: Data) -> String {
@@ -513,12 +623,14 @@ final class LiveActivities {
     _ agent: String,
     _ updatedAt: Double,
     startedAgo: Double,
-    command: String? = nil
+    command: String? = nil,
+    activity: String? = nil,
+    thought: String? = nil
   ) -> LodyActivityAttributes.ContentState.Item {
-    return LodyActivityAttributes.ContentState.Item(
+    var item = LodyActivityAttributes.ContentState.Item(
       id: id,
       status: status,
-      statusLabel: String(localized: String.LocalizationValue("native.liveActivity.status." + status.rawValue), bundle: .lody),
+      statusLabel: String(localized: String.LocalizationValue("native.liveActivity.status.\(status.rawValue), bundle: .lody)"),
       permissionRequestId: command == nil ? nil : "debug-request",
       permissionCommand: command,
       agentLogoKind: agent == "CC" ? "claude" : "codex",
@@ -528,6 +640,16 @@ final class LiveActivities {
       updatedAtLabel: String(localized: "native.liveActivity.debug.updatedAt", bundle: .lody),
       startedAt: updatedAt - startedAgo * 1000
     )
+    item.machineName = String(localized: "native.liveActivity.debug.machine", bundle: .lody)
+    item.activity = activity
+    item.thought = thought
+    if command != nil {
+      item.permissionOptions = [
+        .init(id: "debug-allow", label: String(localized: "native.liveActivity.allow", bundle: .lody), kind: "allow_once"),
+        .init(id: "debug-deny", label: String(localized: "native.liveActivity.deny", bundle: .lody), kind: "reject_once"),
+      ]
+    }
+    return item
   }
 
   private nonisolated static func debugState(permission: Bool = false) -> LodyActivityAttributes.ContentState {
@@ -539,23 +661,34 @@ final class LiveActivities {
       "CX",
       now - 1000,
       startedAgo: 187,
-      command: permission ? "git push origin main --force" : nil
+      command: permission ? "git push origin main --force" : nil,
+      activity: String(localized: "native.liveActivity.debug.activity2", bundle: .lody),
+      thought: String(localized: "native.liveActivity.debug.thought2", bundle: .lody)
     )
     return LodyActivityAttributes.ContentState(
       totalCount: 2,
       statusCounts: .init(permission: permission ? 1 : 0, running: permission ? 1 : 2),
       items: [
-        debugItem("debug-1", .running, String(localized: "native.liveActivity.debug.title1", bundle: .lody), "CC", now, startedAgo: 761),
+        debugItem(
+          "debug-1",
+          .running,
+          String(localized: "native.liveActivity.debug.title1", bundle: .lody),
+          "CC",
+          now,
+          startedAgo: 761,
+          activity: String(localized: "native.liveActivity.debug.activity1", bundle: .lody),
+          thought: String(localized: "native.liveActivity.debug.thought1", bundle: .lody)
+        ),
         second,
       ],
       permissionAlert: permission
         ? .init(title: String(localized: "native.liveActivity.debug.alertTitle", bundle: .lody), body: "git push origin main --force")
         : nil,
-      copy: debugCopy
+      copy: widgetCopy
     )
   }
 
-  private nonisolated static var debugCopy: LodyActivityAttributes.ContentState.Copy {
+  private nonisolated static var widgetCopy: LodyActivityAttributes.ContentState.Copy {
     var copy = LodyActivityAttributes.ContentState.Copy(stale: labels.stale, empty: labels.empty, others: labels.others, lastSync: labels.lastSync, openHint: labels.openHint)
     copy.runningSummary = labels.runningSummary
     copy.completedSummary = labels.completedSummary
@@ -565,6 +698,8 @@ final class LiveActivities {
     copy.elapsed = labels.elapsed
     copy.waiting = labels.waiting
     copy.took = labels.took
+    copy.allow = labels.allow
+    copy.deny = labels.deny
     copy.smallAttention = labels.smallAttention
     copy.smallWaiting = labels.smallWaiting
     copy.smallDone = labels.smallDone
