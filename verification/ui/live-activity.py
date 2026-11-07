@@ -3,6 +3,7 @@
 iOS hides a Live Activity from the Dynamic Island while its own app is in the
 foreground, so every island capture backgrounds the app first.
 """
+from driver import BUNDLE_ID
 import re
 import subprocess
 import sys
@@ -29,7 +30,7 @@ def foreground():
     # Let the Home/Island dismissal finish before requesting activation; launching
     # during that transition can return the existing pid and still land on Home.
     time.sleep(1)
-    subprocess.run(['xcrun', 'simctl', 'launch', udid, 'app.innei.lody'], check=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'launch', udid, BUNDLE_ID], check=True, timeout=30)
     ui.element('live-activity-status')
 
 

@@ -1,4 +1,5 @@
 """Settings choices update in place through native pop-up menus."""
+from driver import BUNDLE_ID
 import sys
 import plistlib
 import re
@@ -37,8 +38,8 @@ def open_color_picker():
     time.sleep(2)
 
 
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
-prefs = container / 'Library/Preferences/app.innei.lody.plist'
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
+prefs = container / f'Library/Preferences/{BUNDLE_ID}.plist'
 def saved_color():
     return plistlib.loads(prefs.read_bytes()).get('accentColor', '')
 
@@ -52,8 +53,8 @@ ui.wait(lambda _: re.fullmatch(r'#[0-9A-F]{6}', saved_color()), 'Custom color wa
 custom = saved_color()
 ui.capture('custom-selected')
 # Cold launch proves native startup restore the persisted choice.
-subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, 'app.innei.lody'], check=True)
-launch = ['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody', '--ui-verify']
+subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, BUNDLE_ID], check=True)
+launch = ['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID, '--ui-verify']
 subprocess.run(launch, check=True)
 ui.invalidate_axe()
 ui.element('ui-verify-ready', timeout=120)

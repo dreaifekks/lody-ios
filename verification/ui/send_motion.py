@@ -1,4 +1,5 @@
 """Check committed animation samples, including the window-to-cell handoff."""
+from driver import BUNDLE_ID
 import json
 import math
 from pathlib import Path
@@ -29,7 +30,7 @@ def project(point, path, cumulative):
 class ThrowTrace:
     def __init__(self, ui):
         self.ui = ui
-        container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+        container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
         self.folder = Path(container) / 'tmp'
         self.existing = set(self.folder.glob('lody-throw-*.json'))
 

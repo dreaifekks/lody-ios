@@ -4,6 +4,7 @@ Visual gate: compare run.mp4 with Settings. Search must blur/fade, not disappear
 abruptly; its retiring glass must not reappear or remain after the transition.
 The accessibility assertions below only establish settled ownership/usability.
 """
+from driver import BUNDLE_ID
 import json
 from pathlib import Path
 import shutil
@@ -15,7 +16,7 @@ import catalog
 from driver import UI
 
 ui = UI(sys.argv[1], sys.argv[2])
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 existing = set((container / 'tmp').glob('lody-scroll-*.json'))
 search_label = catalog.text('search.field.placeholder')
 

@@ -1,5 +1,8 @@
 """Native workers run concurrently and retain evidence when a sibling fails."""
 import json
+import os
+import plistlib
+import driver
 from pathlib import Path
 import shlex
 import subprocess
@@ -15,6 +18,22 @@ from orchestrator import run_batches
 
 
 class RunnerTest(unittest.TestCase):
+    def test_built_app_identity_overrides_environment_and_reaches_child_cases(self):
+        old = driver.BUNDLE_ID, driver.APP_GROUP
+        try:
+            with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'LODY_VERIFY_BUNDLE_ID': 'wrong-app'}):
+                app = Path(directory)
+                (app / 'Info.plist').write_bytes(plistlib.dumps({
+                    'CFBundleIdentifier': 'com.dreaife.lody', 'LodyAppGroup': 'group.com.dreaife.lody',
+                }))
+                self.assertEqual(driver.configure_app(app), ('com.dreaife.lody', 'group.com.dreaife.lody'))
+                result = subprocess.check_output([
+                    sys.executable, '-c', 'import driver; print(driver.BUNDLE_ID, driver.APP_GROUP)',
+                ], cwd=Path(__file__).parent, text=True)
+                self.assertEqual(result.strip(), 'com.dreaife.lody group.com.dreaife.lody')
+        finally:
+            driver.BUNDLE_ID, driver.APP_GROUP = old
+
     def test_native_catalog_formats_arguments_and_plural_variants(self):
         self.assertEqual(catalog.text('native.chat.attachment.preview', name='{name} 100%'), 'Preview attachment {name} 100%')
         self.assertEqual(catalog.plural('changes.fileCount', 1), '1 file')

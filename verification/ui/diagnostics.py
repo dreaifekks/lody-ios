@@ -1,4 +1,5 @@
 """Production diagnostic UI and native rolling files, with isolated offline events."""
+from driver import BUNDLE_ID
 import json
 from pathlib import Path
 import shutil
@@ -53,7 +54,7 @@ ui.axe('tap', '--id', 'diagnostics-export')
 label(catalog.text('diagnostics.exportFailed'))
 count(5)
 ui.capture('diagnostics-export-failed')
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 previous_exports = set((container / 'tmp/LodyDiagnostics').glob('*/diagnostics.txt'))
 ui.axe('tap', '--id', 'diagnostics-export')
 ui.element('ActivityListView')

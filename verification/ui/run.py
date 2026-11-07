@@ -1,4 +1,5 @@
 """Run offline UI baselines on a managed Simulator lease; see README.md."""
+from driver import BUNDLE_ID, configure_app
 import argparse
 import json
 import os
@@ -309,6 +310,7 @@ parser.add_argument(
     help='Require a captured run.mp4; --suite core defaults to off',
 )
 args = parser.parse_args()
+BUNDLE_ID, _ = configure_app(args.app)
 if args.parallel and args.udid:
     parser.error('--parallel owns its Simulator leases; omit --udid')
 os.environ['LODY_UI_PHOTO_ACCESS'] = args.photo_access
@@ -376,8 +378,8 @@ def terminate_app():
     # Reinstall/reset can already have stopped the app. Some runtime versions
     # wait indefinitely when asked to terminate an absent UIKit process.
     running = sim('spawn', args.udid, 'launchctl', 'list').stdout.splitlines()
-    if any(line.split()[0].isdigit() and 'UIKitApplication:app.innei.lody[' in line for line in running):
-        sim('terminate', args.udid, 'app.innei.lody', check=False)
+    if any(line.split()[0].isdigit() and f'UIKitApplication:{BUNDLE_ID}[' in line for line in running):
+        sim('terminate', args.udid, BUNDLE_ID, check=False)
 
 results = []
 links_ready = False
@@ -408,7 +410,7 @@ try:
     if 'workspace-general' in selected or any(case.startswith('attachment-motion-') for case in selected) or (args.photo_access in ['full', 'limited', 'granted'] and any(case.startswith('attachment-overlay-') for case in selected)):
         # Photos outlives app launches. Seed once per app container so repeats
         # don't fill the grid with duplicates or reinitialize the photo service.
-        container = Path(sim('get_app_container', args.udid, 'app.innei.lody', 'data').stdout.strip())
+        container = Path(sim('get_app_container', args.udid, BUNDLE_ID, 'data').stdout.strip())
         seeded = container / 'Library/Caches/lody-ui-photo-fixture-v3'
         if not seeded.exists():
             terminate_app()
@@ -441,21 +443,21 @@ try:
                     terminate_app()
                     launch_mode = None
                     if args.camera_access != 'fixture':
-                        sim('privacy', args.udid, 'reset', 'camera', 'app.innei.lody')
+                        sim('privacy', args.udid, 'reset', 'camera', BUNDLE_ID)
                 if case.startswith(('attachment-overlay-', 'attachment-motion-')):
                     terminate_app()
                     grant_photos = case.startswith('attachment-motion-') or args.photo_access == 'granted'
-                    sim('privacy', args.udid, 'grant' if grant_photos else 'reset', 'photos', 'app.innei.lody')
+                    sim('privacy', args.udid, 'grant' if grant_photos else 'reset', 'photos', BUNDLE_ID)
                     launch_mode = None
                 mode = (case in HOME_CASES, case in ('smooth-scroll', 'chat-performance'), case in ('camera-chat', 'camera-sheet'))
                 if case == 'chat-performance':
-                    container = Path(sim('get_app_container', args.udid, 'app.innei.lody', 'data').stdout.strip())
+                    container = Path(sim('get_app_container', args.udid, BUNDLE_ID, 'data').stdout.strip())
                     (container / 'tmp/lody-chat-loading.json').unlink(missing_ok=True)
                 restart = True
                 if restart:
                     result['appLifecycle'] = 'launch'
                     terminate_app()
-                    launch = ['launch', args.udid, 'app.innei.lody', '--ui-verify']
+                    launch = ['launch', args.udid, BUNDLE_ID, '--ui-verify']
                     if case in HOME_CASES:
                         launch.append('--ui-verify-home')
                     if case in {'session-search', 'session-search-pad'}:
@@ -463,7 +465,7 @@ try:
                     if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
                         launch.append('--ui-verify-mentions')
                     if mode[2] or (case.startswith('attachment-camera-') and args.camera_access == 'fixture'):
-                        sim('privacy', args.udid, 'reset', 'photos', 'app.innei.lody')
+                        sim('privacy', args.udid, 'reset', 'photos', BUNDLE_ID)
                         launch.append('--ui-verify-camera')
                     if case.startswith('attachment-motion-'):
                         launch.append('--ui-verify-camera')
@@ -481,7 +483,7 @@ try:
                     sim(*launch)
                     launch_mode = mode
                 processes = sim('spawn', args.udid, 'launchctl', 'list').stdout.splitlines()
-                result['appPid'] = next((line.split()[0] for line in processes if 'UIKitApplication:app.innei.lody[' in line), None)
+                result['appPid'] = next((line.split()[0] for line in processes if f'UIKitApplication:{BUNDLE_ID}[' in line), None)
                 assert result['appPid'], 'Lody process is missing'
                 if result['appLifecycle'] == 'return-to-root':
                     assert result['appPid'] == app_pid, 'Returning to root unexpectedly replaced the App process'

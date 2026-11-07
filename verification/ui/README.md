@@ -79,3 +79,10 @@ No desktop credentials, real turns or private user data belong in fixtures.
 For visual/interaction requirement alignment only, export a finished run with
 `acceptance-round.py` and ingest its claims through the acceptance tool. Ordinary
 regression runs remain programmatic gates and are not ingested.
+
+The runner reads `CFBundleIdentifier` and `LodyAppGroup` from the selected app's
+Info.plist and passes that identity to child cases, including Share probes.
+Standalone scripts without an `--app` input use `LODY_VERIFY_BUNDLE_ID` (or the
+prebuild `LODY_BUNDLE_ID`) and `LODY_VERIFY_APP_GROUP`. The rotation probe's
+`app.innei.lody.verify.width` string is a fixed Darwin notification protocol,
+not an installed app identifier.

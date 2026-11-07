@@ -1,4 +1,5 @@
 """Whole-message actions and the actual exported warm-paper JPG, without cloud access."""
+from driver import BUNDLE_ID
 import shutil
 import re
 import subprocess
@@ -8,7 +9,7 @@ from driver import UI
 import catalog
 
 ui = UI(*sys.argv[1:])
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 
 def menu():
     ui.axe('tap', '--id', 'paper-reply:meta:actions')

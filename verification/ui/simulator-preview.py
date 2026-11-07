@@ -1,5 +1,6 @@
 """The overflow menu opens a picked device; one live decoder survives full-screen/back,
 dragging and typing; close hides it, choosing another device replaces it, stop ends it."""
+from driver import BUNDLE_ID
 import re
 import sys
 import json
@@ -12,7 +13,7 @@ import catalog
 
 ui = UI(*sys.argv[1:])
 container = Path(subprocess.check_output(
-    ['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+    ['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 traces = container / 'tmp'
 entrances = 0
 

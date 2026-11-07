@@ -1,4 +1,5 @@
 """Native session simulator navigation borrows and returns one chat-owned decoder."""
+from driver import BUNDLE_ID
 import json
 import re
 import subprocess
@@ -9,7 +10,7 @@ import catalog
 
 ui = UI(*sys.argv[1:])
 container = Path(subprocess.check_output(
-    ['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+    ['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 traces = container / 'tmp'
 
 

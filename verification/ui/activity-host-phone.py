@@ -3,6 +3,7 @@
 Run in a verify:simulator lease after installing LodyActivityVerify. This checks
 Widget presentation, not the full app's catalog, push delivery or route handling.
 """
+from driver import BUNDLE_ID
 import json
 import os
 from pathlib import Path
@@ -23,7 +24,7 @@ def sim(*args):
 
 
 def select(name):
-    sim('launch', '--terminate-running-process', udid, 'app.innei.lody', '-fixture', name, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
+    sim('launch', '--terminate-running-process', udid, BUNDLE_ID, '-fixture', name, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
     ui.invalidate_axe()
     expected = 'Ended' if name == 'end' else f'Showing {name}'
     ui.wait(lambda items: any(i.get('AXLabel') == expected for i in items), f'ActivityKit did not accept {name}')

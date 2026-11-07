@@ -1,4 +1,5 @@
 """Production Markdown supports code copy, selection, and clipped, horizontally scrolling tables."""
+from driver import BUNDLE_ID
 import json
 import subprocess
 import sys
@@ -13,7 +14,7 @@ ui = UI(*sys.argv[1:])
 
 def table_bleed_path():
     container = subprocess.check_output(
-        ['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'],
+        ['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'],
         text=True,
         timeout=10,
     ).strip()

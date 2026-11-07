@@ -1,4 +1,5 @@
 """Replay identical 300 synthetic TPS fixtures through the production native path."""
+from driver import BUNDLE_ID
 import json
 from pathlib import Path
 import shutil
@@ -9,7 +10,7 @@ from driver import UI
 
 ui = UI(sys.argv[1], sys.argv[2])
 container = Path(subprocess.check_output(
-    ['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
+    ['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
 reports = container / 'tmp'
 summary = []
 

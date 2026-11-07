@@ -1,4 +1,5 @@
 """Real native links open catalog sessions above one Home, including repeated opens and cold starts."""
+from driver import BUNDLE_ID
 import json
 import os
 import subprocess
@@ -75,9 +76,9 @@ home('initial-home')
 # Recreate the process with the same offline launch contract to cover startup
 # ordering between native header configuration and the workspace props.
 for index in range(2 if embedded else 3):
-    subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'app.innei.lody'], check=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'terminate', udid, BUNDLE_ID], check=True, timeout=30)
     ui.invalidate_axe()
-    launch = ['xcrun', 'simctl', 'launch', udid, 'app.innei.lody', '--ui-verify', '--ui-verify-home',
+    launch = ['xcrun', 'simctl', 'launch', udid, BUNDLE_ID, '--ui-verify', '--ui-verify-home',
               '-AppleLanguages', f'({catalog.LANGUAGE})',
               '-AppleLocale', 'en_US' if catalog.LANGUAGE == 'en' else 'zh_CN']
     subprocess.run(launch, check=True, timeout=30)

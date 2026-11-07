@@ -1,4 +1,5 @@
 """Production composer overlay in both hosts; actual Simulator Photos fixture."""
+from driver import BUNDLE_ID
 import os
 import sys
 import subprocess
@@ -104,7 +105,7 @@ if mode in ['denied', 'settings']:
     ui.capture('settings-opened')
     # Return without changing authorization: iOS may kill the app when privacy
     # changes, which is a cold launch rather than a live overlay continuation.
-    subprocess.run(['xcrun','simctl','launch',ui.udid,'app.innei.lody'],check=True,timeout=30)
+    subprocess.run(['xcrun','simctl','launch',ui.udid,BUNDLE_ID],check=True,timeout=30)
     access = ui.element('attachment-photos-access')
     assert access.get('AXLabel') == catalog.text('native.chat.attachment.openSettings')
     assert ui.element(field).get('AXValue') == draft

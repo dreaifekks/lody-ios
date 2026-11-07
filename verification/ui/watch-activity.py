@@ -4,6 +4,7 @@ This does not claim ActivityKit/Smart Stack forwarding. That needs the paired
 phone flow described in activity-host/README.md. Every capture retains its AX
 hierarchy and the fixture label on screen, so provenance is unambiguous.
 """
+from driver import BUNDLE_ID, configure_app
 import argparse
 import json
 import os
@@ -16,6 +17,7 @@ parser.add_argument('--app', required=True, type=Path)
 parser.add_argument('--output', required=True, type=Path)
 parser.add_argument('--udid', default=os.environ.get('LODY_VERIFY_UDID'))
 args = parser.parse_args()
+BUNDLE_ID, _ = configure_app(args.app)
 if not args.udid:
     parser.error('Run inside pnpm verify:simulator --device watch (or watch-small)')
 args.output.mkdir(parents=True, exist_ok=True)
@@ -45,7 +47,7 @@ for name, title in [
 ]:
     fixture = name.removesuffix('-aod')
     start = time.monotonic()
-    sim('launch', '--terminate-running-process', args.udid, 'app.innei.lody.small-activity-verify',
+    sim('launch', '--terminate-running-process', args.udid, BUNDLE_ID,
         '-fixture', fixture, '-reduced', 'YES' if name.endswith('-aod') else 'NO',
         '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
     deadline = time.monotonic() + 45

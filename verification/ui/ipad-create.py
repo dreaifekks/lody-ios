@@ -1,4 +1,5 @@
 """Create two native sessions across iPad orientations without losing the composer."""
+from driver import BUNDLE_ID
 import json
 from pathlib import Path
 import subprocess
@@ -10,7 +11,7 @@ import rotation
 
 ui = UI(*sys.argv[1:])
 container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid,
-                                        'app.innei.lody', 'data'], text=True).strip())
+                                        BUNDLE_ID, 'data'], text=True).strip())
 report = container / 'tmp/lody-production-composer-relay.json'
 for orientation in ['landscape', 'portrait']:
     if ui.visible_keyboard(ui.state()):

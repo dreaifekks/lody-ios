@@ -1,4 +1,5 @@
 """Real WebView lifecycle and short UIKit background allowance; no cloud or credentials."""
+from driver import BUNDLE_ID
 import json
 from pathlib import Path
 import subprocess
@@ -23,7 +24,7 @@ def tap(name):
     ui.axe('tap', '--id', 'background-' + name, '--tap-style', 'physical')
 
 def foreground():
-    subprocess.run(['xcrun', 'simctl', 'launch', udid, 'app.innei.lody'], check=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'launch', udid, BUNDLE_ID], check=True, timeout=30)
 
 try:
     tap('start')

@@ -7,6 +7,7 @@ disabled. With a fixture App Group snapshot: the shared text fills the native fo
 Send writes one inbox entry carrying the chosen agent, and Lody comes forward.
 The model switch also carries an explicit false value into the shared draft.
 """
+from driver import BUNDLE_ID, configure_app
 import argparse
 import json
 import os
@@ -35,6 +36,7 @@ if not args.udid:
     raise SystemExit(run_with_simulator(SimulatorPool(), 'Share Probe', [sys.executable, __file__, *sys.argv[1:]]))
 
 app = Path(args.app).resolve()
+BUNDLE_ID, APP_GROUP = configure_app(app)
 assert (app / 'PlugIns/LodyShare.appex').is_dir(), 'Build the Share Extension target first'
 output = Path(args.output).resolve()
 output.mkdir(parents=True, exist_ok=True)
@@ -47,7 +49,7 @@ def sim(*command, **kwargs):
 host = output / 'ShareProbeHost.app'
 host.mkdir(exist_ok=True)
 (host / 'Info.plist').write_bytes(plistlib.dumps({
-    'CFBundleIdentifier': 'app.innei.lody.share-probe-host',
+    'CFBundleIdentifier': BUNDLE_ID + '.share-probe-host',
     'CFBundleExecutable': 'ShareProbeHost',
     'CFBundleName': 'ShareProbeHost',
     'CFBundlePackageType': 'APPL',
@@ -76,11 +78,11 @@ subprocess.run(['codesign', '--force', '--sign', '-', str(host)], check=True, ti
 sim('install', args.udid, str(app))
 sim('install', args.udid, str(host))
 sim('ui', args.udid, 'appearance', args.appearance)
-for bundle in ['app.innei.lody.share', 'app.innei.lody.share-probe-host']:
+for bundle in [BUNDLE_ID + '.share', BUNDLE_ID + '.share-probe-host']:
     sim('spawn', args.udid, 'defaults', 'write', bundle, 'AppleLanguages', '-array', 'en')
     sim('spawn', args.udid, 'defaults', 'write', bundle, 'AppleLocale', 'en_US')
 group = Path(subprocess.check_output(
-    ['xcrun', 'simctl', 'get_app_container', args.udid, 'app.innei.lody', 'group.app.innei.lody'], text=True).strip())
+    ['xcrun', 'simctl', 'get_app_container', args.udid, BUNDLE_ID, APP_GROUP], text=True).strip())
 store = group / 'Library/LodyShare'
 ui = UI(args.udid, output)
 
@@ -93,9 +95,9 @@ def flatten(node):
 
 def open_extension(name):
     # The containing app stays stopped; the system hosts only its extension.
-    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, 'app.innei.lody'], capture_output=True, timeout=30)
-    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, 'app.innei.lody.share-probe-host'], capture_output=True, timeout=30)
-    sim('launch', args.udid, 'app.innei.lody.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
+    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID], capture_output=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID + '.share-probe-host'], capture_output=True, timeout=30)
+    sim('launch', args.udid, BUNDLE_ID + '.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
     ui.element('share-probe-host.open')
     ui.axe('tap', '--id', 'share-probe-host.open', '--tap-style', 'physical', '--post-delay', '1')
     ui.capture(f'{name}-tray')

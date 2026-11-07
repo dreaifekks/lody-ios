@@ -1,4 +1,5 @@
 """Preferences stay local, survive restart, and push native notification settings."""
+from driver import BUNDLE_ID
 import plistlib
 import subprocess
 import sys
@@ -33,8 +34,8 @@ assert ui.element('notifications')['frame']['height'] >= 44
 assert ui.element('quick-replies')['frame']['height'] >= 44
 choose('queue')
 choose('guide')
-container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip())
-prefs = container / 'Library/Preferences/app.innei.lody.plist'
+container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip())
+prefs = container / f'Library/Preferences/{BUNDLE_ID}.plist'
 
 
 def saved():
@@ -55,9 +56,9 @@ ui.axe('drag', '--start-x', '2', '--start-y', '450', '--end-x', '365',
 assert ui.element('queued-message-behavior')['AXValue'] == catalog.text('settings.queuedMessageBehavior.guide')
 ui.capture('notification-returned')
 
-subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, 'app.innei.lody'], check=True, timeout=30)
+subprocess.run(['xcrun', 'simctl', 'terminate', ui.udid, BUNDLE_ID], check=True, timeout=30)
 ui.invalidate_axe()
-launch = ['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody', '--ui-verify', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US']
+launch = ['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID, '--ui-verify', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US']
 subprocess.run(launch, check=True, timeout=30)
 ui.element('ui-verify-ready', timeout=90)
 ui.open_case('preferences-preview')
@@ -85,14 +86,14 @@ if not any(i.get('AXUniqueId') == 'PREFERRED_LANGUAGE' for i in ui.state()):
     for attempt in range(3):
         ui.axe('tap', '--id', 'com.apple.settings.apps', '--post-delay', '.4')
         try:
-            ui.element('app.innei.lody', timeout=20)
+            ui.element(BUNDLE_ID, timeout=20)
             break
         except AssertionError:
             ui.capture(f'language-apps-empty-{attempt}')
             if attempt == 2:
                 raise
             ui.axe('tap', '--id', 'BackButton', '--post-delay', '.6')
-    ui.axe('tap', '--id', 'app.innei.lody', '--post-delay', '.4')
+    ui.axe('tap', '--id', BUNDLE_ID, '--post-delay', '.4')
 language = ui.element('PREFERRED_LANGUAGE')
 assert 'English' in language['AXLabel']
 ui.capture('language-system-settings')
@@ -103,7 +104,7 @@ ui.capture('language-system-choices')
 ui.axe('tap', '--id', 'BackButton', '--post-delay', '.4')
 assert 'English' in ui.element('PREFERRED_LANGUAGE')['AXLabel']
 ui.capture('language-selection-cancelled')
-subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'app.innei.lody'], check=True, timeout=30)
+subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID], check=True, timeout=30)
 ui.invalidate_axe()
 assert ui.element('language')['AXValue'] == 'English'
 assert ui.element('queued-message-behavior')['AXValue'] == catalog.text('settings.queuedMessageBehavior.guide')

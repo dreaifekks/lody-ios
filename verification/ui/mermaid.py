@@ -1,4 +1,5 @@
 """Pele Mermaid diagrams render in Markdown documents, keep source, and fail into a readable block."""
+from driver import BUNDLE_ID
 import json
 import subprocess
 import sys
@@ -7,7 +8,7 @@ from driver import UI
 import catalog
 
 ui = UI(*sys.argv[1:])
-container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
 probe = Path(container) / 'tmp/lody-mermaid.json'
 flowchart = 'graph TD\n    A[Start] --> B{Ready?}\n    B -->|Yes| C[Done]\n    B -->|No| A'
 pie = 'pie\n    "Swift" : 60\n    "TypeScript" : 40'

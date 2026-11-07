@@ -1,4 +1,5 @@
 """Interactive HTML, original-path resources and actionable feedback in both file hosts."""
+from driver import BUNDLE_ID
 import json
 import subprocess
 import sys
@@ -6,7 +7,7 @@ from pathlib import Path
 from driver import UI
 
 ui = UI(*sys.argv[1:])
-container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, 'app.innei.lody', 'data'], text=True).strip()
+container = subprocess.check_output(['xcrun', 'simctl', 'get_app_container', ui.udid, BUNDLE_ID, 'data'], text=True).strip()
 probe_path = Path(container) / 'tmp/lody-html-preview.json'
 
 def probe():

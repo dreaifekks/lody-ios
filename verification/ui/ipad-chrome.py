@@ -1,4 +1,5 @@
 """Production iPad search, Glass FAB and chat composer hosts, without cloud."""
+from driver import BUNDLE_ID
 import atexit
 import json
 import subprocess
@@ -32,7 +33,7 @@ def assert_selected(stage, identifier='ui-design', selected=True):
     # AXe 1.8 drops the Selected trait even when UIKit reports traits == 9.
     # Read the real cell, without changing app state or introducing a test API.
     processes = subprocess.check_output(['xcrun', 'simctl', 'spawn', ui.udid, 'launchctl', 'list'], text=True)
-    pid = next(line.split()[0] for line in processes.splitlines() if 'UIKitApplication:app.innei.lody[' in line)
+    pid = next(line.split()[0] for line in processes.splitlines() if f'UIKitApplication:{BUNDLE_ID}[' in line)
     expression = '''({ NSMutableArray *q = [NSMutableArray array];
       NSMutableArray *controllers = [NSMutableArray array];
       for (UIWindowScene *scene in [[UIApplication sharedApplication] connectedScenes]) {

@@ -1,5 +1,6 @@
 """Small shared AXe helpers; every command is bounded and uses an explicit device."""
 import json
+import plistlib
 import os
 import select
 import shlex
@@ -8,6 +9,20 @@ import tempfile
 import time
 from urllib.parse import urlencode
 from pathlib import Path
+
+BUNDLE_ID = os.environ.get('LODY_VERIFY_BUNDLE_ID') or os.environ.get('LODY_BUNDLE_ID', 'app.innei.lody')
+APP_GROUP = os.environ.get('LODY_VERIFY_APP_GROUP', 'group.' + BUNDLE_ID)
+
+
+def configure_app(app):
+    """Use the selected built app's identity for this runner and every child case."""
+    info = plistlib.loads((Path(app) / 'Info.plist').read_bytes())
+    global BUNDLE_ID, APP_GROUP
+    BUNDLE_ID = info['CFBundleIdentifier']
+    APP_GROUP = info['LodyAppGroup']
+    os.environ['LODY_VERIFY_BUNDLE_ID'] = BUNDLE_ID
+    os.environ['LODY_VERIFY_APP_GROUP'] = APP_GROUP
+    return BUNDLE_ID, APP_GROUP
 
 
 def axe_session_dead(error):
