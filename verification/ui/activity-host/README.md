@@ -6,7 +6,7 @@ Cloud, and contain no alternate implementation of the UI.
 
 - `LodyActivityVerify` owns real ActivityKit activities and embeds the production
   `LodyLiveActivity` extension. Use it for Lock Screen, Dynamic Island and paired
-  Watch forwarding. Its bundle identifier is `app.innei.lody`, so install it only
+  Watch forwarding. Its bundle identifier matches the configured app (`LODY_BUNDLE_ID`, default `app.innei.lody`), so install it only
   on a leased verification Simulator. It replaces the product app on that device.
 - `LodySmallActivityVerify` directly hosts `LodySmallActivityView` on watchOS at
   152 × 69.5 and 184 × 80.5 pt. Captures visibly say **Production view fixture**;
