@@ -181,15 +181,21 @@ final class ChatAttachmentCollector: @unchecked Sendable {
 
 final class ChatAttachmentPicker: NSObject, UIDocumentPickerDelegate {
   var onPick: (([ChatAttachment]) -> Void)?
+  var identity: @MainActor () -> String = { "" }
+  private var scope = ""
+  private weak var activePicker: UIDocumentPickerViewController?
 
   func files(from controller: UIViewController) {
     let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
     picker.allowsMultipleSelection = true
     picker.delegate = self
+    scope = identity()
+    activePicker = picker
     controller.present(picker, animated: true)
   }
 
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    guard activePicker === controller, identity() == scope else { return }
     let picked = urls.compactMap { url -> ChatAttachment? in
       guard let copy = ChatAttachment.store(url) else { return nil }
       let name = url.lastPathComponent
@@ -207,6 +213,9 @@ final class ChatAttachmentPicker: NSObject, UIDocumentPickerDelegate {
 
 final class ChatPhotoLibraryPicker: NSObject, PHPickerViewControllerDelegate {
   var onPick: (([ChatAttachment]) -> Void)?
+  var identity: @MainActor () -> String = { "" }
+  private var scope = ""
+  private weak var activePicker: PHPickerViewController?
 
   func present(from controller: UIViewController, fullScreen: Bool = false) {
     var config = PHPickerConfiguration(photoLibrary: .shared())
@@ -215,6 +224,8 @@ final class ChatPhotoLibraryPicker: NSObject, PHPickerViewControllerDelegate {
     config.selectionLimit = 10
     config.selection = .ordered
     let picker = PHPickerViewController(configuration: config)
+    scope = identity()
+    activePicker = picker
     if fullScreen { picker.modalPresentationStyle = .fullScreen }
     picker.delegate = self
     controller.present(picker, animated: true)
@@ -222,6 +233,9 @@ final class ChatPhotoLibraryPicker: NSObject, PHPickerViewControllerDelegate {
 
   func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
     guard !results.isEmpty else { picker.dismiss(animated: true); return }
+    guard activePicker === picker, identity() == scope else { picker.dismiss(animated: true); return }
+    let scope = self.scope
+    let callback = onPick
     let group = DispatchGroup()
     let picked = ChatAttachmentCollector()
     for (index, result) in results.enumerated() {
@@ -241,7 +255,10 @@ final class ChatPhotoLibraryPicker: NSObject, PHPickerViewControllerDelegate {
       let ordered = picked.ordered
       picker.dismiss(animated: true) { [weak self] in
         guard !ordered.isEmpty else { return }
-        self?.onPick?(ordered)
+        guard let self, self.activePicker === picker, self.identity() == scope else {
+          ChatAttachment.discardImports(ordered); return
+        }
+        callback?(ordered)
       }
     }
   }

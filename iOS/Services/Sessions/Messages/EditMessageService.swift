@@ -48,6 +48,10 @@ struct EditMessageService {
   var prepare: @MainActor (EditMessageScope) async throws -> EditMessageDraft
   var send: @MainActor (EditMessageScope, EditMessageSubmission, Set<String>) async throws -> RuntimeContract.EditSessionResult
   var read: @MainActor (EditMessageScope) async throws -> RuntimeContract.EditSessionResult
+  var usesLAN: @MainActor () -> Bool = { LanComposerPolicy.isLAN }
+  var identity: @MainActor () -> String = {
+    (AuthSession.shared.snapshot.account?.user.id ?? "") + ":" + (DataRuntime.current?.attachmentScope ?? "")
+  }
 
   static let live = Self(
     prepare: { scope in

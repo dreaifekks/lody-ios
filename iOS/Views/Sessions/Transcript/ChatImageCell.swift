@@ -1,5 +1,15 @@
 import UIKit
 
+@MainActor
+struct ChatKeptImageService {
+  var file: @MainActor (ChatImage, String, String) async throws -> URL
+  var identity: @MainActor () -> String
+  static let live = ChatKeptImageService(
+    file: { try await LanKeptImages.file($0, workspace: $1, session: $2) },
+    identity: { (AuthSession.shared.snapshot.account?.user.id ?? "") + ":" + (DataRuntime.current?.attachmentScope ?? "") }
+  )
+}
+
 /// A separate row keeps image geometry out of text measurement and message bubbles.
 final class ChatImageCell: UICollectionViewCell, ChatGapCell {
   var gapAbove: CGFloat = 0 {
@@ -7,6 +17,7 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
   }
   private var photo = UIImageView()
   var compact = false
+  var keptImages = ChatKeptImageService.live
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let failure = UILabel()
   private var image: ChatImage?
@@ -16,6 +27,9 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
   private var requestURL: URL?
   private var requestID = UUID()
   private var task: URLSessionDataTask?
+  private var keptTask: Task<Void, Never>?
+  private var keptScope: String?
+  private var cacheObserver: NSObjectProtocol?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -37,6 +51,14 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
     isAccessibilityElement = true
     accessibilityTraits = [.image, .button]
     accessibilityHint = String(localized: "native.chat.image.openPreview", bundle: .lody)
+    cacheObserver = NotificationCenter.default.addObserver(forName: LanKeptImages.didCache, object: nil, queue: .main) { [weak self] event in
+      MainActor.assumeIsolated {
+        guard let self, let image = self.image, self.photo.image == nil,
+          event.userInfo?["sha256"] as? String == image.sha256?.lowercased(),
+          event.userInfo?["scope"] as? String == self.keptImages.identity() else { return }
+        self.loadKeptImage(image)
+      }
+    }
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -48,6 +70,12 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
   func configure(_ row: ChatRow, workspace: String, session: String) {
     guard let image = row.image else { return }
     let hadLocalImage = requestURL?.isFileURL == true && handoffEntryID == row.entryID
+    let contextChanged = self.workspace != workspace || self.session != session
+    let scopeChanged = keptScope.map { $0 != keptImages.identity() } ?? false
+    if self.image != image || contextChanged || scopeChanged {
+      keptTask?.cancel(); keptTask = nil; requestID = UUID()
+      if !hadLocalImage || contextChanged || scopeChanged { requestURL = nil; photo.image = nil }
+    }
     self.image = image
     self.workspace = workspace
     self.session = session
@@ -64,17 +92,24 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
       return
     }
     if LodyUIVerify.enabled, Self.isVerifyImage(image.id) {
+      keptTask?.cancel(); keptTask = nil
       task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
       photo.image = Self.verifyBitmap()
       spinner.stopAnimating(); failure.isHidden = true
       return
     }
     guard !workspace.isEmpty, !session.isEmpty, !image.id.isEmpty else {
+      keptTask?.cancel(); keptTask = nil
       task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
       photo.image = nil; spinner.stopAnimating(); failure.isHidden = false
       return
     }
+    if image.machineId != nil {
+      loadKeptImage(image)
+      return
+    }
     guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else {
+      keptTask?.cancel(); keptTask = nil
       task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
       spinner.stopAnimating(); failure.isHidden = false
       return
@@ -94,6 +129,34 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
     failure.isHidden = true
     guard let token = try? AuthKeychain.read() else { failure.isHidden = false; return }
     fetch(thumbnail, fallback: original, requestID: requestID, token: token)
+  }
+
+  private func loadKeptImage(_ image: ChatImage) {
+    if keptTask != nil || (requestURL?.isFileURL == true && photo.image != nil) { return }
+    let requestID = UUID()
+    self.requestID = requestID
+    let workspace = self.workspace, session = self.session
+    let service = keptImages
+    let scope = service.identity()
+    keptScope = scope
+    task?.cancel(); task = nil; requestURL = nil
+    photo.image = nil; failure.isHidden = true; spinner.startAnimating()
+    keptTask = Task { @MainActor [weak self] in
+      do {
+        let url = try await service.file(image, workspace, session)
+        try Task.checkCancellation()
+        guard let self, self.requestID == requestID, self.image == image,
+          service.identity() == scope else { return }
+        self.requestURL = url
+        self.photo.image = ChatAttachment.thumbnail(url)
+        self.failure.isHidden = self.photo.image != nil
+        self.spinner.stopAnimating(); self.keptTask = nil
+      } catch {
+        guard !Task.isCancelled, let self, self.requestID == requestID,
+          service.identity() == scope else { return }
+        self.spinner.stopAnimating(); self.failure.isHidden = false; self.keptTask = nil
+      }
+    }
   }
 
   private func fetch(_ url: URL, fallback: URL?, requestID: UUID, token: String) {
@@ -127,8 +190,14 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
   }
   override func prepareForReuse() {
     super.prepareForReuse()
+    keptTask?.cancel(); keptTask = nil; keptScope = nil
     task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
     photo.image = nil; spinner.stopAnimating(); failure.isHidden = true
+  }
+
+  isolated deinit {
+    task?.cancel(); keptTask?.cancel()
+    if let cacheObserver { NotificationCenter.default.removeObserver(cacheObserver) }
   }
 
   var zoomSource: UIView { photo }

@@ -612,6 +612,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private weak var optionsPopover: ComposerOptionsController?
   private let attachmentBar = ChatAttachmentBar()
   private let attachmentStack = ChatComposerAttachmentStack()
+  var attachmentImportIdentity: @MainActor () -> String = { "" }
+  var attachmentLimit: @MainActor () -> Int = { 16 }
   private var attachments: [ChatAttachment] = []
   private let filePicker = ChatAttachmentPicker()
   private let libraryPicker = ChatPhotoLibraryPicker()
@@ -778,7 +780,11 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     input.pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: [UTType.item.identifier])
     input.onPasteItems = { [weak self] providers in
       guard let self, self.state.editable else { return false }
-      return ChatAttachment.paste(providers) { [weak self] in self?.addAttachments($0) }
+      let scope = self.attachmentImportIdentity()
+      return ChatAttachment.paste(providers) { [weak self] picked in
+        guard let self, self.attachmentImportIdentity() == scope else { ChatAttachment.discardImports(picked); return }
+        self.addAttachments(picked)
+      }
     }
     input.onPasteLongText = { [weak self] paste in
       self?.pasteLongText(paste) ?? false
@@ -832,6 +838,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     modelButton.accessibilityIdentifier = "session-model"
     modelButton.addTarget(self, action: #selector(presentComposerOptions), for: .touchUpInside)
     modelButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    filePicker.identity = { [weak self] in self?.attachmentImportIdentity() ?? "closed" }
+    libraryPicker.identity = { [weak self] in self?.attachmentImportIdentity() ?? "closed" }
     filePicker.onPick = { [weak self] picked in self?.addAttachments(picked) }
     libraryPicker.onPick = { [weak self] picked in self?.addAttachments(picked) }
     attachmentBar.onPreview = { [weak self] id in
@@ -1138,13 +1146,21 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private func presentAttachmentCamera() {
     guard let controller = presenter() else { return }
     let camera = AttachmentPickerController(cameraOnly: true)
-    camera.onPick = { [weak self] picked in self?.addAttachments(picked) }
+    let scope = attachmentImportIdentity()
+    camera.onPick = { [weak self] picked in
+      guard let self, self.attachmentImportIdentity() == scope else { ChatAttachment.discardImports(picked); return }
+      self.addAttachments(picked)
+    }
     controller.present(camera, animated: true)
   }
   private func presentRecentPhotos() {
     guard let controller = presenter() else { return }
     let sheet = AttachmentPickerController()
-    sheet.onPick = { [weak self] picked in self?.addAttachments(picked) }
+    let scope = attachmentImportIdentity()
+    sheet.onPick = { [weak self] picked in
+      guard let self, self.attachmentImportIdentity() == scope else { ChatAttachment.discardImports(picked); return }
+      self.addAttachments(picked)
+    }
     controller.present(sheet, animated: true)
   }
   #else
@@ -1169,8 +1185,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
 
   private func finishAttachmentOverlay(onCancel: (() -> Void)? = nil, _ action: @escaping (ChatComposerView, UIViewController) -> Void) {
+    let scope = attachmentImportIdentity()
     attachmentOverlay.dismissWithResult { [weak self] result in
-      guard result == .dismissed, let self, self.window != nil,
+      guard result == .dismissed, let self, self.attachmentImportIdentity() == scope, self.window != nil,
             self.attach.isEnabled, let controller = self.presenter() else { onCancel?(); return }
       action(self, controller)
     }
@@ -1181,6 +1198,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
 
   private func presentRecentPhotos() {
+    let scope = attachmentImportIdentity()
     attachmentPages.push(OverlayPage(id: "recent-photos", layout: attachmentMediaLayout,
       appearance: ChatRecentPhotosView.initialAppearance) { [weak self] in
       let photos = ChatRecentPhotosView()
@@ -1202,7 +1220,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       }
       photos.onPick = { [weak self] picked in
         guard let self else { ChatAttachment.discardImports(picked); return }
-        self.acceptOverlayAttachments(picked)
+        self.acceptOverlayAttachments(picked, identity: scope)
       }
       return photos
     })
@@ -1214,6 +1232,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
 
   private func presentCamera() {
+    let scope = attachmentImportIdentity()
     attachmentPages.push(OverlayPage(id: "camera", layout: attachmentMediaLayout,
       appearance: OverlayAppearance(corners: .bottomConcentric(top: 40)), contentLayout: .stable) { [weak self] in
       let camera = ChatCameraPage()
@@ -1221,7 +1240,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       camera.onRequestAccess = { [weak self] in self?.requestCameraAccess() }
       camera.onPick = { [weak self] photo in
         guard let self else { try? FileManager.default.removeItem(at: photo.url); return }
-        self.acceptOverlayAttachments([photo])
+        self.acceptOverlayAttachments([photo], identity: scope)
       }
       return camera
     })
@@ -1229,8 +1248,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
 
   /// The draft owns imports before the visual handoff; animation cancellation
   /// must never discard an accepted attachment.
-  private func acceptOverlayAttachments(_ picked: [ChatAttachment]) {
-    guard window != nil, attach.isEnabled, attachmentOverlay.isPresented else {
+  private func acceptOverlayAttachments(_ picked: [ChatAttachment], identity: String) {
+    guard attachmentImportIdentity() == identity, window != nil, attach.isEnabled, attachmentOverlay.isPresented else {
       ChatAttachment.discardImports(picked.filter { item in !attachments.contains { $0.url == item.url } })
       return
     }
@@ -1240,7 +1259,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     })
     guard let first = accepted.first else { attachmentOverlay.dismiss(); return }
     if !input.isFirstResponder { input.becomeFirstResponder() }
-    addAttachments(accepted)
+    guard addAttachments(accepted) else { attachmentOverlay.dismiss(); return }
     window?.layoutIfNeeded()
     // The photo lands in the new pill's own thumbnail, which stays hidden until
     // the panel arrives so the swap is invisible.
@@ -1302,16 +1321,25 @@ final class ChatComposerView: UIView, UITextViewDelegate {
 
   #endif
 
-  private func addAttachments(_ picked: [ChatAttachment]) {
-    attachments += picked.filter { new in !attachments.contains { $0.id == new.id } }
+  @discardableResult
+  private func addAttachments(_ picked: [ChatAttachment]) -> Bool {
+    let imported = picked.filter { new in !attachments.contains { $0.id == new.id } }
+    guard attachments.count + imported.count <= attachmentLimit() else {
+      ChatAttachment.discardImports(imported)
+      let key = attachmentLimit() == 8 ? "native.attachment.error.lanLimit" : "native.attachment.error.limit"
+      LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: "info")
+      return false
+    }
+    attachments += imported
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     updateComposer()
+    return true
   }
 
   private func pasteLongText(_ paste: ComposerPaste) -> Bool {
     guard state.editable, let file = ChatAttachment.makePastedTextFile(paste.fileText, name: paste.fileName) else { return false }
     let location = input.selectedRange.location
-    addAttachments([file])
+    guard addAttachments([file]) else { return false }
     LodyToastOverlay.shared.show(
       message: String.localizedStringWithFormat(String(localized: "native.chat.composer.pasteAsFile", bundle: .lody), String(describing: file.name)),
       kind: "success",

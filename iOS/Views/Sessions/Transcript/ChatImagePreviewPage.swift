@@ -1,6 +1,7 @@
 import UIKit
 
 final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
+  var keptImages = ChatKeptImageService.live
   let scroll = UIScrollView()
   let photo = UIImageView()
   private let spinner = UIActivityIndicatorView(style: .large)
@@ -11,6 +12,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
   private var safeTop: CGFloat = 0
   private var safeBottom: CGFloat = 0
   private var task: URLSessionDataTask?
+  private var keptTask: Task<Void, Never>?
   private var requestID = UUID()
   private var laidOutSize = CGSize.zero
 
@@ -39,7 +41,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     addSubview(retry)
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-  deinit { task?.cancel() }
+  deinit { task?.cancel(); keptTask?.cancel() }
 
   func configure(
     item: ChatImagePreviewItem,
@@ -57,12 +59,14 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     self.safeBottom = safeBottom
     photo.accessibilityLabel = item.image.fileName
     if let placeholder { photo.image = placeholder }
-    if same, photo.image != nil, task == nil { return }
+    if same, photo.image != nil, task == nil, keptTask == nil { return }
     reload()
   }
 
   func reload() {
-    task?.cancel()
+    task?.cancel(); task = nil
+    keptTask?.cancel(); keptTask = nil
+    requestID = UUID()
     retry.isHidden = true
     guard let item else { return }
     if let uri = item.localURI, let url = URL(string: uri), url.isFileURL {
@@ -79,6 +83,29 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
       spinner.stopAnimating()
       retry.isHidden = true
       layoutImage()
+      return
+    }
+    if item.image.machineId != nil {
+      let requestID = self.requestID
+      let workspace = self.workspace, session = self.session
+      let service = keptImages
+      let scope = service.identity()
+      spinner.startAnimating()
+      keptTask = Task { @MainActor [weak self] in
+        do {
+          let url = try await service.file(item.image, workspace, session)
+          try Task.checkCancellation()
+          guard let self, self.requestID == requestID, self.item == item,
+            service.identity() == scope else { return }
+          self.photo.image = UIImage(contentsOfFile: url.path)
+          self.retry.isHidden = self.photo.image != nil
+          self.spinner.stopAnimating(); self.keptTask = nil; self.layoutImage()
+        } catch {
+          guard !Task.isCancelled, let self, self.requestID == requestID,
+            service.identity() == scope else { return }
+          self.spinner.stopAnimating(); self.retry.isHidden = false; self.keptTask = nil
+        }
+      }
       return
     }
     guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else { spinner.stopAnimating(); retry.isHidden = true; return }

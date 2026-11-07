@@ -17,10 +17,10 @@ extension DataRuntime {
   }
   public func createSession(_ payload: String, sink: ReplySink) {
     guard let workspace else { fail(sink, "not_ready", String(localized: "native.runtime.sessionNotSynced", bundle: .lodyData)); return }
-    let user = userId, generation = self.generation
+    let user = userId, generation = self.generation, scope = attachmentScope
     Task { @MainActor in
       let entitlement = await billing.entitlement(workspace: workspace, user: user)
-      guard self.generation == generation, self.workspace == workspace, self.userId == user else {
+      guard self.generation == generation, self.workspace == workspace, self.userId == user, self.attachmentScope == scope else {
         sink.resolve(#"{"state":"rejected"}"#); return
       }
       guard self.inWorkspace(payload, sink: sink) else { return }
@@ -33,7 +33,7 @@ extension DataRuntime {
     callJSON(RuntimeContract.Calls.ControlTurn.self, payload: payload, sink: sink)
   }
   public func prepareSessionEdit(_ payload: String, sink: ReplySink) {
-    let generation = self.generation
+    let generation = self.generation, scope = attachmentScope
     guard let workspace, let session = sessionId else { fail(sink, "not_ready", "Session unavailable"); return }
     Task { @MainActor in
       do {
@@ -44,7 +44,7 @@ extension DataRuntime {
               draft["state"] as? String == "ready" else { sink.resolve(result); return }
         var attachments: [[String: Any]] = []
         let originals = draft["attachments"] as? [[String: Any]] ?? []
-        guard originals.count <= 16 else { throw SessionAttachments.error(String(localized: "native.attachment.error.limit", bundle: .lodyData)) }
+        guard originals.count <= (isLAN ? 8 : 16) else { throw SessionAttachments.error(String(localized: "native.attachment.error.limit", bundle: .lodyData)) }
         let downloads = AttachmentDownloadBatch()
         // ponytail: download at most 16 originals for the shared local-file composer; use lazy remote previews if large attachments make editing slow.
         for block in originals {
@@ -53,13 +53,18 @@ extension DataRuntime {
                 let editID = block["editId"] as? String else { throw SessionAttachments.error("Invalid attachment") }
           let name = block["fileName"] as? String ?? (image ? "image.jpg" : "file")
           let directory = downloads.makeDirectory()
-          let url = try await SessionAttachments.download(workspace: workspace,
-            session: block["storageSessionId"] as? String ?? session, fileId: id, fileName: name,
-            sizeBytes: block["sizeBytes"] as? Int, directory: directory, image: image)
-          guard self.generation == generation, self.sessionId == session else { throw CancellationError() }
-          attachments.append(["id": editID, "name": name, "uri": url.absoluteString, "kind": image ? "image" : "file"])
+          let local = block["transport"] as? String == "local"
+          var file = ChatMessageAttachment(id: id, fileName: name,
+            image: image ? ChatImage(id: id, fileName: name, storageSessionId: nil, width: nil, height: nil) : nil,
+            storageSessionId: block["storageSessionId"] as? String, transport: block["transport"] as? String,
+            sizeBytes: block["sizeBytes"] as? Int, mimeType: block["mimeType"] as? String,
+            machineId: block["machineId"] as? String, sha256: block["sha256"] as? String)
+          if local { file = file.shownAsImage }
+          let url = try await self.downloadAttachment(file, workspace: workspace, session: session, directory: directory)
+          guard self.generation == generation, self.sessionId == session, self.attachmentScope == scope else { throw CancellationError() }
+          attachments.append(["id": editID, "name": name, "uri": url.absoluteString, "kind": file.image != nil ? "image" : "file"])
         }
-        guard self.generation == generation, self.sessionId == session else { throw CancellationError() }
+        guard self.generation == generation, self.sessionId == session, self.attachmentScope == scope else { throw CancellationError() }
         draft["attachments"] = attachments
         let encoded = String(data: try JSONSerialization.data(withJSONObject: draft), encoding: .utf8)!
         downloads.handOff()
@@ -68,14 +73,11 @@ extension DataRuntime {
     }
   }
   public func sendTurn(_ payload: String, sink: ReplySink, edit: Bool = false) {
-    if isLAN, Self.hasAttachmentPayload(payload) {
-      sink.resolve(#"{"state":"not_sent","reason":"lan_attachments_unavailable"}"#); return
-    }
     guard let workspace else { dispatchTurn(payload, sink: sink, billing: nil, edit: edit); return }
-    let user = userId, generation = self.generation
+    let user = userId, generation = self.generation, scope = attachmentScope
     Task { @MainActor in
       let entitlement = await billing.entitlement(workspace: workspace, user: user)
-      guard self.generation == generation, self.workspace == workspace, self.userId == user else {
+      guard self.generation == generation, self.workspace == workspace, self.userId == user, self.attachmentScope == scope else {
         sink.resolve(notSentJSON("native.runtime.connectionSwitched")); return
       }
       let hasAttachments = payload.data(using: .utf8)
@@ -114,18 +116,19 @@ extension DataRuntime {
       args["backgroundTaskId"] = SessionBackgroundTasks.shared.begin(owner: owner)
     }
     let backgroundTaskId = args["backgroundTaskId"] as? String
-    let generation = self.generation
+    let generation = self.generation, transferScope = attachmentScope
     let sendID = args["id"] as? String ?? ""
     let attempt = UUID()
     let billingTier = billing?["effectivePlanTier"] as? String
     let checkoutPending = billing?["checkoutPending"] as? Bool
     attachmentAttempts[target] = attempt
-    attachmentTasks[target] = Task.detached { [weak self] in
+    attachmentTasks[target] = Task { @MainActor [weak self] in
       do {
-        args["attachmentBlocks"] = try await SessionAttachments.upload(attachments, workspace: workspace, session: target) { [weak self] attachmentID, phase, percent in
+        guard let self, self.attachmentScope == transferScope, self.attachmentAttempts[target] == attempt else { throw CancellationError() }
+        args["attachmentBlocks"] = try await self.uploadAttachments(attachments, session: target, machineId: args["machineId"] as? String) { [weak self] attachmentID, phase, percent in
           DispatchQueue.main.async { [weak self] in
             guard let self, self.generation == generation, self.workspace == workspace,
-              self.attachmentAttempts[target] == attempt, self.attachmentTasks[target] != nil else { return }
+              self.attachmentScope == transferScope, self.attachmentAttempts[target] == attempt, self.attachmentTasks[target] != nil else { return }
             var event: [String: Any] = ["sessionId": target, "sendId": sendID,
               "attachmentId": attachmentID, "phase": phase]
             if let percent { event["percent"] = percent }
@@ -135,7 +138,8 @@ extension DataRuntime {
         try Task.checkCancellation()
         let prepared = String(data: try JSONSerialization.data(withJSONObject: args), encoding: .utf8)!
         await MainActor.run { [weak self] in
-          guard let self, self.generation == generation, !Task.isCancelled else {
+          guard let self, self.generation == generation, self.workspace == workspace,
+            self.attachmentScope == transferScope, self.attachmentAttempts[target] == attempt, !Task.isCancelled else {
             if let backgroundTaskId { SessionBackgroundTasks.shared.finish(backgroundTaskId, success: false) }
             sink.resolve(notSentJSON("native.runtime.connectionSwitched")); return
           }
@@ -150,7 +154,7 @@ extension DataRuntime {
       } catch {
         let result = (try? JSONSerialization.data(withJSONObject: ["state": "not_sent", "reason": error.localizedDescription])) ?? Data()
         await MainActor.run { [weak self] in
-          if let self, self.generation == generation, !Task.isCancelled {
+          if let self, self.generation == generation, self.attachmentAttempts[target] == attempt {
             self.attachmentTasks[target] = nil
             self.attachmentAttempts[target] = nil
           }
@@ -161,9 +165,6 @@ extension DataRuntime {
     }
   }
   public func dispatchTurn(_ payload: String, sink: ReplySink, billing: [String: Any]?, edit: Bool) {
-    if isLAN, Self.hasAttachmentPayload(payload) {
-      sink.resolve(#"{"state":"not_sent","reason":"lan_attachments_unavailable"}"#); return
-    }
     let args = payload.data(using: .utf8).flatMap { data in
       data.count <= 128 * 1024 ? (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] : nil
     }
@@ -193,10 +194,6 @@ extension DataRuntime {
     // Catalog expansion precedes the durable send and has its own bounded read.
     let expands = text.contains("$") || text.contains("@session:") || text.contains("@role:")
     turnCall(RuntimeContract.Calls.SendTurn.self, payload, inject: inject, sink: sink, task: task, timeout: expands ? 90 : nil)
-  }
-  private static func hasAttachmentPayload(_ payload: String) -> Bool {
-    guard let args = scope(payload) else { return false }
-    return ["attachments", "attachmentBlocks"].contains { (args[$0] as? [Any])?.isEmpty == false }
   }
   private func turnCall<C: RuntimeCall>(_ call: C.Type, _ payload: String, inject: [String: Any], sink: ReplySink,
     task: String?, timeout: Double? = nil) where C.Params: Decodable, C.Result: Encodable {

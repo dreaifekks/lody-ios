@@ -99,6 +99,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var findFocusRequest: Bool?
   let findHighlightedViews = NSHashTable<UIView>.weakObjects()
   var composer = ChatComposerView(frame: .zero)
+  var keptImages = ChatKeptImageService.live
+  var attachmentLoader: SessionFilePreviewController.Loader?
   var usesLAN: @MainActor () -> Bool = { LanComposerPolicy.isLAN }
   var composerBottom: NSLayoutConstraint!
   var composerRetired = false
@@ -934,6 +936,7 @@ extension LodyChatView {
       let cell = collection.dequeueReusableCell(withReuseIdentifier: "attachments", for: index) as! ChatMessageAttachmentsCell
       cell.canEdit = { [weak self] in self?.editableMessageID == row.entryID }
       cell.onEdit = { [weak self] in self?.onEditMessage(["entryId": row.entryID]) }
+      cell.keptImages = keptImages
       cell.configure(row, workspace: self.imageWorkspace, session: self.imageSession, expanded: self.expandedAttachments.contains(row.entryID))
       cell.onToggle = { [weak self] in self?.toggleExpansion(row) }
       cell.onPreview = { [weak self] attachment, image in
@@ -948,6 +951,7 @@ extension LodyChatView {
     }
     if row.image != nil {
       let cell = collection.dequeueReusableCell(withReuseIdentifier: "image", for: index) as! ChatImageCell
+      cell.keptImages = keptImages
       cell.configure(row, workspace: self.imageWorkspace, session: self.imageSession)
       return cell
     }

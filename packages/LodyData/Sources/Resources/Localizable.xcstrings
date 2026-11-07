@@ -10988,6 +10988,74 @@
         }
       }
     },
+    "native.attachment.error.lanLimit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A LAN message can contain up to 8 attachments in total."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LAN 消息最多可包含 8 个附件（图片与文件合计）。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.lanMachine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot receive files. Update Lody on that machine and reconnect."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 无法接收文件。请更新该设备上的 Lody 后重新连接。"
+          }
+        }
+      }
+    },
+    "native.attachment.error.lanRead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not read an attachment from %@: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法从 %@ 读取附件：%@"
+          }
+        }
+      }
+    },
+    "native.attachment.error.lanSend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not send attachments to %@: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将附件发送到 %@：%@"
+          }
+        }
+      }
+    },
     "native.attachment.error.limit": {
       "extractionState": "manual",
       "localizations": {

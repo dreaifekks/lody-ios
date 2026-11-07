@@ -26,7 +26,7 @@ import type {
 import {
   editableUserTurn,
   editAttachments,
-  isAttachmentBlock,
+  validAttachmentBlocks,
   replacementInput,
 } from './edit-session';
 import {
@@ -808,11 +808,7 @@ export async function sendTurn(
   )
     return { state: 'not_sent', reason: 'invalid_config_options' };
   const attachments = args.attachmentBlocks ?? [];
-  if (
-    !Array.isArray(attachments) ||
-    attachments.length > 16 ||
-    attachments.some((block) => !isAttachmentBlock(block))
-  )
+  if (!validAttachmentBlocks(attachments))
     return { state: 'not_sent', reason: '附件信息无效，请重新选择' };
   if (
     (!text && !attachments.length) ||

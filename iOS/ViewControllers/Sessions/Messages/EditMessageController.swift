@@ -6,6 +6,7 @@ class EditMessageController: UIViewController {
   private enum Phase { case loading, loadFailed, ready, sending, unknown, checking, closed }
   private let scope: EditMessageScope
   private let service: EditMessageService
+  private let accountIdentity: String
   private var phase = Phase.loading
   private var draft: EditMessageDraft?
   private var replacement: String?
@@ -25,6 +26,7 @@ class EditMessageController: UIViewController {
   init(sessionId: String, entryId: String, service: EditMessageService = .live) {
     scope = EditMessageScope(sessionId: sessionId, expectedUserTurnId: entryId)
     self.service = service
+    accountIdentity = service.identity()
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -66,6 +68,12 @@ class EditMessageController: UIViewController {
       footer.bottomAnchor.constraint(equalTo: host.topAnchor, constant: -12),
       retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
     ])
+    LanComposerPolicy.apply(to: composer, lan: service.usesLAN)
+    composer.attachmentImportIdentity = service.identity
+    composer.prepareSend = { [weak self] payload in
+      guard let self, self.service.identity() == self.accountIdentity else { return true }
+      return LanComposerPolicy.rejects(payload, lan: self.service.usesLAN())
+    }
     composer.sendHandoff = false
     composer.setInputIdentifier("edit-message-input")
     composer.onHeightChange = { [weak self] height in self?.hostHeight.constant = height }
@@ -96,7 +104,7 @@ class EditMessageController: UIViewController {
     task = Task { [weak self, service, scope] in
       do {
         let value = try await service.prepare(scope)
-        guard let self, !Task.isCancelled, phase != .closed else { return }
+        guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
         draft = value
         phase = .ready
         composer.setInitialDraft(value.text)
@@ -110,7 +118,7 @@ class EditMessageController: UIViewController {
           composer.trailingAnchor.constraint(equalTo: host.trailingAnchor),
         ])
       } catch {
-        guard let self, !Task.isCancelled, phase != .closed else { return }
+        guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
         record(error, action: "prepare_failed")
         phase = .loadFailed
         errorLabel.text = String(localized: "chat.edit.loadFailed", bundle: .lody)
@@ -133,7 +141,7 @@ class EditMessageController: UIViewController {
         self?.record(error, action: "send_failed")
         result = .unknown(.init())
       }
-      guard let self, !Task.isCancelled, phase != .closed else { return }
+      guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
       if case .accepted(let accepted) = result { finish(accepted.id); return }
       restoreToken += 1
       composer.restoreDraft(token: restoreToken)
@@ -155,10 +163,10 @@ class EditMessageController: UIViewController {
     task = Task { [weak self, service] in
       do {
         let result = try await service.read(request)
-        guard let self, !Task.isCancelled, phase != .closed else { return }
+        guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
         if case .accepted(let accepted) = result { finish(accepted.id); return }
       } catch { self?.record(error, action: "read_failed") }
-      guard let self, !Task.isCancelled, phase != .closed else { return }
+      guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
       phase = .unknown
       errorLabel.text = String(localized: "chat.edit.unknown", bundle: .lody)
       render()

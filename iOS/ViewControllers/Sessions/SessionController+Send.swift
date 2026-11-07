@@ -41,9 +41,19 @@ extension SessionController {
       sessionId: sessionId, store: environment.store(state.userId, state.workspaceId),
       services: environment.services(), inflight: environment.inflight
     )
-    sender.changed = { [weak self] in self?.renderComposer() }
-    sender.clearDraft = { [weak self] in self?.chat.clearDraft(token: $0) }
-    sender.restoreDraft = { [weak self] in self?.chat.restoreDraft(token: $0) }
+    let scope = state.key
+    sender.changed = { [weak self] in
+      guard let self, self.source.state.key == scope else { return }
+      self.renderComposer()
+    }
+    sender.clearDraft = { [weak self] token in
+      guard let self, self.source.state.key == scope else { return }
+      self.chat.clearDraft(token: token)
+    }
+    sender.restoreDraft = { [weak self] token in
+      guard let self, self.source.state.key == scope else { return }
+      self.chat.restoreDraft(token: token)
+    }
     composerModel.changed = { [weak self] in self?.renderComposer() }
     control.changed = { [weak self] in self?.renderComposer() }
     self.sender = sender

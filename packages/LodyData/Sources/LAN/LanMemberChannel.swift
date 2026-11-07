@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// One bounded TLS-PSK JSON connection, used only for hub discovery.
+/// One bounded TLS-PSK member connection shared by hub discovery and files.
 final class LanMemberChannel: @unchecked Sendable {
   struct Failure: Error, LocalizedError, Equatable {
     let code: String
@@ -136,13 +136,13 @@ final class LanMemberChannel: @unchecked Sendable {
     }
   }
 
-  private func writeLine(_ value: [String: Any]) async throws {
+  func writeLine(_ value: [String: Any]) async throws {
     var data = try JSONSerialization.data(withJSONObject: value)
     data.append(0x0A)
     try await write(data)
   }
 
-  private func write(_ data: Data) async throws {
+  func write(_ data: Data) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       queue.async { [self] in
         connection.send(content: data, completion: .contentProcessed { [weak self] error in
@@ -192,7 +192,7 @@ final class LanMemberChannel: @unchecked Sendable {
     return true
   }
 
-  private func readLine(maxBytes: Int, deadline: TimeInterval?) async throws -> Data {
+  func readLine(maxBytes: Int, deadline: TimeInterval?) async throws -> Data {
     let end = deadline.map { ProcessInfo.processInfo.systemUptime + $0 }
     while true {
       let remaining = end.map { $0 - ProcessInfo.processInfo.systemUptime }
@@ -211,4 +211,13 @@ final class LanMemberChannel: @unchecked Sendable {
     }
   }
 
+  func readChunk(limit: Int) async throws -> Data {
+    if buffer.isEmpty, !(try await receiveMore(deadline: nil)) {
+      throw Failure(code: "remote_unreachable", message: "connection closed in the middle of a file")
+    }
+    let count = min(limit, buffer.count)
+    let chunk = Data(buffer.prefix(count))
+    buffer = Data(buffer.dropFirst(count))
+    return chunk
+  }
 }

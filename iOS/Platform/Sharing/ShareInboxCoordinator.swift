@@ -88,32 +88,12 @@ final class ShareInboxCoordinator {
   private func deliver(_ entry: ShareManifest, scope: String) async {
     let adopted: ShareManifest
     do {
-      if AuthSession.shared.snapshot.account?.lan != nil, !entry.attachments.isEmpty { adopted = entry }
-      else { adopted = try ShareStore.adopt(entry.id) }
+      adopted = try ShareStore.adopt(entry.id)
     }
     catch {
       ShareStore.remove(entry.id)
       toast("shareInbox.unreadable")
       report(error, operation: "adopt")
-      return
-    }
-    if AuthSession.shared.snapshot.account?.lan != nil, !adopted.attachments.isEmpty {
-      // Return to an editable text draft; never queue these files for Cloud upload.
-      do {
-        var fields: [String: Any] = ["workspaceId": adopted.workspaceId, "context": adopted.context,
-          "draft": ["text": adopted.text, "attachmentsJSON": "[]"]]
-        if let project = adopted.projectId { fields["projectId"] = project }
-        guard let page = try SessionNavigation.handle("create", fields) else { return }
-        form = page
-        ShareStore.remove(entry.id)
-        LanComposerPolicy.unavailable()
-        await withCheckedContinuation { done in
-          page.onClose = { [weak self, weak page] in
-            if self?.form === page { self?.form = nil }
-            done.resume()
-          }
-        }
-      } catch { failed.insert(entry.id); report(error, operation: "lan-text-draft") }
       return
     }
     var available = adopted.draft != nil

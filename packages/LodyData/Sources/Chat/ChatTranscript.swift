@@ -96,13 +96,19 @@ public struct ChatImage: Codable, Equatable, Sendable {
   public let storageSessionId: String?
   public let width: Double?
   public let height: Double?
+  public var machineId: String? = nil
+  public var sha256: String? = nil
+  public var sizeBytes: Int? = nil
 
-  public init(id: String, fileName: String, storageSessionId: String?, width: Double?, height: Double?) {
+  public init(id: String, fileName: String, storageSessionId: String?, width: Double?, height: Double?, machineId: String? = nil, sha256: String? = nil, sizeBytes: Int? = nil) {
     self.id = id
     self.fileName = fileName
     self.storageSessionId = storageSessionId
     self.width = width
     self.height = height
+    self.machineId = machineId
+    self.sha256 = sha256
+    self.sizeBytes = sizeBytes
   }
 }
 
@@ -115,8 +121,11 @@ public struct ChatMessageAttachment: Decodable, Equatable, Sendable {
   public var storageSessionId: String? = nil
   public var transport: String? = nil
   public var sizeBytes: Int? = nil
+  public var mimeType: String? = nil
+  public var machineId: String? = nil
+  public var sha256: String? = nil
 
-  public init(id: String, fileName: String, image: ChatImage? = nil, localURI: String? = nil, localID: String? = nil, storageSessionId: String? = nil, transport: String? = nil, sizeBytes: Int? = nil) {
+  public init(id: String, fileName: String, image: ChatImage? = nil, localURI: String? = nil, localID: String? = nil, storageSessionId: String? = nil, transport: String? = nil, sizeBytes: Int? = nil, mimeType: String? = nil, machineId: String? = nil, sha256: String? = nil) {
     self.id = id
     self.fileName = fileName
     self.image = image
@@ -125,6 +134,21 @@ public struct ChatMessageAttachment: Decodable, Equatable, Sendable {
     self.storageSessionId = storageSessionId
     self.transport = transport
     self.sizeBytes = sizeBytes
+    self.mimeType = mimeType
+    self.machineId = machineId
+    self.sha256 = sha256
+  }
+
+  /// A LAN keeps a message's pictures as files; one an agent reads, small
+  /// enough to fetch on sight, shows as the picture.
+  public var shownAsImage: ChatMessageAttachment {
+    guard image == nil, transport == "local", let machineId, let sha256, let sizeBytes,
+          sizeBytes <= 10 * 1024 * 1024,
+          ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mimeType ?? "") else { return self }
+    var picture = self
+    picture.image = ChatImage(id: id, fileName: fileName, storageSessionId: storageSessionId, width: nil, height: nil,
+                              machineId: machineId, sha256: sha256, sizeBytes: sizeBytes)
+    return picture
   }
 }
 
@@ -531,7 +555,7 @@ public struct ChatTranscript: Sendable {
           if let image = item.image, item.type == "image" {
             return ChatMessageAttachment(id: image.id, fileName: image.fileName, image: image)
           }
-          return item.type == "file" ? item.file : nil
+          return item.type == "file" ? item.file?.shownAsImage : nil
         }
         if !attachments.isEmpty {
           result.append(ChatRow(id: entry.id + ":user", entryID: entry.id, kind: "attachments", text: "", attachments: attachments))
@@ -679,6 +703,11 @@ public struct ChatTranscript: Sendable {
           row.actionable = false
         case "file":
           guard let file = item.file else { continue }
+          if let image = file.shownAsImage.image {
+            result.append(ChatRow(id: entry.id + ":" + item.itemId + ":image:0",
+              entryID: entry.id, kind: "image", text: "", itemID: item.itemId, image: image))
+            continue
+          }
           row.file = file
           row.text = file.fileName
           row.symbol = "doc"
@@ -740,7 +769,7 @@ public struct ChatTranscript: Sendable {
         let model = entry.modelInfo?.title ?? ""
         let finishedAt = ChatMetaTime.label(entry.endedAt, now: now)
         let meta = [model, finishedAt].filter { !$0.isEmpty }.joined(separator: " · ")
-        if !meta.isEmpty || entry.items.contains(where: { $0.type == "text" || $0.isImage }) {
+        if !meta.isEmpty || entry.items.contains(where: { $0.type == "text" || $0.isImage || $0.file?.shownAsImage.image != nil }) {
           var row = ChatRow(id: entry.id + ":meta", entryID: entry.id, kind: "meta", text: meta)
           row.imageAsset = LodyAgentIcon.asset(
             modelId: entry.modelInfo?.modelId, name: entry.modelInfo?.name

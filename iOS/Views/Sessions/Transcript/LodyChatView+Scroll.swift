@@ -109,7 +109,8 @@ extension LodyChatView {
       sourceView: { [weak self] pageId in
         guard let cell = self?.imageCell(id: pageId), cell.window != nil else { return nil }
         return cell.zoomSource
-      }
+      },
+      keptImages: keptImages
     )
   }
 
@@ -120,7 +121,7 @@ extension LodyChatView {
       controller.present(AttachmentPreviewController([ChatAttachment(id: attachment.id, name: attachment.fileName, url: url, isImage: false)], index: 0), animated: true)
       return
     }
-    controller.present(SessionFilePreviewController(file: attachment, workspace: imageWorkspace, session: imageSession), animated: true)
+    controller.present(SessionFilePreviewController(file: attachment, workspace: imageWorkspace, session: imageSession, loader: attachmentLoader, identity: keptImages.identity), animated: true)
   }
 
   func toggleExpansion(_ row: ChatRow) {

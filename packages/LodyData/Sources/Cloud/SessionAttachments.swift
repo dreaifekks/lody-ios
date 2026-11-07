@@ -95,25 +95,7 @@ public enum SessionAttachments: Sendable {
       var responseStage: StaticString = kind == "image" ? "image_upload" : "file_upload"
       var result: [String: Any]
       if kind == "image" {
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? ""
-        var bytes: Data
-        var fileName = name
-        var contentType = mime
-        if ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mime), count <= 5 * 1024 * 1024 {
-          bytes = try Data(contentsOf: url)
-        } else {
-          guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                  kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 2048,
-                  kCGImageSourceCreateThumbnailWithTransform: true,
-                ] as CFDictionary), let jpeg = jpegData(image, quality: 0.85) else {
-            throw error(String(localized: "native.attachment.error.imageRead", bundle: .lodyData))
-          }
-          bytes = jpeg; contentType = "image/jpeg"
-          fileName = (name as NSString).deletingPathExtension + ".jpg"
-        }
-        guard bytes.count <= 5 * 1024 * 1024 else { throw error(String(localized: "native.attachment.error.imageTooLarge", bundle: .lodyData)) }
+        let (bytes, fileName, contentType) = try imagePayload(url, name: name, size: count)
         let boundary = UUID().uuidString
         let safeName = fileName.replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
         var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"sessionId\"\r\n\r\n\(session)\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\nContent-Type: \(contentType)\r\n\r\n".utf8)
@@ -171,6 +153,31 @@ public enum SessionAttachments: Sendable {
       onProgress(attachmentID, "complete", 100)
     }
     return blocks
+  }
+
+  static func sendsImageAsIs(_ url: URL, size: Int) -> Bool {
+    let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? ""
+    return ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mime) && size <= 5 * 1024 * 1024
+  }
+
+  /// What an image is sent as: its own bytes when an agent takes the format
+  /// and size, otherwise a 2048 px JPEG.
+  static func imagePayload(_ url: URL, name: String, size: Int) throws -> (bytes: Data, fileName: String, mimeType: String) {
+    if sendsImageAsIs(url, size: size) {
+      let bytes = try Data(contentsOf: url)
+      guard bytes.count <= 5 * 1024 * 1024 else { throw error(String(localized: "native.attachment.error.imageTooLarge", bundle: .lodyData)) }
+      return (bytes, name, UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "")
+    }
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2048,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+          ] as CFDictionary), let jpeg = jpegData(image, quality: 0.85) else {
+      throw error(String(localized: "native.attachment.error.imageRead", bundle: .lodyData))
+    }
+    guard jpeg.count <= 5 * 1024 * 1024 else { throw error(String(localized: "native.attachment.error.imageTooLarge", bundle: .lodyData)) }
+    return (jpeg, (name as NSString).deletingPathExtension + ".jpg", "image/jpeg")
   }
 
   /// Download to disk so a video never becomes a base64 or in-memory file body.

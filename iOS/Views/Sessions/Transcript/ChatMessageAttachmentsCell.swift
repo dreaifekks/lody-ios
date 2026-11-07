@@ -14,6 +14,7 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
   var gapAbove: CGFloat = 0 {
     didSet { if gapAbove != oldValue { setNeedsLayout() } }
   }
+  var keptImages = ChatKeptImageService.live
   var canEdit: (() -> Bool)?
   var onEdit: (() -> Void)?
   func updateEditAccessibility() {
@@ -85,6 +86,7 @@ final class ChatMessageAttachmentsCell: UICollectionViewCell, UIContextMenuInter
         if let image = attachment.image {
           let cell = ChatImageCell()
           cell.compact = true
+          cell.keptImages = keptImages
           cell.configure(ChatRow(id: row.entryID + ":attachment:" + (attachment.localID ?? attachment.id),
             entryID: row.entryID, kind: "image", text: attachment.fileName,
             localImageURI: attachment.localURI, image: image), workspace: workspace, session: session)
