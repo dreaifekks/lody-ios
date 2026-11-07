@@ -265,7 +265,7 @@ class SessionController: UIViewController {
       ]),
     ]
     if AuthSession.shared.snapshot.account?.lan != nil { menuActions.remove(at: 1) }
-    more.menu = UIMenu(children: changes + simulatorMenu() + menuActions)
+    more.menu = UIMenu(children: changes + terminalMenu() + simulatorMenu() + menuActions)
     moreItem = more
     let header = LodyNavigationHeader.of(navigationItem)
     if header.rightItems != [more] { header.rightItems = [more] }

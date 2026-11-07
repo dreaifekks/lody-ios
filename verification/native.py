@@ -59,6 +59,7 @@ checks = {
     'project-index': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Views/List/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionDeletion.swift', 'iOS/Models/Sessions/SessionRows.swift', 'iOS/Models/Home/Inbox/InboxProjectNavigation.swift', 'iOS/Models/Home/Inbox/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
     'ai-usage': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Views/List/LodyListState.swift', 'Settings/AIUsageModels.swift', 'iOS/Models/Settings/AIUsageSections.swift'],
     'settings-roles': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Models/Settings/PromptShortcutSections.swift', 'iOS/Models/Settings/AgentRoleSections.swift'],
+    'lan-terminal': ['LAN/LanMemberProtocol.swift', 'LAN/LanTerminalLink.swift', 'Sessions/SessionCatalog.swift'],
     'notifications': ['iOS/Platform/Notifications/ApsEnvironment.swift', 'iOS/Platform/Notifications/PushPermissionLaunchRequest.swift', 'iOS/Platform/Notifications/PushClickBuffer.swift'],
     'diagnostics': ['Diagnostics/DiagnosticsStore.swift'],
     'file-link': ['iOS/Views/Sessions/Transcript/ChatFileLink.swift'],
@@ -118,6 +119,8 @@ if args.case:
         parser.error(f'Unknown check {args.case}; choose from {", ".join(checks)}')
     checks = {args.case: checks[args.case]}
 for files in checks.values():
+    if 'Sessions/SessionCatalog.swift' in files and 'LAN/LanMemberProtocol.swift' not in files:
+        files.insert(0, 'LAN/LanMemberProtocol.swift')
     if 'Shared/UIKit/ViewControllers/Composer/ComposerOptionsController.swift' in files:
         files += ['Shared/UIKit/Models/ComposerOptions.swift', 'Shared/UIKit/Views/Composer/ChatEffortSlider.swift']
     if 'iOS/Views/Form/LodyForm.swift' in files:
