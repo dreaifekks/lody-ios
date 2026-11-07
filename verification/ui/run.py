@@ -21,7 +21,7 @@ from simulator import DEVICE_TYPES, run_with_simulator, SimulatorPool
 CHAT = ROOT / 'verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
-    'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'live-activity', 'settings-baseline', 'appearance', 'queued-message-behavior'],
+    'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'branch-picker-lan', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'live-activity', 'settings-baseline', 'appearance', 'queued-message-behavior'],
     'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-taps', 'chat-thread', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'mermaid'],
     'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
 }
@@ -120,6 +120,7 @@ PREVIEW = {
     'activity': 'activity-preview',
     'project-picker': 'project-picker-preview',
     'branch-picker': 'create-parity',
+    'branch-picker-lan': 'create-lan',
     'settings': 'settings-preview',
     'appearance': 'appearance-preview',
     'queued-message-behavior': 'queued-message-behavior-preview',
@@ -239,6 +240,7 @@ READY = {
     'activity': 'activity-running',
     'project-picker': 'create-session-input',
     'branch-picker': 'create-session-input',
+    'branch-picker-lan': 'create-session-input',
     'settings': 'settings-machine',
     'appearance': 'appearance',
     'queued-message-behavior': 'queued-message-behavior',
@@ -535,7 +537,7 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['lan-entry', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'live-activity', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['branch-picker-lan', 'lan-entry', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'live-activity', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:
@@ -693,7 +695,7 @@ try:
                 elif case in ('send-queue', 'send-guide'):
                     # Queue/steer/stop and guide rounds reach ~185s on the native fixtures.
                     check_timeout = 300
-                elif case in ('branch-picker', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'appearance'):
+                elif case in ('branch-picker', 'branch-picker-lan', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'appearance'):
                     check_timeout = 300
                 check_started = time.monotonic()
                 with (output / 'check.log').open('w') as log:
