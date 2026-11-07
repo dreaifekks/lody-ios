@@ -50,6 +50,7 @@ parser.add_argument(
     default=None,
     help='Explicit build cache. Omit to reuse the project DerivedData; use only to compare two builds',
 )
+parser.add_argument('--jobs', type=int, default=None, help='Maximum concurrent Xcode build jobs')
 parser.add_argument('--skip-assets', action='store_true', help='Skip pnpm native:assets')
 parser.add_argument('--log', default=str(DEFAULT_LOG), help=f'xcodebuild log path (default {DEFAULT_LOG})')
 parser.add_argument('--json', action='store_true', help='Print one JSON object instead of the app path')
@@ -84,6 +85,8 @@ def xcodebuild(arguments):
         '-destination',
         arguments.destination,
     ]
+    if arguments.jobs is not None:
+        command += ['-jobs', str(arguments.jobs)]
     if arguments.destination.startswith('id='):
         command += ['ONLY_ACTIVE_ARCH=YES']
     if arguments.derived_data is not None:

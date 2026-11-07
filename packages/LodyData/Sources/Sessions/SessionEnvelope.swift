@@ -106,7 +106,7 @@ public struct SessionItemTarget: Equatable, Sendable {
 public struct SessionTranscriptFacts: Equatable, Sendable {
   public static let recoverable: Set<String> = [
     "acp_provider_overloaded", "acp_upstream_api_error", "acp_internal_error", "acp_unknown_error",
-    "agent_disconnected", "agent_no_output", "acp_not_ready",
+    "agent_disconnected", "daemon_restart", "agent_no_output", "acp_not_ready",
   ]
 
   public var permission: SessionPermission?

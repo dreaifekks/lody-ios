@@ -94,6 +94,17 @@ public final class SessionDecision {
   public static let errorContinuation =
     "Continue working from where you left off. The previous turn stopped because of an agent error."
 
+  public static let interruptedContinuation =
+    "Continue from where you left off. The previous turn was cut off before it finished; check the current state before repeating anything that may already have been done."
+
+  public static func retryTurn(reason: String) -> (text: String, deliveryKind: String?) {
+    switch reason {
+    case "daemon_restart", "agent_disconnected": (interruptedContinuation, "continue")
+    case "acp_provider_overloaded": (capacityContinuation, nil)
+    default: (errorContinuation, nil)
+    }
+  }
+
   // OSS execution-turn-config: leave planning for this turn while preserving permissions and the model.
   public static func planExecutionChoice(_ choice: ModelChoice, _ capability: Capability?) -> ModelChoice {
     var next = choice

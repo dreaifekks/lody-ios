@@ -16,7 +16,7 @@ struct OnboardingService {
   var login: () -> Void
   var cancel: () -> Void
   var reopen: () -> Void
-  var joinLAN: @MainActor (String) async throws -> Void = { _ in throw CancellationError() }
+  var joinLAN: @MainActor (String) async throws -> Void
 
   static var live: OnboardingService {
     OnboardingService(

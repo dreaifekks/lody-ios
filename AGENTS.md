@@ -82,7 +82,6 @@
 - Debug's offline notification fixture never initializes OneSignal or requests real
   permission. See `PUSH_NOTIFICATIONS.md` for setup and verification limits.
 
-
 ## LAN hub (fork)
 
 - Besides official Lody Cloud, this fork joins a self-hosted LAN hub. `AuthSession` in `packages/LodyData/Sources/Auth` owns the mutually exclusive account mode. A successful LAN join replaces Cloud credentials; successful Cloud authorization removes the LAN. Failed or cancelled authorization keeps the current account. Credentials remain in `AuthKeychain` under the `lan-hub` account; UIKit receives `AuthAccount.lan` summary only.

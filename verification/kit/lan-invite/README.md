@@ -2,7 +2,7 @@
 
 From the checkout root, run `python3 verification/kit/lan-invite/check.py`.
 This uses Swift 6 and the selected Xcode SDK, acquires the shared native-job
-`mkdir` lock, and skips compilation above a one-minute load of 6. It does not
+`mkdir` lock, and skips compilation above a one-minute load of 30. It does not
 run xcodebuild, a simulator, system Keychain operations, network requests or a
 real hub. The check is deliberately not wired into root scripts in this task.
 

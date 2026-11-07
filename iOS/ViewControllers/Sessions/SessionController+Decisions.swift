@@ -34,9 +34,8 @@ extension SessionController {
           target: target, enabled: enabled, entryId: body["entryId"] as? String ?? "", itemId: body["itemId"] as? String ?? "",
           id: body["id"] as? String ?? ""
         ) { [weak self] target, id in
-          let text = target.detail == "acp_provider_overloaded"
-            ? SessionDecision.capacityContinuation : SessionDecision.errorContinuation
-          return try await self?.turn(id: id, text: text, choice: choice) ?? ""
+          let retry = SessionDecision.retryTurn(reason: target.detail)
+          return try await self?.turn(id: id, text: retry.text, choice: choice, deliveryKind: retry.deliveryKind) ?? ""
         }
       }
     }
@@ -90,7 +89,7 @@ extension SessionController {
     }
   }
 
-  private func turn(id: String, text: String, choice: ModelChoice) async throws -> String {
+  private func turn(id: String, text: String, choice: ModelChoice, deliveryKind: String? = nil) async throws -> String {
     guard let session = source.state.catalog.session(sessionId) else { throw OutboxError.scopeExpired }
     let capability = composerModel.capability
     var payload: [String: Any] = [
@@ -98,6 +97,7 @@ extension SessionController {
       "cliType": session.cliType, "agentType": session.agentType, "text": text, "attachments": [Any](),
       "queue": false, "guide": false,
     ]
+    payload["deliveryKind"] = deliveryKind
     payload["resume"] = session.resume
     payload["modeId"] = choice.modeId
     payload["reasoningEffortConfigId"] = capability?.reasoningEffortConfigId

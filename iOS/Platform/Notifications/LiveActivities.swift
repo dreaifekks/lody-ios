@@ -630,7 +630,7 @@ final class LiveActivities {
     var item = LodyActivityAttributes.ContentState.Item(
       id: id,
       status: status,
-      statusLabel: String(localized: String.LocalizationValue("native.liveActivity.status.\(status.rawValue), bundle: .lody)"),
+      statusLabel: String(localized: String.LocalizationValue("native.liveActivity.status.\(status.rawValue)"), bundle: .lody),
       permissionRequestId: command == nil ? nil : "debug-request",
       permissionCommand: command,
       agentLogoKind: agent == "CC" ? "claude" : "codex",

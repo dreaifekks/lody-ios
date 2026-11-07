@@ -21,7 +21,7 @@ def main():
     try:
         (LOCK / 'owner').write_text(f'lan-data-p0-lightweight {os.getpid()}\n')
         load = os.getloadavg()[0]
-        if load > 6:
+        if load > 30:
             raise SystemExit(f'LOAD_HIGH: {load:.2f}; no compilation run')
         with tempfile.TemporaryDirectory(prefix='lody-lan-p0-') as temp:
             output = Path(temp)

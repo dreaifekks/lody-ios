@@ -23240,6 +23240,12 @@
             "state": "translated",
             "value": "Allow"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许"
+          }
         }
       }
     },
@@ -23251,6 +23257,12 @@
             "state": "translated",
             "value": "Deny"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拒绝"
+          }
         }
       }
     },
@@ -23258,6 +23270,12 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
+          }
+        },
+        "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "Mac"
@@ -23273,6 +23291,12 @@
             "state": "translated",
             "value": "Reading source files"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在读取源文件"
+          }
         }
       }
     },
@@ -23283,6 +23307,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Running checks"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在运行检查"
           }
         }
       }
@@ -23295,6 +23325,12 @@
             "state": "translated",
             "value": "Tracing the active request"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在追踪当前请求"
+          }
         }
       }
     },
@@ -23305,6 +23341,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Checking the result"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核对执行结果"
           }
         }
       }

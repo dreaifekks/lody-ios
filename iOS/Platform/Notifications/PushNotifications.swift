@@ -296,7 +296,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
         return
       }
       if resolved {
-        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
         completionHandler([])
         return
       }

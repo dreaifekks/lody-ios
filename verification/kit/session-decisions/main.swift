@@ -154,3 +154,14 @@ let facts = SessionTranscriptFacts(entries: [
 precondition(facts.editableUserId == "u2" && facts.editEligibility.hasPrefix("u2:handled:a1:true"))
 precondition(facts.answered == ["u1"], "only entries followed by a reply are answered")
 print("PASS: edit eligibility follows the latest delivered user turn and its preceding reply")
+
+for reason in ["daemon_restart", "agent_disconnected"] {
+  precondition(SessionTranscriptFacts.latestRetryableError([failure(reason)])?.detail == reason)
+  let continuation = SessionDecision.retryTurn(reason: reason)
+  precondition(continuation.deliveryKind == "continue" && continuation.text == SessionDecision.interruptedContinuation)
+  precondition(SessionTranscriptFacts.latestRetryableError([failure(reason), user]) == nil)
+}
+precondition(SessionDecision.retryTurn(reason: "acp_provider_overloaded").deliveryKind == nil)
+precondition(SessionDecision.retryTurn(reason: "acp_provider_overloaded").text == SessionDecision.capacityContinuation)
+precondition(SessionDecision.retryTurn(reason: "acp_unknown_error").deliveryKind == nil)
+print("PASS: restart and lost agents send Continue; capacity and ordinary error retries remain ordinary turns")
