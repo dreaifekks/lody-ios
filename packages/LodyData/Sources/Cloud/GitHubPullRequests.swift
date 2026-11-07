@@ -81,7 +81,7 @@ import Foundation
   /// credential it was minted for is still the one signed in.
   private static func cloudAccess(workspace: String, repo: String, writing: Bool) async throws -> (String, @MainActor () throws -> Void) {
     guard let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure("unauthorized") }
-    let checkIdentity = {
+    let checkIdentity: @MainActor @Sendable () throws -> Void = {
       guard try AuthKeychain.read() == credential else { throw failure("unauthorized") }
       try Task.checkCancellation()
     }
@@ -103,7 +103,7 @@ import Foundation
   /// LAN while a request runs drops its result.
   private static func lanAccess(workspace: String) async throws -> (String, @MainActor () throws -> Void) {
     guard let invite = LanHub.credential(for: workspace) else { throw failure("unauthorized") }
-    let checkIdentity = {
+    let checkIdentity: @MainActor @Sendable () throws -> Void = {
       guard LanHub.credential(for: workspace) == invite else { throw failure("unauthorized") }
       try Task.checkCancellation()
     }
