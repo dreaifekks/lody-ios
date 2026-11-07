@@ -3,6 +3,7 @@ import Foundation
 
 struct ShareCatalog: Codable, Equatable {
   var userId: String
+  // LAN capability is derived from the credential-free `lw_` workspace identity.
   var workspaceId: String
   var projects: [CreateProject]
   var machineNames: [String: String]?

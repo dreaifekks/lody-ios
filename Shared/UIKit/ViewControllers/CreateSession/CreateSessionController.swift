@@ -331,10 +331,13 @@ final class CreateSessionController: UIViewController {
     let projectId = form.project.projectId
     let picker = CreateBranchController(repo: String(projectId.dropFirst(7)))
     picker.onMore = { [weak self] in self?.fetchBranches() }
+    picker.typed = { [weak self] query in
+      guard let self, self.form.project.projectId == projectId else { return nil }
+      return self.form.typedBranch(query)
+    }
     picker.onPick = { [weak self] name in
       guard let self, self.form.project.projectId == projectId,
-        self.form.project.branches?.names.contains(name) == true else { return }
-      self.form.project.branch = name
+        self.form.selectBranch(name) else { return }
       self.changed(prefs: false)
     }
     branchPicker = picker
@@ -372,7 +375,7 @@ final class CreateSessionController: UIViewController {
       restore()
       return false
     }
-    if !form.deferUnresolved && form.current.github && form.current.branch.trimmingCharacters(in: .whitespaces).isEmpty {
+    if !form.deferUnresolved && form.current.github && form.current.branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       restore()
       message(String(localized: "create.toast.branchRequired", bundle: .lody))
       return false

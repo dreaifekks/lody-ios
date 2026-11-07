@@ -4,6 +4,15 @@ public enum CreateLogic {
   public static let chatTarget = "chat"
   public static let fullAccessModes = ["agent-full-access", "danger-full-access", "bypassPermissions", "yolo", "always-approve"]
 
+  // `lw_` is the LAN workspace identity, also present in the credential-free
+  // Share catalog. No credential or network access is needed to resolve this policy.
+  public static func typedBranch(_ query: String, workspaceId: String, listed: [String]) -> String? {
+    let name = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard workspaceId.hasPrefix("lw_"), !name.isEmpty,
+      !name.contains(where: \.isWhitespace), !listed.contains(name) else { return nil }
+    return name
+  }
+
   public static func isThoughtLevel(_ option: ConfigOption) -> Bool {
     option.type == "select" && (option.category == "thought_level" || option.id == "reasoning_effort")
   }

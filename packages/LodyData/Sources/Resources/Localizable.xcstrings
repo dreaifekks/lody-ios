@@ -18540,6 +18540,24 @@
         }
       }
     },
+    "create.branch.use": {
+      "comment": "name: name",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use “%@”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用“%@”"
+          }
+        }
+      }
+    },
     "create.branch.failed": {
       "extractionState": "manual",
       "localizations": {

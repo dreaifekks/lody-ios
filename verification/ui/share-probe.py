@@ -31,7 +31,9 @@ parser.add_argument('--udid', default=os.environ.get('LODY_VERIFY_UDID'))
 parser.add_argument('--output', default='.artifacts/share-probe/ui')
 parser.add_argument('--appearance', choices=['light', 'dark'], default='light')
 parser.add_argument('--branches', action='store_true', help='Exercise cached GitHub branch selection and missing-cache handoff')
+parser.add_argument('--lan-branches', action='store_true', help='Exercise LAN manual branch selection in the real offline Share Extension')
 args = parser.parse_args()
+args.branches = args.branches or args.lan_branches
 if not args.udid:
     raise SystemExit(run_with_simulator(SimulatorPool(), 'Share Probe', [sys.executable, __file__, *sys.argv[1:]]))
 
@@ -169,7 +171,7 @@ def remote_back():
     nodes = list(flatten(json.loads(ui.axe('describe-ui', '--point', '30,112'))))
     button = next(n for n in nodes if n.get('type') == 'Button' and n.get('AXLabel') in ['Back', 'New Session'])
     frame = button['frame']
-    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
+    ui.axe('tap', '-x', str(frame['x'] + min(frame['width'], 44) / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
 
 
 video = subprocess.Popen(['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=h264', '--force', str(output / 'run.mp4')],
@@ -193,7 +195,7 @@ try:
         (store / 'branches' / 'Owner%2FRepo.json').write_text(json.dumps({
             'names': ['trunk', 'feature/cached'], 'defaultBranch': 'trunk', 'nextPage': 2,
         }))
-    (store / 'catalog.json').write_text(json.dumps({'userId': 'probe-user', 'workspaceId': 'probe-ws', 'projects': [project], 'machineNames': {'ui': 'Fixture Mac'}}))
+    (store / 'catalog.json').write_text(json.dumps({'userId': 'probe-user', 'workspaceId': 'lw_probe' if args.lan_branches else 'probe-ws', 'projects': [project], 'machineNames': {'ui': 'Fixture Mac'}}))
     options = {'sessionId': 'cached', 'project': project, 'agents': [{'id': 'agent', 'name': 'Fixture Agent', 'machineId': 'ui', 'machineName': 'Fixture Mac', 'cliType': 'builtin', 'agentType': 'codex'}],
         'capabilities': [{'machineId': 'ui', 'cliType': 'builtin', 'agentType': 'codex', 'models': [{'id': 'a', 'name': 'Model A'}], 'modes': [], 'reasoningEfforts': {}, 'configOptions': [{'id': 'fast-mode', 'name': 'Fast mode', 'category': 'model_config', 'type': 'boolean', 'currentValue': False, 'options': []}]}]}
     from urllib.parse import quote
@@ -233,6 +235,21 @@ try:
         remote_tap('branch:feature/cached')
         assert 'feature/cached' in str(remote('branch'))
         ui.capture('cached-selected')
+        if args.lan_branches:
+            remote_tap('branch')
+            remote_tap('list-search')
+            ui.axe('type', 'discard-this')
+            remote('typed:discard-this')
+            remote_back()
+            assert 'feature/cached' in str(remote('branch')), 'Cancelled LAN candidate changed selection'
+            remote_tap('branch')
+            remote_tap('list-search')
+            ui.axe('type', '  release-next  ')
+            remote('typed:release-next')
+            ui.capture('lan-manual-candidate')
+            remote_tap('typed:release-next')
+            assert 'release-next' in str(remote('branch'))
+            ui.capture('lan-manual-selected')
         send = find_send()
         assert send and send['enabled']
     frame = send['frame']
@@ -244,7 +261,8 @@ try:
     assert entry['draft']['agent']['id'] == 'agent' and entry['draft']['sessionId'] != 'cached', 'Draft must carry the agent and a fresh session id'
     assert entry['draft']['choice']['configOptionValues']['fast-mode'] is False, 'Explicit false model option must reach the share inbox'
     if args.branches:
-        assert entry['draft']['branch'] == 'feature/cached', 'Selected branch must reach the inbox draft'
+        expected_branch = 'release-next' if args.lan_branches else 'feature/cached'
+        assert entry['draft']['branch'] == expected_branch, 'Selected branch must reach the inbox draft'
     (output / 'manifest.json').write_text(json.dumps(entry, indent=2))
     deadline = time.monotonic() + 12
     while any(item.get('AXUniqueId') == 'share-probe-host.open' for item in ui.state()):
@@ -263,6 +281,14 @@ try:
         remote_tap('branch')
         remote('branches-cached')
         ui.capture('missing-cache')
+        if args.lan_branches:
+            remote_tap('list-search')
+            ui.axe('type', 'release-without-list')
+            remote('typed:release-without-list')
+            remote_tap('typed:release-without-list')
+            assert 'release-without-list' in str(remote('branch'))
+            # Reopen and cancel so both modes take the same Back path below.
+            remote_tap('branch')
         # Back belongs to the remote extension's own navigation stack.
         remote_back()
         send = find_send()
@@ -270,9 +296,15 @@ try:
         frame = send['frame']
         ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '3')
         entries = [json.loads((entry / 'manifest.json').read_text()) for entry in (store / 'inbox').iterdir()]
-        assert len(entries) == 1 and entries[0].get('draft') is None and 'Lody share probe' in entries[0]['text'], 'Missing branch must preserve text and defer resolution'
+        assert len(entries) == 1 and 'Lody share probe' in entries[0]['text']
+        if args.lan_branches:
+            assert entries[0]['draft']['branch'] == 'release-without-list', 'LAN manual branch must survive without a cached list'
+        else:
+            assert entries[0].get('draft') is None, 'Missing Cloud branch must defer resolution'
         (output / 'unresolved-manifest.json').write_text(json.dumps(entries[0], indent=2))
     print('PASS: signed-out guidance, ready snapshot form, inbox entry written, Lody opened')
+    if args.lan_branches:
+        print('PASS: LAN manual branches, trim/cancel and missing-list selection in the real Share Extension')
     print('NOT VERIFIED: authenticated drain into the outbox (covered by tests/share and a signed-in device run)')
 finally:
     video.send_signal(signal.SIGINT)

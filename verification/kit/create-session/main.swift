@@ -206,7 +206,6 @@ do {
   form.deferUnresolved = true
   check(form.canSend, "Share Extension can still defer unresolved selection to the app")
 }
-print("PASS: create-session form logic")
 
 // Permission changes survive form preferences and preserve independent settings.
 do {
@@ -259,3 +258,38 @@ do {
   form.deferUnresolved = true
   check(form.canSend && form.draft(sessionId: "s") == nil, "offline share defers unresolved branch to the app")
 }
+
+// App and offline Share use the same credential-free LAN branch selection policy.
+do {
+  let repo = CreateProject(id: "github:Owner/Repo", machineId: "", name: "Owner/Repo")
+  for cachedOnly in [false, true] {
+    var form = CreateSessionForm(userId: "local:fixture", workspaceId: "lw_fixture", projects: [repo])
+    form.deferUnresolved = cachedOnly
+    form.open(projectId: nil, context: nil)
+    form.applyOptions(options, chat: false)
+    form.applyBranches(CreateBranches(names: ["trunk"], defaultBranch: "trunk", nextPage: 2))
+    let previous = form.project.branch
+    check(form.typedBranch(" \n release-next \t") == "release-next", "LAN trims a manual candidate")
+    check(form.project.branch == previous, "typing and cancelling never commit a candidate")
+    check(!form.selectBranch(" \n ") && form.project.branch == previous, "blank choice keeps previous selection")
+    check(!form.selectBranch("release next") && form.project.branch == previous, "invalid manual choice keeps previous selection")
+    check(form.selectBranch(" \n release-next \t"), "manual selection is accepted in each host")
+    form.applyBranches(CreateBranches(names: ["feature/later"], defaultBranch: "trunk"))
+    check(form.project.branch == "release-next", "late pages retain the explicit manual selection")
+    form.project.branchesFailed = true
+    check(form.canSend && form.draft(sessionId: "s")?.branch == "release-next", "list failure does not block an explicit LAN base branch")
+    form.selectProject(CreateProject(id: "github:Owner/Other", machineId: "", name: "Other"))
+    check(form.project.branch.isEmpty, "new repository clears manual branch")
+    form.applyOptions(options, chat: false)
+    form.applyBranches(CreateBranches(names: []))
+    check(form.project.branch.isEmpty, "empty repository does not guess main")
+    check(form.selectBranch("feature/new"), "empty LAN list accepts a manual branch")
+  }
+  var cloud = CreateSessionForm(userId: "u", workspaceId: "cloud", projects: [repo])
+  cloud.open(projectId: nil, context: nil)
+  cloud.applyBranches(CreateBranches(names: ["trunk"], defaultBranch: "trunk"))
+  check(cloud.typedBranch("release-next") == nil && !cloud.selectBranch("release-next"), "Cloud never offers unlisted manual branches")
+  check(cloud.selectBranch("trunk"), "Cloud retains listed selection")
+}
+
+print("PASS: create-session form logic including LAN manual branches in App and cached Share")

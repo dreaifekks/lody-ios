@@ -1,4 +1,5 @@
 import Foundation
+import LodyCore
 
 let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
   .appendingPathComponent("../../../tests/fixtures").standardized
@@ -24,4 +25,28 @@ for item in cases {
   precondition(built.createdJSON == golden[name]!["created"], "\(name) created differs from JS:\n\(built.createdJSON)")
   precondition(built.record?.sessionId == draft.sessionId, "\(name) record does not decode for the outbox")
 }
-print("PASS: CreateDraftRecord matches createDraft.ts byte for byte")
+
+// Production form -> draft -> ordinary creation outbox payload, for App and cached Share.
+do {
+  let repo = CreateProject(id: "github:Owner/Repo", machineId: "", name: "Owner/Repo")
+  let agent = CreationAgent(id: "a", name: "LAN Agent", machineId: "m", machineName: "LAN Mac", cliType: "builtin", agentType: "codex")
+  for cachedOnly in [false, true] {
+    var form = CreateSessionForm(userId: "local:fixture", workspaceId: "lw_fixture", projects: [repo])
+    form.deferUnresolved = cachedOnly
+    form.open(projectId: nil, context: nil)
+    form.applyOptions(CreationOptions(sessionId: "s", project: repo, agents: [agent], capabilities: []), chat: false)
+    form.applyBranches(CreateBranches(names: []))
+    precondition(form.selectBranch(" \n release-next \t"))
+    let draft = form.draft(sessionId: "s")!
+    let built = CreateDraftRecord(draft: draft, payload: ["id": "turn", "text": "First LAN turn", "attachments": []])
+    let record = built.record!
+    let creation = try JSONSerialization.jsonObject(with: Data(record.creation!.utf8)) as! [String: Any]
+    precondition(record.phase == "waiting" && record.sendId == "turn")
+    precondition(record.send["text"]?.string == "First LAN turn")
+    precondition(creation["projectId"] as? String == repo.id && creation["branch"] as? String == "release-next")
+    precondition(creation["machineId"] as? String == "m" && creation["agentConfigId"] as? String == "a")
+    precondition(creation["workspaceId"] as? String == "lw_fixture")
+  }
+}
+
+print("PASS: CreateDraftRecord matches createDraft.ts and preserves LAN repo/base branch and first turn")

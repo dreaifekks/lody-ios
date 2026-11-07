@@ -174,6 +174,20 @@ public struct CreateSessionForm: Sendable {
     project = CreateSessionPage(chat: false, projectId: picked.id)
   }
 
+  public func typedBranch(_ query: String) -> String? {
+    guard project.github else { return nil }
+    return CreateLogic.typedBranch(query, workspaceId: workspaceId, listed: project.branches?.names ?? [])
+  }
+
+  @discardableResult
+  public mutating func selectBranch(_ value: String) -> Bool {
+    let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard project.github, !name.isEmpty,
+      project.branches?.names.contains(name) == true || typedBranch(name) == name else { return false }
+    project.branch = name
+    return true
+  }
+
   public mutating func applyBranches(_ value: CreateBranches) {
     if project.branches == nil { project.branches = value }
     else { project.branches?.append(value) }
@@ -220,7 +234,7 @@ public struct CreateSessionForm: Sendable {
 
   public var canSend: Bool {
     !userId.isEmpty && !current.loading &&
-      (deferUnresolved || (!current.failed && current.agent != nil && (!current.github || !current.branch.isEmpty)))
+      (deferUnresolved || (!current.failed && current.agent != nil && (!current.github || !current.branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)))
   }
 
   public var notice: String {
@@ -235,7 +249,7 @@ public struct CreateSessionForm: Sendable {
 
   public func draft(sessionId: String) -> CreateSessionDraft? {
     let page = current
-    guard let agent = page.agent, !userId.isEmpty, !page.github || !page.branch.isEmpty else { return nil }
+    guard let agent = page.agent, !userId.isEmpty, !page.github || !page.branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
     let project = projects.first { $0.id == page.projectId }
     return CreateSessionDraft(
       sessionId: sessionId,
@@ -243,7 +257,7 @@ public struct CreateSessionForm: Sendable {
       workspaceId: workspaceId,
       projectId: page.chat ? nil : page.projectId,
       projectName: page.chat ? "" : (project?.name ?? page.options?.project?.name ?? ""),
-      branch: page.github ? page.branch.trimmingCharacters(in: .whitespaces) : nil,
+      branch: page.github ? page.branch.trimmingCharacters(in: .whitespacesAndNewlines) : nil,
       agent: agent,
       choice: page.choice,
       reasoningEffortConfigId: page.capability?.reasoningEffortConfigId

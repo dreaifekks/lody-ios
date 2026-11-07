@@ -2,6 +2,18 @@ import XCTest
 import LodyCore
 
 final class CoreTests: XCTestCase {
+  func testLANManualBaseBranchPolicy() {
+    XCTAssertEqual(CreateLogic.typedBranch(" \n release/next \t", workspaceId: "lw_fixture", listed: []), "release/next")
+    for workspace in ["", "cloud", "w1"] {
+      XCTAssertNil(CreateLogic.typedBranch("release/next", workspaceId: workspace, listed: []))
+    }
+    for query in ["", " \n ", "release next", "release\nnext"] {
+      XCTAssertNil(CreateLogic.typedBranch(query, workspaceId: "lw_fixture", listed: []))
+    }
+    XCTAssertNil(CreateLogic.typedBranch("trunk", workspaceId: "lw_fixture", listed: ["trunk"]))
+    XCTAssertEqual(CreateLogic.typedBranch("release/next", workspaceId: "lw_fixture", listed: ["trunk"]), "release/next")
+  }
+
   func testSuspensionDoesNotConsumeHeartbeatDeadline() {
     var health = RuntimeHealth()
     health.started(at: 100)

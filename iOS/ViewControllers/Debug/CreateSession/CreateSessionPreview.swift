@@ -49,12 +49,17 @@ struct CreateSessionFixture {
 
   var params: CreateSessionHostParams {
     var params = CreateSessionHostParams()
-    params.userId = SettingsSource.live.state.account?.user.id ?? ""
+    params.userId = scenario == "create-lan" ? "local:ui-create" : (SettingsSource.live.state.account?.user.id ?? "")
     switch scenario {
     case "model-memory":
       params.workspaceId = "ui-model-memory"
       params.projects = [CreateProject(id: "ui:local:models", machineId: "ui", name: "Model Memory", rootPath: "/fixture")]
       params.projectId = "ui:local:models"
+    case "create-lan":
+      params.workspaceId = "lw_ui-create"
+      params.projects = [Self.alpha]
+      params.sendHandoff = false
+      params.relay = false
     case "create-recovery":
       params.workspaceId = "ui-home"
       params.projects = [Self.alpha]
@@ -80,6 +85,45 @@ struct CreateSessionFixture {
       case "model-memory": return Self.options("ui-model-memory", project: params.projects.first)
       case "create-recovery": return try await Self.recovery(project: projectId == nil ? nil : project)
       default: return Self.options("ui-create-parity", project: project)
+      }
+    }
+    if scenario == "create-lan" {
+      let evidence = LANCreationEvidence()
+      service.repositories = { workspace in
+        precondition(workspace == params.workspaceId)
+        evidence.repositoriesRequested = true
+        return ["Owner/Paged", "Owner/Unavailable", "Owner/Empty"]
+      }
+      service.branches = { _, repo, page in
+        evidence.branchRequests.append("\(repo):\(page)")
+        if repo == "Owner/Unavailable" { throw CocoaError(.fileReadUnknown) }
+        if repo == "Owner/Empty" { return CreateBranches(names: []) }
+        if page == 1 { return CreateBranches(names: ["trunk", "develop"], defaultBranch: "trunk", nextPage: 2) }
+        return CreateBranches(names: ["feature/search-across-pages"])
+      }
+      service.options = { _, projectId in
+        evidence.optionProjects.append(projectId ?? "chat")
+        let project = projectId.flatMap { id in
+          id.hasPrefix("github:") ? CreateSessionService.githubProject(String(id.dropFirst(7))) : nil
+        } ?? params.projects.first { $0.id == projectId }
+        var options = Self.options("ui-lan-create", project: project)
+        options.agents.append(CreationAgent(id: "remote", name: "LAN Agent", machineId: "lan-mac", machineName: "LAN Mac", cliType: "builtin", agentType: "codex"))
+        return options
+      }
+      service.readPrefs = { _ in
+        try? FileManager.default.removeItem(at: LANCreationEvidence.url)
+        try? await OutboxSession.shared.remove(user: params.userId, workspace: params.workspaceId, sessionId: "ui-lan-create").value
+        return nil
+      }
+      service.writePrefs = { _, _ in }
+      service.put = { user, workspace, json in
+        // Use the ordinary outbox, scoped away from the fixture app's catalog.
+        let saved = OutboxSession.shared.put(user: user, workspace: workspace, json: json)
+        return Task { @MainActor in
+          try await saved.value
+          let snapshot = OutboxSession.read(user: user, workspace: workspace)
+          try evidence.save(outbox: snapshot)
+        }
       }
     }
     return service
@@ -115,5 +159,25 @@ struct CreateSessionFixture {
   // The store queue is serial, so these land before the page's first prefs or options read.
   private static func write(_ key: String, _ value: String) {
     LocalStore.queue.async { _ = try? LocalStore.shared.write(key, value) }
+  }
+}
+
+// Only the offline UI fixture exports this credential-free observation. Production
+// form submission and OutboxSession persistence run before the evidence is written.
+@MainActor
+private final class LANCreationEvidence {
+  static var url: URL { FileManager.default.temporaryDirectory.appendingPathComponent("lody-lan-create.json") }
+  var repositoriesRequested = false
+  var branchRequests: [String] = []
+  var optionProjects: [String] = []
+
+  func save(outbox: String) throws {
+    let value: [String: Any] = [
+      "repositoriesRequested": repositoriesRequested,
+      "branchRequests": branchRequests,
+      "optionProjects": optionProjects,
+      "outbox": try JSONSerialization.jsonObject(with: Data(outbox.utf8)),
+    ]
+    try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]).write(to: Self.url, options: .atomic)
   }
 }
