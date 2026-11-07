@@ -16,13 +16,13 @@
 
 **Decisions**
 
-| Item | Decision | Whose |
-|---|---|---|
-| Structure | Follows the official desktop app; drops local-agent items and Billing | yours (doc round 1) |
-| Look | Colour tiles; large account header; theme thumbnails + dots | yours (canvas round 1) |
-| Tech | SwiftUI `NavigationSplitView` + `Form(.grouped)` | yours (doc round 1) |
-| First version | 8 pages; agents / roles / memory / MCP / prompts / GitHub / usage / sharing come later | yours (doc round 1) |
-| Appearance | Stored on this Mac only | yours (doc round 1) |
+| Item          | Decision                                                                               | Whose                  |
+| ------------- | -------------------------------------------------------------------------------------- | ---------------------- |
+| Structure     | Follows the official desktop app; drops local-agent items and Billing                  | yours (doc round 1)    |
+| Look          | Colour tiles; large account header; theme thumbnails + dots                            | yours (canvas round 1) |
+| Tech          | SwiftUI `NavigationSplitView` + `Form(.grouped)`                                       | yours (doc round 1)    |
+| First version | 8 pages; agents / roles / memory / MCP / prompts / GitHub / usage / sharing come later | yours (doc round 1)    |
+| Appearance    | Stored on this Mac only                                                                | yours (doc round 1)    |
 
 **Check these (my calls)**
 

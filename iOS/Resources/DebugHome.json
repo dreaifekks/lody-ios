@@ -375,9 +375,7 @@
         "rootPath": "/Users/me/git/solo"
       }
     ],
-    "machineIds": [
-      "ui"
-    ],
+    "machineIds": ["ui"],
     "machineNames": {
       "ui": "Fixture Mac"
     },

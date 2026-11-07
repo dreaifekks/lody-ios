@@ -10,11 +10,11 @@ Lody 的 `verification/mac/vm*.py` 已经能在无界面的 Tart macOS VM 里跑
 
 ## 2. 目标、非目标、反目标
 
-| 类别 | 内容 |
-| --- | --- |
-| 目标 | 新项目加一份 `macvm.toml` 就能跑 VM 里的 XCUITest；base 跟项目无关，所有项目共用；每个项目有自己的常驻 runner；base 跟着宿主机 Xcode、iOS runtime 和工具清单的变化自动做增量更新；VM 里不出现需要人点的权限弹窗；XCUITest 做不到的事，AI 可以通过 `macvm` 进入 runner，用 cliclick 和 peekaboo 操作。 |
-| 非目标 | 不支持 Linux 和 Intel 宿主机；不做 CI 云端调度；不管被测 App 内部的测试接缝；不同时支持多个 macOS 版本的 base（一次只有一个，系统大版本升级时整体重建）。 |
-| 反目标 | 碰宿主机的屏幕、鼠标、键盘或 Dock；把项目名、bundle id 写死在工具里；VM 里出现需要人点的弹窗；只为迁移就把已经配好的 base 重装一遍；Lody 在迁移过程中有一段时间跑不了验证。 |
+| 类别   | 内容                                                                                                                                                                                                                                                                                                  |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 目标   | 新项目加一份 `macvm.toml` 就能跑 VM 里的 XCUITest；base 跟项目无关，所有项目共用；每个项目有自己的常驻 runner；base 跟着宿主机 Xcode、iOS runtime 和工具清单的变化自动做增量更新；VM 里不出现需要人点的权限弹窗；XCUITest 做不到的事，AI 可以通过 `macvm` 进入 runner，用 cliclick 和 peekaboo 操作。 |
+| 非目标 | 不支持 Linux 和 Intel 宿主机；不做 CI 云端调度；不管被测 App 内部的测试接缝；不同时支持多个 macOS 版本的 base（一次只有一个，系统大版本升级时整体重建）。                                                                                                                                             |
+| 反目标 | 碰宿主机的屏幕、鼠标、键盘或 Dock；把项目名、bundle id 写死在工具里；VM 里出现需要人点的弹窗；只为迁移就把已经配好的 base 重装一遍；Lody 在迁移过程中有一段时间跑不了验证。                                                                                                                           |
 
 ## 3. 约束
 
@@ -115,17 +115,17 @@ dir = ".artifacts/mac-verify-vm"
 
 ## 7. 命令
 
-| 命令 | 做什么 |
-| --- | --- |
-| `macvm prepare [--recovery-vnc] [--repair-xcode] [--force]` | 建立或增量更新 base，规则见第 8 节。 |
-| `macvm run [--case …] [--extra …] [--hold] [--fresh] [--no-update] [--output …]` | 宿主机构建，同时启动当前项目的 runner，重置后运行测试，导出结果。行为同现在的 `pnpm verify:mac:vm`。 |
-| `macvm status [--follow]` | 显示 base 的状态和指纹、每台 runner 的状态、空闲倒计时、锁、正在运行的步骤，以及最近 10 次运行（带项目名）。 |
-| `macvm watch` | runner 开着时，打开当前项目 runner 的 Screen Sharing。 |
-| `macvm reset` | 删掉当前项目的 runner，下次重新 clone。 |
-| `macvm up` | 启动当前项目的 runner 并保持开机（受空闲停机约束），不跑测试。供下面三个命令使用。 |
-| `macvm exec -- <cmd…>` | 在当前项目的 runner 里通过 SSH 执行命令，返回输出和退出码，`PATH` 里已有 Homebrew。例如：`macvm exec -- cliclick c:400,300`、`macvm exec -- peekaboo see --app Lody`。 |
-| `macvm screenshot [path]` | 通过 Screen Sharing 抓取 runner 的整屏截图，存成 PNG，默认存到输出目录。用的是现有的 RFB 抓帧，不依赖 VM 里的权限。 |
-| `macvm migrate` | 一次性把现有的 Lody 卷和 VM 改名，见第 11 节。 |
+| 命令                                                                             | 做什么                                                                                                                                                                 |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `macvm prepare [--recovery-vnc] [--repair-xcode] [--force]`                      | 建立或增量更新 base，规则见第 8 节。                                                                                                                                   |
+| `macvm run [--case …] [--extra …] [--hold] [--fresh] [--no-update] [--output …]` | 宿主机构建，同时启动当前项目的 runner，重置后运行测试，导出结果。行为同现在的 `pnpm verify:mac:vm`。                                                                   |
+| `macvm status [--follow]`                                                        | 显示 base 的状态和指纹、每台 runner 的状态、空闲倒计时、锁、正在运行的步骤，以及最近 10 次运行（带项目名）。                                                           |
+| `macvm watch`                                                                    | runner 开着时，打开当前项目 runner 的 Screen Sharing。                                                                                                                 |
+| `macvm reset`                                                                    | 删掉当前项目的 runner，下次重新 clone。                                                                                                                                |
+| `macvm up`                                                                       | 启动当前项目的 runner 并保持开机（受空闲停机约束），不跑测试。供下面三个命令使用。                                                                                     |
+| `macvm exec -- <cmd…>`                                                           | 在当前项目的 runner 里通过 SSH 执行命令，返回输出和退出码，`PATH` 里已有 Homebrew。例如：`macvm exec -- cliclick c:400,300`、`macvm exec -- peekaboo see --app Lody`。 |
+| `macvm screenshot [path]`                                                        | 通过 Screen Sharing 抓取 runner 的整屏截图，存成 PNG，默认存到输出目录。用的是现有的 RFB 抓帧，不依赖 VM 里的权限。                                                    |
+| `macvm migrate`                                                                  | 一次性把现有的 Lody 卷和 VM 改名，见第 11 节。                                                                                                                         |
 
 `exec`、`screenshot` 和 `up` 都不拿锁。测试运行期间也能用 `exec`，是否会干扰测试由调用者自己判断，跟现在 VNC 的 Observe 模式是一样的约定。`up` 和 `exec` 每次调用都会刷新 runner 的活动时间，所以 AI 正在使用的 runner 不会因为"空闲最久"被别的项目挤掉。
 
@@ -135,24 +135,24 @@ dir = ".artifacts/mac-verify-vm"
 
 base 的配置拆成一组有名字的步骤。每一步都有一个"指纹"，决定它需不需要重跑：
 
-| 步骤 | 内容 | 指纹 |
-| --- | --- | --- |
-| system | 不睡眠、不锁屏、不建索引、自动化模式、开发者模式 | 步骤脚本的哈希 |
-| xcode | 把宿主机 Xcode 拷进去，删掉其他 Xcode 副本，接受许可，执行 first launch | 宿主机 Xcode 的 build 号 |
-| runtime | 导入对应的 iOS Simulator runtime，删除旧 runtime | Xcode build 号加 iOS SDK 版本 |
-| screen-sharing | 启用 Screen Sharing 及其权限 | 步骤脚本的哈希 |
-| services | 停掉 46 个后台服务 | 服务清单的哈希 |
-| tools | Homebrew，加上 `cliclick`、`peekaboo` | 工具清单的哈希 |
-| grants | 预写权限库，见第 10 节 | 操控方清单和权限清单的哈希 |
-| desktop | Dock 只放 Finder、Xcode、DeviceHub、Terminal，关闭"最近使用"，纯色 Space Gray 壁纸 | 步骤脚本的哈希 |
-| first-launch | 首次打开 Xcode 和 DeviceHub，提前消化首次运行的提示 | Xcode build 号 |
+| 步骤           | 内容                                                                               | 指纹                          |
+| -------------- | ---------------------------------------------------------------------------------- | ----------------------------- |
+| system         | 不睡眠、不锁屏、不建索引、自动化模式、开发者模式                                   | 步骤脚本的哈希                |
+| xcode          | 把宿主机 Xcode 拷进去，删掉其他 Xcode 副本，接受许可，执行 first launch            | 宿主机 Xcode 的 build 号      |
+| runtime        | 导入对应的 iOS Simulator runtime，删除旧 runtime                                   | Xcode build 号加 iOS SDK 版本 |
+| screen-sharing | 启用 Screen Sharing 及其权限                                                       | 步骤脚本的哈希                |
+| services       | 停掉 46 个后台服务                                                                 | 服务清单的哈希                |
+| tools          | Homebrew，加上 `cliclick`、`peekaboo`                                              | 工具清单的哈希                |
+| grants         | 预写权限库，见第 10 节                                                             | 操控方清单和权限清单的哈希    |
+| desktop        | Dock 只放 Finder、Xcode、DeviceHub、Terminal，关闭"最近使用"，纯色 Space Gray 壁纸 | 步骤脚本的哈希                |
+| first-launch   | 首次打开 Xcode 和 DeviceHub，提前消化首次运行的提示                                | Xcode build 号                |
 
 每一步的指纹记录在卷上的 `runs/base.json`。规则如下：
 
 - `macvm prepare` 只重跑指纹变了的步骤；某一步变了，排在它后面并依赖它的步骤也重跑（xcode → runtime → first-launch）。全部跑完后 base 再"登录一次"让首次运行的提示消失，然后更新指纹记录和 ready 标记。
 - `macvm run` 开始前先算一遍指纹。不一致就打印哪些步骤变了，先做增量 prepare 再继续；加 `--no-update` 则用旧 base 跑，并给出提示。
 - base 更新后，所有 runner 在各自的下一次运行时重新 clone（沿用现在比较 ready 标记时间戳的做法）。
-- 更新不在 base 本身上做，而是"先复制、成功后再替换"：prepare 先把 `macos-27.2` clone 成 `macos-27.2-next`（APFS 写时复制，几乎不占空间），所有步骤都在 next 上跑。全部成功后，用 `base.lock` 短暂锁住，把 next 改名为正式 base，再写入指纹和 ready 标记。失败时正式 base 和 ready 标记都不受影响，任何 clone（新 runner、`reset`、基础设施失败后的重新 clone、`--fresh`）拿到的始终是完整的 base。next 和它自己的指纹记录保留下来，下次 prepare 从失败的步骤继续。`base.lock` 只在 clone 和替换的那一刻持有，长时间的 Xcode 更新不会挡住别的项目。*现在的实现是一开始就删掉 ready 标记，失败后所有 runner 都跑不了，今天就遇到过一次。*
+- 更新不在 base 本身上做，而是"先复制、成功后再替换"：prepare 先把 `macos-27.2` clone 成 `macos-27.2-next`（APFS 写时复制，几乎不占空间），所有步骤都在 next 上跑。全部成功后，用 `base.lock` 短暂锁住，把 next 改名为正式 base，再写入指纹和 ready 标记。失败时正式 base 和 ready 标记都不受影响，任何 clone（新 runner、`reset`、基础设施失败后的重新 clone、`--fresh`）拿到的始终是完整的 base。next 和它自己的指纹记录保留下来，下次 prepare 从失败的步骤继续。`base.lock` 只在 clone 和替换的那一刻持有，长时间的 Xcode 更新不会挡住别的项目。_现在的实现是一开始就删掉 ready 标记，失败后所有 runner 都跑不了，今天就遇到过一次。_
 - Homebrew 工具的版本升级不算指纹变化。`macvm prepare --upgrade-tools` 会强制重跑 tools 步骤（`brew upgrade`）。
 
 ## 9. runner
@@ -194,33 +194,33 @@ base 的 grants 步骤给固定的操控方授予能预授权的全部权限：
 
 ## 13. 决定一览
 
-| 决定 | 来源 |
-| --- | --- |
-| base 跟项目无关，所有项目共用 | 你定的 |
-| 每个项目一台常驻 runner | 你定的 |
-| base 跟着 Xcode、SDK、工具的变化自动更新 | 你定的 |
-| 独立的通用 CLI，放在自己的仓库 | 你定的 |
-| base 内置 Homebrew 和 AI 控制工具，作为 XCUITest 做不到时的兜底 | 你定的 |
-| Dock 只放 Finder、Xcode、DeviceHub、Terminal，纯色壁纸 | 你定的 |
-| VM 里不出现需要人点的权限弹窗 | 你定的 |
-| 项目配置用 `macvm.toml`，声明式配置加附加套件 | 你同意了推荐 |
-| 按步骤指纹做增量更新，运行前自动触发，`--no-update` 跳过 | 你同意了推荐 |
-| 同时最多 2 台 VM，停掉空闲最久的 runner | 你同意了推荐 |
-| 改成中性名字，一次性迁移，不重装 | 你同意了推荐 |
-| App 内的测试接缝留在 Lody | 你同意了推荐 |
-| 用预写权限库代替关闭权限系统 | 你同意了推荐 |
-| 工具名 `macvm`，仓库路径，用 `uv tool` 安装 | 我的决定 |
-| cliclick 和 peekaboo 作为首批工具 | 我的决定 |
-| 新增 `up`、`exec`、`screenshot` 命令，且不拿锁 | 我的决定 |
-| 两层锁，不同项目的运行可以并行 | 我的决定 |
-| 更新失败时保留旧的 ready 标记 | 我的决定 |
-| git 历史不迁移 | 我的决定 |
-| base 更新采用"先复制、成功后再替换"，失败不影响正式 base | 我的决定 |
-| 沿用项目平时的 DerivedData，构建时 `DEVELOPER_DIR` 指向 base 的 Xcode | 我的决定 |
-| 现有参数全部保留，附加套件可写成 `--<name>` | 我的决定 |
-| `up` 和 `exec` 刷新活动时间，避免被挤掉 | 我的决定 |
-| 改名和切换在同一个提交里落地 | 我的决定 |
-| 被测 App 默认不预授权，每次运行前清回"未决定"，项目在 `[grants.apps]` 里写明要预先给的权限 | 你定的 |
+| 决定                                                                                       | 来源         |
+| ------------------------------------------------------------------------------------------ | ------------ |
+| base 跟项目无关，所有项目共用                                                              | 你定的       |
+| 每个项目一台常驻 runner                                                                    | 你定的       |
+| base 跟着 Xcode、SDK、工具的变化自动更新                                                   | 你定的       |
+| 独立的通用 CLI，放在自己的仓库                                                             | 你定的       |
+| base 内置 Homebrew 和 AI 控制工具，作为 XCUITest 做不到时的兜底                            | 你定的       |
+| Dock 只放 Finder、Xcode、DeviceHub、Terminal，纯色壁纸                                     | 你定的       |
+| VM 里不出现需要人点的权限弹窗                                                              | 你定的       |
+| 项目配置用 `macvm.toml`，声明式配置加附加套件                                              | 你同意了推荐 |
+| 按步骤指纹做增量更新，运行前自动触发，`--no-update` 跳过                                   | 你同意了推荐 |
+| 同时最多 2 台 VM，停掉空闲最久的 runner                                                    | 你同意了推荐 |
+| 改成中性名字，一次性迁移，不重装                                                           | 你同意了推荐 |
+| App 内的测试接缝留在 Lody                                                                  | 你同意了推荐 |
+| 用预写权限库代替关闭权限系统                                                               | 你同意了推荐 |
+| 工具名 `macvm`，仓库路径，用 `uv tool` 安装                                                | 我的决定     |
+| cliclick 和 peekaboo 作为首批工具                                                          | 我的决定     |
+| 新增 `up`、`exec`、`screenshot` 命令，且不拿锁                                             | 我的决定     |
+| 两层锁，不同项目的运行可以并行                                                             | 我的决定     |
+| 更新失败时保留旧的 ready 标记                                                              | 我的决定     |
+| git 历史不迁移                                                                             | 我的决定     |
+| base 更新采用"先复制、成功后再替换"，失败不影响正式 base                                   | 我的决定     |
+| 沿用项目平时的 DerivedData，构建时 `DEVELOPER_DIR` 指向 base 的 Xcode                      | 我的决定     |
+| 现有参数全部保留，附加套件可写成 `--<name>`                                                | 我的决定     |
+| `up` 和 `exec` 刷新活动时间，避免被挤掉                                                    | 我的决定     |
+| 改名和切换在同一个提交里落地                                                               | 我的决定     |
+| 被测 App 默认不预授权，每次运行前清回"未决定"，项目在 `[grants.apps]` 里写明要预先给的权限 | 你定的       |
 
 ## 14. 留给实现者
 

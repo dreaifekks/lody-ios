@@ -22,3 +22,6 @@ packages/lexical-swift/Sources/Lexical/Documentation.docc/
 
 packages/lody-core/.build/
 packages/lody-core/.swiftpm/
+
+# Bundled third-party Mermaid renderer; preserve the distributed artifact.
+iOS/Resources/Mermaid/pele.js

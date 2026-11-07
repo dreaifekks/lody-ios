@@ -52,13 +52,13 @@ Success: on Mac, a 10,000-entry session opens showing its latest page, scrolling
 
 ## Decisions (from the conversation)
 
-| Question | Decision |
-|---|---|
-| Mac-only shortcut vs shared core | **B: shared core for iOS and Mac** |
-| Row model at the ChatKit boundary | **A: ChatKit owns list mechanics only.** A row is an id + version + Lody-supplied neighbour key and grouping; cells are registered by the host. `CKTextView` stays an optional primitive, not a mandated cell. `lody-ios-bb` agreed. |
-| Order | **Core first → Mac → iOS** (iOS only after `lody-ios-bb` says its `LodyiOSKit/Sources/Chat` work is done) |
-| Mac send landing | **Same as iOS.** The sent message settles near the top of the viewport with reserved space below it (iOS `anchoredUserID` + `updateBottomInset`, S:9-28), and the reply grows into that space. Following uses the eased `CKScrollMotion`, not a jump. Mac composer and transcript checks gain assertions for this. |
-| Height cache key | Must include the **previous row's kind** (`ChatRowPadding.above(kind:previousKind:)` adds a gap that depends on it), not only id + version + width. From `lody-ios-bb`. |
+| Question                          | Decision                                                                                                                                                                                                                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mac-only shortcut vs shared core  | **B: shared core for iOS and Mac**                                                                                                                                                                                                                                                                                 |
+| Row model at the ChatKit boundary | **A: ChatKit owns list mechanics only.** A row is an id + version + Lody-supplied neighbour key and grouping; cells are registered by the host. `CKTextView` stays an optional primitive, not a mandated cell. `lody-ios-bb` agreed.                                                                               |
+| Order                             | **Core first → Mac → iOS** (iOS only after `lody-ios-bb` says its `LodyiOSKit/Sources/Chat` work is done)                                                                                                                                                                                                          |
+| Mac send landing                  | **Same as iOS.** The sent message settles near the top of the viewport with reserved space below it (iOS `anchoredUserID` + `updateBottomInset`, S:9-28), and the reply grows into that space. Following uses the eased `CKScrollMotion`, not a jump. Mac composer and transcript checks gain assertions for this. |
+| Height cache key                  | Must include the **previous row's kind** (`ChatRowPadding.above(kind:previousKind:)` adds a gap that depends on it), not only id + version + width. From `lody-ios-bb`.                                                                                                                                            |
 
 No artboards or other artifacts were used for this design; it was decided in chat.
 
