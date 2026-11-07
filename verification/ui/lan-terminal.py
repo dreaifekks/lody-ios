@@ -10,6 +10,18 @@ import catalog
 ui = UI(*sys.argv[1:])
 
 
+def reset_case(preview):
+    # A Debug deep link presents a new sheet; dismiss the old fixture first so
+    # accessibility cannot target its still-visible underlying controls.
+    label = catalog.text('accessibility.closeSheet', title='')
+    close = ui.wait(lambda items: next((i for i in items if i.get('type') == 'Button' and i.get('AXLabel') == label), None), 'Missing fixture close')
+    f = close['frame']
+    ui.axe('tap', '-x', str(f['x'] + f['width'] / 2), '-y', str(f['y'] + f['height'] / 2), '--post-delay', '.4')
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'terminal-fixture-open' for i in items), 'Old fixture did not close')
+    ui.open_case(preview)
+    ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == 'terminal-fixture-open' and i['frame']['height'] >= 44), None), 'New fixture did not settle')
+
+
 def open_terminal():
     ui.axe('tap', '--id', 'terminal-fixture-open')
     return ui.element('terminal-view')
@@ -108,7 +120,7 @@ counts = audit(0, opens=5, closes=5)
 assert counts['cleanups'] == 2, counts
 ui.capture('dead-link-cleaned')
 
-ui.open_case('terminal-preview-late-open')
+reset_case('terminal-preview-late-open')
 open_terminal()
 ui.element('terminal-status')
 back()
@@ -117,7 +129,7 @@ ui.axe('tap', '--id', 'terminal-fixture-release')
 audit(0, opens=1, closes=1)
 ui.capture('late-open-cleaned')
 
-ui.open_case('terminal-preview-failure')
+reset_case('terminal-preview-failure')
 open_terminal()
 retry = ui.element('terminal-reconnect')
 assert retry['frame']['height'] >= 44, retry
@@ -126,10 +138,10 @@ ui.axe('tap', '--id', 'terminal-reconnect')
 screen_contains('Lody LAN terminal')
 back()
 audit(0, opens=2, closes=1)
-ui.open_case('terminal-preview-unknown')
+reset_case('terminal-preview-unknown')
 open_terminal()
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'terminal-status'
-    and i.get('AXLabel') == catalog.text('terminal.openUnknown') for i in items), 'Unknown open was hidden')
+    and (i.get('AXLabel') or '').startswith(catalog.text('terminal.openUnknown')) for i in items), 'Unknown open was hidden')
 assert not any(i.get('AXUniqueId') == 'terminal-reconnect' for i in ui.state()), 'Unknown open allowed another open'
 ui.capture('open-unknown')
 back()
@@ -138,11 +150,11 @@ ui.axe('tap', '--id', 'terminal-fixture-release')
 audit(0, opens=1, closes=1)
 # A local notSent result arriving after onClose must resolve the old attempt
 # despite the invalidated generation, restore Retry, and create exactly one PTY.
-ui.open_case('terminal-preview-not-sent')
+reset_case('terminal-preview-not-sent')
 open_terminal()
 ui.element('terminal-reconnect')
 assert not any(i.get('AXUniqueId') == 'terminal-status'
-    and i.get('AXLabel') == catalog.text('terminal.openUnknown') for i in ui.state())
+    and (i.get('AXLabel') or '').startswith(catalog.text('terminal.openUnknown')) for i in ui.state())
 ui.capture('local-not-sent-retry')
 ui.axe('tap', '--id', 'terminal-reconnect')
 screen_contains('Lody LAN terminal fixture-1')

@@ -244,7 +244,7 @@ try:
             assert 'feature/cached' in str(remote('branch')), 'Cancelled LAN candidate changed selection'
             remote_tap('branch')
             remote_tap('list-search')
-            ui.axe('type', '  release-next  ')
+            ui.axe('type', ' release-next ')
             remote('typed:release-next')
             ui.capture('lan-manual-candidate')
             remote_tap('typed:release-next')

@@ -699,6 +699,9 @@ try:
                 elif case in ('send-queue', 'send-guide'):
                     # Queue/steer/stop and guide rounds reach ~185s on the native fixtures.
                     check_timeout = 300
+                elif case in ('lan-files', 'lan-terminal'):
+                    # Multiple reset scenes cover recovery and resource ownership.
+                    check_timeout = 300
                 elif case in ('branch-picker', 'branch-picker-lan', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'appearance'):
                     check_timeout = 300
                 check_started = time.monotonic()

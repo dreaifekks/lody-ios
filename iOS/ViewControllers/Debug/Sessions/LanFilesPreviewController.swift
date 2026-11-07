@@ -52,7 +52,7 @@ final class LanFilesPreviewController: UIViewController {
         fetches += 1; updateStatus()
         guard memberOnline else { throw SessionAttachments.error("Offline member unavailable") }
         // Intentionally allow a late result so the production scope fence is exercised.
-        try? await Task.sleep(for: .milliseconds(scenario == "late" ? 1800 : 400))
+        try? await Task.sleep(for: .milliseconds(scenario == "late" ? 6000 : 400))
         if scenario == "recovery", fetches <= 2 {
           runtimeEpoch += 1; updateStatus()
           throw SessionAttachments.error("Offline runtime replaced. Retry the picture.")
@@ -77,11 +77,10 @@ final class LanFilesPreviewController: UIViewController {
     }
     chat.onEditMessage = { [weak self] _ in self?.openEditor(notes: notes, image: imageURL) }
     chat.editableMessageID = "lan-user"
-    chat.frame = view.bounds
-    chat.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    chat.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(chat)
     chat.setAttachmentContext(SessionController.json(["workspaceId": "lw_offline-files", "sessionId": "offline-files"]))
-    chat.setComposerState(SessionController.json(["editable": true, "canSend": true, "sending": false, "placeholder": "LAN draft"]))
+    chat.setComposerState(SessionController.json(["editable": true, "canSend": true, "sending": false, "notice": "", "reconnect": false, "placeholder": "LAN draft"]))
     let attachments = [["id": "draft-file", "name": "notes.txt", "uri": notes.absoluteString, "kind": "file"]]
     chat.setInitialDraft("Retain LAN text and file")
     chat.setInitialAttachments(String(decoding: try! JSONSerialization.data(withJSONObject: attachments), as: UTF8.self))
@@ -111,9 +110,16 @@ final class LanFilesPreviewController: UIViewController {
     chat.setEntries(String(decoding: try! JSONSerialization.data(withJSONObject: entries), as: UTF8.self))
     status.accessibilityIdentifier = "lan-files-status"
     status.isAccessibilityElement = true
-    controls.axis = .horizontal
-    controls.spacing = 8
+    status.font = .preferredFont(forTextStyle: .caption1)
+    status.numberOfLines = 2
+    controls.axis = .vertical
+    controls.spacing = 0
     controls.addArrangedSubview(status)
+    let actions = UIStackView()
+    actions.axis = .horizontal
+    actions.distribution = .fillEqually
+    actions.spacing = 8
+    controls.addArrangedSubview(actions)
     let switchAccount = UIButton(type: .system)
     switchAccount.setTitle("Switch account", for: .normal)
     switchAccount.accessibilityIdentifier = "lan-files-switch"
@@ -121,15 +127,16 @@ final class LanFilesPreviewController: UIViewController {
       guard let self else { return }
       user = UUID().uuidString
       chat.setEntries("[]")
-      chat.setComposerState(SessionController.json(["editable": false, "canSend": false, "sending": false]))
+      chat.scheduleUpdate()
+      chat.setComposerState(SessionController.json(["editable": false, "canSend": false, "sending": false, "notice": "", "reconnect": false, "placeholder": "LAN draft"]))
       updateStatus()
     }, for: .touchUpInside)
-    controls.addArrangedSubview(switchAccount)
+    actions.addArrangedSubview(switchAccount)
     let edit = UIButton(type: .system)
     edit.setTitle("Edit", for: .normal)
     edit.accessibilityIdentifier = "lan-files-edit"
     edit.addAction(UIAction { [weak self] _ in self?.openEditor(notes: notes, image: imageURL) }, for: .touchUpInside)
-    controls.addArrangedSubview(edit)
+    actions.addArrangedSubview(edit)
     let recover = UIButton(type: .system)
     recover.setTitle("Recover", for: .normal)
     recover.accessibilityIdentifier = "lan-files-recover"
@@ -137,14 +144,19 @@ final class LanFilesPreviewController: UIViewController {
       guard let self else { return }
       runtimeEpoch += 1; memberOnline = false; updateStatus()
     }, for: .touchUpInside)
-    controls.addArrangedSubview(recover)
+    actions.addArrangedSubview(recover)
     controls.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(controls)
     NSLayoutConstraint.activate([
       controls.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
       controls.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
       controls.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-      controls.heightAnchor.constraint(equalToConstant: 44),
+      status.heightAnchor.constraint(equalToConstant: 44),
+      actions.heightAnchor.constraint(equalToConstant: 44),
+      chat.topAnchor.constraint(equalTo: controls.bottomAnchor),
+      chat.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      chat.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      chat.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
     updateStatus()
   }

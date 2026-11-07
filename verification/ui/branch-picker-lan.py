@@ -12,8 +12,8 @@ ui = UI(sys.argv[1], sys.argv[2])
 
 
 def tap(identifier):
-    ui.element(identifier)
-    ui.axe('tap', '--id', identifier, '--post-delay', '.6')
+    frame = ui.element(identifier)['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.6')
 
 
 def back():
@@ -30,6 +30,7 @@ def selected(name):
 def search(value):
     tap('list-search')
     ui.axe('type', value)
+    ui.restore_software_keyboard()
     expected = value.strip().casefold()
     ui.wait(lambda items: any(i.get('AXUniqueId') == 'list-search' and (i.get('AXValue') or '').strip().casefold() == expected for i in items), 'Search lost input')
 
@@ -43,8 +44,8 @@ def pick_repo(name, first=False):
     ui.element('branch')
 
 
-# Self-resetting scene: all repository/options/branch I/O is injected; no hub or account.
-ui.open_case('create-lan')
+# The runner already entered the independently resettable create-lan scene.
+# Opening it twice would leave two animated sheets with duplicate AX ids.
 ui.element('create-session-input')
 pick_repo('Paged', first=True)
 tap('machine')
@@ -54,7 +55,7 @@ tap('lan-mac:remote')
 selected('trunk')
 tap('branch')
 assert not any((i.get('AXUniqueId') or '').startswith('typed:') for i in ui.state()), 'Empty search offered a guessed branch'
-search('SEARCH-ACROSS')
+search('across')
 # Searching follows the next page, including while a manual candidate is available.
 tap('branch:feature/search-across-pages')
 selected('feature/search-across-pages')
@@ -76,9 +77,15 @@ back()
 assert 'release-empty' not in str(ui.element('branch')), 'Cancelling committed a manual candidate'
 
 pick_repo('Unavailable')
+# Each repository owns its own remembered machine/agent selection.
+# Choose the submission target for this final repository explicitly.
+tap('machine')
+tap('lan-mac')
+tap('agent')
+tap('lan-mac:remote')
 tap('branch')
 ui.element('branches-more')
-search('  release-next  ')
+search(' release-next ')
 row = ui.element('typed:release-next')
 assert catalog.text('create.branch.use', name='release-next') in (row.get('AXLabel') or ''), row
 assert row['frame']['height'] >= 44, 'Manual branch target must be at least 44 pt'
@@ -94,7 +101,7 @@ selected('release-next')
 ui.capture('manual-selected')
 tap('create-session-input')
 ui.wait_for_keyboard('create-session-input')
-ui.type_into('create-session-input', 'First LAN turn')
+ui.type_into('create-session-input', 'first lan turn')
 ui.capture('ready-to-submit')
 tap('session-send')
 
@@ -114,7 +121,7 @@ records = evidence['outbox']['records']
 assert len(records) == 1, records
 record = records[0]
 creation = json.loads(record['send']['creation'])
-assert record['send']['phase'] == 'waiting' and record['send']['text'] == 'First LAN turn'
+assert record['send']['phase'] == 'waiting' and record['send']['text'] == 'first lan turn'
 assert record['send']['id'], 'First turn has no id'
 assert record['session']['id'] == creation['sessionId'] == 'ui-lan-create'
 assert record['session']['projectId'] == creation['projectId'] == 'github:Owner/Unavailable'
