@@ -72,6 +72,8 @@ class CreateSessionHostController: UIViewController {
     navigation.navigationBar.scrollEdgeAppearance = appearance
     navigation.navigationBar.compactAppearance = appearance
     navigation.view.backgroundColor = .clear
+    input.usesLAN = { [params] in params.workspaceId.hasPrefix("lw_") }
+    LanComposerPolicy.apply(to: input.composer, lan: input.usesLAN)
     input.composerRelay = relays
     input.composer.sendHandoff = params.sendHandoff ?? true
     wire()
@@ -148,8 +150,7 @@ class CreateSessionHostController: UIViewController {
     controller.form.open(projectId: params.projectId, context: params.context)
     if let text = params.initialText, !text.isEmpty { input.composer.setInitialDraft(text) }
     if let attachments = params.initialAttachmentsJSON, !attachments.isEmpty, attachments != "[]" {
-      if LanComposerPolicy.isLAN { LanComposerPolicy.unavailable() }
-      else { input.composer.setInitialAttachments(attachments) }
+      input.composer.setInitialAttachments(attachments)
     }
     refreshKey = currentRefreshKey()
     for name in refreshNotifications {

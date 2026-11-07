@@ -3,7 +3,16 @@ import UIKit
 
 @MainActor
 final class CreateSessionController: UIViewController {
-  var form = CreateSessionForm()
+  var form = CreateSessionForm() {
+    didSet {
+      let limit = form.workspaceId.hasPrefix("lw_") ? 8 : 16
+      composer.attachmentLimit = { limit }
+      #if LODY_SHARE_EXTENSION
+      let scope = form.userId + ":" + form.workspaceId
+      composer.attachmentImportIdentity = { scope }
+      #endif
+    }
+  }
   var loadOptions: ((_ projectId: String?) async throws -> CreationOptions)?
   var loadRepositories: (() async throws -> [CreateProject])?
   var loadBranches: ((_ repo: String, _ page: Int) async throws -> CreateBranches)?
@@ -368,6 +377,11 @@ final class CreateSessionController: UIViewController {
   func submit(_ payload: [String: Any]) -> Bool {
     let text = payload["text"] as? String ?? ""
     let attachments = payload["attachments"] as? [Any] ?? []
+    if form.workspaceId.hasPrefix("lw_"), attachments.count > 8 {
+      restore()
+      message(String(localized: "native.attachment.error.lanLimit", bundle: .lody))
+      return false
+    }
     let draft = form.current.options.flatMap { form.draft(sessionId: $0.sessionId) }
     guard !sending, form.canSend, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty,
       draft != nil || form.deferUnresolved
