@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "terminal.openUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The machine did not confirm whether the shell opened. Check its terminal list before opening another terminal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "机器未确认是否已创建 Shell。请先检查该机器的终端列表，再打开新终端。"
+          }
+        }
+      }
+    },
     "terminal.menu": {
       "extractionState": "manual",
       "localizations": {

@@ -40,9 +40,15 @@ final class TerminalFixtureController: UIViewController {
     fixture.authorized = true
     let fixture = self.fixture
     let scenario = self.scenario
-    let page = TerminalFixturePage(sessionId: "fixture", authorized: { fixture.authorized }) { event, closed in
-      TerminalFixtureChannel(fixture: fixture, scenario: scenario, event: event, closed: closed)
+    let page = TerminalFixturePage(sessionId: "fixture", authorized: { fixture.authorized }) { ownership, event, closed in
+      guard ownership.configure(machineId: "fixture-member", cleanup: { id, completion in
+        fixture.cleanups += 1
+        fixture.close(id)
+        completion(true)
+      }) else { return nil }
+      return TerminalFixtureChannel(fixture: fixture, scenario: scenario, ownership: ownership, event: event, closed: closed)
     }
+    page.disconnect = { fixture.forceDisconnect?() }
     page.expire = {
       fixture.authorized = false
       NotificationCenter.default.post(name: .lodyAuthDidChange, object: nil)
@@ -54,40 +60,59 @@ final class TerminalFixtureController: UIViewController {
 @MainActor
 private final class TerminalFixturePage: TerminalController {
   var expire: (@MainActor () -> Void)?
+  var disconnect: (@MainActor () -> Void)?
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
     let expire = UIBarButtonItem(title: "Expire account", primaryAction: UIAction { [weak self] _ in self?.expire?() })
     expire.accessibilityIdentifier = "terminal-fixture-expire"
-    parent?.navigationItem.rightBarButtonItem = expire
+    let disconnect = UIBarButtonItem(title: "Disconnect", primaryAction: UIAction { [weak self] _ in self?.disconnect?() })
+    disconnect.accessibilityIdentifier = "terminal-fixture-disconnect"
+    parent?.navigationItem.rightBarButtonItems = [expire, disconnect]
   }
 }
 
 @MainActor
 private final class TerminalFixture {
   var authorized = true
-  var active = 0
+  var terminals: [String: String] = [:]
+  var active: Int { terminals.count }
+  var cleanups = 0
+  var forceDisconnect: (@MainActor () -> Void)?
   var opens = 0
   var closes = 0
   var inputs = 0
   var resizes = 0
   var releaseOpen: (@MainActor () -> Void)?
   var changed: (@MainActor () -> Void)?
-  var summary: String { "active:\(active),opens:\(opens),closes:\(closes),inputs:\(inputs),resizes:\(resizes)" }
+  var summary: String { "active:\(active),opens:\(opens),closes:\(closes),inputs:\(inputs),resizes:\(resizes),cleanups:\(cleanups)" }
   func update() { changed?() }
+  func close(_ id: String) {
+    if terminals.removeValue(forKey: id) != nil { closes += 1 }
+    update()
+  }
 }
 
 @MainActor
 private final class TerminalFixtureChannel: TerminalChannel {
   private let fixture: TerminalFixture
   private let scenario: String
+  private let ownership: TerminalShellOwnership
   private let event: @MainActor (LanTerminalEvent) -> Void
   private let closed: @MainActor (LanTerminalLink.Failure) -> Void
   private var stopped = false
-  private var owned = false
+  private var disconnected = false
+  private var ownedId: String?
   private var line = ""
-  init(fixture: TerminalFixture, scenario: String, event: @escaping @MainActor (LanTerminalEvent) -> Void,
+  init(fixture: TerminalFixture, scenario: String, ownership: TerminalShellOwnership,
+       event: @escaping @MainActor (LanTerminalEvent) -> Void,
        closed: @escaping @MainActor (LanTerminalLink.Failure) -> Void) {
-    self.fixture = fixture; self.scenario = scenario; self.event = event; self.closed = closed
+    self.fixture = fixture; self.scenario = scenario; self.ownership = ownership
+    self.event = event; self.closed = closed
+    fixture.forceDisconnect = { [weak self] in
+      guard let self, !self.disconnected else { return }
+      self.disconnected = true // Server unsubscribes, retaining its PTY.
+      self.closed(.unreachable("Offline fixture connection lost"))
+    }
   }
   func start(_ completion: @escaping @MainActor (Result<Void, LanTerminalLink.Failure>) -> Void) {
     if scenario == "failure", fixture.opens == 0 {
@@ -96,47 +121,65 @@ private final class TerminalFixtureChannel: TerminalChannel {
     } else { completion(.success(())) }
   }
   func request(_ command: LanTerminalCommand, _ completion: @escaping @MainActor (Result<LanTerminalEvent, LanTerminalLink.Failure>) -> Void) {
-    guard !stopped else { return }
+    guard !stopped, !disconnected else { return }
     switch command.type {
-    case "list": completion(.success(.terminals(requestId: nil, sessionId: "fixture", terminals: [])))
+    case "list":
+      let terminals = fixture.terminals.map { LanTerminalSnapshot(terminalId: $0.key, title: $0.value) }
+        + [LanTerminalSnapshot(terminalId: "desktop-owned", title: "Do not close")]
+      completion(.success(.terminals(requestId: nil, sessionId: "fixture", terminals: terminals)))
     case "open":
       let open: @MainActor @Sendable () -> Void = { [self] in
         fixture.releaseOpen = nil
         fixture.opens += 1
-        // Emulate a late server answer; cleanup still belongs to the transport.
-        if stopped { fixture.closes += 1; fixture.update(); return }
-        owned = true; fixture.active += 1; fixture.update()
-        completion(.success(.opened(requestId: nil, terminalId: "fixture", cwd: "/offline")))
+        let id = "fixture-\(fixture.opens)"
+        ownedId = id
+        fixture.terminals[id] = "offline shell"
+        ownership.record(id)
+        if stopped || disconnected {
+          fixture.close(id); ownership.confirmExit(id); return
+        }
+        fixture.update()
+        completion(.success(.opened(requestId: nil, terminalId: id, cwd: "/offline")))
       }
-      if scenario == "late-open" { fixture.releaseOpen = open } else { open() }
+      if scenario == "unknown-open" {
+        fixture.releaseOpen = open
+        completion(.failure(.timedOut))
+      } else if scenario == "late-open" { fixture.releaseOpen = open }
+      else { open() }
     case "attach":
-      event(.data(requestId: nil, terminalId: "fixture", data: "Lody LAN terminal \u{E0B0} \u{F07C} \u{E725}\r\n$ ", replay: true))
-      completion(.success(.title(requestId: nil, terminalId: "fixture", title: "offline shell")))
+      guard let id = command.terminalId, fixture.terminals[id] != nil else {
+        completion(.failure(.refused(code: "terminal_not_found", message: "Missing fixture shell"))); return
+      }
+      event(.data(requestId: nil, terminalId: id, data: "Lody LAN terminal \(id) \u{E0B0} \u{F07C} \u{E725}\r\n$ ", replay: true))
+      completion(.success(.title(requestId: nil, terminalId: id, title: "offline shell")))
     default: completion(.failure(.closed("Unexpected fixture command")))
     }
   }
+  func adopt(terminalId: String) { ownedId = terminalId }
   func send(_ command: LanTerminalCommand) {
-    guard !stopped else { return }
+    guard !stopped, !disconnected, let id = ownedId else { return }
     if command.type == "resize" { fixture.resizes += 1; fixture.update(); return }
     guard let text = command.data else { return }
     fixture.inputs += 1; fixture.update()
     for character in text {
       if character == "\r" || character == "\n" {
         if line == "exit" {
-          stop(); event(.exit(requestId: nil, terminalId: "fixture", exitCode: 0, signal: nil)); return
+          fixture.close(id); ownership.confirmExit(id)
+          event(.exit(requestId: nil, terminalId: id, exitCode: 0, signal: nil)); return
         }
-        event(.data(requestId: nil, terminalId: "fixture", data: "\r\n\(line)\r\n$ ", replay: false)); line = ""
+        event(.data(requestId: nil, terminalId: id, data: "\r\n\(line)\r\n$ ", replay: false)); line = ""
       } else if character == "\u{7f}" {
-        if !line.isEmpty { line.removeLast(); event(.data(requestId: nil, terminalId: "fixture", data: "\u{8} \u{8}", replay: false)) }
+        if !line.isEmpty { line.removeLast(); event(.data(requestId: nil, terminalId: id, data: "\u{8} \u{8}", replay: false)) }
       } else {
-        line.append(character); event(.data(requestId: nil, terminalId: "fixture", data: String(character), replay: false))
+        line.append(character); event(.data(requestId: nil, terminalId: id, data: String(character), replay: false))
       }
     }
   }
+  func disconnect() { disconnected = true }
   func stop() {
     guard !stopped else { return }
     stopped = true
-    if owned { owned = false; fixture.active -= 1; fixture.closes += 1 }
-    fixture.update()
+    if disconnected { ownership.cleanupKnown() }
+    else if let id = ownedId { fixture.close(id); ownership.confirmExit(id) }
   }
 }

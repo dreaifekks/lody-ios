@@ -8,11 +8,11 @@ import UIKit
 @MainActor
 final class LodyTerminalView: UIView {
   enum State: String { case connecting, ready, exited, failed }
-  typealias Factory = @MainActor (@escaping @MainActor (LanTerminalEvent) -> Void,
+  typealias Factory = @MainActor (TerminalShellOwnership, @escaping @MainActor (LanTerminalEvent) -> Void,
                       @escaping @MainActor (LanTerminalLink.Failure) -> Void) -> (any TerminalChannel)?
   var onState: ((State, String?) -> Void)?
   private let sessionId: String
-  private let factory: Factory
+  private var factory: Factory?
   private var started = false
   private var ended = false
   var scrollView: UIScrollView { terminal }
@@ -22,6 +22,7 @@ final class LodyTerminalView: UIView {
   private let reconnect = UIButton(configuration: .tinted())
   private var link: (any TerminalChannel)?
   private var terminalId: String?
+  private let ownership = TerminalShellOwnership()
   /// Callbacks of a replaced link are ignored.
   private var generation = 0
   private var accessibilityPending = false
@@ -86,24 +87,29 @@ final class LodyTerminalView: UIView {
   func end() {
     guard !ended else { return }
     ended = true
-    disconnect()
+    generation += 1
+    ownership.end(using: link)
+    factory = nil
+    link = nil
+    terminalId = nil
     _ = terminal.resignFirstResponder()
     show("terminal.unavailable")
   }
 
-  isolated deinit { link?.stop() }
+  isolated deinit { ownership.end(using: link) }
 
   // MARK: Connection
 
   private func connect() {
     guard !ended else { return }
-    disconnect()
+    guard !ownership.openUncertain else { return fail("terminal.openUnknown", detail: nil) }
+    drop()
     generation += 1
     let current = generation
     terminal.getTerminal().resetToInitialState()
     emit(.connecting)
     show("terminal.connecting")
-    guard let link = factory({ [weak self] event in
+    guard let factory, let link = factory(ownership, { [weak self] event in
       self?.receive(event, generation: current)
     }, { [weak self] failure in
       guard let self, self.generation == current else { return }
@@ -115,12 +121,21 @@ final class LodyTerminalView: UIView {
       switch result {
       case let .failure(failure): self.fail("terminal.unreachable", detail: failure.localizedDescription)
       case .success:
-        // List is scoped to this session; each page owns a fresh shell rather
-        // than taking ownership of a desktop terminal.
+        // Only the page's known ID can be restored; never adopt another
+        // terminal discovered in this list.
         link.request(.list(sessionId: self.sessionId)) { [weak self, weak link] result in
           guard let self, self.generation == current, !self.ended, let link else { return }
-          guard case let .success(.terminals(_, id, _)) = result, id == self.sessionId else {
+          guard case let .success(.terminals(_, id, terminals)) = result, id == self.sessionId else {
             return self.fail("terminal.openFailed", detail: Self.detail(result))
+          }
+          if let ownedId = self.ownership.terminalId {
+            if terminals.contains(where: { $0.terminalId == ownedId }) {
+              link.adopt(terminalId: ownedId)
+              self.attach(ownedId, link: link, generation: current)
+              return
+            }
+            // Fresh list confirms the old ID no longer exists.
+            self.ownership.confirmExit(ownedId)
           }
           self.open(link, generation: current)
         }
@@ -129,23 +144,31 @@ final class LodyTerminalView: UIView {
   }
 
   private func open(_ link: any TerminalChannel, generation current: Int) {
+    guard !ownership.openUncertain else { return }
+    ownership.openUncertain = true
     let size = terminalSize()
     link.request(.open(sessionId: sessionId, cols: size.cols, rows: size.rows)) { [weak self, weak link] result in
       guard let self, self.generation == current, !self.ended, let link else { return }
       guard case let .success(.opened(_, id, _)) = result else {
+        if case .failure(.refused(_, _)) = result { self.ownership.openUncertain = false }
         return self.fail("terminal.openFailed", detail: Self.detail(result))
       }
-      self.terminalId = id
-      let size = self.terminalSize()
-      link.request(.attach(terminalId: id, cols: size.cols, rows: size.rows)) { [weak self] result in
-        guard let self, self.generation == current, !self.ended else { return }
-        guard case let .success(.title(_, answerId, title)) = result, answerId == id else {
-          return self.fail("terminal.openFailed", detail: Self.detail(result))
-        }
-        self.show(nil)
-        self.emit(.ready, title: title)
-        _ = self.terminal.becomeFirstResponder()
+      self.ownership.record(id)
+      self.attach(id, link: link, generation: current)
+    }
+  }
+
+  private func attach(_ id: String, link: any TerminalChannel, generation current: Int) {
+    terminalId = id
+    let size = terminalSize()
+    link.request(.attach(terminalId: id, cols: size.cols, rows: size.rows)) { [weak self] result in
+      guard let self, self.generation == current, !self.ended else { return }
+      guard case let .success(.title(_, answerId, title)) = result, answerId == id else {
+        return self.fail("terminal.openFailed", detail: Self.detail(result))
       }
+      self.show(nil)
+      self.emit(.ready, title: title)
+      _ = self.terminal.becomeFirstResponder()
     }
   }
 
@@ -159,6 +182,7 @@ final class LodyTerminalView: UIView {
     case let .error(_, id, _, message) where id == nil || id == terminalId:
       fail("terminal.disconnected", detail: message)
     case let .exit(_, id, _, _) where id == terminalId:
+      ownership.confirmExit(id)
       drop()
       emit(.exited)
       show("terminal.exited", retry: true)
@@ -167,17 +191,10 @@ final class LodyTerminalView: UIView {
     }
   }
 
-  private func disconnect() {
-    generation += 1
-    link?.stop()
-    link = nil
-    terminalId = nil
-  }
-
-  /// Ends the link without reporting its own close, which would replace this state.
+  /// Lose a subscription, retaining the page's shell identity and cleanup route.
   private func drop() {
     generation += 1
-    link?.stop()
+    link?.disconnect()
     link = nil
     terminalId = nil
   }
@@ -186,7 +203,8 @@ final class LodyTerminalView: UIView {
     drop()
     _ = terminal.resignFirstResponder()
     emit(.failed, message: detail)
-    show(key, retry: true, detail: detail)
+    if ownership.openUncertain { show("terminal.openUnknown", detail: detail) }
+    else { show(key, retry: true, detail: detail) }
   }
 
   private static func detail(_ result: Result<LanTerminalEvent, LanTerminalLink.Failure>) -> String? {

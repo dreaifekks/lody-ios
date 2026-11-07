@@ -87,6 +87,10 @@ final class Member: @unchecked Sendable {
   var hello: [String: Any]?
   var refuse: [String: String]?
   var received: [[String: Any]] = []
+  var connections: [NWConnection] = []
+  var shells: [String: String] = [:]
+  var openedCount = 0
+  var attached: [ObjectIdentifier: Set<String>] = [:]
   var helloVersion = 1
   var delayOpen = false
   var lateOpen: (() -> Void)?
@@ -96,6 +100,7 @@ final class Member: @unchecked Sendable {
     parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
     listener = try NWListener(using: parameters)
     listener.newConnectionHandler = { [unowned self] connection in
+      self.connections.append(connection)
       connection.start(queue: self.queue)
       self.read(connection, buffer: LanTerminalLineBuffer())
     }
@@ -118,12 +123,12 @@ final class Member: @unchecked Sendable {
 
   func read(_ connection: NWConnection, buffer: LanTerminalLineBuffer) {
     let buffer = Box(buffer)
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [unowned self] content, _, complete, _ in
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [unowned self] content, _, complete, error in
       for line in (try? buffer.value.append(content ?? Data())) ?? [] {
         let message = try! JSONSerialization.jsonObject(with: line) as! [String: Any]
         self.answer(connection, message)
       }
-      if !complete { self.read(connection, buffer: buffer.value) }
+      if !complete, error == nil { self.read(connection, buffer: buffer.value) }
     }
   }
 
@@ -138,27 +143,41 @@ final class Member: @unchecked Sendable {
       }
       write(connection, ["type": "hello", "version": helloVersion, "machineId": machineId, "service": "terminal"])
     case "open":
-      let answer = { [self] in write(connection, ["type": "opened", "requestId": requestId!, "terminalId": "t1", "cwd": "/work"]) }
+      openedCount += 1
+      let id = "t\(openedCount)"
+      shells[id] = message["sessionId"] as? String
+      let answer = { [self] in write(connection, ["type": "opened", "requestId": requestId!, "terminalId": id, "cwd": "/work"]) }
       if delayOpen { lateOpen = answer } else { answer() }
     case "attach":
-      write(connection, ["type": "data", "requestId": requestId!, "terminalId": "t1", "data": "replayed", "replay": true])
-      write(connection, ["type": "title", "requestId": requestId!, "terminalId": "t1", "title": "zsh"])
+      let id = message["terminalId"] as! String
+      check(shells[id] != nil, "attempted to attach a different or missing shell")
+      attached[ObjectIdentifier(connection), default: []].insert(id)
+      write(connection, ["type": "data", "requestId": requestId!, "terminalId": id, "data": "replayed", "replay": true])
+      write(connection, ["type": "title", "requestId": requestId!, "terminalId": id, "title": "zsh"])
     case "resize":
       received.append(message)
-    case "list" where message["sessionId"] as? String == "s1":
-      write(connection, ["type": "terminals", "requestId": requestId!, "sessionId": "s1", "terminals": []])
+    case "list" where message["sessionId"] as? String != "missing":
+      let session = message["sessionId"] as! String
+      let values = shells.filter { $0.value == session }.map { ["terminalId": $0.key, "title": "zsh"] }
+      write(connection, ["type": "terminals", "requestId": requestId!, "sessionId": session, "terminals": values])
     case "list":
       write(connection, ["type": "error", "requestId": requestId!, "code": "terminal_not_found", "message": "no such session"])
     case "input":
       received.append(message)
+      let id = message["terminalId"] as! String
       if message["data"] as? String == "exit\r" {
-        write(connection, ["type": "exit", "terminalId": "t1", "exitCode": 0])
+        shells.removeValue(forKey: id)
+        write(connection, ["type": "exit", "terminalId": id, "exitCode": 0])
       } else {
-        write(connection, ["type": "data", "terminalId": "t1", "data": "echo:\(message["data"] as! String)"])
+        write(connection, ["type": "data", "terminalId": id, "data": "echo:\(message["data"] as! String)"])
       }
     case "close":
       received.append(message)
-      write(connection, ["type": "exit", "terminalId": "t1", "exitCode": 0])
+      let id = message["terminalId"] as! String
+      shells.removeValue(forKey: id)
+      if attached[ObjectIdentifier(connection)]?.contains(id) == true {
+        write(connection, ["type": "exit", "terminalId": id, "exitCode": 0])
+      }
     case "silent":
       break
     default:
@@ -239,11 +258,83 @@ let exitHello: Result<Void, LanTerminalLink.Failure>? = wait { exiting.start(com
 check({ if case .success = exitHello { true } else { false } }())
 let exitOpen: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { exiting.request(.open(sessionId: "s1", cols: 80, rows: 24), completion: $0) }
 check({ if case .success(.opened(_, _, _)) = exitOpen { true } else { false } }())
-exiting.send(.input(terminalId: "t1", data: "exit\r"))
+guard case let .success(.opened(_, exitedID, _)) = exitOpen else { fatalError("no exit shell") }
+exiting.send(.input(terminalId: exitedID, data: "exit\r"))
 Thread.sleep(forTimeInterval: 0.5)
 callbacks.sync {}
-check(exitEvents.value.contains(.exit(requestId: nil, terminalId: "t1", exitCode: 0, signal: nil)))
+check(exitEvents.value.contains(.exit(requestId: nil, terminalId: exitedID, exitCode: 0, signal: nil)))
 exiting.cancel()
+
+// A dropped socket retains its PTY. Reconnection lists/adopts/attaches the
+// same ID; it never opens another shell or claims a desktop-owned terminal.
+let recover = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId, callbackQueue: callbacks)
+let recoverHello: Result<Void, LanTerminalLink.Failure>? = wait { recover.start(completion: $0) }
+check({ if case .success = recoverHello { true } else { false } }())
+let recoverOpen: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { recover.request(.open(sessionId: "recovery", cols: 80, rows: 24), completion: $0) }
+guard case let .success(.opened(_, recoveredID, _)) = recoverOpen else { fatalError("no recovery shell") }
+member.queue.sync { member.shells["desktop-owned"] = "recovery" }
+let opensBeforeReconnect = member.queue.sync { member.openedCount }
+let lost: Bool? = wait { done in
+  recover.onClose = { _ in done(true) }
+  member.queue.sync { member.connections.forEach { $0.cancel() } }
+}
+check(lost == true)
+let resumed = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId, callbackQueue: callbacks)
+let resumedHello: Result<Void, LanTerminalLink.Failure>? = wait { resumed.start(completion: $0) }
+check({ if case .success = resumedHello { true } else { false } }())
+let resumedList: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { resumed.request(.list(sessionId: "recovery"), completion: $0) }
+check({ if case let .success(.terminals(_, _, terminals)) = resumedList { terminals.contains { $0.terminalId == recoveredID } && terminals.count == 2 } else { false } }())
+resumed.adopt(terminalId: recoveredID)
+let restored: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { resumed.request(.attach(terminalId: recoveredID, cols: 90, rows: 30), completion: $0) }
+check({ if case let .success(.title(_, id, _)) = restored { id == recoveredID } else { false } }())
+check(member.queue.sync { member.openedCount } == opensBeforeReconnect)
+let lostAgain: Bool? = wait { done in
+  resumed.onClose = { _ in done(true) }
+  member.queue.sync { member.connections.forEach { $0.cancel() } }
+}
+check(lostAgain == true)
+// End with an already-dead link: cleanup is independent of the new-open gate.
+let cleaned: Bool? = wait { done in
+  LanTerminalLink.cleanup(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId,
+    sessionId: "recovery", terminalId: recoveredID, completion: done)
+}
+check(cleaned == true)
+check(member.queue.sync { member.shells[recoveredID] == nil && member.shells["desktop-owned"] == "recovery" })
+check(member.queue.sync { !member.received.contains { $0["type"] as? String == "close_session" } })
+
+// cancel on an adopted link is scoped to its one known page-owned ID.
+member.queue.sync { member.shells["page-owned"] = "recovery" }
+let adopter = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId, callbackQueue: callbacks)
+let adopterHello: Result<Void, LanTerminalLink.Failure>? = wait { adopter.start(completion: $0) }
+check({ if case .success = adopterHello { true } else { false } }())
+adopter.adopt(terminalId: "page-owned")
+let adopterAttach: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { adopter.request(.attach(terminalId: "page-owned", cols: 80, rows: 24), completion: $0) }
+check({ if case .success(.title(_, "page-owned", _)) = adopterAttach { true } else { false } }())
+let adoptedClose: Bool? = wait { adopter.cancel(completion: $0) }
+check(adoptedClose == true)
+check(member.queue.sync { member.shells["page-owned"] == nil && member.shells["desktop-owned"] != nil })
+
+// A still-alive peer can leave open unanswered. Stopping must expire within
+// one requestTimeout grace. With no ID the client cannot safely guess a PTY.
+member.queue.sync { member.delayOpen = true }
+let stalled = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId, callbackQueue: callbacks)
+let stalledHello: Result<Void, LanTerminalLink.Failure>? = wait { stalled.start(completion: $0) }
+check({ if case .success = stalledHello { true } else { false } }())
+stalled.request(.open(sessionId: "unknown", cols: 80, rows: 24)) { _ in }
+let openDeadline = Date().addingTimeInterval(3)
+while member.queue.sync(execute: { member.lateOpen == nil }), Date() < openDeadline { Thread.sleep(forTimeInterval: 0.01) }
+check(member.queue.sync { member.lateOpen != nil })
+let closesBeforeTimeout = member.queue.sync { member.received.filter { $0["type"] as? String == "close" }.count }
+let timedOut: Bool? = wait { done in
+  stalled.onClose = { failure in done(failure == .timedOut) }
+  stalled.cancel()
+}
+check(timedOut == true, "stopping open retained the connection forever")
+check(member.queue.sync { member.received.filter { $0["type"] as? String == "close" }.count } == closesBeforeTimeout, "guessed an unknown shell ID")
+member.queue.sync {
+  member.lateOpen = nil; member.delayOpen = false
+  member.shells = member.shells.filter { $0.value != "unknown" } // test harness teardown only
+}
 
 // A protocol version mismatch must not become ready.
 member.queue.sync { member.helloVersion = 2 }
@@ -276,4 +367,10 @@ let gone = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId
 let unreachable: Result<Void, LanTerminalLink.Failure>? = wait { done in gone.start(completion: done) }
 check({ if case .success = unreachable { false } else { unreachable != nil } }(), "\(String(describing: unreachable))")
 
-print("PASS: LAN terminal key, framing, events, commands; loopback hello, open/attach replay, input, close, refusal, machine and key checks")
+let failedCleanup: Bool? = wait { done in
+  LanTerminalLink.cleanup(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId,
+    sessionId: "recovery", terminalId: "page-owned", completion: done)
+}
+check(failedCleanup == false, "unreachable cleanup did not terminate")
+
+print("PASS: reconnect preserves shell ID, adopted cancel and dead-link cleanup are scoped, unknown open drains within deadline; LAN terminal key, framing, events, commands; loopback hello, open/attach replay, input, close, refusal, machine and key checks")

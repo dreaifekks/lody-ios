@@ -5,6 +5,9 @@ public struct LanTerminalSnapshot: Sendable, Equatable, Decodable {
   public let terminalId: String
   public let title: String
   public let cwd: String?
+  public init(terminalId: String, title: String, cwd: String? = nil) {
+    self.terminalId = terminalId; self.title = title; self.cwd = cwd
+  }
 }
 
 /// A server event of the terminal protocol (`TerminalServerEventSchema`).
@@ -142,6 +145,8 @@ public final class LanTerminalLink: @unchecked Sendable {
   private static let requestTimeout: TimeInterval = 9
   private var stopping = false
   private var closing = false
+  private var drainDeadlineArmed = false
+  private var closeCompletion: (@Sendable (Bool) -> Void)?
   private var ownedTerminal: String?
   private var opening = Set<String>()
   // Retain only while an open answer is outstanding, so departure can close it.
@@ -162,6 +167,7 @@ public final class LanTerminalLink: @unchecked Sendable {
 
   /// Events that answer no pending request: live output, titles and exits.
   public var onEvent: (@Sendable (LanTerminalEvent) -> Void)?
+  public var onOwnedTerminal: (@Sendable (String) -> Void)?
   public var onClose: (@Sendable (Failure) -> Void)?
 
   public init(endpoint: LanTerminalEndpoint, lanId: String, key: Data, machineId: String, callbackQueue: DispatchQueue = .main) {
@@ -226,8 +232,32 @@ public final class LanTerminalLink: @unchecked Sendable {
     }
   }
 
-  public func cancel() {
-    queue.async { [self] in stopOwnedShell() }
+  /// Adopt only a shell ID that the page itself previously opened.
+  public func adopt(terminalId: String) {
+    queue.async { [self] in
+      guard !finished, !stopping, ownedTerminal == nil || ownedTerminal == terminalId else { return }
+      ownedTerminal = terminalId
+    }
+  }
+
+  /// Drop the subscription without terminating a known shell; the page keeps
+  /// its identity for reconnection. An unanswered open still drains safely.
+  public func disconnect() {
+    queue.async { [self] in
+      if !opening.isEmpty { stopOwnedShell() }
+      else { finish(.closed("subscription disconnected")) }
+    }
+  }
+
+  public func cancel(completion: (@Sendable (Bool) -> Void)? = nil) {
+    queue.async { [self] in
+      guard !finished else {
+        callbackQueue.async { completion?(false) }
+        return
+      }
+      if let completion { closeCompletion = completion }
+      stopOwnedShell()
+    }
   }
 
   private func stopOwnedShell() {
@@ -236,7 +266,13 @@ public final class LanTerminalLink: @unchecked Sendable {
     if let ownedTerminal { close(terminal: ownedTerminal); return }
     if !opening.isEmpty {
       draining = self
-      return // A late open must be closed, never adopted by the UI.
+      if !drainDeadlineArmed {
+        drainDeadlineArmed = true
+        queue.asyncAfter(deadline: .now() + Self.requestTimeout) { [weak self] in
+          self?.finish(.timedOut)
+        }
+      }
+      return // Bounded grace for a late ID; never guess an unknown shell.
     }
     finish(.closed("closed by this device"))
   }
@@ -259,6 +295,34 @@ public final class LanTerminalLink: @unchecked Sendable {
       // close, so bound the drain once the command has been submitted.
       queue.asyncAfter(deadline: .now() + 2) { [weak self] in
         self?.finish(.closed("closed by this device"))
+      }
+    }
+  }
+
+  /// Best-effort cleanup of one known owned ID, even after account teardown.
+  /// Never opens, attaches, guesses an ID, or closes an entire session.
+  public static func cleanup(endpoint: LanTerminalEndpoint, lanId: String, key: Data,
+                             machineId: String, sessionId: String, terminalId: String,
+                             completion: @escaping @Sendable (Bool) -> Void) {
+    let link = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key,
+      machineId: machineId, callbackQueue: DispatchQueue(label: "app.lody.terminal-cleanup"))
+    link.queue.async {
+      link.draining = link
+      link.ownedTerminal = terminalId
+      link.closeCompletion = completion
+      link.queue.asyncAfter(deadline: .now() + 12) { [weak link] in link?.finish(.timedOut) }
+    }
+    link.start { result in
+      guard case .success = result else { return } // finish already reports false.
+      link.send(.close(terminalId: terminalId))
+      // close has no acknowledgement when this connection is not subscribed.
+      // A fresh list confirms absence; it never supplies a replacement ID.
+      link.request(.list(sessionId: sessionId)) { result in
+        let confirmed: Bool
+        if case let .success(.terminals(_, id, terminals)) = result, id == sessionId {
+          confirmed = !terminals.contains { $0.terminalId == terminalId }
+        } else { confirmed = false }
+        link.queue.async { link.finish(.closed("cleanup finished"), confirmedClose: confirmed) }
       }
     }
   }
@@ -352,11 +416,22 @@ public final class LanTerminalLink: @unchecked Sendable {
       finish(.closed("the machine sent an invalid terminal event"))
       return
     }
-    if case let .exit(_, terminalId, _, _) = event, closing, terminalId == ownedTerminal {
-      finish(.closed("closed by this device")); return
+    if case let .exit(_, terminalId, _, _) = event, terminalId == ownedTerminal {
+      ownedTerminal = nil
+      if closing {
+        forward(event)
+        finish(.closed("closed by this device"), confirmedClose: true); return
+      }
+    }
+    if case let .error(_, terminalId, code, _) = event, closing,
+       terminalId == ownedTerminal, code == "terminal_not_found" {
+      ownedTerminal = nil
+      finish(.closed("shell already ended"), confirmedClose: true); return
     }
     if case let .opened(id, terminalId, _) = event, let id, opening.remove(id) != nil {
       ownedTerminal = terminalId
+      let owned = onOwnedTerminal
+      callbackQueue.async { owned?(terminalId) }
       if stopping { close(terminal: terminalId); return }
     } else if let id = event.requestId, opening.remove(id) != nil, stopping {
       finish(.closed("closed by this device")); return
@@ -383,7 +458,7 @@ public final class LanTerminalLink: @unchecked Sendable {
     callbackQueue.async { handler?(event) }
   }
 
-  private func finish(_ failure: Failure) {
+  private func finish(_ failure: Failure, confirmedClose: Bool = false) {
     guard !finished else { return }
     finished = true
     draining = nil
@@ -396,7 +471,10 @@ public final class LanTerminalLink: @unchecked Sendable {
     pending.removeAll()
     for callback in waiting { callback(.failure(failure)) }
     let close = onClose
+    let completion = closeCompletion
+    closeCompletion = nil
     callbackQueue.async {
+      completion?(confirmedClose)
       ready?(.failure(failure))
       if ready == nil { close?(failure) }
     }

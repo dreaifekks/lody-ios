@@ -47,6 +47,42 @@ test('published terminal metadata is required; bad or removed endpoints are excl
   );
 });
 
+test('catalog refresh supplies the changed endpoint and removes inactive members', () => {
+  const member = 'machine-changing';
+  const base = [
+    { key: ['e', member], value: true },
+    {
+      key: ['m', member],
+      value: { lanTerminal: { version: 1, host: 'old.local', port: 8789 } },
+    },
+  ];
+  assert.equal(
+    projectRows(base, 'meta').machineTerminals.changing.host,
+    'old.local',
+  );
+  const changed = [
+    ...base,
+    {
+      key: ['m', member, 'lanTerminal'],
+      value: { version: 1, host: 'new.local', port: 8790 },
+    },
+  ];
+  assert.deepEqual(projectRows(changed, 'meta').machineTerminals.changing, {
+    host: 'new.local',
+    port: 8790,
+  });
+  assert.equal(
+    projectRows(
+      [
+        ...changed.filter((row) => row.key[0] !== 'e'),
+        { key: ['e', member], value: false },
+      ],
+      'meta',
+    ).machineTerminals,
+    undefined,
+  );
+});
+
 test('scoped terminal PSK matches the desktop vector', () => {
   assert.equal(
     createHash('sha256')
@@ -62,6 +98,7 @@ test('native boundary and fixed assets are present (static evidence only)', () =
     link,
     /(?:enum LanTerminalProtocol|struct LanTerminalEndpoint)/,
   );
+  assert.doesNotMatch(link, /["']close_session["']/);
   const tls = read('packages/LodyData/Sources/LAN/LanMemberProtocol.swift');
   assert.match(tls, /set_tls_resumption_enabled\(security, false\)/);
   assert.match(tls, /set_max_tls_protocol_version\(security, \.TLSv12\)/);
