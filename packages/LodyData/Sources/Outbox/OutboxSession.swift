@@ -168,7 +168,15 @@ public final class OutboxSession {
         return try await withCheckedThrowingContinuation { runtime.sendTurn(payload, sink: .continuation($0)) }
       },
       releaseReserve: { [weak self] id in self?.runtime?.releaseReserve(id) },
-      alert: { [weak self] title, message in self?.alert(title, message) })
+      alert: { [weak self] title, message in self?.alert(title, message) },
+      confirmSessionCreation: { [weak self] payload in
+        guard let runtime = self?.runtime else { throw OutboxError.scopeExpired }
+        return try await withCheckedThrowingContinuation { runtime.confirmSessionCreation(payload, sink: .continuation($0)) }
+      },
+      confirmSessionTurn: { [weak self] payload in
+        guard let runtime = self?.runtime else { throw OutboxError.scopeExpired }
+        return try await withCheckedThrowingContinuation { runtime.confirmSessionTurn(payload, sink: .continuation($0)) }
+      })
   }
 
   private func alert(_ title: String, _ message: String) {

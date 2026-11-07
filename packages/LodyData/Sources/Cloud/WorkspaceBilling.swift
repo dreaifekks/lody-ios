@@ -8,6 +8,7 @@ import Foundation
   public func clear() { cached = nil }
 
   public func entitlement(workspace: String, user: String) async -> [String: Any]? {
+    guard !LanInvite.isWorkspace(workspace) else { return nil }
     if let cached, cached.workspace == workspace, cached.user == user,
        cached.expiresAt > Date.timeIntervalSinceReferenceDate {
       return cached.value

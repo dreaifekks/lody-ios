@@ -2,6 +2,15 @@ import LodyCore
 import Foundation
 
 extension DataRuntime {
+  public func confirmSessionCreation(_ payload: String, sink: ReplySink) {
+    guard inWorkspace(payload, sink: sink) else { return }
+    callJSON(RuntimeContract.Calls.ConfirmSessionCreation.self, payload: payload, sink: sink)
+  }
+  public func confirmSessionTurn(_ payload: String, sink: ReplySink) {
+    guard workspace != nil else { fail(sink, "not_ready", "Session unavailable"); return }
+    callJSON(RuntimeContract.Calls.ConfirmSessionTurn.self, payload: payload, sink: sink)
+  }
+
   public func releaseReserve(_ id: String) {
     reservedSessions.removeAll { $0 == id }
     dispatch(RuntimeContract.Calls.ReleaseReserve.self, .init(sessionId: id))
@@ -59,6 +68,9 @@ extension DataRuntime {
     }
   }
   public func sendTurn(_ payload: String, sink: ReplySink, edit: Bool = false) {
+    if isLAN, Self.hasAttachmentPayload(payload) {
+      sink.resolve(#"{"state":"not_sent","reason":"lan_attachments_unavailable"}"#); return
+    }
     guard let workspace else { dispatchTurn(payload, sink: sink, billing: nil, edit: edit); return }
     let user = userId, generation = self.generation
     Task { @MainActor in
@@ -149,6 +161,9 @@ extension DataRuntime {
     }
   }
   public func dispatchTurn(_ payload: String, sink: ReplySink, billing: [String: Any]?, edit: Bool) {
+    if isLAN, Self.hasAttachmentPayload(payload) {
+      sink.resolve(#"{"state":"not_sent","reason":"lan_attachments_unavailable"}"#); return
+    }
     let args = payload.data(using: .utf8).flatMap { data in
       data.count <= 128 * 1024 ? (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] : nil
     }
@@ -179,6 +194,10 @@ extension DataRuntime {
     let expands = text.contains("$") || text.contains("@session:") || text.contains("@role:")
     turnCall(RuntimeContract.Calls.SendTurn.self, payload, inject: inject, sink: sink, task: task, timeout: expands ? 90 : nil)
   }
+  private static func hasAttachmentPayload(_ payload: String) -> Bool {
+    guard let args = scope(payload) else { return false }
+    return ["attachments", "attachmentBlocks"].contains { (args[$0] as? [Any])?.isEmpty == false }
+  }
   private func turnCall<C: RuntimeCall>(_ call: C.Type, _ payload: String, inject: [String: Any], sink: ReplySink,
     task: String?, timeout: Double? = nil) where C.Params: Decodable, C.Result: Encodable {
     let release: @MainActor (Bool) -> Void = { success in
@@ -197,7 +216,10 @@ extension DataRuntime {
 }
 
 private func notSentJSON(_ key: String) -> String {
-  let payload: [String: Any] = ["state": "not_sent", "reason": String(localized: String.LocalizationValue(key), bundle: .lodyData)]
+  let waiting = ["native.runtime.sessionNotSyncedRetry", "native.runtime.sessionNotReady", "native.runtime.connectionSwitched"].contains(key)
+  let payload: [String: Any]
+  if waiting { payload = ["state": "not_sent", "reason": "session_not_ready", "retryable": true] }
+  else { payload = ["state": "not_sent", "reason": String(localized: String.LocalizationValue(key), bundle: .lodyData)] }
   guard let data = try? JSONSerialization.data(withJSONObject: payload),
         let json = String(data: data, encoding: .utf8) else { return #"{"state":"not_sent"}"# }
   return json

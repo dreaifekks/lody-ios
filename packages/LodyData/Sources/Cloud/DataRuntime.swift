@@ -28,6 +28,13 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
   public var shareTasks: [String: Task<Void, Never>] = [:]
   public var health = RuntimeHealth()
   private var pingPending = false
+  var lan: LanInvite?
+  private var lanHandler: LanHubSchemeHandler?
+  private var followTask: Task<Void, Never>?
+  private var followAttempt = UUID()
+  private var followedAt: TimeInterval = -.infinity
+  private var lastCatalog: String?
+  public var isLAN: Bool { lan != nil }
   public var workspace: String?
   private var workspaceSlug = ""
   private var workspaceName = ""
@@ -70,6 +77,8 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
           "hasView": String(self.webView != nil), "contractReady": String(self.contractReady),
           "handshakeDeferred": String(self.handshakeDeferred),
         ])
+        self.lanHandler?.reconnect()
+        self.followHub(force: true)
         self.health.resume(at: self.now)
         if self.webView == nil { self.build(reason: "foreground") }
         else {
@@ -84,6 +93,10 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
     })
   }
   public func start(workspace: String, slug: String, name: String, owner: String, userId: String) {
+    cancelFollow()
+    lastCatalog = nil
+    lan = LanHub.credential(for: workspace)
+    followedAt = -.infinity
     disposeView()
     if self.workspace != workspace || self.userId != userId {
       sessionId = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
@@ -91,12 +104,16 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
     self.userId = userId; cacheErrorShown = false
     self.workspace = workspace; self.owner = owner; health = RuntimeHealth()
     workspaceSlug = slug; workspaceName = name
+    guard !LanInvite.isWorkspace(workspace) || lan != nil else {
+      publish("failed", reason: "missing_lan_credential"); return
+    }
     backgrounded = LodyHosting.current?.isBackground ?? false
     if backgrounded { publish("background", reason: "paused") }
-    else { build(reason: "subscribe") }
+    else { build(reason: "subscribe"); followHub(force: true) }
   }
   public func stop(owner: String? = nil) {
     if let owner, self.owner != owner { return }
+    cancelFollow(); lastCatalog = nil; lan = nil
     workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
   }
   public func status() -> [String: any Sendable] {
@@ -130,7 +147,14 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
   private func build(reason: String) {
     guard workspace != nil else { return }
     disposeView(); lastStartReason = reason; generation += 1; health.started(at: now); acknowledgements = 0
-    let view = RuntimeDocument.makeWebView(handler: self, delegate: self)
+    let view = RuntimeDocument.makeWebView(handler: self, delegate: self) { config in
+      if let lan = self.lan, !self.backgroundProbe {
+        config.preferences.inactiveSchedulingPolicy = .none
+        let handler = LanHubSchemeHandler(invite: lan)
+        config.setURLSchemeHandler(handler, forURLScheme: LanHubSchemeHandler.scheme)
+        self.lanHandler = handler
+      }
+    }
     // A signature drift silently drops the optional policy witness, and with it the navigation guard.
     assert(responds(to: #selector(webView(_:decidePolicyFor:decisionHandler:) as (WKWebView, WKNavigationAction, @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) -> Void)))
     webView = view
@@ -145,7 +169,7 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
       return
     }
     do {
-      try RuntimeDocument.load(in: view, bundle: Bundle.main)
+      try RuntimeDocument.load(in: view, bundle: Bundle.main, origin: pageOrigin)
     } catch { disposeView(); publish("failed", reason: "missing_resource") }
   }
   private func disposeView() {
@@ -158,6 +182,7 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
     channel?.close("runtime_replaced"); channel = nil; contractReady = false; handshakeDeferred = false
     githubTasks.values.forEach { $0.cancel() }; githubTasks.removeAll()
     shareTasks.values.forEach { $0.cancel() }; shareTasks.removeAll()
+    lanHandler?.invalidate(); lanHandler = nil
     pingPending = false
     let old = webView; webView = nil
     old?.configuration.userContentController.removeScriptMessageHandler(forName: "dataRuntime")
@@ -305,6 +330,7 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
     switch event {
     case .catalog(let value):
       guard value.catalog.utf8.count <= 12 * 1024 * 1024 else { return }
+      lastCatalog = value.catalog
       publish("live", reason: "catalog", catalog: value.catalog)
       LodyHosting.current?.catalogDidUpdate(value.catalog, workspaceId: workspace ?? "", workspaceSlug: workspaceSlug,
         workspaceName: workspaceName, userId: userId)
@@ -319,6 +345,7 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
       if phase != "live" { publish("live", reason: "synced") }
     case .syncError(let value):
       publish("offline", reason: value.reason.rawValue)
+      followHub()
     case .sessionSubscriptions(let value):
       retainedSessions = value.ids
       reservedSessions = value.reserved
@@ -338,8 +365,51 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
     #endif
     }
   }
+  private var pageOrigin: String {
+    guard let lan, !backgroundProbe else { return "https://lody.ai/" }
+    return LanHubSchemeHandler.origin(lan) + "/"
+  }
+
+  private func cancelFollow() {
+    followAttempt = UUID()
+    followTask?.cancel(); followTask = nil
+  }
+
+  private func followHub(force: Bool = false) {
+    guard let lan, !backgroundProbe, !backgrounded, workspace != nil,
+      followTask == nil, force || now - followedAt >= 60 else { return }
+    followedAt = now
+    let attempt = UUID(); followAttempt = attempt
+    let owner = self.owner, catalog = lastCatalog
+    let key = "catalog:\(userId):\(workspace ?? "")", store = localStore
+    followTask = Task { [weak self] in
+      let next = await LanHubFollower.locate(lan) {
+        let text: String?
+        if let catalog { text = catalog }
+        else {
+          text = await withCheckedContinuation { continuation in
+            LocalStore.queue.async { continuation.resume(returning: try? store.read(key)) }
+          }
+        }
+        return LanHubFollower.members(catalog: text)
+      }
+      guard let self, !Task.isCancelled, self.followAttempt == attempt else { return }
+      self.followTask = nil
+      guard let next, self.owner == owner, self.workspace == lan.workspaceId,
+        self.lan == lan, (try? LanHub.read()) == lan else { return }
+      do { try LanHub.save(next) } catch { return }
+      self.lan = next
+      AuthSession.shared.lanHubMoved(next)
+      guard next.url != lan.url else { return }
+      if self.backgrounded { self.disposeView(); self.publish("background", reason: "hub_moved") }
+      else { self.build(reason: "hub_moved") }
+      NotificationCenter.default.post(name: .lodyLANHubDidMove, object: LanHub.summary(next))
+    }
+  }
+
   public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-    decisionHandler(RuntimeDocument.allows(navigationAction) ? .allow : .cancel)
+    guard self.webView === webView else { decisionHandler(.cancel); return }
+    decisionHandler(RuntimeDocument.allows(navigationAction, origin: pageOrigin) ? .allow : .cancel)
   }
   public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { if self.webView === webView { recover("process_terminated") } }
   public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { if self.webView === webView { recover("navigation_failed") } }

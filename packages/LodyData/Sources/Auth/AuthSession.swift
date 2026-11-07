@@ -63,6 +63,8 @@ public final class AuthSession {
   public private(set) var snapshot = AuthSnapshot()
   public var api = AuthAPI()
   public var stopRuntime: (() -> Void)?
+  public var isLAN: Bool { snapshot.account?.isLAN == true }
+  public var probeLAN: @Sendable (LanInvite) async throws -> Void = { try await LanHub.probe($0) }
 
   private var account: AuthAccount?
   private var credential: String?
@@ -76,6 +78,7 @@ public final class AuthSession {
   private var current: Task<Void, Never>?
   private var attempt = 0
   private var started = false
+  private var committing = false
 
   public var catalogScope: AuthCatalogScope {
     AuthCatalogScope(account: account, localReady: localReady, initialWorkspace: initialWorkspace, initialCatalog: initialCatalog)
@@ -98,9 +101,33 @@ public final class AuthSession {
     await begin { id in await self.performLogin(id) }
   }
 
+  /// Probes first; failed or cancelled joins preserve the current identity.
+  public func joinLAN(_ inviteString: String) async throws {
+    guard !LodyUIVerify.enabled else { throw AuthFailure(message: "Joining a LAN is disabled during offline UI verification") }
+    try Task.checkCancellation()
+    let invite = try LanInvite.parse(inviteString)
+    var completed = false
+    var failure: (any Error)?
+    await begin { id in
+      self.update(id) { self.busy = true; self.code = nil; self.error = nil }
+      do {
+        try await self.probeLAN(invite)
+        guard self.active(id) else { throw CancellationError() }
+        try await self.replaceIdentity(id, lan: invite, cloud: nil)
+        completed = true
+      } catch {
+        failure = error
+        self.update(id) { self.error = error.localizedDescription }
+      }
+      self.update(id) { self.busy = false; self.localReady = true }
+    }
+    if let failure { throw failure }
+    guard completed else { throw CancellationError() }
+  }
+
   public func cancel() {
+    guard !committing else { return }
     current?.cancel()
-    current = nil
     attempt += 1
     closeBrowser()
     busy = false
@@ -111,6 +138,16 @@ public final class AuthSession {
   public func logout() async {
     let token = credential
     await begin { id in await self.performLogout(id, token: token) }
+  }
+
+  /// Refreshes UI context after an authenticated handover without changing identity.
+  func lanHubMoved(_ invite: LanInvite) {
+    guard account?.lan?.id == invite.id else { return }
+    account = .lanAccount(invite)
+    publish()
+    let generation = LocalStore.shared.generation
+    let fresh = account!
+    Task { await save(fresh, generation: generation) }
   }
 
   public func reopen() {
@@ -138,15 +175,27 @@ public final class AuthSession {
   }
 
   private func begin(_ work: @escaping @MainActor (Int) async -> Void) async {
-    current?.cancel()
+    if committing { await current?.value }
+    closeBrowser()
+    let previous = current
+    previous?.cancel()
     attempt += 1
     let id = attempt
-    let task = Task { await work(id) }
+    let task = Task {
+      await previous?.value
+      guard self.active(id) else { return }
+      await work(id)
+    }
     current = task
-    await task.value
+    await withTaskCancellationHandler { await task.value } onCancel: {
+      Task { @MainActor [weak self] in
+        guard let self, self.attempt == id else { return }
+        self.cancel()
+      }
+    }
   }
 
-  private func active(_ id: Int) -> Bool { id == attempt }
+  private func active(_ id: Int) -> Bool { id == attempt && !Task.isCancelled }
 
   private func update(_ id: Int, _ change: () -> Void) {
     guard active(id) else { return }
@@ -169,7 +218,7 @@ public final class AuthSession {
       try await hydrateAndRefresh(id)
     } catch {
       if (error as? AuthFailure)?.expired == true, active(id) {
-        update(id) { account = nil; credential = nil; setCatalog(nil) }
+        update(id) { account = nil; credential = nil; initialWorkspace = ""; setCatalog(nil) }
         if !(await clearLocalAndCredentials()) { toast("auth.toast.clearLocalFailed") }
       }
       update(id) { self.error = error.localizedDescription }
@@ -179,10 +228,24 @@ public final class AuthSession {
 
   private func hydrateAndRefresh(_ id: Int) async throws {
     let started = ProcessInfo.processInfo.systemUptime
+    let lan = try LanHub.read()
     let token = try AuthKeychain.read()
     let boot = (try? await Self.onStore { try $0.startup() }) ?? [:]
     guard active(id) else { return }
-    if let token, let saved = AuthAccount.decode(boot["account"]) {
+    if let lan {
+      let fresh = AuthAccount.lanAccount(lan)
+      let same = AuthAccount.userID(boot["account"]) == fresh.user.id
+      if !same { try await clearLocal() }
+      guard active(id) else { return }
+      await save(fresh)
+      update(id) {
+        account = fresh; credential = nil; localReady = true
+        initialWorkspace = same ? boot["workspace"] ?? lan.workspaceId : lan.workspaceId
+        setCatalog(same ? boot["catalog"] : nil)
+      }
+      return
+    }
+    if let token, let saved = AuthAccount.decode(boot["account"]), !saved.isLAN {
       #if DEBUG
       NSLog("LodyLocal hydrate_ms=%.2f", (ProcessInfo.processInfo.systemUptime - started) * 1000)
       #endif
@@ -224,11 +287,7 @@ public final class AuthSession {
       let token = try await api.pollToken(code)
       let fresh = try await api.account(token: token)
       guard active(id) else { throw AuthFailure(message: String(localized: "common.cancelled", bundle: .lodyData)) }
-      try await clearLocal()
-      try AuthKeychain.save(token)
-      await save(fresh)
-      guard active(id) else { throw AuthFailure(message: String(localized: "common.cancelled", bundle: .lodyData)) }
-      update(id) { account = fresh; credential = token; self.code = nil }
+      try await replaceIdentity(id, lan: nil, cloud: (fresh, token))
     } catch {
       update(id) { self.error = error.localizedDescription; code = nil }
     }
@@ -237,9 +296,42 @@ public final class AuthSession {
     update(id) { busy = false; localReady = true }
   }
 
+  private func replaceIdentity(_ id: Int, lan: LanInvite?, cloud: (AuthAccount, String)?) async throws {
+    guard active(id) else { throw CancellationError() }
+    let oldLAN = try LanHub.read(), oldCloud = try AuthKeychain.read()
+    committing = true
+    defer { committing = false }
+    stopRuntime?()
+    await LodyHosting.current?.forgetDevice()
+    guard active(id) else { throw CancellationError() }
+    try await clearLocal()
+    guard active(id) else { throw CancellationError() }
+    let fresh: AuthAccount
+    do {
+      if let lan {
+        try LanHub.save(lan)
+        try AuthKeychain.clear()
+        fresh = .lanAccount(lan)
+      } else if let cloud {
+        try AuthKeychain.save(cloud.1)
+        try LanHub.clear()
+        fresh = cloud.0
+      } else { throw CancellationError() }
+    } catch {
+      if let oldLAN { try? LanHub.save(oldLAN) } else { try? LanHub.clear() }
+      if let oldCloud { try? AuthKeychain.save(oldCloud) } else { try? AuthKeychain.clear() }
+      throw error
+    }
+    update(id) {
+      account = fresh; credential = cloud?.1; code = nil
+      initialWorkspace = lan?.workspaceId ?? ""; setCatalog(nil)
+    }
+    await save(fresh)
+  }
+
   private func performLogout(_ id: Int, token: String?) async {
     update(id) { busy = true; error = nil }
-    update(id) { account = nil; credential = nil; code = nil; setCatalog(nil) }
+    update(id) { account = nil; credential = nil; code = nil; initialWorkspace = ""; setCatalog(nil) }
     do {
       guard await clearLocalAndCredentials() else { throw AuthFailure(message: String(localized: "auth.error.signOutIncomplete", bundle: .lodyData)) }
       if let token { try await api.signOut(token: token) }
@@ -252,7 +344,7 @@ public final class AuthSession {
   private func clearLocalAndCredentials() async -> Bool {
     var cleared = true
     do { try await clearLocal() } catch { cleared = false }
-    do { try clearCredentials() } catch { cleared = false }
+    do { try await clearCredentials() } catch { cleared = false }
     return cleared
   }
 
@@ -263,10 +355,13 @@ public final class AuthSession {
     try await Self.onStore { try $0.clear() }
   }
 
-  private func clearCredentials() throws {
+  private func clearCredentials() async throws {
     stopRuntime?()
-    LodyHosting.current?.forgetDevice()
-    try AuthKeychain.clear()
+    await LodyHosting.current?.forgetDevice()
+    var failure: (any Error)?
+    do { try AuthKeychain.clear() } catch { failure = error }
+    do { try LanHub.clear() } catch { failure = failure ?? error }
+    if let failure { throw failure }
   }
 
   private func save(_ account: AuthAccount, generation: Int? = nil) async {
@@ -277,7 +372,7 @@ public final class AuthSession {
 
   private func persist(_ updated: AuthWorkspace, account: AuthAccount, credential: String, generation: Int) async {
     let workspaces = account.workspaces.map { $0.id == updated.id ? updated : $0 }
-    await save(AuthAccount(user: account.user, workspaces: workspaces), generation: generation)
+    await save(AuthAccount(user: account.user, workspaces: workspaces, lan: account.lan), generation: generation)
     guard self.credential == credential, var current = self.account else { return }
     current.workspaces = workspaces
     self.account = current
@@ -324,5 +419,6 @@ public final class AuthSession {
 }
 
 extension Notification.Name {
+  public static let lodyLANHubDidMove = Notification.Name("LodyLANHubDidMove")
   public static let lodyAuthDidChange = Notification.Name("LodyAuthDidChange")
 }

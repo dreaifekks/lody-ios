@@ -60,6 +60,7 @@ public enum SessionAttachments: Sendable {
   }
   public static func upload(_ attachments: [[String: Any]], workspace: String, session: String,
     onProgress: @escaping ProgressHandler = { _, _, _ in }) async throws -> [[String: Any]] {
+    guard !LanInvite.isWorkspace(workspace) else { throw error("lan_attachments_unavailable") }
     guard attachments.count <= 16,
           attachments.filter({ $0["kind"] as? String == "image" }).count <= 8,
           attachments.filter({ $0["kind"] as? String == "file" }).count <= 8 else {
@@ -174,6 +175,7 @@ public enum SessionAttachments: Sendable {
 
   /// Download to disk so a video never becomes a base64 or in-memory file body.
   public static func download(workspace: String, session: String, fileId: String, fileName: String, sizeBytes: Int?, directory: URL, image: Bool = false) async throws -> URL {
+    guard !LanInvite.isWorkspace(workspace) else { throw error("lan_attachments_unavailable") }
     guard !workspace.isEmpty, !session.isEmpty, !fileId.isEmpty else {
       throw error(String(localized: "native.attachment.error.invalid", bundle: .lodyData))
     }

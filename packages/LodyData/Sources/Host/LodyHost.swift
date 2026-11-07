@@ -14,7 +14,7 @@ public protocol LodyHost: AnyObject {
   func dismissAuthorization()
   func catalogDidUpdate(_ catalogJSON: String, workspaceId: String, workspaceSlug: String, workspaceName: String, userId: String)
   func clearSharedData()
-  func forgetDevice()
+  func forgetDevice() async
 }
 
 @MainActor

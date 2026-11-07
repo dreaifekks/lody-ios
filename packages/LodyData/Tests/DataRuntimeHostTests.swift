@@ -19,7 +19,7 @@ final class DataRuntimeHostTests: XCTestCase {
       catalogs.append(catalogJSON)
     }
     func clearSharedData() {}
-    func forgetDevice() {}
+    func forgetDevice() async {}
   }
 
   private func store() -> LocalStore {
@@ -47,6 +47,19 @@ final class DataRuntimeHostTests: XCTestCase {
     XCTAssertEqual(runtime.sessionId, "s")
     replacement()
     XCTAssertNil(runtime.sessionId)
+  }
+
+  func testStaleUnsubscribeCannotStopTheCurrentOwner() {
+    let host = FakeHost()
+    LodyHosting.current = host
+    defer { LodyHosting.current = nil }
+    let runtime = DataRuntime(localStore: store())
+    runtime.start(workspace: "w", slug: "team", name: "Team", owner: "new-owner", userId: "user")
+    runtime.stop(owner: "old-owner")
+    XCTAssertEqual(runtime.workspace, "w")
+    runtime.stop(owner: "new-owner")
+    XCTAssertNil(runtime.workspace)
+    XCTAssertNil(runtime.webView)
   }
 
   func testLocalStoreRoundTrips() throws {

@@ -1,6 +1,13 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "send.error.notDelivered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This message was not delivered. Try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "消息未送达，请重试。" } }
+      }
+    },
     "native.chat.mermaid.failed": {
       "extractionState": "manual",
       "localizations": {

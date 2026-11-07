@@ -15,6 +15,7 @@ extension DataRuntime {
   private func shortcutCloud(_ id: String, _ params: RuntimeContract.ShortcutCloudParams) {
     typealias Call = RuntimeContract.HostCalls.ShortcutCloud
     guard let channel, githubTasks[id] == nil else { return }
+    guard !isLAN else { channel.fail(id: id, method: Call.method, code: "shortcut_unavailable"); return }
     guard let workspace, let body = try? RuntimeJSON.object(params), body["workspaceId"] as? String == workspace,
           let operation = body["operation"] as? String, let args = body["args"] as? [String: Any],
           githubTasks.count < 8 else {
@@ -78,6 +79,11 @@ extension DataRuntime {
   private func fetchGrant() {
     guard grantTask == nil else { return }
     guard let workspace, let view = webView else { deliverGrant(nil); return }
+    if let lan {
+      deliverGrant(.init(token: "lan-hub", gatewayBaseUrl: LanHubSchemeHandler.origin(lan), expiresIn: 365 * 86400, shardHostSuffix: nil))
+      return
+    }
+    guard !LanInvite.isWorkspace(workspace) else { deliverGrant(nil); return }
     do {
       guard let token = try AuthKeychain.read() else { throw NSError(domain: "MissingAuth", code: 1) }
       var request = URLRequest(url: URL(string: "https://backend.lody.ai/api/loro-streams/token")!, timeoutInterval: 15)

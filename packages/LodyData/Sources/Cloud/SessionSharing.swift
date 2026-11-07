@@ -22,6 +22,7 @@ import Security
     return value
   }
   public static func run(_ operation: String, args: [String: Any], workspace: String, userId: String, session: URLSession? = nil, useLink: LinkAction? = nil) async throws -> Any {
+    guard !LanInvite.isWorkspace(workspace) else { throw failure() }
     let transport = session ?? Self.transport
     guard !workspace.isEmpty, !userId.isEmpty, let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure() }
     func check() throws {

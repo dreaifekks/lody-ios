@@ -39,6 +39,14 @@ public struct AuthWorkspace: Codable, Equatable, Sendable {
 public struct AuthAccount: Codable, Equatable, Sendable {
   public let user: AuthUser
   public var workspaces: [AuthWorkspace]
+  public var lan: LanHubSummary?
+  public var isLAN: Bool { lan != nil }
+
+  public static func lanAccount(_ invite: LanInvite) -> AuthAccount {
+    AuthAccount(user: AuthUser(id: invite.userId, name: invite.displayName, email: "", image: nil),
+      workspaces: [AuthWorkspace(id: invite.workspaceId, name: invite.displayName, slug: LanInvite.workspaceSlug, image: nil)],
+      lan: LanHub.summary(invite))
+  }
 
   public static func decode(_ json: String?) -> AuthAccount? {
     guard let json, let account = try? JSONDecoder().decode(AuthAccount.self, from: Data(json.utf8)),
@@ -58,9 +66,10 @@ public struct AuthAccount: Codable, Equatable, Sendable {
     return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? "null"
   }
 
-  public init(user: AuthUser, workspaces: [AuthWorkspace]) {
+  public init(user: AuthUser, workspaces: [AuthWorkspace], lan: LanHubSummary? = nil) {
     self.user = user
     self.workspaces = workspaces
+    self.lan = lan
   }
 }
 

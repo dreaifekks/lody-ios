@@ -2,13 +2,16 @@ import Foundation
 import Security
 
 public enum AuthKeychain: Sendable {
-  private static var query: [String: Any] { [
+  public static let lanHub = "lan-hub"
+  public static let cloudSession = "better-auth-session"
+
+  private static func query(_ account: String) -> [String: Any] { [
     kSecClass as String: kSecClassGenericPassword,
     kSecAttrService as String: "app.innei.lody.auth",
-    kSecAttrAccount as String: "better-auth-session",
+    kSecAttrAccount as String: account,
   ] }
-  public static func read() throws -> String? {
-    var request = query
+  public static func read(account: String = cloudSession) throws -> String? {
+    var request = query(account)
     request[kSecReturnData as String] = true
     request[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
@@ -19,19 +22,19 @@ public enum AuthKeychain: Sendable {
     }
     return token
   }
-  public static func save(_ token: String) throws {
+  public static func save(_ token: String, account: String = cloudSession) throws {
     guard !token.isEmpty else { throw NSError(domain: "LodyKit.Auth", code: 1) }
     let values = [kSecValueData as String: Data(token.utf8)]
-    var status = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+    var status = SecItemUpdate(query(account) as CFDictionary, values as CFDictionary)
     if status == errSecItemNotFound {
-      var item = query.merging(values) { _, value in value }
+      var item = query(account).merging(values) { _, value in value }
       item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
       status = SecItemAdd(item as CFDictionary, nil)
     }
     guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
   }
-  public static func clear() throws {
-    let status = SecItemDelete(query as CFDictionary)
+  public static func clear(account: String = cloudSession) throws {
+    let status = SecItemDelete(query(account) as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
   }
 }
