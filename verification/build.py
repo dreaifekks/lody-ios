@@ -86,7 +86,8 @@ def xcodebuild(arguments):
         arguments.destination,
     ]
     if arguments.jobs is not None:
-        command += ['-jobs', str(arguments.jobs)]
+        command += ['-jobs', str(arguments.jobs),
+                    f'OTHER_SWIFT_FLAGS=$(inherited) -driver-batch-count {arguments.jobs}']
     if arguments.destination.startswith('id='):
         command += ['ONLY_ACTIVE_ARCH=YES']
     if arguments.derived_data is not None:

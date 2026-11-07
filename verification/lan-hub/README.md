@@ -18,11 +18,10 @@ optional port, are accepted. Credentials, other hosts, URL paths, queries,
 fragments, and non-synthetic `LODY_HUB_TOKEN` values fail before the first seed
 write. All fetches remain on that origin and reject redirects.
 
-The main session may add this package script; this task does not change the
-root package:
+The checkout also exposes the same driver as `pnpm verify:lan-hub`:
 
-```json
-"verify:lan-hub": "node --experimental-strip-types verification/lan-hub/reconnect.mjs"
+```sh
+LODY_HUB_URL=http://127.0.0.1:18799 LODY_HUB_TOKEN=loopback pnpm verify:lan-hub
 ```
 
 The scenarios retain the old fork's send/reconnect behavior through the new

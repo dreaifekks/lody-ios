@@ -24,6 +24,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "node --experimental-strip-types --experimental-test-module-mocks --test tests/**/*.test.mjs && python3 verification/ui/runner_test.py && python3 verification/simulator_test.py && python3 verification/build_test.py",
+    "verify:lan-hub": "node --experimental-strip-types verification/lan-hub/reconnect.mjs",
     "verify:build": "python3 verification/build.py",
     "verify:ui": "python3 verification/ui/run.py",
     "verify:native": "python3 verification/native.py",
