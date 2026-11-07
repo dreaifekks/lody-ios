@@ -86,3 +86,22 @@ Standalone scripts without an `--app` input use `LODY_VERIFY_BUNDLE_ID` (or the
 prebuild `LODY_BUNDLE_ID`) and `LODY_VERIFY_APP_GROUP`. The rotation probe's
 `app.innei.lody.verify.width` string is a fixed Darwin notification protocol,
 not an installed app identifier.
+
+The real Share Extension probe must run inside its current managed Verify
+Simulator lease, because it temporarily sets `LODY_VERIFY_OFFLINE=1` in that
+simulator's launchd environment. Hold the repository heavy-work lock on the mini:
+
+```sh
+pnpm verify:simulator --name 'Share Probe' -- python3 verification/ui/share-probe.py \
+  --app /path/to/Lody.app --lan-branches --appearance light \
+  --output .artifacts/share-probe/light
+```
+
+Use a separate output directory for dark appearance. The containing app stays
+stopped while the extension runs; cold handoff must observe the destination PID,
+its verification environment and the process-scoped offline marker. Notification
+permission UI fails this offline check. The probe restores the previous environment
+on normal exit, exceptions, SIGTERM and SIGHUP. `--host-app` can reuse a matching
+prebuilt probe host; it does not rebuild or re-sign that host. This probe rejects
+arbitrary `--udid` devices outside the managed lease, and does not establish an
+authenticated ShareInbox drain into a live outbox.
