@@ -1,6 +1,11 @@
 import SwiftTerm
 import UIKit
 
+/// A horizontal drag must cancel shortcut-button tracking and start scrolling.
+private final class TerminalShortcutScrollView: UIScrollView {
+  override func touchesShouldCancel(in view: UIView) -> Bool { true }
+}
+
 /// SwiftTerm 1.19's default accessory uses sub-44 pt buttons on iPhone.
 /// Keep its public input path, with a native scrolling row of full-size keys.
 @MainActor
@@ -12,7 +17,7 @@ final class TerminalKeyboardAccessory: UIInputView, UIInputViewAudioFeedback {
   private let stockArrowActions: TerminalAccessory
   private let leftArrowAction: UIButton
   private let rightArrowAction: UIButton
-  private let scroll = UIScrollView()
+  private let scroll = TerminalShortcutScrollView()
   private var controlButton: UIButton?
   private var mouseButton: UIButton?
   private var repeatTimer: Timer?

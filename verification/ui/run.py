@@ -699,7 +699,10 @@ try:
                 elif case in ('send-queue', 'send-guide'):
                     # Queue/steer/stop and guide rounds reach ~185s on the native fixtures.
                     check_timeout = 300
-                elif case in ('lan-files', 'lan-terminal'):
+                elif case == 'lan-terminal':
+                    # Full-size shortcut geometry/wire checks precede lifecycle scenes.
+                    check_timeout = 600
+                elif case == 'lan-files':
                     # Multiple reset scenes cover recovery and resource ownership.
                     check_timeout = 300
                 elif case in ('branch-picker', 'branch-picker-lan', 'message-share', 'session-search-pad', 'chat-stream-performance', 'mention-chat', 'mention-sheet', 'appearance'):
