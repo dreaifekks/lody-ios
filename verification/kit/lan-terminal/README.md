@@ -2,7 +2,7 @@
 
 `node --experimental-strip-types --test verification/kit/lan-terminal/static.test.mjs`
 is the dependency-free static / catalog projection check. It neither compiles Swift
-nor opens a listener. This is the only executed terminal check in round 2 P1a.
+nor opens a listener. Run the native loopback separately with `pnpm verify:native --case lan-terminal`.
 
 `main.swift` ports df8d9343's real Network.framework TLS 1.2 PSK loopback member.
 It checks the key vector, UTF-8/newline framing and size ceiling, event/command
@@ -19,8 +19,8 @@ Source registration in `verification/native.py` (integrated by the main session)
 - native checks that already compile `Sessions/SessionCatalog.swift` also need
   `LAN/LanMemberProtocol.swift` (session-rows and project-index).
 
-The owner integrates this into the existing caller-managed native batch. No
-standalone build/lock/server launch is performed in this task.
+Run native and UI checks through the caller-managed validation batch and the
+repository's single-simulator/heavy-work lock policy.
 
 ## Review follow-up (B1 / S1 / S2)
 
@@ -28,7 +28,7 @@ The loopback member now retains PTYs when its socket drops, as the desktop does.
 The source checks reconnect list/adopt/attach with the same ID and no extra open,
 scoped cancel after adoption, dead-link cleanup that preserves a desktop-owned
 shell, and bounded exit from stopping with an unanswered open. Failed cleanup
-also terminates. These Swift sources were not compiled or run in this task.
+also terminates. The strict admission/exit model below is part of the same check.
 
 `LanTerminalLink` adds `adopt(terminalId:)`, `disconnect()`, `onOwnedTerminal`,
 `cancel(completion:)` (true only for confirmed absence/exit), and static bounded
@@ -62,8 +62,8 @@ source list are unchanged. Its prior close-before-list algorithm is superseded.
 Loopback sources now reject a fresh connection's direct close, then establish
 that list/attach allows closing that same ID and confirms asynchronous exit.
 The dead-link cleanup check uses this stricter model and preserves the other
-session terminal; an already-absent ID emits no close. These changes require a
-new native run; an earlier pass against the permissive member does not cover it.
+session terminal; an already-absent ID emits no close. Run this strict model after cleanup changes; a pass against an older permissive
+member does not cover the admission or asynchronous-exit contract.
 
 `LanTerminalLink.Failure.notSent(String)` means a local queue rejection before
 submitting command bytes. A write error or missing remote answer is still
