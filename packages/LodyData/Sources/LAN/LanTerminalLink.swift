@@ -130,6 +130,8 @@ public final class LanTerminalLink: @unchecked Sendable {
     case anotherMachine
     case timedOut
     case closed(String)
+    /// Rejected on the local queue before any command bytes were submitted.
+    case notSent(String)
 
     public var errorDescription: String? {
       switch self {
@@ -137,7 +139,7 @@ public final class LanTerminalLink: @unchecked Sendable {
       case let .refused(_, message): message
       case .anotherMachine: "another machine answered"
       case .timedOut: "the machine did not answer in time"
-      case let .closed(reason): reason
+      case let .closed(reason), let .notSent(reason): reason
       }
     }
   }
@@ -202,11 +204,11 @@ public final class LanTerminalLink: @unchecked Sendable {
   public func request(_ command: LanTerminalCommand, completion: @escaping @Sendable (Result<LanTerminalEvent, Failure>) -> Void) {
     queue.async { [self] in
       guard !finished, !stopping, greeted else {
-        callbackQueue.async { completion(.failure(.closed("connection closed"))) }
+        callbackQueue.async { completion(.failure(.notSent("connection closed before sending"))) }
         return
       }
       if command.type == "open", ownedTerminal != nil || !opening.isEmpty {
-        callbackQueue.async { completion(.failure(.closed("this link already owns a shell"))) }
+        callbackQueue.async { completion(.failure(.notSent("this link already owns a shell"))) }
         return
       }
       sequence += 1
@@ -300,7 +302,8 @@ public final class LanTerminalLink: @unchecked Sendable {
   }
 
   /// Best-effort cleanup of one known owned ID, even after account teardown.
-  /// Never opens, attaches, guesses an ID, or closes an entire session.
+  /// Lists/adopts/attaches only the known ID, then waits for its close/exit.
+  /// Never opens, guesses an ID, or closes an entire session.
   public static func cleanup(endpoint: LanTerminalEndpoint, lanId: String, key: Data,
                              machineId: String, sessionId: String, terminalId: String,
                              completion: @escaping @Sendable (Bool) -> Void) {
@@ -308,21 +311,46 @@ public final class LanTerminalLink: @unchecked Sendable {
       machineId: machineId, callbackQueue: DispatchQueue(label: "app.lody.terminal-cleanup"))
     link.queue.async {
       link.draining = link
-      link.ownedTerminal = terminalId
       link.closeCompletion = completion
       link.queue.asyncAfter(deadline: .now() + 12) { [weak link] in link?.finish(.timedOut) }
     }
     link.start { result in
       guard case .success = result else { return } // finish already reports false.
-      link.send(.close(terminalId: terminalId))
-      // close has no acknowledgement when this connection is not subscribed.
-      // A fresh list confirms absence; it never supplies a replacement ID.
+      // ScopedTerminalService admits IDs per connection. close before list or
+      // attach is refused even if this page owns that ID on an older socket.
       link.request(.list(sessionId: sessionId)) { result in
-        let confirmed: Bool
-        if case let .success(.terminals(_, id, terminals)) = result, id == sessionId {
-          confirmed = !terminals.contains { $0.terminalId == terminalId }
-        } else { confirmed = false }
-        link.queue.async { link.finish(.closed("cleanup finished"), confirmedClose: confirmed) }
+        guard case let .success(.terminals(_, id, terminals)) = result, id == sessionId else {
+          link.queue.async { link.finish(.closed("cleanup list failed")) }; return
+        }
+        guard terminals.contains(where: { $0.terminalId == terminalId }) else {
+          link.queue.async { link.finish(.closed("shell already absent"), confirmedClose: true) }; return
+        }
+        link.adopt(terminalId: terminalId)
+        // Attach subscribes to the asynchronous PTY exit. Its replay is ignored.
+        link.request(.attach(terminalId: terminalId, cols: 80, rows: 24)) { result in
+          guard case let .success(.title(_, id, _)) = result, id == terminalId else {
+            // It may have exited between list and attach. Only a fresh absence
+            // confirms that race, never an admission error by itself.
+            link.request(.list(sessionId: sessionId)) { result in
+              let absent: Bool
+              if case let .success(.terminals(_, id, terminals)) = result, id == sessionId {
+                absent = !terminals.contains { $0.terminalId == terminalId }
+              } else { absent = false }
+              link.queue.async { link.finish(.closed("cleanup attach failed"), confirmedClose: absent) }
+            }
+            return
+          }
+          link.queue.async {
+            guard !link.finished else { return }
+            guard link.ownedTerminal == terminalId else {
+              link.finish(.closed("shell exited during attach"), confirmedClose: true); return
+            }
+            link.stopping = true
+            link.closing = true
+            link.write(LanTerminalCommand.close(terminalId: terminalId))
+            // The overall 12-second deadline bounds the wait for this ID's exit.
+          }
+        }
       }
     }
   }

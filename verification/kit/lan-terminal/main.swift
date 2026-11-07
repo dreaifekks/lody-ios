@@ -91,6 +91,8 @@ final class Member: @unchecked Sendable {
   var shells: [String: String] = [:]
   var openedCount = 0
   var attached: [ObjectIdentifier: Set<String>] = [:]
+  var admitted: [ObjectIdentifier: Set<String>] = [:]
+  var ending = Set<String>()
   var helloVersion = 1
   var delayOpen = false
   var lateOpen: (() -> Void)?
@@ -129,10 +131,39 @@ final class Member: @unchecked Sendable {
         self.answer(connection, message)
       }
       if !complete, error == nil { self.read(connection, buffer: buffer.value) }
+      else {
+        self.attached.removeValue(forKey: ObjectIdentifier(connection))
+        self.admitted.removeValue(forKey: ObjectIdentifier(connection))
+      }
     }
   }
 
+  /// Model node-pty: close requests hang up first; the record disappears only
+  /// in the asynchronous exit callback, published to subscribed connections.
+  func end(_ id: String) {
+    guard ending.insert(id).inserted else { return }
+    queue.asyncAfter(deadline: .now() + .milliseconds(150)) { [self] in
+      shells.removeValue(forKey: id)
+      ending.remove(id)
+      for connection in connections {
+        let key = ObjectIdentifier(connection)
+        if attached[key]?.remove(id) != nil {
+          write(connection, ["type": "exit", "terminalId": id, "exitCode": 0])
+        }
+      }
+    }
+  }
+
+  func reject(_ connection: NWConnection, _ message: [String: Any]) {
+    var answer: [String: Any] = ["type": "error", "code": "terminal_not_found", "message": "terminal_not_found: not admitted or exited"]
+    answer["requestId"] = message["requestId"]
+    answer["terminalId"] = message["terminalId"]
+    write(connection, answer)
+  }
+
   func answer(_ connection: NWConnection, _ message: [String: Any]) {
+    received.append(message)
+    let scope = ObjectIdentifier(connection)
     let requestId = message["requestId"] as? String
     switch message["type"] as? String {
     case "hello":
@@ -146,42 +177,42 @@ final class Member: @unchecked Sendable {
       openedCount += 1
       let id = "t\(openedCount)"
       shells[id] = message["sessionId"] as? String
+      admitted[scope, default: []].insert(id)
       let answer = { [self] in write(connection, ["type": "opened", "requestId": requestId!, "terminalId": id, "cwd": "/work"]) }
       if delayOpen { lateOpen = answer } else { answer() }
     case "attach":
       let id = message["terminalId"] as! String
-      check(shells[id] != nil, "attempted to attach a different or missing shell")
+      guard shells[id] != nil else { reject(connection, message); return }
+      admitted[scope, default: []].insert(id)
       attached[ObjectIdentifier(connection), default: []].insert(id)
       write(connection, ["type": "data", "requestId": requestId!, "terminalId": id, "data": "replayed", "replay": true])
       write(connection, ["type": "title", "requestId": requestId!, "terminalId": id, "title": "zsh"])
     case "resize":
-      received.append(message)
+      let id = message["terminalId"] as! String
+      guard admitted[scope]?.contains(id) == true, shells[id] != nil else { reject(connection, message); return }
     case "list" where message["sessionId"] as? String != "missing":
       let session = message["sessionId"] as! String
+      for (id, owner) in shells where owner == session { admitted[scope, default: []].insert(id) }
       let values = shells.filter { $0.value == session }.map { ["terminalId": $0.key, "title": "zsh"] }
       write(connection, ["type": "terminals", "requestId": requestId!, "sessionId": session, "terminals": values])
     case "list":
       write(connection, ["type": "error", "requestId": requestId!, "code": "terminal_not_found", "message": "no such session"])
     case "input":
-      received.append(message)
       let id = message["terminalId"] as! String
+      guard admitted[scope]?.contains(id) == true, shells[id] != nil else { reject(connection, message); return }
       if message["data"] as? String == "exit\r" {
-        shells.removeValue(forKey: id)
-        write(connection, ["type": "exit", "terminalId": id, "exitCode": 0])
+        end(id)
       } else {
         write(connection, ["type": "data", "terminalId": id, "data": "echo:\(message["data"] as! String)"])
       }
     case "close":
-      received.append(message)
       let id = message["terminalId"] as! String
-      shells.removeValue(forKey: id)
-      if attached[ObjectIdentifier(connection)]?.contains(id) == true {
-        write(connection, ["type": "exit", "terminalId": id, "exitCode": 0])
-      }
+      guard admitted[scope]?.contains(id) == true, shells[id] != nil else { reject(connection, message); return }
+      end(id)
     case "silent":
       break
     default:
-      received.append(message)
+      break
     }
   }
 }
@@ -259,11 +290,41 @@ check({ if case .success = exitHello { true } else { false } }())
 let exitOpen: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { exiting.request(.open(sessionId: "s1", cols: 80, rows: 24), completion: $0) }
 check({ if case .success(.opened(_, _, _)) = exitOpen { true } else { false } }())
 guard case let .success(.opened(_, exitedID, _)) = exitOpen else { fatalError("no exit shell") }
+let exitAttached: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { exiting.request(.attach(terminalId: exitedID, cols: 80, rows: 24), completion: $0) }
+check({ if case .success(.title(_, _, _)) = exitAttached { true } else { false } }())
 exiting.send(.input(terminalId: exitedID, data: "exit\r"))
 Thread.sleep(forTimeInterval: 0.5)
 callbacks.sync {}
 check(exitEvents.value.contains(.exit(requestId: nil, terminalId: exitedID, exitCode: 0, signal: nil)))
 exiting.cancel()
+
+// A fresh connection must not be able to close a known but unadmitted ID.
+member.queue.sync { member.shells["scope-owned"] = "scope-test" }
+let scopeLink = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId, callbackQueue: callbacks)
+let scopeHello: Result<Void, LanTerminalLink.Failure>? = wait { scopeLink.start(completion: $0) }
+check({ if case .success = scopeHello { true } else { false } }())
+let unadmittedClose: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { scopeLink.request(.close(terminalId: "scope-owned"), completion: $0) }
+check({ if case .failure(.refused("terminal_not_found", _)) = unadmittedClose { true } else { false } }())
+check(member.queue.sync { member.shells["scope-owned"] == "scope-test" }, "unadmitted close killed a shell")
+let scopeList: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { scopeLink.request(.list(sessionId: "scope-test"), completion: $0) }
+check({ if case let .success(.terminals(_, _, values)) = scopeList { values.contains { $0.terminalId == "scope-owned" } } else { false } }())
+scopeLink.adopt(terminalId: "scope-owned")
+let scopeAttach: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { scopeLink.request(.attach(terminalId: "scope-owned", cols: 80, rows: 24), completion: $0) }
+check({ if case .success(.title(_, "scope-owned", _)) = scopeAttach { true } else { false } }())
+let scopeClosed: Bool? = wait { scopeLink.cancel(completion: $0) }
+check(scopeClosed == true, "list/attach then close must wait for asynchronous exit")
+check(member.queue.sync { member.shells["scope-owned"] == nil })
+
+// Explicit local rejection means no command was submitted, so UI can retry.
+let notStarted = LanTerminalLink(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId, callbackQueue: callbacks)
+let opensBeforeLocalReject = member.queue.sync { member.openedCount }
+let notSent: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { notStarted.request(.open(sessionId: "not-sent", cols: 80, rows: 24), completion: $0) }
+check({ if case .failure(.notSent(_)) = notSent { true } else { false } }())
+check(member.queue.sync { member.openedCount } == opensBeforeLocalReject)
+notStarted.cancel()
+let rejectedAfterStop: Result<LanTerminalEvent, LanTerminalLink.Failure>? = wait { notStarted.request(.open(sessionId: "not-sent", cols: 80, rows: 24), completion: $0) }
+check({ if case .failure(.notSent(_)) = rejectedAfterStop { true } else { false } }())
+check(member.queue.sync { member.openedCount } == opensBeforeLocalReject)
 
 // A dropped socket retains its PTY. Reconnection lists/adopts/attaches the
 // same ID; it never opens another shell or claims a desktop-owned terminal.
@@ -301,6 +362,14 @@ let cleaned: Bool? = wait { done in
 check(cleaned == true)
 check(member.queue.sync { member.shells[recoveredID] == nil && member.shells["desktop-owned"] == "recovery" })
 check(member.queue.sync { !member.received.contains { $0["type"] as? String == "close_session" } })
+
+let closesBeforeAbsent = member.queue.sync { member.received.filter { $0["type"] as? String == "close" }.count }
+let alreadyGone: Bool? = wait { done in
+  LanTerminalLink.cleanup(endpoint: endpoint, lanId: lanId, key: key, machineId: machineId,
+    sessionId: "recovery", terminalId: recoveredID, completion: done)
+}
+check(alreadyGone == true)
+check(member.queue.sync { member.received.filter { $0["type"] as? String == "close" }.count } == closesBeforeAbsent)
 
 // cancel on an adopted link is scoped to its one known page-owned ID.
 member.queue.sync { member.shells["page-owned"] = "recovery" }

@@ -26,11 +26,16 @@ final class LodyTerminalView: UIView {
   /// Callbacks of a replaced link are ignored.
   private var generation = 0
   private var accessibilityPending = false
+  private var failureKey: String?
 
   init(sessionId: String, factory: @escaping Factory) {
     self.sessionId = sessionId
     self.factory = factory
     super.init(frame: .zero)
+    ownership.onOpenRejected = { [weak self] in
+      guard let self, !self.ended, let key = self.failureKey else { return }
+      self.show(key, retry: true)
+    }
     backgroundColor = .systemBackground
     terminal.translatesAutoresizingMaskIntoConstraints = false
     terminal.terminalDelegate = self
@@ -90,6 +95,7 @@ final class LodyTerminalView: UIView {
     generation += 1
     ownership.end(using: link)
     factory = nil
+    ownership.onOpenRejected = nil
     link = nil
     terminalId = nil
     _ = terminal.resignFirstResponder()
@@ -106,6 +112,7 @@ final class LodyTerminalView: UIView {
     drop()
     generation += 1
     let current = generation
+    failureKey = nil
     terminal.getTerminal().resetToInitialState()
     emit(.connecting)
     show("terminal.connecting")
@@ -144,13 +151,20 @@ final class LodyTerminalView: UIView {
   }
 
   private func open(_ link: any TerminalChannel, generation current: Int) {
+    let ownership = self.ownership
     guard !ownership.openUncertain else { return }
-    ownership.openUncertain = true
+    let attempt = ownership.beginOpen()
     let size = terminalSize()
     link.request(.open(sessionId: sessionId, cols: size.cols, rows: size.rows)) { [weak self, weak link] result in
+      // Resolve a local rejection even if onClose already invalidated this UI
+      // generation and released its channel. Never clear a newer open attempt.
+      switch result {
+      case .failure(.notSent(_)), .failure(.refused(_, _)):
+        ownership.confirmNotOpened(attempt: attempt)
+      default: break
+      }
       guard let self, self.generation == current, !self.ended, let link else { return }
       guard case let .success(.opened(_, id, _)) = result else {
-        if case .failure(.refused(_, _)) = result { self.ownership.openUncertain = false }
         return self.fail("terminal.openFailed", detail: Self.detail(result))
       }
       self.ownership.record(id)
@@ -200,6 +214,7 @@ final class LodyTerminalView: UIView {
   }
 
   private func fail(_ key: String, detail: String?) {
+    failureKey = key
     drop()
     _ = terminal.resignFirstResponder()
     emit(.failed, message: detail)

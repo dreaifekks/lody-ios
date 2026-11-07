@@ -6,7 +6,19 @@ import Foundation
 final class TerminalShellOwnership {
   private(set) var terminalId: String?
   private(set) var machineId: String?
-  var openUncertain = false
+  private(set) var openUncertain = false
+  private var openSequence = 0
+  var onOpenRejected: (@MainActor () -> Void)?
+
+  func beginOpen() -> Int {
+    openSequence += 1; openUncertain = true
+    return openSequence
+  }
+  func confirmNotOpened(attempt: Int) {
+    guard attempt == openSequence, openUncertain, terminalId == nil else { return }
+    openUncertain = false
+    onOpenRejected?()
+  }
   private var ended = false
   private var cleanupAttempted = false
   private var cleanup: (@MainActor (String, @escaping @MainActor (Bool) -> Void) -> Void)?

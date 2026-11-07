@@ -3,6 +3,7 @@ import UIKit
 @MainActor
 enum DebugSceneFactory {
   private static let scenes: [String: ([String: Any]) -> UIViewController] = [
+    "terminal-preview-not-sent": { _ in TerminalFixtureController(scenario: "not-sent") },
     "terminal-preview-unknown": { _ in TerminalFixtureController(scenario: "unknown-open") },
     "terminal-preview-late-open": { _ in TerminalFixtureController(scenario: "late-open") },
     "terminal-preview-failure": { _ in TerminalFixtureController(scenario: "failure") },

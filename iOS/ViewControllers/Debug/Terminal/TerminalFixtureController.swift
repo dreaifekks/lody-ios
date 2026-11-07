@@ -74,6 +74,7 @@ private final class TerminalFixturePage: TerminalController {
 @MainActor
 private final class TerminalFixture {
   var authorized = true
+  var rejectedBeforeSend = false
   var terminals: [String: String] = [:]
   var active: Int { terminals.count }
   var cleanups = 0
@@ -102,6 +103,7 @@ private final class TerminalFixtureChannel: TerminalChannel {
   private var stopped = false
   private var disconnected = false
   private var ownedId: String?
+  private var admitted = Set<String>()
   private var line = ""
   init(fixture: TerminalFixture, scenario: String, ownership: TerminalShellOwnership,
        event: @escaping @MainActor (LanTerminalEvent) -> Void,
@@ -121,18 +123,29 @@ private final class TerminalFixtureChannel: TerminalChannel {
     } else { completion(.success(())) }
   }
   func request(_ command: LanTerminalCommand, _ completion: @escaping @MainActor (Result<LanTerminalEvent, LanTerminalLink.Failure>) -> Void) {
-    guard !stopped, !disconnected else { return }
+    guard !stopped, !disconnected else { completion(.failure(.notSent("Offline link already stopped"))); return }
     switch command.type {
     case "list":
       let terminals = fixture.terminals.map { LanTerminalSnapshot(terminalId: $0.key, title: $0.value) }
         + [LanTerminalSnapshot(terminalId: "desktop-owned", title: "Do not close")]
+      admitted.formUnion(terminals.map(\.terminalId))
       completion(.success(.terminals(requestId: nil, sessionId: "fixture", terminals: terminals)))
     case "open":
+      if scenario == "not-sent", !fixture.rejectedBeforeSend {
+        fixture.rejectedBeforeSend = true
+        disconnected = true
+        // Force onClose to invalidate the view generation before the local
+        // rejection callback. No shell and no command bytes exist yet.
+        closed(.unreachable("Offline local queue rejected open"))
+        completion(.failure(.notSent("Offline open was never submitted")))
+        return
+      }
       let open: @MainActor @Sendable () -> Void = { [self] in
         fixture.releaseOpen = nil
         fixture.opens += 1
         let id = "fixture-\(fixture.opens)"
         ownedId = id
+        admitted.insert(id)
         fixture.terminals[id] = "offline shell"
         ownership.record(id)
         if stopped || disconnected {
@@ -150,6 +163,7 @@ private final class TerminalFixtureChannel: TerminalChannel {
       guard let id = command.terminalId, fixture.terminals[id] != nil else {
         completion(.failure(.refused(code: "terminal_not_found", message: "Missing fixture shell"))); return
       }
+      admitted.insert(id)
       event(.data(requestId: nil, terminalId: id, data: "Lody LAN terminal \(id) \u{E0B0} \u{F07C} \u{E725}\r\n$ ", replay: true))
       completion(.success(.title(requestId: nil, terminalId: id, title: "offline shell")))
     default: completion(.failure(.closed("Unexpected fixture command")))
@@ -157,7 +171,7 @@ private final class TerminalFixtureChannel: TerminalChannel {
   }
   func adopt(terminalId: String) { ownedId = terminalId }
   func send(_ command: LanTerminalCommand) {
-    guard !stopped, !disconnected, let id = ownedId else { return }
+    guard !stopped, !disconnected, let id = ownedId, admitted.contains(id) else { return }
     if command.type == "resize" { fixture.resizes += 1; fixture.update(); return }
     guard let text = command.data else { return }
     fixture.inputs += 1; fixture.update()
@@ -180,6 +194,7 @@ private final class TerminalFixtureChannel: TerminalChannel {
     guard !stopped else { return }
     stopped = true
     if disconnected { ownership.cleanupKnown() }
-    else if let id = ownedId { fixture.close(id); ownership.confirmExit(id) }
+    else if let id = ownedId, admitted.contains(id) { fixture.close(id); ownership.confirmExit(id) }
+    else { ownership.cleanupKnown() }
   }
 }

@@ -136,4 +136,16 @@ back()
 audit(0, opens=0, closes=0)
 ui.axe('tap', '--id', 'terminal-fixture-release')
 audit(0, opens=1, closes=1)
+# A local notSent result arriving after onClose must resolve the old attempt
+# despite the invalidated generation, restore Retry, and create exactly one PTY.
+ui.open_case('terminal-preview-not-sent')
+open_terminal()
+ui.element('terminal-reconnect')
+assert not any(i.get('AXUniqueId') == 'terminal-status'
+    and i.get('AXLabel') == catalog.text('terminal.openUnknown') for i in ui.state())
+ui.capture('local-not-sent-retry')
+ui.axe('tap', '--id', 'terminal-reconnect')
+screen_contains('Lody LAN terminal fixture-1')
+back()
+audit(0, opens=1, closes=1)
 print('PASS: terminal replay/input/exit/retry, cancelled and committed return, account expiry, delayed open cleanup (offline service).')
