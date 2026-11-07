@@ -1,11 +1,18 @@
 import LodyCore
 import Foundation
 
-/// Launch-argument fixtures. Available in Debug and Release; only `--ui-verify`
-/// (or `--lody-offline`) turns them on. TestFlight never passes those arguments.
+/// Fixture scenes require `--ui-verify`. Offline behavior also accepts
+/// `--lody-offline` or the explicit verification environment flag so a system
+/// cold launch can stay offline without enabling fixture scenes.
 public enum LodyUIVerify: Sendable {
   public static var enabled: Bool { has("--ui-verify") }
-  public static var offline: Bool { enabled || has("--lody-offline") }
+  public static var offline: Bool { enabled || has("--lody-offline") || environmentOffline }
+  private static let environmentOffline: Bool = {
+    guard ProcessInfo.processInfo.environment["LODY_VERIFY_OFFLINE"] == "1" else { return false }
+    // One process-scoped observation for cold-launch acceptance; no credentials.
+    NSLog("LodyUIVerify environment offline enabled")
+    return true
+  }()
   public static var home: Bool { enabled && has("--ui-verify-home") }
   public static var mentions: Bool { enabled && has("--ui-verify-mentions") }
   public static var throwProbe: Bool { enabled && has("--ui-verify-throw") }

@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import signal
 import subprocess
@@ -23,7 +24,7 @@ import time
 from driver import UI
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from simulator import SimulatorPool, run_with_simulator
+from simulator import MANAGED_NAME, SimulatorPool, run_with_simulator
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--app', required=True)
@@ -45,8 +46,64 @@ output = Path(args.output).resolve()
 output.mkdir(parents=True, exist_ok=True)
 
 
-def sim(*command, **kwargs):
-    return subprocess.run(['xcrun', 'simctl', *command], check=True, timeout=120, **kwargs)
+def sim(*command, check=True, **kwargs):
+    return subprocess.run(['xcrun', 'simctl', *command], check=check, timeout=120, **kwargs)
+
+
+# A launchd environment change is scoped strictly to this caller-owned simulator.
+assert os.environ.get('LODY_VERIFY_UDID') == args.udid, 'Share probe requires its current Verify Simulator lease'
+inventory = json.loads(sim('list', 'devices', '--json', capture_output=True, text=True).stdout)
+device = next((device for devices in inventory['devices'].values() for device in devices if device['udid'] == args.udid), None)
+assert device and device['state'] == 'Booted' and MANAGED_NAME.fullmatch(device['name']), 'Share probe requires a booted managed Verify Simulator'
+
+
+def application_pid():
+    processes = sim('spawn', args.udid, 'launchctl', 'list', capture_output=True, text=True).stdout
+    app = next((line.split() for line in processes.splitlines() if 'UIKitApplication:' + BUNDLE_ID + '[' in line), None)
+    if app and app[0].isdigit():
+        return int(app[0])
+    return None
+
+
+def cold_handoff(name):
+    # Require the actual destination process, not disappearance of the source UI.
+    def foreground(items):
+        if any(item.get('AXLabel') == '“Lody” Would Like to Send You Notifications' for item in items):
+            ui.capture(name + '-unexpected-notification-permission')
+            raise AssertionError('Offline cold handoff requested notification permission')
+        pid = application_pid()
+        if pid and any(item.get('role') == 'AXApplication' and item.get('pid') == pid for item in items):
+            return pid
+        return None
+
+    ui.invalidate_axe()
+    try:
+        pid = ui.wait(foreground, 'Lody did not become the foreground AX application', timeout=12)
+        command = subprocess.check_output(['ps', 'eww', '-p', str(pid), '-o', 'command='], text=True, timeout=10)
+        flag = re.search(r'(?:^|\s)LODY_VERIFY_OFFLINE=([^\s]*)', command)
+        value = flag.group(1) if flag else None
+        # Save only the one non-secret verification value, never the process environment.
+        evidence = {'pid': pid, 'environmentOffline': value, 'uiVerifyArgument': '--ui-verify' in command,
+                    'offlineArgument': '--lody-offline' in command, 'offlineMarkerObserved': False}
+        marker = 'LodyUIVerify environment offline enabled'
+        deadline = time.monotonic() + 5
+        while True:
+            observed = sim('spawn', args.udid, 'log', 'show', '--last', '2m', '--style', 'json',
+                           '--predicate', f'processIdentifier == {pid} AND eventMessage CONTAINS "{marker}"',
+                           capture_output=True, text=True).stdout
+            events = json.loads(observed)
+            evidence['offlineMarkerObserved'] = any(event.get('eventMessage') == marker for event in events)
+            (output / (name + '-offline.json')).write_text(json.dumps(evidence, indent=2))
+            if evidence['offlineMarkerObserved'] or time.monotonic() >= deadline:
+                break
+            time.sleep(.2)
+        assert value == '1', 'Cold App did not inherit the simulator offline environment'
+        assert not evidence['uiVerifyArgument'] and not evidence['offlineArgument'], 'Cold handoff must not substitute an argv-launched App'
+        assert evidence['offlineMarkerObserved'], 'Cold App did not observe offline mode; rebuild with the verification environment support'
+    except Exception:
+        ui.capture(name + '-missing')
+        raise
+    ui.capture(name)
 
 
 if args.host_app:
@@ -106,6 +163,8 @@ def open_extension(name):
     # The containing app stays stopped; the system hosts only its extension.
     subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID], capture_output=True, timeout=30)
     subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID + '.share-probe-host'], capture_output=True, timeout=30)
+    assert application_pid() is None, 'Containing App must be stopped before opening the Share Extension'
+    (output / f'{name}-app-stopped.json').write_text(json.dumps({'appRunning': False}))
     launched = sim('launch', args.udid, BUNDLE_ID + '.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US', capture_output=True, text=True)
     (output / f'{name}-launch.txt').write_text(launched.stdout + launched.stderr)
     ui.invalidate_axe()
@@ -194,9 +253,15 @@ def remote_back():
     ui.axe('tap', '-x', str(frame['x'] + min(frame['width'], 44) / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
 
 
-video = subprocess.Popen(['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=h264', '--force', str(output / 'run.mp4')],
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# On this Simulator launchctl prints no bytes for absence and a newline for a
+# defined empty value. Preserve the raw observation to restore either exactly.
+offline_key = 'LODY_VERIFY_OFFLINE'
+previous_offline = sim('spawn', args.udid, 'launchctl', 'getenv', offline_key, capture_output=True, text=True).stdout
+video = None
 try:
+    sim('spawn', args.udid, 'launchctl', 'setenv', offline_key, '1')
+    video = subprocess.Popen(['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=h264', '--force', str(output / 'run.mp4')],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     shutil.rmtree(store, ignore_errors=True)
     send = open_extension('signed-out')
     assert send['enabled'] is False, 'Send must stay disabled without a snapshot'
@@ -284,34 +349,7 @@ try:
         expected_branch = 'release-next' if args.lan_branches else 'feature/cached'
         assert entry['draft']['branch'] == expected_branch, 'Selected branch must reach the inbox draft'
     (output / 'manifest.json').write_text(json.dumps(entry, indent=2))
-    # A cold app handoff can show a SpringBoard notification permission alert.
-    # Its absence from the host AX tree alone does not prove Lody is foreground.
-    notification_dismissed = False
-
-    def lody_foreground(items):
-        global notification_dismissed
-        notification_title = '“Lody” Would Like to Send You Notifications'
-        if any(item.get('AXLabel') == notification_title for item in items):
-            assert not notification_dismissed, 'Notification permission alert did not dismiss'
-            deny = next((item for item in items if item.get('type') == 'Button' and item.get('AXLabel') == 'Don’t Allow'), None)
-            assert deny, 'Notification permission alert has no deny action'
-            ui.capture('handoff-notification-permission')
-            ui.axe('tap', '--label', deny['AXLabel'], '--post-delay', '.6')
-            notification_dismissed = True
-            ui.invalidate_axe()
-            return False
-        processes = sim('spawn', args.udid, 'launchctl', 'list', capture_output=True, text=True).stdout
-        app = next((line.split() for line in processes.splitlines() if 'UIKitApplication:' + BUNDLE_ID + '[' in line), None)
-        if not app or not app[0].isdigit():
-            return False
-        return any(item.get('role') == 'AXApplication' and str(item.get('pid')) == app[0] for item in items)
-
-    try:
-        ui.wait(lody_foreground, 'Lody did not become the foreground AX application', timeout=12)
-    except Exception:
-        ui.capture('handoff-missing')
-        raise
-    ui.capture('handoff')
+    cold_handoff('handoff')
     if args.branches:
         shutil.rmtree(store / 'branches')
         shutil.rmtree(store / 'inbox', ignore_errors=True)
@@ -340,11 +378,30 @@ try:
         else:
             assert entries[0].get('draft') is None, 'Missing Cloud branch must defer resolution'
         (output / 'unresolved-manifest.json').write_text(json.dumps(entries[0], indent=2))
+        cold_handoff('missing-cache-handoff')
     print('PASS: signed-out guidance, ready snapshot form, inbox entry written, Lody opened')
     if args.lan_branches:
         print('PASS: LAN manual branches, trim/cancel and missing-list selection in the real Share Extension')
-    print('NOT VERIFIED: authenticated drain into the outbox (covered by tests/share and a signed-in device run)')
+    print('PASS: cold App inherited offline environment, observed offline mode and became foreground without notification permission UI')
+    print('NOT VERIFIED: authenticated ShareInbox drain into a live outbox')
 finally:
-    video.send_signal(signal.SIGINT)
-    video.wait(timeout=20)
-    shutil.rmtree(store, ignore_errors=True)
+    try:
+        if video is not None:
+            video.send_signal(signal.SIGINT)
+            video.wait(timeout=20)
+        shutil.rmtree(store, ignore_errors=True)
+    finally:
+        try:
+            # Do not leave a live process with the temporary offline environment.
+            for bundle in [BUNDLE_ID, BUNDLE_ID + '.share-probe-host']:
+                sim('terminate', args.udid, bundle, check=False, capture_output=True, text=True)
+        finally:
+            if previous_offline:
+                sim('spawn', args.udid, 'launchctl', 'setenv', offline_key, previous_offline.removesuffix('\n'))
+            else:
+                sim('spawn', args.udid, 'launchctl', 'unsetenv', offline_key)
+            restored = sim('spawn', args.udid, 'launchctl', 'getenv', offline_key, capture_output=True, text=True).stdout
+            (output / 'offline-environment-restored.json').write_text(json.dumps({
+                'previouslyPresent': bool(previous_offline), 'restored': restored == previous_offline,
+            }, indent=2))
+            assert restored == previous_offline, 'Simulator offline environment was not restored exactly'
