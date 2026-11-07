@@ -9795,6 +9795,23 @@
       },
       "comment": "1: add; 2: del; 3: text"
     },
+    "native.chat.image.loaded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image loaded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图片已加载"
+          }
+        }
+      }
+    },
     "native.chat.image.failed": {
       "extractionState": "manual",
       "localizations": {

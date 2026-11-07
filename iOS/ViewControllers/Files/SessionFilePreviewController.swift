@@ -18,7 +18,7 @@ final class SessionFilePreviewController: QLPreviewController, QLPreviewControll
   init(file: ChatMessageAttachment, workspace: String, session: String,
     loader: Loader? = nil,
     identity: @escaping @MainActor () -> String = {
-      (AuthSession.shared.snapshot.account?.user.id ?? "") + ":" + (DataRuntime.current?.attachmentScope ?? "")
+      AttachmentUIIdentity.current
     }) {
     self.loader = loader ?? Self.downloadFile
     self.identity = identity
@@ -49,6 +49,7 @@ final class SessionFilePreviewController: QLPreviewController, QLPreviewControll
     let scope = identity()
     let loader = self.loader
     download = Task { [weak self, file, workspace, session, directory] in
+      defer { if let self, self.fixtureAttempt == attempt { self.download = nil } }
       do {
         let url: URL
         if LodyUIVerify.enabled, session == "ui-verify-attachments" {
@@ -58,13 +59,18 @@ final class SessionFilePreviewController: QLPreviewController, QLPreviewControll
           url = try await loader(file, workspace, session, directory)
         }
         try Task.checkCancellation()
-        guard let self, self.identity() == scope, self.fixtureAttempt == attempt else { try? FileManager.default.removeItem(at: directory); return }
+        guard let self, self.fixtureAttempt == attempt else { try? FileManager.default.removeItem(at: directory); return }
+        guard self.identity() == scope else {
+          try? FileManager.default.removeItem(at: directory)
+          self.dismiss(animated: true); return
+        }
         self.url = url
         self.contentUnavailableConfiguration = nil
         self.reloadData()
       } catch {
         try? FileManager.default.removeItem(at: directory)
-        guard !Task.isCancelled, let self, self.identity() == scope, self.fixtureAttempt == attempt else { return }
+        guard !Task.isCancelled, let self, self.fixtureAttempt == attempt else { return }
+        guard self.identity() == scope else { self.dismiss(animated: true); return }
         var failed = UIContentUnavailableConfiguration.empty()
         failed.background.backgroundColor = .systemBackground
         failed.image = UIImage(systemName: "doc.badge.ellipsis")

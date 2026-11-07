@@ -7,6 +7,15 @@ import XCTest
 
 @MainActor
 final class LanAttachmentTests: XCTestCase {
+  func testStableAttachmentIdentityIncludesAccountModeLANAndWorkspace() {
+    let identity = AttachmentIdentity.key(userId: "user", workspaceId: "workspace", lanId: "hub")
+    XCTAssertEqual(identity, AttachmentIdentity.key(userId: "user", workspaceId: "workspace", lanId: "hub"))
+    XCTAssertNotEqual(identity, AttachmentIdentity.key(userId: "other", workspaceId: "workspace", lanId: "hub"))
+    XCTAssertNotEqual(identity, AttachmentIdentity.key(userId: "user", workspaceId: "other", lanId: "hub"))
+    XCTAssertNotEqual(identity, AttachmentIdentity.key(userId: "user", workspaceId: "workspace", lanId: "other"))
+    XCTAssertNotEqual(identity, AttachmentIdentity.key(userId: "user", workspaceId: "workspace", lanId: nil))
+  }
+
   func testLocalImagesDecodeForBothAuthorsAndKeepTheirReadIdentity() throws {
     for role in ["user", "assistant"] {
       let json = """

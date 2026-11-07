@@ -97,6 +97,7 @@ class EditMessageController: UIViewController {
   }
 
   private func prepare() {
+    guard service.identity() == accountIdentity else { close(); return }
     precondition(draft == nil)
     phase = .loading
     errorLabel.text = nil
@@ -104,7 +105,7 @@ class EditMessageController: UIViewController {
     task = Task { [weak self, service, scope] in
       do {
         let value = try await service.prepare(scope)
-        guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
+        guard let self, self.acceptResult() else { return }
         draft = value
         phase = .ready
         composer.setInitialDraft(value.text)
@@ -118,7 +119,7 @@ class EditMessageController: UIViewController {
           composer.trailingAnchor.constraint(equalTo: host.trailingAnchor),
         ])
       } catch {
-        guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
+        guard let self, self.acceptResult() else { return }
         record(error, action: "prepare_failed")
         phase = .loadFailed
         errorLabel.text = String(localized: "chat.edit.loadFailed", bundle: .lody)
@@ -141,7 +142,7 @@ class EditMessageController: UIViewController {
         self?.record(error, action: "send_failed")
         result = .unknown(.init())
       }
-      guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
+      guard let self, self.acceptResult() else { return }
       if case .accepted(let accepted) = result { finish(accepted.id); return }
       restoreToken += 1
       composer.restoreDraft(token: restoreToken)
@@ -163,14 +164,20 @@ class EditMessageController: UIViewController {
     task = Task { [weak self, service] in
       do {
         let result = try await service.read(request)
-        guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
+        guard let self, self.acceptResult() else { return }
         if case .accepted(let accepted) = result { finish(accepted.id); return }
       } catch { self?.record(error, action: "read_failed") }
-      guard let self, !Task.isCancelled, phase != .closed, service.identity() == accountIdentity else { return }
+      guard let self, self.acceptResult() else { return }
       phase = .unknown
       errorLabel.text = String(localized: "chat.edit.unknown", bundle: .lody)
       render()
     }
+  }
+
+  private func acceptResult() -> Bool {
+    guard !Task.isCancelled, phase != .closed else { return false }
+    guard service.identity() == accountIdentity else { close(); return false }
+    return true
   }
 
   private func render() {

@@ -18,6 +18,16 @@ final class Gate {
   func release() { next?.resume(); next = nil }
 }
 
+@MainActor
+final class Notices {
+  var scopes: [String] = []
+}
+let notices = await Notices()
+let observer = NotificationCenter.default.addObserver(forName: LanImageCache.didCache, object: nil, queue: .main) { event in
+  MainActor.assumeIsolated { notices.scopes.append(event.userInfo?["scope"] as? String ?? "missing") }
+}
+defer { NotificationCenter.default.removeObserver(observer) }
+
 let root = FileManager.default.temporaryDirectory.appendingPathComponent("lan-cache-check-\(UUID().uuidString)")
 defer { try? FileManager.default.removeItem(at: root) }
 let cache = await LanImageCache(directory: root)
@@ -45,6 +55,18 @@ await gate.release()
 let a = try await first.value
 let b = try await second.value
 check(a == b && a.lastPathComponent == digest && fetches == 1, "digest coalescing")
+
+// Disk reuse survives both a new runtime epoch and a period with no runtime.
+// Neither call may enter the loader when the member is offline.
+let recovered = try await cache.file(digest: digest, scope: "account-A", epoch: "runtime-2") { _ in
+  fatalError("Runtime recovery must reuse the existing digest")
+}
+let offlineCache = await LanImageCache(directory: root)
+let offline = try await offlineCache.file(digest: digest, scope: "account-A", epoch: "unavailable") { _ in
+  fatalError("A cached image must remain readable without a runtime or member")
+}
+check(recovered == a && offline == a && fetches == 1, "stable disk namespace across runtime recovery and offline access")
+check(notices.scopes == ["account-A"], "cache notifications carry the stable UI identity; cache hits never refetch or repost")
 
 let retryDigest = String(repeating: "b", count: 64)
 do {
@@ -79,6 +101,43 @@ let switched = try await cache.file(digest: digest, scope: "account-B") { direct
 await lateGate.release()
 do { _ = try await late.value; fatalError("late old account result must fail") } catch {}
 check(switched != a, "accounts must not reuse disk identity")
+let epochGate = await Gate()
+let epochDigest = String(repeating: "d", count: 64)
+let obsolete = Task { @MainActor in
+  try await cache.file(digest: epochDigest, scope: "account-B", epoch: "runtime-1") { directory in
+    await epochGate.wait()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent("obsolete.png")
+    try Data("old epoch".utf8).write(to: url)
+    return url
+  }
+}
+while await !epochGate.entered { await Task.yield() }
+let replacementGate = await Gate()
+let replacement = Task { @MainActor in
+  try await cache.file(digest: epochDigest, scope: "account-B", epoch: "runtime-2") { directory in
+    await replacementGate.wait()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent("current.png")
+    try Data("new epoch".utf8).write(to: url)
+    return url
+  }
+}
+while await !replacementGate.entered { await Task.yield() }
+await epochGate.release()
+do { _ = try await obsolete.value; fatalError("old runtime must not commit its late result") } catch {}
+let joinedReplacement = Task { @MainActor in
+  try await cache.file(digest: epochDigest, scope: "account-B", epoch: "runtime-2") { _ in
+    fatalError("An old completion must not erase the new epoch's pending fetch")
+  }
+}
+await Task.yield()
+await replacementGate.release()
+let current = try await replacement.value
+let joined = try await joinedReplacement.value
+let currentBytes = try Data(contentsOf: current)
+check(current == joined && currentBytes == Data("new epoch".utf8), "epoch replacement retains the new pending owner")
+
 let items = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
 check(!items.contains { $0.lastPathComponent.hasPrefix("fetch-") }, "scratch removed after late failure")
-print("PASS: LAN image digest coalescing, retry, account switch and late-result fencing")
+print("PASS: LAN digest coalescing, recovery/offline disk hits, retry, account and runtime epoch fences")

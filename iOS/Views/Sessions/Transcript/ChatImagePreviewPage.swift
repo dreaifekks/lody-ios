@@ -7,6 +7,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
   private let spinner = UIActivityIndicatorView(style: .large)
   private let retry = UIButton(type: .system)
   private var item: ChatImagePreviewItem?
+  private var identity = ""
   private var workspace = ""
   private var session = ""
   private var safeTop: CGFloat = 0
@@ -32,11 +33,15 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     photo.accessibilityTraits = .image
     scroll.addSubview(photo)
     spinner.color = .white
+    spinner.hidesWhenStopped = true
+    spinner.isAccessibilityElement = true
+    spinner.accessibilityIdentifier = "chat-image-loading"
     addSubview(spinner)
     retry.setTitle(String(localized: "native.chat.image.retry", bundle: .lody), for: .normal)
     retry.tintColor = .white
     retry.backgroundColor = UIColor(white: 0.15, alpha: 0.9)
     retry.layer.cornerRadius = 12
+    retry.accessibilityIdentifier = "chat-image-retry"
     retry.addAction(UIAction { [weak self] _ in self?.reload() }, for: .touchUpInside)
     addSubview(retry)
   }
@@ -51,7 +56,10 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     safeTop: CGFloat,
     safeBottom: CGFloat
   ) {
-    let same = self.item == item && self.workspace == workspace && self.session == session
+    let scope = keptImages.identity()
+    let same = self.item == item && self.workspace == workspace && self.session == session && identity == scope
+    if identity != scope { photo.image = nil }
+    identity = scope
     self.item = item
     self.workspace = workspace
     self.session = session
@@ -59,7 +67,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     self.safeBottom = safeBottom
     photo.accessibilityLabel = item.image.fileName
     if let placeholder { photo.image = placeholder }
-    if same, photo.image != nil, task == nil, keptTask == nil { return }
+    if same { return }
     reload()
   }
 
@@ -92,6 +100,11 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
       let scope = service.identity()
       spinner.startAnimating()
       keptTask = Task { @MainActor [weak self] in
+        defer {
+          if let self, self.requestID == requestID {
+            self.spinner.stopAnimating(); self.keptTask = nil
+          }
+        }
         do {
           let url = try await service.file(item.image, workspace, session)
           try Task.checkCancellation()
@@ -99,11 +112,11 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
             service.identity() == scope else { return }
           self.photo.image = UIImage(contentsOfFile: url.path)
           self.retry.isHidden = self.photo.image != nil
-          self.spinner.stopAnimating(); self.keptTask = nil; self.layoutImage()
+          self.layoutImage()
         } catch {
           guard !Task.isCancelled, let self, self.requestID == requestID,
             service.identity() == scope else { return }
-          self.spinner.stopAnimating(); self.retry.isHidden = false; self.keptTask = nil
+          self.retry.isHidden = false
         }
       }
       return

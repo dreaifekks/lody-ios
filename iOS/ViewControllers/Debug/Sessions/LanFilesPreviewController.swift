@@ -10,7 +10,12 @@ final class LanFilesPreviewController: UIViewController {
   private let controls = UIStackView()
   private let root = FileManager.default.temporaryDirectory.appendingPathComponent("lan-files-preview-\(UUID().uuidString)")
   private lazy var cache = LanImageCache(directory: root.appendingPathComponent("cache"))
-  private var identity = UUID().uuidString
+  private var user = "offline-user"
+  private var identity: String { AttachmentIdentity.key(userId: user, workspaceId: "lw_offline-files", lanId: "offline-hub") }
+  private var runtimeEpoch = 1
+  private var memberOnline = true
+  private var prepares = 0
+  private var editSends = 0
   private var fetches = 0
   private var reads = 0
   private var restores = 0
@@ -39,12 +44,19 @@ final class LanFilesPreviewController: UIViewController {
     chat.usesLAN = { true }
     chat.keptImages = ChatKeptImageService(file: { [weak self] image, _, _ in
       guard let self, let digest = image.sha256 else { throw CancellationError() }
-      let scope = identity
-      return try await cache.file(digest: digest, scope: scope) { [weak self] directory in
+      let scope = identity, epoch = runtimeEpoch
+      return try await cache.file(digest: digest, scope: scope, epoch: String(epoch), isCurrent: { [weak self] in
+        self?.identity == scope && self?.runtimeEpoch == epoch
+      }) { [weak self] directory in
         guard let self else { throw CancellationError() }
         fetches += 1; updateStatus()
+        guard memberOnline else { throw SessionAttachments.error("Offline member unavailable") }
         // Intentionally allow a late result so the production scope fence is exercised.
         try? await Task.sleep(for: .milliseconds(scenario == "late" ? 1800 : 400))
+        if scenario == "recovery", fetches <= 2 {
+          runtimeEpoch += 1; updateStatus()
+          throw SessionAttachments.error("Offline runtime replaced. Retry the picture.")
+        }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent(image.fileName)
         try bytes.write(to: url)
@@ -56,6 +68,7 @@ final class LanFilesPreviewController: UIViewController {
       guard let self else { throw CancellationError() }
       reads += 1; updateStatus()
       try? await Task.sleep(for: .milliseconds(400))
+      if scenario == "recovery", reads == 1 { runtimeEpoch += 1; updateStatus() }
       if reads == 1 { throw SessionAttachments.error("Offline member unavailable. Retry this file.") }
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       let url = directory.appendingPathComponent("notes.txt")
@@ -106,7 +119,7 @@ final class LanFilesPreviewController: UIViewController {
     switchAccount.accessibilityIdentifier = "lan-files-switch"
     switchAccount.addAction(UIAction { [weak self] _ in
       guard let self else { return }
-      identity = UUID().uuidString
+      user = UUID().uuidString
       chat.setEntries("[]")
       chat.setComposerState(SessionController.json(["editable": false, "canSend": false, "sending": false]))
       updateStatus()
@@ -117,6 +130,14 @@ final class LanFilesPreviewController: UIViewController {
     edit.accessibilityIdentifier = "lan-files-edit"
     edit.addAction(UIAction { [weak self] _ in self?.openEditor(notes: notes, image: imageURL) }, for: .touchUpInside)
     controls.addArrangedSubview(edit)
+    let recover = UIButton(type: .system)
+    recover.setTitle("Recover", for: .normal)
+    recover.accessibilityIdentifier = "lan-files-recover"
+    recover.addAction(UIAction { [weak self] _ in
+      guard let self else { return }
+      runtimeEpoch += 1; memberOnline = false; updateStatus()
+    }, for: .touchUpInside)
+    controls.addArrangedSubview(recover)
     controls.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(controls)
     NSLayoutConstraint.activate([
@@ -130,14 +151,35 @@ final class LanFilesPreviewController: UIViewController {
 
   private func openEditor(notes: URL, image: URL) {
     let service = EditMessageService(
-      prepare: { _ in
-        EditMessageDraft(state: "ready", text: "Edit this LAN prompt", attachments: [
+      prepare: { [weak self] _ in
+        guard let self else { throw CancellationError() }
+        prepares += 1
+        if scenario == "recovery", prepares == 1 {
+          try await Task.sleep(for: .milliseconds(400))
+          runtimeEpoch += 1; updateStatus()
+          throw SessionAttachments.error("Offline runtime replaced during edit preparation")
+        }
+        return EditMessageDraft(state: "ready", text: "Edit this LAN prompt", attachments: [
           .init(id: "original:0", name: "notes.txt", uri: notes.absoluteString, kind: "file"),
           .init(id: "original:1", name: "photo.png", uri: image.absoluteString, kind: "image"),
         ])
       },
-      send: { _, _, _ in .notSent(.init(reason: "Offline member unavailable")) },
-      read: { _ in .unknown(.init()) },
+      send: { [weak self] _, _, _ in
+        guard let self else { throw CancellationError() }
+        editSends += 1
+        try await Task.sleep(for: .milliseconds(400))
+        if scenario == "recovery" {
+          runtimeEpoch += 1; updateStatus()
+          return .unknown(.init())
+        }
+        return .notSent(.init(reason: "Offline member unavailable"))
+      },
+      read: { [weak self] _ in
+        guard let self else { throw CancellationError() }
+        try await Task.sleep(for: .milliseconds(400))
+        runtimeEpoch += 1; updateStatus()
+        throw SessionAttachments.error("Offline runtime replaced during edit confirmation")
+      },
       usesLAN: { true },
       identity: { [weak self] in self?.identity ?? "closed" }
     )
@@ -146,6 +188,6 @@ final class LanFilesPreviewController: UIViewController {
   }
 
   private func updateStatus() {
-    status.text = "\(fetches) image fetch; \(reads) file reads; \(restores) restored; \(completed) finished"
+    status.text = "\(fetches) image fetch; \(reads) file reads; \(restores) restored; \(completed) finished; epoch \(runtimeEpoch); \(editSends) edit sends"
   }
 }

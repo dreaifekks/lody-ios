@@ -10,7 +10,7 @@ enum LanComposerPolicy {
     if let composer = view as? ChatComposerView {
       composer.attachmentLimit = { lan() ? 8 : 16 }
       composer.attachmentImportIdentity = {
-        (AuthSession.shared.snapshot.account?.user.id ?? "") + ":" + (DataRuntime.current?.attachmentScope ?? "")
+        AttachmentUIIdentity.current
       }
     }
     for child in view.subviews {
@@ -27,5 +27,14 @@ enum LanComposerPolicy {
 
   static func unavailable() {
     LodyToastOverlay.shared.show(message: String(localized: "native.attachment.error.lanLimit", bundle: .lody), kind: "info")
+  }
+}
+
+/// App-owned selection resolves the workspace; LodyData only receives an
+/// explicit workspace and never imports UIKit or SessionSource.live.
+@MainActor
+enum AttachmentUIIdentity {
+  static var current: String {
+    AuthSession.shared.attachmentIdentity(workspace: SessionSource.live.state.workspaceId) ?? "signed-out"
   }
 }

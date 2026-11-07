@@ -6,7 +6,7 @@ struct ChatKeptImageService {
   var identity: @MainActor () -> String
   static let live = ChatKeptImageService(
     file: { try await LanKeptImages.file($0, workspace: $1, session: $2) },
-    identity: { (AuthSession.shared.snapshot.account?.user.id ?? "") + ":" + (DataRuntime.current?.attachmentScope ?? "") }
+    identity: { AttachmentUIIdentity.current }
   )
 }
 
@@ -140,8 +140,13 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
     let scope = service.identity()
     keptScope = scope
     task?.cancel(); task = nil; requestURL = nil
-    photo.image = nil; failure.isHidden = true; spinner.startAnimating()
+    photo.image = nil; failure.isHidden = true; accessibilityValue = nil; spinner.startAnimating()
     keptTask = Task { @MainActor [weak self] in
+      defer {
+        if let self, self.requestID == requestID {
+          self.spinner.stopAnimating(); self.keptTask = nil
+        }
+      }
       do {
         let url = try await service.file(image, workspace, session)
         try Task.checkCancellation()
@@ -150,11 +155,14 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
         self.requestURL = url
         self.photo.image = ChatAttachment.thumbnail(url)
         self.failure.isHidden = self.photo.image != nil
-        self.spinner.stopAnimating(); self.keptTask = nil
+        self.accessibilityValue = self.photo.image == nil
+          ? String(localized: "native.chat.image.failed", bundle: .lody)
+          : String(localized: "native.chat.image.loaded", bundle: .lody)
       } catch {
         guard !Task.isCancelled, let self, self.requestID == requestID,
           service.identity() == scope else { return }
-        self.spinner.stopAnimating(); self.failure.isHidden = false; self.keptTask = nil
+        self.failure.isHidden = false
+        self.accessibilityValue = String(localized: "native.chat.image.failed", bundle: .lody)
       }
     }
   }
@@ -192,7 +200,7 @@ final class ChatImageCell: UICollectionViewCell, ChatGapCell {
     super.prepareForReuse()
     keptTask?.cancel(); keptTask = nil; keptScope = nil
     task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
-    photo.image = nil; spinner.stopAnimating(); failure.isHidden = true
+    photo.image = nil; accessibilityValue = nil; spinner.stopAnimating(); failure.isHidden = true
   }
 
   isolated deinit {

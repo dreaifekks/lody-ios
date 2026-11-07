@@ -25,6 +25,7 @@ enum DebugSceneFactory {
     "permission-sheet-preview": { params in PermissionSheetPreviewController(scenario: params["scenario"] as! String) },
     "permission-preview": { params in PermissionPreviewController(waiting: params["waiting"] as? Bool == true) },
     "session-preview": { params in SessionPreviewController(scenario: params["scenario"] as? String ?? "live") },
+    "lan-files-recovery": { _ in LanFilesPreviewController(scenario: "recovery") },
     "lan-files-late": { _ in LanFilesPreviewController(scenario: "late") },
     "lan-files-preview": { params in LanFilesPreviewController(scenario: params["scenario"] as? String ?? "media") },
     "send-preview": { params in SendPreviewController(params: params) },
