@@ -27,6 +27,7 @@ from simulator import SimulatorPool, run_with_simulator
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--app', required=True)
+parser.add_argument('--host-app', type=Path, help='Reuse an already built ShareProbeHost.app without compiling or signing')
 parser.add_argument('--udid', default=os.environ.get('LODY_VERIFY_UDID'))
 parser.add_argument('--output', default='.artifacts/share-probe/ui')
 parser.add_argument('--appearance', choices=['light', 'dark'], default='light')
@@ -48,35 +49,41 @@ def sim(*command, **kwargs):
     return subprocess.run(['xcrun', 'simctl', *command], check=True, timeout=120, **kwargs)
 
 
-host = output / 'ShareProbeHost.app'
-host.mkdir(exist_ok=True)
-(host / 'Info.plist').write_bytes(plistlib.dumps({
-    'CFBundleIdentifier': BUNDLE_ID + '.share-probe-host',
-    'CFBundleExecutable': 'ShareProbeHost',
-    'CFBundleName': 'ShareProbeHost',
-    'CFBundlePackageType': 'APPL',
-    'CFBundleShortVersionString': '1.0',
-    'CFBundleVersion': '1',
-    'MinimumOSVersion': '26.0',
-    'LSRequiresIPhoneOS': True,
-    'UIDeviceFamily': [1],
-    'UILaunchScreen': {},
-    'UIApplicationSceneManifest': {
-        'UIApplicationSupportsMultipleScenes': False,
-        'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{
-            'UISceneConfigurationName': 'Share Source',
-            'UISceneDelegateClassName': 'ShareProbeHost.ShareProbeHostScene',
-        }]},
-    },
-}))
-sdk = subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path'], text=True).strip()
-arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
-subprocess.run([
-    'xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-swift-version', '6', '-parse-as-library', '-module-name', 'ShareProbeHost',
-    '-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator',
-    str(Path(__file__).with_name('share-probe-host.swift')), '-o', str(host / 'ShareProbeHost'),
-], check=True, timeout=120)
-subprocess.run(['codesign', '--force', '--sign', '-', str(host)], check=True, timeout=30)
+if args.host_app:
+    host = args.host_app.resolve()
+    assert (host / 'ShareProbeHost').is_file(), 'Missing prebuilt ShareProbeHost executable'
+    info = plistlib.loads((host / 'Info.plist').read_bytes())
+    assert info['CFBundleIdentifier'] == BUNDLE_ID + '.share-probe-host', 'Share host identity does not match the selected app'
+else:
+    host = output / 'ShareProbeHost.app'
+    host.mkdir(exist_ok=True)
+    (host / 'Info.plist').write_bytes(plistlib.dumps({
+        'CFBundleIdentifier': BUNDLE_ID + '.share-probe-host',
+        'CFBundleExecutable': 'ShareProbeHost',
+        'CFBundleName': 'ShareProbeHost',
+        'CFBundlePackageType': 'APPL',
+        'CFBundleShortVersionString': '1.0',
+        'CFBundleVersion': '1',
+        'MinimumOSVersion': '26.0',
+        'LSRequiresIPhoneOS': True,
+        'UIDeviceFamily': [1],
+        'UILaunchScreen': {},
+        'UIApplicationSceneManifest': {
+            'UIApplicationSupportsMultipleScenes': False,
+            'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{
+                'UISceneConfigurationName': 'Share Source',
+                'UISceneDelegateClassName': 'ShareProbeHost.ShareProbeHostScene',
+            }]},
+        },
+    }))
+    sdk = subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path'], text=True).strip()
+    arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
+    subprocess.run([
+        'xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-swift-version', '6', '-parse-as-library', '-module-name', 'ShareProbeHost',
+        '-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator',
+        str(Path(__file__).with_name('share-probe-host.swift')), '-o', str(host / 'ShareProbeHost'),
+    ], check=True, timeout=120)
+    subprocess.run(['codesign', '--force', '--sign', '-', str(host)], check=True, timeout=30)
 sim('install', args.udid, str(app))
 sim('install', args.udid, str(host))
 sim('ui', args.udid, 'appearance', args.appearance)
@@ -99,8 +106,21 @@ def open_extension(name):
     # The containing app stays stopped; the system hosts only its extension.
     subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID], capture_output=True, timeout=30)
     subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID + '.share-probe-host'], capture_output=True, timeout=30)
-    sim('launch', args.udid, BUNDLE_ID + '.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
-    ui.element('share-probe-host.open')
+    launched = sim('launch', args.udid, BUNDLE_ID + '.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US', capture_output=True, text=True)
+    (output / f'{name}-launch.txt').write_text(launched.stdout + launched.stderr)
+    ui.invalidate_axe()
+    try:
+        ui.element('share-probe-host.open')
+    except Exception:
+        ui.screenshot(f'{name}-host-missing')
+        try:
+            (output / f'{name}-host-missing-ax.json').write_text(ui.axe('describe-ui'))
+        except Exception as error:
+            (output / f'{name}-host-missing-ax-error.txt').write_text(str(error))
+        process = sim('spawn', args.udid, 'launchctl', 'list', capture_output=True, text=True)
+        relevant = [line for line in process.stdout.splitlines() if BUNDLE_ID in line or 'com.apple.SpringBoard' in line]
+        (output / f'{name}-processes.txt').write_text('\n'.join(relevant))
+        raise
     ui.axe('tap', '--id', 'share-probe-host.open', '--tap-style', 'physical', '--post-delay', '1')
     ui.capture(f'{name}-tray')
     items = ui.state()
@@ -264,15 +284,33 @@ try:
         expected_branch = 'release-next' if args.lan_branches else 'feature/cached'
         assert entry['draft']['branch'] == expected_branch, 'Selected branch must reach the inbox draft'
     (output / 'manifest.json').write_text(json.dumps(entry, indent=2))
-    deadline = time.monotonic() + 12
-    while any(item.get('AXUniqueId') == 'share-probe-host.open' for item in ui.state()):
-        if time.monotonic() >= deadline:
-            ui.capture('handoff-missing')
-            log = subprocess.run(['xcrun', 'simctl', 'spawn', args.udid, 'log', 'show', '--last', '2m', '--style', 'compact',
-                '--predicate', 'process == "LodyShare" OR eventMessage CONTAINS[c] "lody" OR eventMessage CONTAINS[c] "openURL"'], capture_output=True, text=True, timeout=120)
-            (output / 'handoff-extension.log').write_text(log.stdout)
-            raise AssertionError('Lody did not come forward')
-        time.sleep(.5)
+    # A cold app handoff can show a SpringBoard notification permission alert.
+    # Its absence from the host AX tree alone does not prove Lody is foreground.
+    notification_dismissed = False
+
+    def lody_foreground(items):
+        global notification_dismissed
+        notification_title = '“Lody” Would Like to Send You Notifications'
+        if any(item.get('AXLabel') == notification_title for item in items):
+            assert not notification_dismissed, 'Notification permission alert did not dismiss'
+            deny = next((item for item in items if item.get('type') == 'Button' and item.get('AXLabel') == 'Don’t Allow'), None)
+            assert deny, 'Notification permission alert has no deny action'
+            ui.capture('handoff-notification-permission')
+            ui.axe('tap', '--label', deny['AXLabel'], '--post-delay', '.6')
+            notification_dismissed = True
+            ui.invalidate_axe()
+            return False
+        processes = sim('spawn', args.udid, 'launchctl', 'list', capture_output=True, text=True).stdout
+        app = next((line.split() for line in processes.splitlines() if 'UIKitApplication:' + BUNDLE_ID + '[' in line), None)
+        if not app or not app[0].isdigit():
+            return False
+        return any(item.get('role') == 'AXApplication' and str(item.get('pid')) == app[0] for item in items)
+
+    try:
+        ui.wait(lody_foreground, 'Lody did not become the foreground AX application', timeout=12)
+    except Exception:
+        ui.capture('handoff-missing')
+        raise
     ui.capture('handoff')
     if args.branches:
         shutil.rmtree(store / 'branches')
