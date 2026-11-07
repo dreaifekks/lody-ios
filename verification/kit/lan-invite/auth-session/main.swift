@@ -63,6 +63,18 @@ func check(_ condition: @autoclosure () throws -> Bool) throws { let value = try
     try check(try LanHub.current() == nil)
 
     auth.probeLAN = { _ in }
+    var restarts = 0
+    auth.restartRuntime = { restarts += 1 }
+    LocalStore.failClear = true
+    do { try await auth.joinLAN("lody-lan://rejected-commit@hub:8788"); fatalError("storage failure joined LAN") } catch {}
+    LocalStore.failClear = false
+    try check(restarts == 1)
+    AuthKeychain.failNextSave(account: AuthKeychain.lanHub)
+    do { try await auth.joinLAN("lody-lan://rejected-keychain@hub:8788"); fatalError("Keychain failure joined LAN") } catch {}
+    try check(restarts == 2)
+    try check(auth.snapshot.account?.user.id == "cloud-user")
+    try check((try AuthKeychain.read()) == "cloud-token")
+    try check(try LanHub.current() == nil)
     try await auth.joinLAN("lody-lan://joined-test-token@hub:8788/Home")
     let account = auth.snapshot.account!
     try check(account.isLAN && account.lan?.name == "Home")

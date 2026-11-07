@@ -1,7 +1,25 @@
 import Foundation
 import os
 
-enum AuthKeychain { static func read() throws -> String? { "synthetic-app-token" } }
+enum AuthKeychain {
+  static let reads = OSAllocatedUnfairLock(initialState: 0)
+  static func read() throws -> String? { reads.withLock { $0 += 1 }; return "synthetic-app-token" }
+}
+struct LanInvite: Equatable, Sendable {
+  let workspaceId: String
+  static func isWorkspace(_ id: String) -> Bool { id.hasPrefix("lw_") }
+}
+@MainActor enum LanHub {
+  enum Failure: Error { case unauthorized }
+  static var joined: LanInvite? = LanInvite(workspaceId: "lw_test")
+  static var configured = true
+  static var switchDuringToken = false
+  static func credential(for workspace: String) -> LanInvite? { joined?.workspaceId == workspace ? joined : nil }
+  static func githubToken(_ invite: LanInvite) async throws -> String? {
+    if switchDuringToken { joined = nil }
+    return configured ? "synthetic-repo-lan" : nil
+  }
+}
 final class PRProtocol: URLProtocol {
   static let calls = OSAllocatedUnfairLock(initialState: [(String, String)]())
   override class func canInit(with request: URLRequest) -> Bool { true }
@@ -72,9 +90,23 @@ final class PRProtocol: URLProtocol {
     do { _ = try await run("unknown", operation: "comment"); fatalError("Uncertain write reported success") }
     catch { precondition(error.localizedDescription == "comment_unknown") }
     precondition(PRProtocol.calls.withLock { $0.filter { $0.1 == "POST" && $0.0.hasSuffix("/comments") }.count } == before + 1, "Never replay a write")
+    let cloudReads = AuthKeychain.reads.withLock { $0 }
+    let lanRead = try await run("lw_test")
+    precondition(lanRead.contains("A PR") && !lanRead.contains("synthetic"))
+    _ = try await run("lw_test", operation: "comment")
+    precondition(AuthKeychain.reads.withLock { $0 } == cloudReads, "LAN PRs must not read a Cloud credential")
+    LanHub.configured = false
+    do { _ = try await run("lw_test"); fatalError("Missing hub token accepted") }
+    catch { precondition(error.localizedDescription == "lan_github_not_configured") }
+    LanHub.configured = true
+    LanHub.switchDuringToken = true
+    do { _ = try await run("lw_test"); fatalError("Switched LAN accepted") }
+    catch { precondition(error.localizedDescription == "unauthorized") }
+    precondition(AuthKeychain.reads.withLock { $0 } == cloudReads)
     let count = PRProtocol.calls.withLock { $0.count }
     do { _ = try await run("linked", repository: "x/.."); fatalError("Invalid repo accepted") } catch {}
     precondition(PRProtocol.calls.withLock { $0.count } == count)
+    print("LAN PRs use hub tokens without Cloud credentials; missing token and identity switch fail correctly")
     print("PR read/write boundary: head-scoped checks, partial state, permission failure, comments, credential isolation and no write replay passed")
   }
 }

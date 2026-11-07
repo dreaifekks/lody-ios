@@ -23350,6 +23350,23 @@
           }
         }
       }
+    },
+    "pr.error.lanNotConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure a GitHub token on your LAN hub to view pull requests."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在 LAN hub 上配置 GitHub token，以查看拉取请求。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

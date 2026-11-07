@@ -32,6 +32,7 @@ public final class LodyApplication {
     LiveActivities.shared.syncAppIcon()
     DataRuntime.current = runtime
     AuthSession.shared.stopRuntime = { [weak self] in self?.runtime.stop() }
+    AuthSession.shared.restartRuntime = { CatalogSession.shared.refresh() }
     OutboxSession.shared.attach(runtime)
     CatalogSession.shared.attach(runtime)
     for name in [Notification.Name.lodyAuthDidChange, .lodyCatalogDidChange, .lodyLANHubDidMove, UIApplication.didBecomeActiveNotification] {

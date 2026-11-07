@@ -63,6 +63,7 @@ public final class AuthSession {
   public private(set) var snapshot = AuthSnapshot()
   public var api = AuthAPI()
   public var stopRuntime: (() -> Void)?
+  public var restartRuntime: (() -> Void)?
   public var isLAN: Bool { snapshot.account?.isLAN == true }
   public var probeLAN: @Sendable (LanInvite) async throws -> Void = { try await LanHub.probe($0) }
 
@@ -300,7 +301,11 @@ public final class AuthSession {
     guard active(id) else { throw CancellationError() }
     let oldLAN = try LanHub.read(), oldCloud = try AuthKeychain.read()
     committing = true
-    defer { committing = false }
+    var replaced = false
+    defer {
+      committing = false
+      if !replaced { restartRuntime?() }
+    }
     stopRuntime?()
     await LodyHosting.current?.forgetDevice()
     guard active(id) else { throw CancellationError() }
@@ -326,6 +331,7 @@ public final class AuthSession {
       account = fresh; credential = cloud?.1; code = nil
       initialWorkspace = lan?.workspaceId ?? ""; setCatalog(nil)
     }
+    replaced = true
     await save(fresh)
   }
 

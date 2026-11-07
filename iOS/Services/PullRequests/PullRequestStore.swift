@@ -152,7 +152,7 @@ final class PullRequestStore {
   }
 
   static func errorText(_ code: String) -> String {
-    for (match, key) in [("comment_unknown", "commentUnknown"), ("unauthorized", "authorization"),
+    for (match, key) in [("lan_github_not_configured", "lanNotConfigured"), ("comment_unknown", "commentUnknown"), ("unauthorized", "authorization"),
                          ("authorization_required", "authorization"), ("forbidden", "forbidden"),
                          ("not_found", "notFound"), ("rate_limited", "rateLimit")] where code.contains(match) {
       return String(localized: String.LocalizationValue("pr.error." + key), bundle: .lody)
