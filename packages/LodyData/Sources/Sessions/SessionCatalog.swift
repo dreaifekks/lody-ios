@@ -156,6 +156,7 @@ public struct SessionCatalog: Equatable, Sendable {
   public var sessions: [SessionItem] = []
   public var machineIds: [String] = []
   public var machineNames: [String: String] = [:]
+  public var machineTerminals: [String: LanTerminalEndpoint] = [:]
   public var machineSimulators: [String: String] = [:]
 
   public func session(_ id: String) -> SessionItem? { sessions.first { $0.id == id } }
@@ -177,30 +178,34 @@ public struct SessionCatalog: Equatable, Sendable {
       public var sessions: [Lossy<SessionItem>]
       public var machineIds: [Lossy<String>]
       public var machineNames: Lossy<[String: String]>?
+      public var machineTerminals: Lossy<[String: Lossy<LanTerminalEndpoint>]>?
       public var machineSimulators: Lossy<[String: String]>?
 
-      public init(projects: [Lossy<SessionProject>], sessions: [Lossy<SessionItem>], machineIds: [Lossy<String>], machineNames: Lossy<[String: String]>? = nil, machineSimulators: Lossy<[String: String]>? = nil) {
+      public init(projects: [Lossy<SessionProject>], sessions: [Lossy<SessionItem>], machineIds: [Lossy<String>], machineNames: Lossy<[String: String]>? = nil, machineSimulators: Lossy<[String: String]>? = nil, machineTerminals: Lossy<[String: Lossy<LanTerminalEndpoint>]>? = nil) {
         self.projects = projects
         self.sessions = sessions
         self.machineIds = machineIds
         self.machineNames = machineNames
         self.machineSimulators = machineSimulators
+        self.machineTerminals = machineTerminals
       }
     }
     struct Saved: Decodable { var catalog: Shape }
     guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
-      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:]
+      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
+      machineTerminals: (shape.machineTerminals?.value ?? [:]).compactMapValues(\.value)
     )
   }
 
-  public init(projects: [SessionProject] = [], sessions: [SessionItem] = [], machineIds: [String] = [], machineNames: [String: String] = [:], machineSimulators: [String: String] = [:]) {
+  public init(projects: [SessionProject] = [], sessions: [SessionItem] = [], machineIds: [String] = [], machineNames: [String: String] = [:], machineSimulators: [String: String] = [:], machineTerminals: [String: LanTerminalEndpoint] = [:]) {
     self.projects = projects
     self.sessions = sessions
     self.machineIds = machineIds
     self.machineNames = machineNames
     self.machineSimulators = machineSimulators
+    self.machineTerminals = machineTerminals
   }
 }
 

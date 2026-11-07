@@ -3,6 +3,9 @@ import UIKit
 @MainActor
 enum DebugSceneFactory {
   private static let scenes: [String: ([String: Any]) -> UIViewController] = [
+    "terminal-preview-late-open": { _ in TerminalFixtureController(scenario: "late-open") },
+    "terminal-preview-failure": { _ in TerminalFixtureController(scenario: "failure") },
+    "terminal-preview": { params in TerminalFixtureController(scenario: params["scenario"] as? String ?? "ready") },
     "debug": { _ in DebugViewController() },
     "pull-request-preview": { params in PullRequestPreviewController(params: params) },
     "files-fixture": { params in

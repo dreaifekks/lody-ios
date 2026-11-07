@@ -27,6 +27,18 @@ const workspacePackages = ['.', 'packages/cloud-runtime'];
  */
 const nativeComponents = [
   {
+    name: 'SwiftTerm',
+    license: 'MIT',
+    url: 'https://github.com/migueldeicaza/SwiftTerm',
+    file: 'iOS/Resources/Licenses/SwiftTerm-LICENSE.txt',
+  },
+  {
+    name: 'MesloLGS NF',
+    license: 'Apache-2.0',
+    url: 'https://github.com/romkatv/powerlevel10k-media',
+    file: 'iOS/Resources/Licenses/MesloLGS-NF-LICENSE.txt',
+  },
+  {
     name: 'libdatachannel',
     license: 'MPL-2.0',
     url: 'https://github.com/paullouisageneau/libdatachannel',

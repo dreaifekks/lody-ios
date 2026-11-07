@@ -4,22 +4,34 @@ import Network
 
 /// Where a LAN member accepts terminal connections, as published in its
 /// machine metadata. The address is not a secret; the LAN credential opens it.
-struct LanTerminalEndpoint: Sendable, Equatable {
-  let host: String
-  let port: UInt16
+public struct LanTerminalEndpoint: Sendable, Equatable, Codable {
+  public let host: String
+  public let port: UInt16
+
+  public init(host: String, port: UInt16) { self.host = host; self.port = port }
+
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    let host = try values.decode(String.self, forKey: .host)
+    let port = try values.decode(UInt16.self, forKey: .port)
+    guard !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, host.count <= 255, port > 0 else {
+      throw DecodingError.dataCorruptedError(forKey: .host, in: values, debugDescription: "Invalid member endpoint")
+    }
+    self.init(host: host, port: port)
+  }
 }
 
 /// Lody's LAN member protocol (`lan-terminal.ts`): TLS 1.2 with a pre-shared
 /// key derived from the LAN credential, one JSON line of hello each way, then
 /// newline-delimited service messages.
-enum LanTerminalProtocol {
+public enum LanTerminalProtocol {
   static let version = 1
   static let handshakeTimeout: TimeInterval = 10
   /// `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256`, the one suite Node and Electron share.
   static let cipherSuite: UInt16 = 0xCCAC
 
   /// Mirrors `deriveLanTerminalKey`: the raw SHA-256 of the scoped credential.
-  static func key(token: String) -> Data {
+  public static func key(token: String) -> Data {
     Data(SHA256.hash(data: Data("lody-lan-hub:terminal:\(token)".utf8)))
   }
 

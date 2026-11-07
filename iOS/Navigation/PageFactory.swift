@@ -5,6 +5,20 @@ enum PageFactory {
   static var debugSceneFactory: ((String, [String: Any]) -> UIViewController?)?
 
   private static let factories: [String: ([String: Any]) -> UIViewController] = [
+    "terminal": { params in
+      let state = SessionSource.live.state
+      guard params["workspaceId"] as? String == state.workspaceId,
+            params["userId"] as? String == state.userId,
+            let id = params["sessionId"] as? String,
+            let page = TerminalController.live(state: state, sessionId: id) else {
+        let page = UIViewController()
+        var configuration = UIContentUnavailableConfiguration.empty()
+        configuration.text = String(localized: "terminal.unavailable", bundle: .lody)
+        page.contentUnavailableConfiguration = configuration
+        return page
+      }
+      return page
+    },
     "home": { _ in HomeController() },
     "pull-request": { params in
       let repository = params["repository"] as! String

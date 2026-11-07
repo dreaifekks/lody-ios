@@ -186,3 +186,22 @@ extension SessionController {
     }
   }
 }
+
+extension SessionController {
+  /// Main session inserts these elements in the existing overflow menu.
+  func terminalMenu() -> [UIMenuElement] {
+    let state = source.state
+    guard let session = state.catalog.session(sessionId),
+          state.catalog.machineTerminals[session.machineId] != nil,
+          AuthSession.shared.snapshot.account?.lan?.workspaceId == state.workspaceId,
+          AuthSession.shared.snapshot.account?.user.id == state.userId else { return [] }
+    return [UIAction(title: String(localized: "terminal.menu", bundle: .lody), image: UIImage(systemName: "terminal")) { [weak self] _ in
+      self?.openTerminal()
+    }]
+  }
+
+  func openTerminal() {
+    guard let page = TerminalController.live(state: source.state, sessionId: sessionId) else { return }
+    LodyShell.shared.push(page, title: String(localized: "terminal.menu", bundle: .lody), from: self)
+  }
+}
