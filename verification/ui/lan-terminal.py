@@ -6,6 +6,7 @@ import re
 import sys
 from driver import UI
 import catalog
+from terminal_keyboard import check_shortcuts
 
 ui = UI(*sys.argv[1:])
 
@@ -59,6 +60,7 @@ ui.element('terminal-fixture-open')
 open_terminal()
 screen_contains('Lody LAN terminal')
 ui.capture('replay-nerd-fonts')
+check_shortcuts(ui)
 ui.axe('tap', '--id', 'terminal-view')
 ui.axe('type', 'echo hello\n')
 screen_contains('echo hello')

@@ -48,6 +48,7 @@ final class TerminalFixtureController: UIViewController {
       }) else { return nil }
       return TerminalFixtureChannel(fixture: fixture, scenario: scenario, ownership: ownership, event: event, closed: closed)
     }
+    fixture.inputProbe = page.inputProbe
     page.disconnect = { fixture.forceDisconnect?() }
     page.expire = {
       fixture.authorized = false
@@ -59,6 +60,21 @@ final class TerminalFixtureController: UIViewController {
 
 @MainActor
 private final class TerminalFixturePage: TerminalController {
+  let inputProbe = UILabel()
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    inputProbe.translatesAutoresizingMaskIntoConstraints = false
+    inputProbe.isAccessibilityElement = true
+    inputProbe.accessibilityIdentifier = "terminal-fixture-input-hex"
+    inputProbe.accessibilityLabel = "Input bytes"
+    view.addSubview(inputProbe)
+    NSLayoutConstraint.activate([
+      inputProbe.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+      inputProbe.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+      inputProbe.widthAnchor.constraint(equalToConstant: 1),
+      inputProbe.heightAnchor.constraint(equalToConstant: 1),
+    ])
+  }
   var expire: (@MainActor () -> Void)?
   var disconnect: (@MainActor () -> Void)?
   override func viewDidAppear(_ animated: Bool) {
@@ -73,6 +89,7 @@ private final class TerminalFixturePage: TerminalController {
 
 @MainActor
 private final class TerminalFixture {
+  weak var inputProbe: UILabel?
   var authorized = true
   var rejectedBeforeSend = false
   var terminals: [String: String] = [:]
@@ -175,13 +192,28 @@ private final class TerminalFixtureChannel: TerminalChannel {
     if command.type == "resize" { fixture.resizes += 1; fixture.update(); return }
     guard let text = command.data else { return }
     fixture.inputs += 1; fixture.update()
+    fixture.inputProbe?.accessibilityValue = text.utf8.map { String(format: "%02x", $0) }.joined()
     for character in text {
       if character == "\r" || character == "\n" {
+        if line == "fixture-app-cursor" || line == "fixture-normal-cursor" {
+          let enabled = line == "fixture-app-cursor"
+          line = ""
+          event(.data(requestId: nil, terminalId: id, data: enabled ? "\u{1b}[?1h\r\n$ " : "\u{1b}[?1l\r\n$ ", replay: false))
+          continue
+        }
+        if line == "fixture-reset-shortcuts" {
+          line = ""
+          event(.data(requestId: nil, terminalId: id, data: "\u{1b}[?1l\u{1b}[2J\u{1b}[HLody LAN terminal \(id) \u{E0B0} \u{F07C} \u{E725}\r\n$ ", replay: false))
+          continue
+        }
         if line == "exit" {
           fixture.close(id); ownership.confirmExit(id)
           event(.exit(requestId: nil, terminalId: id, exitCode: 0, signal: nil)); return
         }
         event(.data(requestId: nil, terminalId: id, data: "\r\n\(line)\r\n$ ", replay: false)); line = ""
+      } else if character == "\u{3}" || character == "\u{15}" {
+        line = ""
+        event(.data(requestId: nil, terminalId: id, data: "^C\r\n$ ", replay: false))
       } else if character == "\u{7f}" {
         if !line.isEmpty { line.removeLast(); event(.data(requestId: nil, terminalId: id, data: "\u{8} \u{8}", replay: false)) }
       } else {

@@ -39,6 +39,7 @@ final class LodyTerminalView: UIView {
     backgroundColor = .systemBackground
     terminal.translatesAutoresizingMaskIntoConstraints = false
     terminal.terminalDelegate = self
+    terminal.inputAccessoryView = TerminalKeyboardAccessory(terminal: terminal)
     terminal.accessibilityIdentifier = "terminal-view"
     terminal.isAccessibilityElement = true
     terminal.accessibilityLabel = Self.text("terminal.accessibility")
@@ -292,6 +293,7 @@ final class LodyTerminalView: UIView {
     terminal.nativeForegroundColor = UIColor.label.resolvedColor(with: traits)
     terminal.caretColor = tintColor.resolvedColor(with: traits)
     terminal.keyboardAppearance = traits.userInterfaceStyle == .dark ? .dark : .default
+    terminal.inputAccessoryView?.overrideUserInterfaceStyle = traits.userInterfaceStyle
   }
 }
 

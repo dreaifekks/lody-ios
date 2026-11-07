@@ -71,3 +71,31 @@ uncertain. UIKit resolves notSent before its generation guard, using an attempt
 sequence so it cannot clear a newer attempt, and restores explicit Retry even
 if onClose arrived first. The `terminal-preview-not-sent` scene and existing UI
 case exercise that order. No new run.py/native.py registration is needed.
+
+## Full-size native software shortcuts
+
+`iOS/Views/Terminal/TerminalKeyboardAccessory.swift` is an app-only UIInputView,
+installed as TerminalView.inputAccessoryView by LodyTerminalView. All visible
+buttons are at least 44 pt in both dimensions in a 52 pt bar; a UIScrollView
+keeps the row from shrinking, and Hide keyboard remains pinned. It includes
+Esc/Ctrl/Tab, punctuation, arrows with hold repeat, mouse reporting and F1–F10.
+
+Ctrl uses TerminalView.controlModifier and its public reset notification, so
+the stock IME/Kitty/hardware paths perform conversion; the send delegate does
+not convert bytes. Punctuation uses public insertText with temporary Ctrl/Meta
+suppression to match stock insertTextFromAccessory. Left/right reuse the pinned
+1.19 TerminalAccessory's registered UIControl actions (`left:` / `right:`), then
+cancel its internal repeat timer; the visible bar owns repeating. This bounded
+UIKit composition preserves internal BiDi direction resolution without copying
+it or editing/subclassing the non-open dependency. A changed dependency action
+binding fails explicitly and needs review when changing the SwiftTerm pin.
+
+The existing lan-terminal UI case imports terminal_keyboard.check_shortcuts.
+It checks every target/label, Ctrl-C and reset, modifier-bypassing punctuation,
+normal/application arrows, F1–F10 bytes, mouse toggle, keyboard hide/show, then
+restores the fixture prompt. The raw input probe and fixture mode commands exist
+only on the offline Debug page. Hardware keyboard and held-arrow timing still
+need manual verification. No UI/native check was run in this task.
+
+Main session: run the ordinary prebuild once to include the new app-only Swift
+source; no project.yml or UI/native runner registration change is needed.
