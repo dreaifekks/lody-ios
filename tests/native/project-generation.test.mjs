@@ -157,3 +157,53 @@ test(
     }
   },
 );
+
+test(
+  'fork identity overrides preserve automatic Debug signing and derive release profile coverage',
+  { skip: !available },
+  async () => {
+    const root = await fixture();
+    try {
+      const profiles = Object.fromEntries(
+        ['', '.share', '.notification-service', '.live-activity'].map(
+          (suffix) => ['com.dreaife.lody' + suffix, 'profile' + suffix],
+        ),
+      );
+      const result = generate(root, {
+        LODY_BUNDLE_ID: 'com.dreaife.lody',
+        LODY_APPLE_TEAM_ID: 'ALZ45VUZFN',
+        IOS_PROFILE_MAP: JSON.stringify(profiles),
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const project = plist(join(root, 'Lody.xcodeproj/project.pbxproj'));
+      const configurations = Object.values(project.objects).filter(
+        (value) => value.isa === 'XCBuildConfiguration',
+      );
+      const identity = configurations.filter(
+        (value) => value.buildSettings.LODY_BUNDLE_ID,
+      );
+      assert.ok(identity.length > 0);
+      for (const value of identity) {
+        assert.equal(value.buildSettings.LODY_BUNDLE_ID, 'com.dreaife.lody');
+        assert.equal(value.buildSettings.LODY_APPLE_TEAM_ID, 'ALZ45VUZFN');
+      }
+      const signed = configurations.filter(
+        (value) => value.buildSettings.PROVISIONING_PROFILE_SPECIFIER,
+      );
+      assert.equal(signed.length, 4);
+      for (const value of signed) {
+        assert.equal(value.name, 'Release');
+        assert.equal(value.buildSettings.DEVELOPMENT_TEAM, 'ALZ45VUZFN');
+      }
+      assert.ok(
+        configurations
+          .filter((value) => value.name === 'Debug')
+          .every(
+            (value) => !value.buildSettings.PROVISIONING_PROFILE_SPECIFIER,
+          ),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

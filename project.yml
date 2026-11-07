@@ -43,7 +43,10 @@ fileGroups:
 settings:
   base:
     SWIFT_VERSION: '6.0'
-    DEVELOPMENT_TEAM: KAMM5N88X3
+    LODY_BUNDLE_ID: app.innei.lody
+    LODY_APPLE_TEAM_ID: KAMM5N88X3
+    LODY_APP_GROUP: 'group.$(LODY_BUNDLE_ID)'
+    DEVELOPMENT_TEAM: '$(LODY_APPLE_TEAM_ID)'
     CODE_SIGN_STYLE: Automatic
     SUPPORTS_MACCATALYST: 'NO'
     SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: 'NO'
@@ -108,7 +111,7 @@ targets:
           - '**/*.pyc'
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.innei.lody
+        PRODUCT_BUNDLE_IDENTIFIER: $(LODY_BUNDLE_ID)
         INFOPLIST_FILE: .generated/Lody/Info.plist
         CODE_SIGN_ENTITLEMENTS: 'iOS/Lody.entitlements'
         TARGETED_DEVICE_FAMILY: '1,2'
@@ -184,6 +187,7 @@ targets:
     info:
       path: '.generated/LodyShare/Info.plist'
       properties:
+        LodyAppGroup: $(LODY_APP_GROUP)
         CFBundleDisplayName: Lody
         CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
@@ -202,10 +206,10 @@ targets:
       path: '.generated/LodyShare/LodyShare.entitlements'
       properties:
         com.apple.security.application-groups:
-          - group.app.innei.lody
+          - $(LODY_APP_GROUP)
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.innei.lody.share
+        PRODUCT_BUNDLE_IDENTIFIER: $(LODY_BUNDLE_ID).share
         APPLICATION_EXTENSION_API_ONLY: 'YES'
         TARGETED_DEVICE_FAMILY: '1,2'
         SKIP_INSTALL: 'YES'
@@ -241,21 +245,22 @@ targets:
     info:
       path: '.generated/LodyNotificationService/Info.plist'
       properties:
+        LodyAppGroup: $(LODY_APP_GROUP)
         CFBundleDisplayName: Lody Notifications
         CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: '$(PRODUCT_MODULE_NAME).NotificationService'
-        OneSignal_app_groups_key: group.app.innei.lody
+        OneSignal_app_groups_key: $(LODY_APP_GROUP)
     entitlements:
       path: '.generated/LodyNotificationService/LodyNotificationService.entitlements'
       properties:
         com.apple.security.application-groups:
-          - group.app.innei.lody
+          - $(LODY_APP_GROUP)
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.innei.lody.notification-service
+        PRODUCT_BUNDLE_IDENTIFIER: $(LODY_BUNDLE_ID).notification-service
         APPLICATION_EXTENSION_API_ONLY: 'YES'
         TARGETED_DEVICE_FAMILY: '1,2'
         SKIP_INSTALL: 'YES'
@@ -272,6 +277,7 @@ targets:
     info:
       path: '.generated/LodyLiveActivity/Info.plist'
       properties:
+        LodyAppGroup: $(LODY_APP_GROUP)
         CFBundleDisplayName: Lody
         CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
@@ -281,10 +287,10 @@ targets:
       path: '.generated/LodyLiveActivity/LodyLiveActivity.entitlements'
       properties:
         com.apple.security.application-groups:
-          - group.app.innei.lody
+          - $(LODY_APP_GROUP)
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.innei.lody.live-activity
+        PRODUCT_BUNDLE_IDENTIFIER: $(LODY_BUNDLE_ID).live-activity
         APPLICATION_EXTENSION_API_ONLY: 'YES'
         TARGETED_DEVICE_FAMILY: '1,2'
         SKIP_INSTALL: 'YES'
@@ -302,6 +308,7 @@ targets:
     info:
       path: '.generated/LodyActivityVerify/Info.plist'
       properties:
+        LodyAppGroup: $(LODY_APP_GROUP)
         CFBundleDisplayName: LodyActivityVerify
         CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
@@ -315,7 +322,7 @@ targets:
               - lody
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.innei.lody
+        PRODUCT_BUNDLE_IDENTIFIER: $(LODY_BUNDLE_ID)
         ASSETCATALOG_COMPILER_APPICON_NAME: ''
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
         SWIFT_OPTIMIZATION_LEVEL: '-Onone'
@@ -337,6 +344,7 @@ targets:
     info:
       path: '.generated/LodySmallActivityVerify/Info.plist'
       properties:
+        LodyAppGroup: $(LODY_APP_GROUP)
         CFBundleDisplayName: LodySmallActivityVerify
         CFBundleShortVersionString: '$(MARKETING_VERSION)'
         CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
@@ -344,7 +352,7 @@ targets:
         WKWatchOnly: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.innei.lody.small-activity-verify
+        PRODUCT_BUNDLE_IDENTIFIER: $(LODY_BUNDLE_ID).small-activity-verify
         ASSETCATALOG_COMPILER_APPICON_NAME: ''
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
         SWIFT_OPTIMIZATION_LEVEL: '-Onone'

@@ -260,3 +260,13 @@ Lody iOS is made possible thanks to these open-source projects and creators:
 - **[baguette](https://github.com/tddworks/baguette)**: Headless iOS Simulator control and streaming (Apache-2.0). The native simulator viewer is a client of its HTTP and WebSocket protocol; baguette itself runs on the Mac and is not bundled.
 - **[libdatachannel](https://github.com/paullouisageneau/libdatachannel)**: Native data-only Simulator transport (MPL-2.0), built from pinned source at `pnpm prebuild` with media and WebSocket disabled, over [libjuice](https://github.com/paullouisageneau/libjuice) (MPL-2.0), [usrsctp](https://github.com/sctplab/usrsctp) (BSD-3-Clause) and [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) (Apache-2.0). No camera, microphone or WebView is involved.
 - **[vphone-client](https://github.com/datdadev/vphone-client)**: Its native remote iPhone viewer (hardware decode into `AVSampleBufferDisplayLayer`, raw UIKit touch forwarding, never dropping input behind video) shaped the design of Lody's simulator viewer.
+
+## Fork signing
+
+The default identity remains `app.innei.lody` / `KAMM5N88X3`. Generate the personal fork with:
+
+```sh
+LODY_BUNDLE_ID=com.dreaife.lody LODY_APPLE_TEAM_ID=ALZ45VUZFN pnpm prebuild
+```
+
+The app, Share, notification service, Live Activity and verification targets derive their identifiers and App Group (`group.com.dreaife.lody`) from the same configuration. Signing stays enabled. In GitHub Actions set the repository variables `LODY_BUNDLE_ID` and `LODY_APPLE_TEAM_ID`; the fork ships only from `tf-*` tags or its manual Fork TestFlight workflow. Ordinary fork branch pushes do not ship.

@@ -41,13 +41,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "连接局域网中的 Mac，查看和控制其 iOS 模拟器。"
+            "value": "连接局域网中的 Lody LAN hub 及其机器。"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connect to your Mac on the local network to view and control its iOS Simulator."
+            "value": "Connect to your Lody LAN hub and its machines on the local network."
           }
         }
       }

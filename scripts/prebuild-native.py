@@ -21,17 +21,21 @@ def generate(root, environment):
         'include': ['project.yml'],
         'settings': {'base': {'MARKETING_VERSION': version, 'CURRENT_PROJECT_VERSION': build}},
     }
+    for key in ('LODY_BUNDLE_ID', 'LODY_APPLE_TEAM_ID'):
+        if key in environment:
+            spec['settings']['base'][key] = environment[key]
+    bundle = environment.get('LODY_BUNDLE_ID', 'app.innei.lody')
     profiles = json.loads(environment.get('IOS_PROFILE_MAP', '{}'))
     if profiles:
         # Release signing is another XcodeGen input, never a post-generation project edit.
-        targets = {'app.innei.lody': 'Lody', 'app.innei.lody.share': 'LodyShare',
-                   'app.innei.lody.notification-service': 'LodyNotificationService',
-                   'app.innei.lody.live-activity': 'LodyLiveActivity'}
+        targets = {bundle: 'Lody', f'{bundle}.share': 'LodyShare',
+                   f'{bundle}.notification-service': 'LodyNotificationService',
+                   f'{bundle}.live-activity': 'LodyLiveActivity'}
         if set(profiles) != set(targets):
             raise ValueError('Provisioning profiles must cover exactly the app and its three extensions')
         spec['targets'] = {targets[bundle]: {'settings': {'configs': {'Release': {
             'CODE_SIGN_STYLE': 'Manual', 'CODE_SIGN_IDENTITY': 'Apple Distribution',
-            'DEVELOPMENT_TEAM': environment['APPLE_TEAM_ID'], 'PROVISIONING_PROFILE_SPECIFIER': profile,
+            'DEVELOPMENT_TEAM': environment.get('LODY_APPLE_TEAM_ID') or environment['APPLE_TEAM_ID'], 'PROVISIONING_PROFILE_SPECIFIER': profile,
         }}}} for bundle, profile in profiles.items()}
     generated_spec = generated / 'project.json'
     generated_spec.write_text(json.dumps(spec, indent=2) + '\n')

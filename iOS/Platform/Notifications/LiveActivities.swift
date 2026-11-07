@@ -8,7 +8,7 @@ import UIKit
 @MainActor
 final class LiveActivities {
   static let shared = LiveActivities()
-  private let defaults = UserDefaults(suiteName: "group.app.innei.lody")
+  private let defaults = UserDefaults(suiteName: Bundle.main.object(forInfoDictionaryKey: "LodyAppGroup") as? String ?? "group.app.innei.lody")
   private var tokenTasks: [String: (stamp: UUID, nativeId: String, task: Task<Void, Never>, lifecycle: Task<Void, Never>, content: Task<Void, Never>)] = [:]
   private var lastContentLog: [String: (signature: String, time: Date)] = [:]
   private var pushToStartTask: Task<Void, Never>?
