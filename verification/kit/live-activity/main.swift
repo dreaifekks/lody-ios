@@ -1,0 +1,317 @@
+import Foundation
+
+typealias State = LodyActivityAttributes.ContentState
+typealias Item = State.Item
+
+let decoder = JSONDecoder()
+
+func decode(_ json: String) -> State {
+  try! decoder.decode(State.self, from: Data(json.utf8))
+}
+
+func item(_ id: String, _ status: Item.Status, _ updatedAt: Double) -> Item {
+  Item(
+    id: id,
+    status: status,
+    statusLabel: status.rawValue,
+    permissionRequestId: nil,
+    permissionCommand: nil,
+    agentLogoKind: "claude",
+    agentLogoText: "CL",
+    title: id,
+    updatedAt: updatedAt,
+    updatedAtLabel: "now"
+  )
+}
+
+let full = decode("""
+{
+  "totalCount": 3,
+  "updatedAt": 1757000000000,
+  "statusCounts": { "permission": 1, "question": 1, "running": 1, "unread": 0 },
+  "items": [
+    {
+      "id": "one",
+      "status": "permission",
+      "statusLabel": "Needs permission",
+      "permissionRequestId": "req-1",
+      "permissionCommand": "rm -rf /tmp/x",
+      "agentLogoKind": "brand-new-agent",
+      "agentLogoText": "BN",
+      "title": "Refactor the parser",
+      "updatedAt": 1757000000.5,
+      "updatedAtLabel": "2m ago"
+    }
+  ],
+  "permissionAlert": { "title": "Approve command?", "body": "rm -rf /tmp/x" }
+}
+""")
+precondition(full.totalCount == 3)
+precondition(full.updatedAt == 1_757_000_000_000, "server timestamp survives decoding for diagnostic correlation")
+precondition(full.statusCounts.permission == 1 && full.statusCounts.unread == 0)
+precondition(full.items[0].permissionRequestId == "req-1")
+precondition(full.items[0].permissionCommand == "rm -rf /tmp/x")
+precondition(full.items[0].agentLogoKind == "brand-new-agent", "unknown logo kinds survive as strings")
+precondition(full.items[0].updatedAt == 1757000000.5)
+precondition(full.permissionAlert?.title == "Approve command?")
+
+let minimal = decode("""
+{
+  "totalCount": 1,
+  "statusCounts": { "running": 2 },
+  "items": [
+    {
+      "id": "two",
+      "status": "running",
+      "statusLabel": "Working",
+      "agentLogoKind": "codex",
+      "agentLogoText": "CX",
+      "title": "Build",
+      "updatedAt": 1757000001,
+      "updatedAtLabel": "now",
+      "futureField": "ignored"
+    }
+  ],
+  "schemaVersion": 7
+}
+""")
+precondition(minimal.permissionAlert == nil, "missing permissionAlert is tolerated")
+precondition(minimal.updatedAt == nil, "legacy and locally generated content needs no server timestamp")
+precondition(minimal.items[0].permissionRequestId == nil && minimal.items[0].permissionCommand == nil)
+precondition(minimal.statusCounts.running == 2)
+precondition(minimal.statusCounts.permission == 0 && minimal.statusCounts.question == 0 && minimal.statusCounts.unread == 0, "missing count keys default to 0")
+precondition(minimal.items[0].updatedAt == 1757000001, "integer updatedAt decodes as a Double")
+precondition(minimal.items[0].startedAt == nil && minimal.items[0].completedAt == nil, "server payloads carry no turn stamps")
+precondition(minimal.items[0].startDate == minimal.items[0].updatedDate, "the timer falls back to updatedAt")
+
+let finished = decode("""
+{
+  "totalCount": 1,
+  "statusCounts": { "unread": 1 },
+  "items": [
+    { "id": "done", "status": "unread", "statusLabel": "Completed", "agentLogoKind": "codex", "agentLogoText": "CX", "title": "Build", "updatedAt": 1757000900000, "updatedAtLabel": "now", "startedAt": 1757000100000, "completedAt": 1757000900000 }
+  ]
+}
+""")
+precondition(!finished.isActive && finished.isCompleted, "a payload of completed rows is the completion state")
+precondition(finished.focus?.id == "done", "completed rows stay visible instead of being filtered out")
+precondition(finished.showsTimer(for: finished.items[0], isStale: false), "a completed row with a start keeps its frozen duration")
+precondition(finished.timerCaption(for: finished.items[0]) == "took")
+precondition(finished.dismissalDate(from: Date(timeIntervalSince1970: 0)) == Date(timeIntervalSince1970: 60))
+
+let mixedTurn = decode("""
+{
+  "totalCount": 2,
+  "statusCounts": { "running": 1, "unread": 1 },
+  "items": [
+    { "id": "old", "status": "unread", "statusLabel": "Completed", "agentLogoKind": "codex", "agentLogoText": "CX", "title": "Old", "updatedAt": 1757000900000, "updatedAtLabel": "now" },
+    { "id": "live", "status": "running", "statusLabel": "Working", "agentLogoKind": "claude", "agentLogoText": "CC", "title": "Live", "updatedAt": 1757000000000, "updatedAtLabel": "now", "startedAt": 1757000500000 }
+  ]
+}
+""")
+precondition(mixedTurn.focus?.id == "live", "running work outranks completed rows")
+precondition(mixedTurn.items[1].startDate == Date(timeIntervalSince1970: 1757000500), "the timer starts at the turn, not the last message")
+
+let failedRow = decode("""
+{ "totalCount": 1, "statusCounts": {}, "items": [ { "id": "f", "status": "failed", "statusLabel": "Failed", "agentLogoKind": "codex", "agentLogoText": "CX", "title": "Broken", "updatedAt": 1757000900000, "updatedAtLabel": "now", "startedAt": 1757000100000, "completedAt": 1757000900000 } ] }
+""")
+precondition(failedRow.isCompleted && failedRow.allFailed && failedRow.focus?.isDone == true, "a failed row is a completion state of its own")
+precondition(LiveActivityCatalog.failedSessionIds(sessions: [["id": "a", "status": "error"], ["id": "b", "status": "completed"], ["id": "c", "status": "running"]]) == ["a"], "only error sessions count as failed")
+
+precondition(LiveActivityCatalog.startedAt(status: .running, awaiting: nil, lastRunningSeen: 20, lastMessageAt: 10) == 20)
+precondition(LiveActivityCatalog.startedAt(status: .running, awaiting: nil, lastRunningSeen: 5, lastMessageAt: 10) == nil, "a start behind the last completed turn is discarded")
+precondition(LiveActivityCatalog.startedAt(status: .permission, awaiting: 30, lastRunningSeen: 20, lastMessageAt: 10) == 30)
+precondition(LiveActivityCatalog.startedAt(status: .running, awaiting: nil, lastRunningSeen: nil, lastMessageAt: nil) == nil)
+
+let tolerant = decode("""
+{
+  "totalCount": 0,
+  "statusCounts": {},
+  "items": [],
+  "schemaVersion": 9,
+  "extra": { "nested": true }
+}
+""")
+precondition(tolerant.focus == nil && tolerant.others.isEmpty && tolerant.othersCount == 0)
+precondition(!tolerant.isActive && !tolerant.needsAttention)
+precondition(tolerant.dismissalDate(from: Date()) != nil, "empty work ends the activity")
+precondition(tolerant.lastSyncLabel == "Last synced" && tolerant.openHintLabel == "Tap to review", "missing copy falls back to English")
+
+let partialCopy = decode("""
+{ "totalCount": 0, "statusCounts": {}, "items": [], "copy": { "stale": "已断开", "empty": "无", "others": "{count}" } }
+""")
+precondition(partialCopy.staleLabel == "已断开" && partialCopy.openHintLabel == "Tap to review", "older copy payloads keep their strings and default the new ones")
+
+let mixed = State(
+  totalCount: 5,
+  statusCounts: .init(permission: 1, question: 2, running: 1, unread: 1),
+  items: [
+    item("unread", .unread, 500),
+    item("running", .running, 400),
+    item("permission", .permission, 300),
+    item("question-old", .question, 100),
+    item("question-new", .question, 200),
+  ],
+  permissionAlert: nil
+)
+precondition(mixed.focus?.id == "question-new", "question outranks everything, ties use stable identity")
+precondition(mixed.others.map(\.id) == ["question-old", "permission"], "others follow the same order, capped at 2")
+precondition(mixed.othersCount == 3)
+precondition(mixed.needsAttention && mixed.isActive)
+
+let permissionFocus = State(
+  totalCount: 2,
+  statusCounts: .init(permission: 1, question: 0, running: 0, unread: 1),
+  items: [item("unread", .unread, 900), item("permission", .permission, 100)],
+  permissionAlert: nil
+)
+precondition(permissionFocus.focus?.id == "permission" && permissionFocus.needsAttention)
+
+let idle = State(
+  totalCount: 1,
+  statusCounts: .init(permission: 0, question: 0, running: 0, unread: 1),
+  items: [item("unread", .unread, 900)],
+  permissionAlert: nil
+)
+precondition(!idle.isActive && !idle.needsAttention)
+precondition(idle.focus?.id == "unread" && idle.isCompleted, "completed work stays visible as the completion state")
+precondition(idle.othersCount == 0)
+
+let now = Date(timeIntervalSince1970: 1_757_000_000)
+precondition(idle.staleDate(from: now) == now.addingTimeInterval(1800))
+precondition(idle.dismissalDate(from: now) == now.addingTimeInterval(60))
+precondition(mixed.dismissalDate(from: now) == nil, "an active activity never auto-dismisses")
+
+precondition(
+  item("ms", .running, 1_700_000_000_000).updatedDate == Date(timeIntervalSince1970: 1_700_000_000),
+  "updatedAt is milliseconds"
+)
+
+let pushToStart = try! decoder.decode(LodyActivityAttributes.self, from: Data("""
+{ "workspaceId": "ws1", "workspaceName": "Space", "userId": "u1" }
+""".utf8))
+precondition(pushToStart.workspaceSlug.isEmpty, "push-to-start attributes may omit the slug")
+precondition(pushToStart.routeSlug == "ws1", "an empty slug routes by workspace id")
+// Exact event_attributes emitted by Convex onesignal.ts (OneSignal may also add
+// its own metadata). No userId/workspaceSlug is included by that backend.
+let serverAttributes = try! decoder.decode(LodyActivityAttributes.self, from: Data("""
+{ "activityId": "lody-conversations:v5:ws1:u1", "workspaceId": "ws1", "workspaceName": "ws1", "onesignal": { "activityId": "lody-conversations:v5:ws1:u1" } }
+""".utf8))
+precondition(String(describing: LodyActivityAttributes.self) == "LodyConversationLiveActivityAttributes", "the concrete APNs type must match the backend endpoint")
+precondition(serverAttributes.userId == "u1" && serverAttributes.routeSlug == "ws1")
+precondition(serverAttributes.activityId == "lody-conversations:v5:ws1:u1")
+precondition(try! decoder.decode(LodyActivityAttributes.self, from: JSONEncoder().encode(serverAttributes)) == serverAttributes)
+for invalid in [
+  #"{ "workspaceId": "ws1", "workspaceName": "Space" }"#,
+  #"{ "activityId": "lody-conversations:v5:ws2:u1", "workspaceId": "ws1", "workspaceName": "Space" }"#,
+  #"{ "activityId": "lody-conversations:v4:ws1:u1", "workspaceId": "ws1", "workspaceName": "Space" }"#,
+  #"{ "activityId": "lody-conversations:v5:ws1:", "workspaceId": "ws1", "workspaceName": "Space" }"#,
+  #"{ "activityId": "lody-conversations:v5:ws1:u1", "workspaceId": "ws1", "workspaceName": "Space", "userId": "u2" }"#,
+] {
+  precondition((try? decoder.decode(LodyActivityAttributes.self, from: Data(invalid.utf8))) == nil, "malformed or conflicting identity must fail closed")
+}
+print("PASS: Convex push-to-start type and attributes, owner recovery, conflicting identity rejection and round-trip")
+precondition(
+  LodyActivityAttributes(workspaceId: "ws1", workspaceSlug: "space", workspaceName: "Space", userId: "u1").routeSlug == "space"
+)
+
+let route = LodyActivityAttributes.route(workspaceSlug: "my space", sessionId: "a/b c")
+precondition(route.absoluteString == "lody:///my%20space/sessions/a%2Fb%20c", route.absoluteString)
+
+print("PASS: activity payload tolerance, focus priority and tie-break, others cap, activity lifetimes, millisecond timestamps, deep-link encoding")
+
+let labels = LiveActivityCatalog.Labels(
+  permission: "需要你授权",
+  running: "正在工作",
+  stale: "已断开",
+  empty: "没有活跃会话",
+  others: "还有 {count} 个在跑",
+  lastSync: "上次同步",
+  openHint: "点按处理"
+)
+let catalog = LiveActivityCatalog.state(catalogJSON: """
+{
+  "projects": [],
+  "machineIds": ["m1"],
+  "sessions": [
+    { "id": "run", "title": "Build the widget", "status": "running", "lastMessageAt": 1757000002000, "agentType": "codex" },
+    { "id": "await", "title": "Approve force push", "status": "running", "awaitingUserSince": 1757000003000, "lastMessageAt": 1757000001000, "agentType": "claude" },
+    { "id": "idle", "title": "Old thread", "status": "completed", "lastMessageAt": 1757000000000, "agentType": "claude" },
+    { "id": "archived", "title": "Archived but running", "status": "running", "archived": true, "lastMessageAt": 1757000006000, "agentType": "claude" },
+    { "id": "queued", "title": "Waiting to run", "status": "queued", "lastMessageAt": 1757000004000, "cliType": "gemini" },
+    { "id": "nameless", "title": "No agent", "status": "initializing", "lastMessageAt": 1757000005000 },
+    { "id": "fresh", "title": "Never spoke", "status": "queued", "agentType": "claude" }
+  ]
+}
+""", labels: labels)
+precondition(catalog.items.map(\.id) == ["run", "await", "queued", "nameless", "fresh"], "idle and archived sessions are skipped")
+precondition(catalog.totalCount == 5)
+precondition(catalog.statusCounts.running == 4 && catalog.statusCounts.permission == 1)
+precondition(catalog.statusCounts.question == 0 && catalog.statusCounts.unread == 0)
+precondition(catalog.isActive && catalog.needsAttention)
+precondition(catalog.focus?.id == "await", "awaiting sessions outrank running ones")
+precondition(catalog.items[1].status == .permission, "awaitingUserSince wins over a running status")
+precondition(catalog.items[1].statusLabel == "需要你授权")
+precondition(catalog.items[0].statusLabel == "正在工作")
+precondition(catalog.items[1].updatedAt == 1757000003000, "awaiting time is the newer stamp")
+precondition(catalog.items[0].updatedAt == 1757000002000)
+precondition(catalog.items[0].title == "Build the widget")
+precondition(catalog.items.map(\.agentLogoText) == ["CX", "CC", "GE", "AC", "CC"], "cliType stands in for a missing agentType")
+precondition(catalog.items[2].agentLogoKind == "gemini")
+precondition(catalog.items.allSatisfy { $0.permissionCommand == nil })
+precondition(catalog.lastSyncLabel == "上次同步" && catalog.openHintLabel == "点按处理", "catalog labels travel to the widget")
+
+let requestedAt = Date().timeIntervalSince1970 * 1000
+let fresh = catalog.items.first { $0.id == "fresh" }!
+precondition(
+  abs(fresh.updatedAt - requestedAt) < 5000,
+  "a session with neither awaitingUserSince nor lastMessageAt falls back to the request time, not 1970"
+)
+
+let emptyCatalog = LiveActivityCatalog.state(catalogJSON: #"{"sessions": []}"#, labels: labels)
+precondition(emptyCatalog.items.isEmpty && !emptyCatalog.isActive && emptyCatalog.totalCount == 0)
+precondition(!LiveActivityCatalog.state(catalogJSON: "not json", labels: labels).isActive, "a broken catalog starts nothing")
+
+precondition(
+  LodyActivityAttributes.activityId(workspaceId: "ws1", userId: "u1") == "lody-conversations:v5:ws1:u1"
+)
+
+precondition(catalog.staleLabel == "已断开" && catalog.emptyLabel == "没有活跃会话")
+precondition(catalog.othersLabel(3) == "还有 3 个在跑", catalog.othersLabel(3))
+precondition(
+  tolerant.staleLabel == "Disconnected" && tolerant.emptyLabel == "No active sessions",
+  "a payload without widget copy falls back to English rather than rendering blank"
+)
+precondition(tolerant.othersLabel(2) == "2 more running")
+
+print("PASS: widget copy travels in the state and older payloads fall back")
+
+print("PASS: catalog mapping skips idle sessions, ranks awaiting first, and maps agent glyphs")
+
+let twoRunning = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"running","lastMessageAt":1},{"id":"b","status":"running","lastMessageAt":2}]}"#, labels: labels)
+precondition(twoRunning.showsOverview && twoRunning.activeCount == 2)
+let updatedRunning = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"b","status":"running","lastMessageAt":3},{"id":"a","status":"running","lastMessageAt":4}]}"#, labels: labels)
+precondition(twoRunning.visibleItems.map(\.id) == updatedRunning.visibleItems.map(\.id), "stream updates never shuffle session links")
+let oneRemaining = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"completed","awaitingUserSince":1},{"id":"b","status":"running"},{"id":"new","status":"pending"}]}"#, labels: labels)
+precondition(oneRemaining.focus?.id == "b" && !oneRemaining.showsOverview && oneRemaining.activeCount == 1, "completion removes stale awaiting state; pending is idle")
+let allFinished = LiveActivityCatalog.state(catalogJSON: #"{"sessions":[{"id":"a","status":"completed"},{"id":"b","status":"error"}]}"#, labels: labels)
+precondition(!allFinished.isActive && allFinished.focus == nil && allFinished.dismissalDate(from: now) == now.addingTimeInterval(60))
+precondition(pushToStart.route(for: twoRunning).path == "/activity")
+precondition(pushToStart.route(for: oneRemaining).path == "/ws1/sessions/b")
+print("PASS: multiple turns, stable links, partial completion, stale awaiting cleanup, all-finished dismissal and overview routing")
+
+// New compact copy remains optional for server payloads from before Watch support.
+var compactCopy = LodyActivityAttributes.ContentState.Copy(stale: "Disconnected", empty: "Empty", others: "{count} more", lastSync: "Last synced", openHint: "Open")
+compactCopy.smallAttention = "等待你处理"
+compactCopy.smallWaiting = "等待中"
+compactCopy.smallDone = "已完成"
+compactCopy.smallFailed = "失败"
+compactCopy.smallStale = "已过期"
+let compactRoundTrip = try JSONDecoder().decode(LodyActivityAttributes.ContentState.Copy.self, from: JSONEncoder().encode(compactCopy))
+precondition(compactRoundTrip.smallAttention == "等待你处理")
+precondition(compactRoundTrip.smallWaiting == "等待中")
+precondition(compactRoundTrip.smallDone == "已完成")
+precondition(compactRoundTrip.smallFailed == "失败")
+precondition(compactRoundTrip.smallStale == "已过期")
+let legacyCopy = try JSONDecoder().decode(LodyActivityAttributes.ContentState.Copy.self, from: Data("{}".utf8))
+precondition(legacyCopy.smallAttention == nil && legacyCopy.smallDone == nil && legacyCopy.smallStale == nil)

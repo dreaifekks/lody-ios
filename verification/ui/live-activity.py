@@ -1,0 +1,256 @@
+"""Drive the fixture Live Activity through running, permission, expanded and end states.
+
+iOS hides a Live Activity from the Dynamic Island while its own app is in the
+foreground, so every island capture backgrounds the app first.
+"""
+import re
+import subprocess
+import sys
+import time
+
+import catalog
+from driver import UI
+
+udid, output = sys.argv[1:3]
+ui = UI(udid, output)
+ALLOW = {'Allow', 'Always Allow', '允许', '始终允许'}
+OPEN = {'Open', '打开'}
+
+
+def status():
+    return ui.element('live-activity-status').get('AXLabel') or ''
+
+
+def toggle_value():
+    return ui.element('live-activity:toggle').get('AXValue')
+
+
+def foreground():
+    # Let the Home/Island dismissal finish before requesting activation; launching
+    # during that transition can return the existing pid and still land on Home.
+    time.sleep(1)
+    subprocess.run(['xcrun', 'simctl', 'launch', udid, 'app.innei.lody'], check=True, timeout=30)
+    ui.element('live-activity-status')
+
+
+def allow(timeout, labels=ALLOW):
+    """Starting an activity raises a system consent alert: once per device the first
+    time, and again as a "continue to allow" prompt on later runs. Leaving either up
+    would swallow the next taps and change the Lock Screen capture."""
+    def button(items):
+        return next((i for i in items if i.get('AXLabel') in labels and i.get('type') == 'Button'), None)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = button(ui.state())
+        if found:
+            frame = found['frame']
+            ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '1.0')
+            return True
+        time.sleep(.3)
+    return False
+
+
+def expand_island(focus_title, message):
+    """The expanded island is system UI with no accessibility identifier, so it is
+    opened by pressing the island's own coordinates. It then reaches the tree as a
+    single Group whose label concatenates every visible string, so its contents are
+    matched as substrings. A clipped row still appears in that label: only the capture
+    shows whether it survived the island's height."""
+    ui.axe('touch', '-x', '201', '-y', '33', '--down', '--up', '--delay', '.9')
+    time.sleep(1.5)
+    label = ui.wait(
+        lambda items: next((found for found in (i.get('AXLabel') for i in items)
+                            if found and focus_title in found), None),
+        message, timeout=10,
+    )
+    time.sleep(1.5)  # the island animates its contents in; capture the settled frame
+    return label
+
+
+def change_icon(value):
+    ui.axe('tap', '--id', 'live-activity-icon', '--post-delay', '.6')
+    selected = catalog.text('native.chat.attachment.selected')
+    if ui.element(f'app-icon-{value}').get('AXValue') != selected:
+        ui.axe('tap', '--id', f'app-icon-{value}', '--post-delay', '1')
+        # The icon confirmation belongs to SpringBoard and is absent from AXe's
+        # tree on this simulator; use the same fallback as the appearance check.
+        try:
+            ui.axe('tap', '--label', 'OK', '--post-delay', '.5', timeout=3, recover=False)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError):
+            ui.axe('tap', '-x', '201', '-y', '505', '--post-delay', '.5')
+        ui.invalidate_axe()
+        ui.wait(lambda _: ui.element(f'app-icon-{value}').get('AXValue') == selected,
+                'System icon change did not complete')
+    ui.capture(f'icon-{value}')
+    ui.axe('tap', '--id', 'BackButton', '--post-delay', '.6')
+    ui.element('live-activity-status')
+
+
+# A fixture activity outlives a failed run, and starting is a no-op while one exists,
+# so the scene resets itself before it asserts anything.
+if status() != '0 active':
+    ui.axe('tap', '--id', 'live-activity-end', '--tap-style', 'physical')
+    ui.wait(lambda items: status() == '0 active', 'Could not end a leftover fixture activity')
+
+change_icon('default')
+ui.axe('tap', '--id', 'live-activity-start', '--tap-style', 'physical')
+allow(8)
+ui.wait(lambda items: status() != '0 active', 'Fixture activity did not start')
+
+assert toggle_value() == '1', 'Dynamic Island switch did not start on'
+ui.axe('tap', '--id', 'live-activity:toggle', '--tap-style', 'physical')
+ui.wait(lambda items: toggle_value() == '0', 'Dynamic Island switch did not turn off')
+ui.axe('tap', '--id', 'live-activity:toggle', '--tap-style', 'physical')
+ui.wait(lambda items: toggle_value() == '1', 'Dynamic Island switch did not turn back on')
+assert status() != '0 active', 'Toggling the injected switch ended the fixture activity'
+
+ui.axe('button', 'home')
+time.sleep(2)
+ui.capture('island-default-icon')
+foreground()
+change_icon('Aqua')
+assert status() != '0 active', 'Changing the icon ended the running activity'
+
+ui.axe('button', 'home')
+time.sleep(2)
+ui.capture('island-running')
+summary = catalog.text('native.liveActivity.runningSummary').replace('{count}', '2')
+running_expanded = expand_island(summary, 'Expanded island never showed the task overview')
+assert 'git push origin main --force' not in running_expanded, \
+    'A running focus showed the permission command strip'
+assert catalog.text('native.liveActivity.debug.title1') in running_expanded, \
+    'The expanded overview lost its first session row'
+assert catalog.text('native.liveActivity.openHint') not in running_expanded, \
+    'A running focus showed the permission hint'
+for over_ceiling in [catalog.text('native.liveActivity.debug.title2'), catalog.text('native.liveActivity.debug.title3')]:
+    assert over_ceiling not in running_expanded, \
+        f'The island listed {over_ceiling!r}, which pushes it past the height that renders'
+ui.capture('island-running-expanded')
+ui.axe('button', 'home')
+time.sleep(1)
+
+# The Lock Screen is the one surface that keeps the live timer, so it is captured
+# while a session is still running rather than only in the permission state.
+ui.axe('button', 'lock')
+time.sleep(2)
+allow(2)
+time.sleep(1)
+# A locked device exposes only its own Lock Screen in the accessibility tree, so the
+# capsule is evidence by capture alone, as the permission capture below also is.
+ui.capture('lockscreen-running')
+ui.axe('button', 'lock')
+time.sleep(1)
+ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
+foreground()
+ui.element('live-activity-permission')  # the unlock has to land before the tap counts
+ui.axe('tap', '--id', 'live-activity-permission', '--tap-style', 'physical')
+time.sleep(2)
+ui.axe('button', 'home')
+time.sleep(2)
+ui.capture('island-permission')
+
+expanded = expand_island(catalog.text('native.liveActivity.debug.title2'),
+                         'Expanded island never showed the permission focus')
+for expected in [
+    catalog.text('native.liveActivity.status.permission'),
+    catalog.text('native.liveActivity.runningSummary').replace('{count}', '1'),
+    'git push origin main --force',
+]:
+    assert expected in expanded, f'Expanded island never showed {expected!r}'
+assert '查看' not in expanded, 'The removed accessory pill is still rendered in the expanded island'
+assert catalog.text('native.liveActivity.openHint') not in expanded, \
+    'The Lock Screen tap hint leaked into the island, which clips its bottom row'
+for over_ceiling in [catalog.text('native.liveActivity.debug.title1'), catalog.text('native.liveActivity.debug.title3')]:
+    assert over_ceiling not in expanded, \
+        f'The island listed {over_ceiling!r}, which pushes it past the height that renders'
+ui.capture('island-expanded')
+ui.axe('button', 'home')
+time.sleep(1)
+
+ui.axe('button', 'lock')
+time.sleep(2)
+allow(2)
+time.sleep(1)
+ui.capture('lockscreen-permission')
+ui.axe('button', 'lock')
+time.sleep(1)
+ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
+foreground()
+ui.element('live-activity-end')
+ui.axe('tap', '--id', 'live-activity-complete-one', '--tap-style', 'physical')
+time.sleep(2)
+ui.axe('button', 'home')
+time.sleep(2)
+remaining = expand_island(catalog.text('native.liveActivity.debug.title2'), 'Remaining task did not replace completed task')
+assert catalog.text('native.liveActivity.debug.title1') not in remaining
+assert re.search(r'\d+:\d\d', remaining), 'Single remaining task lost its elapsed timer'
+ui.capture('one-remaining')
+ui.axe('button', 'home')
+foreground()
+ui.axe('tap', '--id', 'live-activity-complete-all', '--tap-style', 'physical')
+ui.wait(lambda items: status() == '0 active', 'Completing all tasks did not end the activity')
+# An ended activity keeps its completed rows on the Lock Screen for 60 s so the
+# finished titles and frozen durations are readable; the island drops it at once.
+ui.axe('button', 'lock')
+time.sleep(1)
+ui.capture('lockscreen-completed')
+time.sleep(61)
+ui.capture('lockscreen-dismissed')
+ui.axe('button', 'lock')
+ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
+foreground()
+ui.capture('ended')
+# A new activity must also use the persisted choice, without another icon switch.
+ui.axe('tap', '--id', 'live-activity-start', '--tap-style', 'physical')
+ui.wait(lambda items: status() != '0 active', 'New work did not restart the activity')
+ui.axe('button', 'home')
+time.sleep(2)
+ui.capture('island-new-aqua')
+foreground()
+change_icon('default')
+ui.axe('button', 'home')
+time.sleep(2)
+ui.capture('island-restored-default')
+# Compare only the app mark, excluding the clock, pulsing status and task count.
+# Coordinates are in points on the verification pool's iPhone 17 Pro.
+marks = {}
+for name in ['island-default-icon', 'island-running', 'island-new-aqua', 'island-restored-default']:
+    marks[name] = subprocess.check_output([
+        'ffmpeg', '-v', 'error', '-i', str(ui.output / f'{name}.png'),
+        '-vf', 'scale=402:-1,crop=24:24:114:20', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+    ], timeout=20)
+def difference(left, right):
+    return sum(abs(a - b) for a, b in zip(marks[left], marks[right])) / len(marks[left])
+assert difference('island-default-icon', 'island-running') > 15, 'Active Island kept the default icon'
+assert difference('island-running', 'island-new-aqua') < 5, 'New activity lost the chosen icon'
+assert difference('island-default-icon', 'island-restored-default') < 5, 'Island did not restore the default icon'
+foreground()
+ui.axe('tap', '--id', 'live-activity-fail-all', '--tap-style', 'physical')
+ui.wait(lambda items: status() == '0 active', 'Failing every task did not end the activity')
+ui.axe('button', 'lock')
+time.sleep(1)
+ui.capture('lockscreen-failed')
+ui.axe('button', 'lock')
+ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
+foreground()
+ui.element('live-activity-end')
+
+subprocess.run(['xcrun', 'simctl', 'openurl', udid, 'lody:///debug/sessions/x'], check=True, timeout=30)
+allow(6, OPEN)
+ui.wait(
+    lambda items: any(i.get('AXUniqueId') == 'live-activity-status' for i in items),
+    'An unavailable widget session must leave the current page in place',
+)
+labels = [i.get('AXLabel') or '' for i in ui.state()]
+assert not any('Unmatched' in label for label in labels), 'widget deep link landed on the Unmatched Route screen'
+ui.capture('deep-link')
+subprocess.run(['xcrun', 'simctl', 'openurl', udid, 'lody:///activity?workspaceId=debug&userId=debug'], check=True, timeout=30)
+allow(2, OPEN)
+ui.wait(
+    lambda items: any(catalog.text('notifications.route.wrongAccount') in (i.get('AXLabel') or '') for i in items),
+    'Overview deep link must reject an account outside the signed-in context',
+)
+ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('inbox.settings.view.activity') for i in items),
+        'Overview must use its localized title, not the raw route name')
+ui.capture('overview-account-boundary')
+print('PASS: island running, permission and both expanded states captured, switch toggled, activity ended, unavailable widget link preserves the current page', flush=True)
