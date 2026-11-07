@@ -21,22 +21,38 @@ def check_shortcuts(ui):
             return item
         for _ in range(8):
             items = ui.state()
-            item = next((i for i in items if i.get('AXUniqueId') == identifier), None)
-            if item:
-                f = item['frame']
-                assert round(f['width'], 6) >= 44 and round(f['height'], 6) >= 44, item
-                if f['x'] >= scroll['x'] - .5 and f['x'] + f['width'] <= scroll['x'] + scroll['width'] + .5:
-                    return item
+            item = next(i for i in items if i.get('AXUniqueId') == identifier)
+            f = item['frame']
+            assert round(f['width'], 6) >= 44 and round(f['height'], 6) >= 44, item
+            left, right = scroll['x'], scroll['x'] + scroll['width']
+            if f['x'] >= left - .5 and f['x'] + f['width'] <= right + .5:
+                return item
+            backwards = f['x'] < left
+            needed = left - f['x'] if backwards else f['x'] + f['width'] - right
+            # Start in measured spacing, separate from arrow long-press controls.
+            frames = sorted((i['frame'] for i in items
+                if (i.get('AXUniqueId') or '').removeprefix('terminal-key-') in order), key=lambda f: f['x'])
+            gaps = []
+            for first, second in zip(frames, frames[1:]):
+                lo = max(first['x'] + first['width'], left + 2)
+                hi = min(second['x'], right - 2)
+                if hi - lo >= 2:
+                    gaps.append((lo + hi) / 2)
+            assert gaps, 'No visible spacing for a scroll gesture'
+            start = min(gaps) if backwards else max(gaps)
+            available = right - 4 - start if backwards else start - left - 4
+            # A near-edge reveal still needs enough motion to begin a pan.
+            distance = min(max(needed + 8, 44), available)
+            end = start + distance if backwards else start - distance
             y = scroll['y'] + scroll['height'] / 2
-            left, right = scroll['x'] + 24, scroll['x'] + scroll['width'] - 24
-            visible = [order.index(i['AXUniqueId'].removeprefix('terminal-key-')) for i in items
-                if (i.get('AXUniqueId') or '').removeprefix('terminal-key-') in order
-                and i['frame']['x'] >= scroll['x'] - .5
-                and i['frame']['x'] + i['frame']['width'] <= scroll['x'] + scroll['width'] + .5]
-            backwards = bool(visible) and order.index(name) < min(visible)
-            start, end = (left, right) if backwards else (right, left)
             ui.axe('drag', '--start-x', str(start), '--start-y', str(y),
-                   '--end-x', str(end), '--end-y', str(y), '--duration', '.4')
+                   '--end-x', str(end), '--end-y', str(y), '--duration', '.8', '--post-delay', '.2')
+            positions = []
+            def settled(items):
+                current = next(i for i in items if i.get('AXUniqueId') == identifier)
+                positions.append(round(current['frame']['x'], 3))
+                return len(positions) >= 2 and positions[-1] == positions[-2]
+            ui.wait(settled, 'Shortcut scrolling did not settle')
         raise AssertionError(f'Could not expose full-size shortcut {name}')
 
     def tap(name, expected=None):
@@ -51,10 +67,15 @@ def check_shortcuts(ui):
         'tilde': 'tilde', 'pipe': 'pipe', 'slash': 'slash', 'dash': 'dash',
         'left': 'left', 'down': 'down', 'up': 'up', 'right': 'right', 'mouse': 'mouse',
         'hide': 'hideKeyboard'}
+    # Read static labels in one snapshot. Every key is still physically exposed,
+    # size-checked and activated by tap() below; do not scroll the row twice.
+    initial_keys = {i.get('AXUniqueId'): i for i in ui.state()
+        if (i.get('AXUniqueId') or '').startswith('terminal-key-')}
     for name, label in expected_labels.items():
-        assert key(name).get('AXLabel') == catalog.text('terminal.key.' + label), name
+        assert initial_keys['terminal-key-' + name].get('AXLabel') == catalog.text('terminal.key.' + label), name
     for number in range(1, 11):
-        assert key(f'f{number}').get('AXLabel') == catalog.text('terminal.key.function').replace('%lld', str(number))
+        assert initial_keys[f'terminal-key-f{number}'].get('AXLabel') == catalog.text('terminal.key.function').replace('%lld', str(number))
+    print('PASS: shortcut accessibility labels', flush=True)
 
     tap('escape', '1b')
     tap('tab', '09')
@@ -85,6 +106,7 @@ def check_shortcuts(ui):
     for number, value in enumerate(['1b4f50', '1b4f51', '1b4f52', '1b4f53',
         '1b5b31357e', '1b5b31377e', '1b5b31387e', '1b5b31397e', '1b5b32307e', '1b5b32317e'], 1):
         tap(f'f{number}', value)
+    print('PASS: all shortcut targets >=44 pt and wire bytes', flush=True)
     ui.capture('shortcut-targets')
     tap('hide')
     ui.wait(lambda items: not any(i.get('AXUniqueId') == 'terminal-key-hide' for i in items), 'Hide keyboard did not dismiss accessory')
