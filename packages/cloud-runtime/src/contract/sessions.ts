@@ -133,6 +133,7 @@ export const SendTurnResult = z
       state: z.literal('not_sent'),
       reason: z.string(),
       id: z.string().optional(),
+      retryable: z.boolean().optional(),
     }),
     z.object({
       state: z.literal('unknown'),

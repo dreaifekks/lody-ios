@@ -7,6 +7,7 @@ import {
   loopbackHub,
   openRuntime,
   runtimeBundle,
+  reconnectHistory,
 } from '../../verification/lan-hub/reconnect.mjs';
 
 const command = new URL(
@@ -206,3 +207,23 @@ test(
     );
   },
 );
+
+test('every transport scenario can seed a handled MCP-disabled map without a pending turn or receipt', () => {
+  const fixture = reconnectHistory('session', 'local:verify');
+  const raw = fixture.toJSON();
+  assert.equal(raw.history.length, 1);
+  assert.deepEqual(raw.history[0].inputConfig.mcpServerIds, []);
+  assert.equal(raw.history[0].status, 'handled');
+  assert.equal(raw.history[0].finished, true);
+  assert.equal(
+    typeof fixture.getList('history').get(0).get,
+    'function',
+    'markSeen must be able to inspect the setup row',
+  );
+  assert.equal(raw.humanInputReceipts, undefined);
+  assert.deepEqual(
+    reconnectHistory('mcp', 'local:verify', ['verify-mcp']).toJSON().history[0]
+      .inputConfig.mcpServerIds,
+    ['verify-mcp'],
+  );
+});

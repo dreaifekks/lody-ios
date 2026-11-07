@@ -15,7 +15,7 @@ import {
 } from 'node:worker_threads';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
-import { LoroDoc } from 'loro-crdt/base64';
+import { LoroDoc, LoroMap } from 'loro-crdt/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
 import {
@@ -480,6 +480,24 @@ export async function openRuntime({ base, bundle = undefined }) {
   };
 }
 
+/** A handled setup turn binds MCP selection without creating a pending send. */
+export function reconnectHistory(sessionId, userId, mcpServerIds = []) {
+  const doc = new LoroDoc();
+  const setup = doc.getList('history').pushContainer(new LoroMap());
+  const fields = {
+    id: `verify-setup-${sessionId}`,
+    role: 'user',
+    userId,
+    status: 'handled',
+    finished: true,
+    items: [],
+    inputConfig: { cliType: 'builtin', agentType: 'claude', mcpServerIds },
+  };
+  for (const [key, value] of Object.entries(fields)) setup.set(key, value);
+  doc.commit();
+  return doc;
+}
+
 export async function main(env = process.env) {
   // This guard must precede seed creation or any network activity.
   const base = loopbackHub(env.LODY_HUB_URL, env.LODY_HUB_TOKEN);
@@ -503,6 +521,7 @@ export async function main(env = process.env) {
       'lost',
       'dropped',
       'dead',
+      'mcp-network',
       'stalled',
       'pointer',
       'pointer-ack',
@@ -563,8 +582,43 @@ export async function main(env = process.env) {
           ttlSeconds: 900,
         }),
       );
-    for (const id of Object.values(sessions))
-      must(await direct(`${workspace}:s:${id}`).create(octets));
+    for (const [name, id] of Object.entries(sessions)) {
+      const client = direct(`${workspace}:s:${id}`);
+      must(await client.create(octets));
+      // All transport scenarios explicitly disable MCP. A separate case keeps
+      // a configured selection to exercise pre-write directory failures.
+      const selection = name === 'mcp-network' ? ['verify-mcp'] : [];
+      const doc = reconnectHistory(id, user, selection);
+      must(
+        await client.append({
+          part: {
+            contentType: octets.contentType,
+            body: encodeFrame(doc.export({ mode: 'update' })),
+          },
+        }),
+      );
+    }
+    const mcp = new Flock('verify-mcp-catalog');
+    mcp.set(['mcpServer', 'verify-mcp'], {
+      id: 'verify-mcp',
+      name: 'Synthetic MCP',
+      transport: 'http',
+      enabledByDefault: false,
+      connection: { transport: 'http', url: `${base}/unused-synthetic-mcp` },
+    });
+    mcp.commit();
+    const workspaceSettings = `${workspace}:wf:workspace`;
+    must(await direct(workspaceSettings).create(octets));
+    must(
+      await direct(workspaceSettings).append({
+        part: {
+          contentType: octets.contentType,
+          body: encodeFrame(
+            new TextEncoder().encode(JSON.stringify(mcp.exportJson())),
+          ),
+        },
+      }),
+    );
 
     responder = (async () => {
       const inbox = direct(`${workspace}:rpc:req:${machine}`);
@@ -673,9 +727,23 @@ export async function main(env = process.env) {
       );
     const hubHistory = async (id) => {
       const { doc, appended } = await history(id);
+      const rows = doc.toJSON().history ?? [];
+      const setup = rows.filter((entry) => entry.id === `verify-setup-${id}`);
+      assert.equal(
+        setup.length,
+        1,
+        'the explicit MCP setup turn remains intact',
+      );
+      assert.deepEqual(
+        setup[0].inputConfig.mcpServerIds,
+        id === sessions['mcp-network'] ? ['verify-mcp'] : [],
+      );
       return {
-        appended,
-        turns: (doc.toJSON().history ?? []).map((entry) => entry.id),
+        // One framed update was intentionally seeded before the runtime opened.
+        appended: appended - 1,
+        turns: rows
+          .filter((entry) => entry.id !== `verify-setup-${id}`)
+          .map((entry) => entry.id),
       };
     };
     const pointer = async (id) =>
@@ -786,9 +854,28 @@ export async function main(env = process.env) {
             'producer tuple deduplicates the repeated append',
           );
       });
-    await check('dead', async (id) => {
+    await check('dead', async (id, stream) => {
       await runtime.call('ensureSession', { sessionId: id });
-      await runtime.fault([{ mode: 'hang' }]);
+      const start = runtime.requests.length;
+      await runtime.fault([{ stream, mode: 'hang' }]);
+      // Wait for an owned long-poll to enter the dead route. A previous healthy
+      // poll may still finish after fault installation; it must not freshen the
+      // replica just before send and accidentally turn this into a write test.
+      await until(
+        () =>
+          runtime.requests
+            .slice(start)
+            .some(
+              (request) =>
+                request.stream === stream &&
+                request.method === 'GET' &&
+                !request.bootstrap &&
+                request.mode === 'hang',
+            ),
+        40000,
+        'dead session poll',
+        shutdown.signal,
+      );
       await sleep(3500, shutdown.signal);
       const started = Date.now(),
         refused = await turn(id, 'route is dead');
@@ -797,6 +884,24 @@ export async function main(env = process.env) {
         { state: 'not_sent', reason: 'session_not_ready' },
       );
       assert.ok(Date.now() - started < 8000);
+      const attempts = runtime.requests.slice(start);
+      assert.ok(
+        attempts.some(
+          (request) =>
+            request.stream === stream &&
+            request.method === 'HEAD' &&
+            request.mode === 'hang',
+        ),
+        'freshness must actually probe HEAD',
+      );
+      assert.ok(
+        !attempts.some((request) => request.stream === workspaceSettings),
+        'explicit [] must bypass the MCP catalog',
+      );
+      assert.ok(
+        !attempts.some((request) => request.method === 'POST'),
+        'the dead-route refusal happens before any write',
+      );
       assert.deepEqual(await hubHistory(id), { appended: 0, turns: [] });
       await runtime.fault([]);
       await runtime.reset();
@@ -807,6 +912,43 @@ export async function main(env = process.env) {
         appended: 1,
         turns: [refused.id],
       });
+    });
+    await check('mcp-network', async (id, stream) => {
+      await runtime.call('ensureSession', { sessionId: id });
+      const start = runtime.requests.length;
+      await runtime.fault([
+        { method: 'GET', stream: workspaceSettings, mode: 'drop' },
+      ]);
+      const refused = await turn(id, 'MCP directory route is down');
+      assert.equal(refused.state, 'not_sent');
+      assert.equal(refused.reason, 'mcp_catalog_unavailable');
+      assert.equal(refused.retryable, true);
+      assert.ok(
+        runtime.requests
+          .slice(start)
+          .some(
+            (request) =>
+              request.stream === workspaceSettings && request.mode === 'drop',
+          ),
+      );
+      assert.ok(
+        !runtime.requests
+          .slice(start)
+          .some((request) => request.method === 'POST'),
+        'MCP preparation failure writes no receipt, turn, pointer or RPC',
+      );
+      assert.deepEqual(await hubHistory(id), { appended: 0, turns: [] });
+      await runtime.fault([]);
+      assert.equal(
+        (await turn(id, 'MCP directory recovered', { id: refused.id })).state,
+        'accepted',
+        'a provably pre-write failure may reuse its ID',
+      );
+      assert.deepEqual(await hubHistory(id), {
+        appended: 1,
+        turns: [refused.id],
+      });
+      assert.equal(posts(stream), 1);
     });
     await check('stalled', async (id, stream) => {
       await runtime.call('ensureSession', { sessionId: id });

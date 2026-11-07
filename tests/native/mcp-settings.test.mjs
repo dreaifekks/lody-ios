@@ -3,6 +3,8 @@ import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { openTestSession } from '../helpers.mjs';
+import { reconnectHistory } from '../../verification/lan-hub/reconnect.mjs';
+import { SendTurnResult } from '../../packages/cloud-runtime/src/contract/sessions.ts';
 
 const bundle = await build({
   stdin: {
@@ -422,4 +424,154 @@ test('a denied workspace write is read-only and does not delete or replay', asyn
     (await c.read()).some((row) => row.id === 'docs'),
     true,
   );
+});
+
+test('only known pre-write MCP transport failures are retryable on the typed wire; configuration failures stay terminal', async () => {
+  const c = catalog(),
+    f = await openTestSession({
+      onRpc: () => ({ result: { accepted: true } }),
+    });
+  let retryId;
+  try {
+    for (const code of [
+      'network_error',
+      'timeout',
+      'forbidden',
+      'unauthorized',
+      'bad_request',
+      'protocol_error',
+      'catalog_limit',
+      'unknown',
+    ]) {
+      c.fail(code);
+      for (const queue of [false, true]) {
+        const result = SendTurnResult.parse(
+          await f.runtime.sendTurn({ ...turn, queue }, undefined, c.select),
+        );
+        if (code === 'network_error') retryId = result.id;
+        assert.equal(result.state, 'not_sent', code);
+        assert.equal(result.reason, 'mcp_catalog_unavailable', code);
+        assert.equal(
+          result.retryable === true,
+          ['network_error', 'timeout'].includes(code),
+          code,
+        );
+        assert.equal(f.server.toJSON().history?.length ?? 0, 0);
+        assert.equal(f.server.toJSON().mq?.length ?? 0, 0);
+        assert.deepEqual(f.appends, []);
+      }
+    }
+    c.fail(undefined);
+    c.remote.set(['mcpServer', 'docs'], {
+      ...c.remote.get(['mcpServer', 'docs']),
+      connection: undefined,
+      enabledByDefault: true,
+    });
+    const result = SendTurnResult.parse(
+      await f.runtime.sendTurn(turn, undefined, c.select),
+    );
+    assert.equal(result.reason, 'mcp_connection_missing');
+    assert.notEqual(result.retryable, true);
+    assert.deepEqual(f.appends, []);
+    c.remote.set(['mcpServer', 'docs'], {
+      ...c.remote.get(['mcpServer', 'docs']),
+      enabledByDefault: false,
+    });
+    assert.equal(
+      (await f.runtime.sendTurn({ ...turn, id: retryId }, undefined, c.select))
+        .state,
+      'accepted',
+      'pre-write network failure did not consume the turn id',
+    );
+    assert.deepEqual(
+      f.server.toJSON().history.map((entry) => entry.id),
+      [retryId],
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test('loopback dead-route fixture disables MCP and reaches HEAD before any write', async (t) => {
+  const c = catalog();
+  c.fail('network_error');
+  const f = await openTestSession({ reachable: () => false });
+  try {
+    const seed = reconnectHistory('s1', 'u1');
+    for (const entry of seed.toJSON().history)
+      f.server.getList('history').push(entry);
+    await f.pushUpdate();
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    t.mock.timers.tick(f.runtime.REPLICA_FRESH_MS + 1);
+    const result = await f.runtime.sendTurn(turn, undefined, c.select);
+    assert.equal(result.state, 'not_sent');
+    assert.equal(result.reason, 'session_not_ready');
+    assert.equal(
+      f.probes.length,
+      1,
+      'the refusal must be a real freshness HEAD probe',
+    );
+    assert.deepEqual(f.appends, []);
+  } finally {
+    f.close();
+  }
+});
+
+test('loopback fixture empty MCP selection also bypasses a down directory after a fresh HEAD', async (t) => {
+  const c = catalog();
+  c.fail('network_error');
+  const requests = [];
+  const f = await openTestSession({
+    onRpc: (request) => {
+      requests.push(request);
+      return { result: { accepted: true } };
+    },
+  });
+  try {
+    for (const entry of reconnectHistory('s1', 'u1').toJSON().history)
+      f.server.getList('history').push(entry);
+    await f.pushUpdate();
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    t.mock.timers.tick(f.runtime.REPLICA_FRESH_MS + 1);
+    const result = await f.runtime.sendTurn(turn, undefined, c.select);
+    assert.equal(result.state, 'accepted');
+    assert.equal(f.probes.length, 1);
+    assert.deepEqual(requests[0].params.inputConfig.mcpServerIds, []);
+  } finally {
+    f.close();
+  }
+});
+
+test('an MCP preparation deadline is retryable without promoting permission or schema errors', async (t) => {
+  catalog();
+  let failure;
+  t.mock.method(globalThis.__mcpClient.prototype, 'bootstrap', async () => {
+    throw failure;
+  });
+  for (const [cause, expired, retryable] of [
+    [new DOMException('deadline', 'TimeoutError'), true, true],
+    [new DOMException('aborted read', 'AbortError'), true, true],
+    [new Error('unknown'), true, true],
+    [new Error('forbidden'), true, false],
+    [new Error('protocol_error'), true, false],
+    [new DOMException('cancelled', 'AbortError'), false, false],
+  ]) {
+    failure = cause;
+    const controller = new AbortController();
+    controller.abort(
+      new DOMException('fixture', expired ? 'TimeoutError' : 'AbortError'),
+    );
+    await assert.rejects(
+      sessionMcpSelection('w1', grant, undefined, controller.signal),
+      (error) => {
+        assert.equal(error.message, 'mcp_catalog_unavailable');
+        assert.equal(
+          error.retryable,
+          retryable,
+          `${cause.name}:${cause.message}`,
+        );
+        return true;
+      },
+    );
+  }
 });

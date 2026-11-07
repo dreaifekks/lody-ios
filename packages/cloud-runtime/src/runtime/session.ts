@@ -1165,6 +1165,15 @@ export async function sendTurn(
       id,
       state: delivery,
       reason: error instanceof Error ? error.message : 'send_failed',
+      // The native outbox can release inflight and wait only while nothing was
+      // written. Preserve the diagnostic reason; never replay unknown writes.
+      ...(!writeStarted &&
+      error instanceof Error &&
+      error.message === 'mcp_catalog_unavailable' &&
+      'retryable' in error &&
+      error.retryable === true
+        ? { retryable: true }
+        : {}),
     };
   } finally {
     state.sending = false;

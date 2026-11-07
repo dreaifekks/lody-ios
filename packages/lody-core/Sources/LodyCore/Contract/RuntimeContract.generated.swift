@@ -5137,19 +5137,23 @@ extension RuntimeContract {
   public struct SendTurnResultNotSent: Codable, Sendable, Equatable {
     public var reason: String
     public var id: String?
-    public init(reason: String, id: String? = nil) {
+    public var retryable: Bool?
+    public init(reason: String, id: String? = nil, retryable: Bool? = nil) {
       self.reason = reason
       self.id = id
+      self.retryable = retryable
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.reason = try c.decode(String.self, forKey: Key("reason"))
       self.id = try c.decodeIfPresent(String.self, forKey: Key("id"))
+      self.retryable = try c.decodeIfPresent(Bool.self, forKey: Key("retryable"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.reason, forKey: Key("reason"))
       try c.encodeIfPresent(self.id, forKey: Key("id"))
+      try c.encodeIfPresent(self.retryable, forKey: Key("retryable"))
     }
   }
 

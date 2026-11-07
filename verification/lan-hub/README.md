@@ -33,6 +33,22 @@ pointer whose ACKs were lost. Catalog polling preserves its cursor through a
 dropped read without exceeding STALL_GRACE; synthetic machine ping verifies
 latency and a silent peer's timeout without inventing heartbeat presence.
 
+Each transport scenario starts from one handled setup turn that explicitly
+persists `mcpServerIds: []`. Only that known setup ID and its single seed frame
+are excluded from the send assertions; it has no pending turn or human receipt.
+The dead-route case waits for its owned long poll to enter the fault, lets the
+replica become stale, and requires a failed HEAD with no POST or MCP catalog
+read. It therefore cannot pass because a different preparation step failed.
+
+A separate `mcp-network` case keeps a configured synthetic MCP selection and
+drops only the workspace-settings read. It requires `not_sent`,
+`mcp_catalog_unavailable`, and `retryable: true` with no write, then retries the
+same unused turn ID once the directory returns. Missing MCP configuration and
+permission/schema errors remain terminal; only recognized pre-write transport
+failures or a preparation deadline are retryable. The native outbox consumes
+that flag to release inflight ownership and wait rather than mark delivery
+unknown.
+
 `confirmSessionTurn` uses the typed `seen/pending/absent/not_ready` result and
 `delivery/retryId` fields. Neither confirmation nor the verifier replays the old
 turn or dispatch RPC.

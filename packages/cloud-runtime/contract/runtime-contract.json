@@ -2596,7 +2596,8 @@
           "properties": {
             "state": { "type": "string", "const": "not_sent" },
             "reason": { "type": "string" },
-            "id": { "type": "string" }
+            "id": { "type": "string" },
+            "retryable": { "type": "boolean" }
           },
           "required": ["state", "reason"]
         },
