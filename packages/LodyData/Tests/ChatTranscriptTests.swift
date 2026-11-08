@@ -57,6 +57,33 @@ final class ChatTranscriptTests: XCTestCase {
     XCTAssertEqual(try transcript(json).rows().first { $0.kind == "duration" }?.workDurationMs, 5000)
   }
 
+  func testSubagentCardsUseRunStateAndKeepLatestStep() throws {
+    let json = """
+    [{"id":"a","role":"assistant","status":"running","finished":false,"items":[
+      {"itemId":"task1","type":"subagent_task","status":"completed","actor":"Explore","run":{"state":"running","items":[{"itemId":"step","type":"text","text":"first line\\nLatest step"}]}},
+      {"itemId":"task2","type":"subagent_task","status":"in_progress","actor":"Review","summary":"Finished review","run":{"state":"completed","items":[]}}]}]
+    """
+    let value = try transcript(json)
+    let rows = value.rows().filter { $0.kind == "subagent_task" }
+    XCTAssertEqual(value.liveSubagentItems().map(\.itemId), ["task1"])
+    XCTAssertEqual(rows.map { $0.subagent?.status }, ["in_progress", "completed"])
+    XCTAssertEqual(rows[0].subagent?.detail, "Latest step")
+    XCTAssertFalse(rows[0].subagent!.groupTitle.isEmpty)
+    XCTAssertEqual(rows[1].subagent?.groupTitle, "")
+    XCTAssertFalse(value.rows(processEntryID: "a", processStartID: "__subagent__")[0].subagent!.groupTitle.isEmpty)
+  }
+
+  func testUnknownSubagentRemainsUnsettledInTheCard() throws {
+    let json = """
+    [{"id":"a","role":"assistant","status":"done","finished":true,"items":[
+      {"itemId":"task","type":"subagent_task","status":"completed","run":{"state":"unknown","items":[]}}]}]
+    """
+    let row = try XCTUnwrap(try transcript(json).rows().first { $0.kind == "subagent_task" })
+    XCTAssertEqual(row.subagent?.status, "unknown")
+    XCTAssertFalse(row.subagent!.detail.isEmpty)
+    XCTAssertFalse(row.running)
+  }
+
   func testToolCallsFoldIntoAProcessSummary() throws {
     let rows = try transcript(reply).rows()
     XCTAssertTrue(rows.contains { $0.kind == "summary" && $0.actionable })

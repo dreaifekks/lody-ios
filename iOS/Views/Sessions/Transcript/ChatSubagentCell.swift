@@ -6,6 +6,7 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
   }
   private let glyph = LodyStatusGlyphView(kind: .done)
   private let titleLabel = UILabel()
+  private let groupLabel = UILabel()
   private let statusLabel = UILabel()
   private let detailLabel = UILabel()
   private lazy var tree = LodyTentacle(in: contentView.layer)
@@ -14,7 +15,7 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
   override init(frame: CGRect) {
     super.init(frame: frame)
     _ = tree
-    for view in [glyph, titleLabel, statusLabel, detailLabel] as [UIView] {
+    for view in [glyph, titleLabel, statusLabel, detailLabel, groupLabel] as [UIView] {
       view.isAccessibilityElement = false
       contentView.addSubview(view)
     }
@@ -51,8 +52,13 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
     switch card.status {
     case "pending", "in_progress": glyph.kind = .live
     case "failed": glyph.kind = .failed
+    case "unknown": glyph.kind = .attention
     default: glyph.kind = .done
     }
+    groupLabel.text = card.groupTitle
+    groupLabel.font = Self.groupFont(traitCollection)
+    groupLabel.textColor = .lodySecondary
+    groupLabel.isHidden = card.groupTitle.isEmpty
     let font = Self.titleFont(traitCollection)
     let title = NSMutableAttributedString(string: card.description, attributes: [
       .font: font, .foregroundColor: UIColor.lodyInk,
@@ -74,7 +80,7 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
     detailLabel.font = Self.detailFont(traitCollection)
     detailLabel.isHidden = Self.detailText(card).isEmpty
     accessibilityIdentifier = row.id
-    accessibilityLabel = [card.actor, card.description].filter { !$0.isEmpty }.joined(separator: ", ")
+    accessibilityLabel = [card.groupTitle, card.actor, card.description].filter { !$0.isEmpty }.joined(separator: ", ")
     accessibilityValue = [Self.statusText(card.status), card.detail].filter { !$0.isEmpty }.joined(separator: ", ")
     accessibilityTraits = row.actionable ? .button : .staticText
     setNeedsLayout()
@@ -86,6 +92,8 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
       "in_progress": "native.chat.subagent.running",
       "completed": "native.chat.subagent.completed",
       "failed": "native.chat.subagent.failed",
+      "cancelled": "native.chat.subagent.cancelled",
+      "unknown": "native.chat.subagent.unknown",
     ]
     return keys[status].map { String(localized: String.LocalizationValue($0), bundle: .lody) } ?? ""
   }
@@ -102,6 +110,14 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
     LodyDesign.font(.footnote, size: 12, compatibleWith: traits)
   }
 
+  private static func groupFont(_ traits: UITraitCollection) -> UIFont {
+    LodyDesign.font(.footnote, size: 12, compatibleWith: traits)
+  }
+
+  private static func groupHeight(_ card: ChatSubagentCard, traits: UITraitCollection) -> CGFloat {
+    card.groupTitle.isEmpty ? 0 : ceil(groupFont(traits).lineHeight) + 6
+  }
+
   private static func firstLine(_ traits: UITraitCollection) -> (top: CGFloat, height: CGFloat, row: CGFloat) {
     let height = ceil(titleFont(traits).lineHeight)
     let row = max(30, height + 12)
@@ -111,8 +127,9 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
   static func height(_ row: ChatRow, width: CGFloat, traits: UITraitCollection) -> CGFloat {
     guard let card = row.subagent else { return 0 }
     let line = firstLine(traits)
-    if detailText(card).isEmpty { return line.row }
-    return max(40, line.top + line.height + 1 + ceil(detailFont(traits).lineHeight))
+    let group = groupHeight(card, traits: traits)
+    if detailText(card).isEmpty { return group + line.row }
+    return group + max(40, line.top + line.height + 1 + ceil(detailFont(traits).lineHeight))
   }
 
   static func hasDetail(_ row: ChatRow) -> Bool {
@@ -123,13 +140,14 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
     guard let card = row.subagent else { return 0 }
     let line = firstLine(traits)
     let detail = detailText(card).isEmpty ? 0 : 1 + ceil(detailFont(traits).lineHeight)
-    return height(row, width: 0, traits: traits) - line.top - line.height - detail
+    return height(row, width: 0, traits: traits) - groupHeight(card, traits: traits) - line.top - line.height - detail
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
     layoutGap()
-    guard let row, row.subagent != nil else { return }
+    guard let row, let card = row.subagent else { return }
+    let group = Self.groupHeight(card, traits: traitCollection)
     let width = contentView.bounds.width
     let line = Self.firstLine(traitCollection)
     let center = row.treeChild ? LodyDesign.Rail.chatChildCenter : LodyDesign.Rail.chatCenter
@@ -138,10 +156,11 @@ final class ChatSubagentCell: UICollectionViewCell, ChatGapCell {
     let available = max(0, width - x)
     let statusWidth = statusLabel.isHidden ? 0 : min(ceil(statusLabel.sizeThatFits(CGSize(width: width, height: line.height)).width), available * 0.45)
     let statusHeight = ceil(statusLabel.font.lineHeight)
-    let midY = line.top + line.height / 2
+    let midY = group + line.top + line.height / 2
     statusLabel.frame = CGRect(x: width - statusWidth, y: midY - statusHeight / 2, width: statusWidth, height: statusHeight)
-    titleLabel.frame = CGRect(x: x, y: line.top, width: max(0, statusLabel.frame.minX - x - 8), height: line.height)
+    titleLabel.frame = CGRect(x: x, y: group + line.top, width: max(0, statusLabel.frame.minX - x - 8), height: line.height)
     detailLabel.frame = CGRect(x: x, y: titleLabel.frame.maxY + 1, width: available, height: ceil(detailLabel.font.lineHeight))
+    groupLabel.frame = CGRect(x: x, y: 0, width: available, height: max(0, group - 6))
     let side = LodyDesign.Rail.chatGlyph
     glyph.frame = CGRect(x: center - ChatReadingColumn.cellMargin - side / 2, y: midY - side / 2, width: side, height: side)
     var path = UIBezierPath()

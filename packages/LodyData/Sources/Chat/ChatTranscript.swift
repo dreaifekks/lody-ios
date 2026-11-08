@@ -228,6 +228,7 @@ public struct ChatItem: Decodable, Sendable {
   public var isBackgrounded: Bool? = nil
   public var skipTranscript: Bool? = nil
   public var processDurationMs: Int? = nil
+  public var run: ChatSubagentRun? = nil
   public var isProcess: Bool { !isOrchestration && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   public var hidesFromTranscript: Bool {
     if type == "proposed_plan" {
@@ -236,7 +237,7 @@ public struct ChatItem: Decodable, Sendable {
     return type == "subagent_task" && skipTranscript == true
   }
   public var isLiveSubagent: Bool {
-    type == "subagent_task" && skipTranscript != true && (status == "in_progress" || status == "pending")
+    type == "subagent_task" && skipTranscript != true && ["in_progress", "pending"].contains(ChatSubagentCard.status(self))
   }
   public let image: ChatImage?
   public var file: ChatMessageAttachment? = nil
@@ -244,7 +245,7 @@ public struct ChatItem: Decodable, Sendable {
   public var isImage: Bool { type == "image" || type == "image_group" }
   public var isAttachment: Bool { isImage || type == "file" }
 
-  public init(meta: NoticeMeta? = nil, itemId: String, type: String, name: String?, text: String? = nil, kind: String?, title: String?, status: String?, path: String?, hasDetail: Bool?, permission: Permission?, entries: [Plan]?, description: String?, actor: String?, markdown: String? = nil, isLatest: Bool? = nil, lastToolName: String? = nil, summary: String? = nil, error: String? = nil, isBackgrounded: Bool? = nil, skipTranscript: Bool? = nil, processDurationMs: Int? = nil, image: ChatImage?, file: ChatMessageAttachment? = nil, images: [ChatImage]? = nil) {
+  public init(meta: NoticeMeta? = nil, itemId: String, type: String, name: String?, text: String? = nil, kind: String?, title: String?, status: String?, path: String?, hasDetail: Bool?, permission: Permission?, entries: [Plan]?, description: String?, actor: String?, markdown: String? = nil, isLatest: Bool? = nil, lastToolName: String? = nil, summary: String? = nil, error: String? = nil, isBackgrounded: Bool? = nil, skipTranscript: Bool? = nil, processDurationMs: Int? = nil, image: ChatImage?, file: ChatMessageAttachment? = nil, images: [ChatImage]? = nil, run: ChatSubagentRun? = nil) {
     self.meta = meta
     self.itemId = itemId
     self.type = type
@@ -267,10 +268,17 @@ public struct ChatItem: Decodable, Sendable {
     self.isBackgrounded = isBackgrounded
     self.skipTranscript = skipTranscript
     self.processDurationMs = processDurationMs
+    self.run = run
     self.image = image
     self.file = file
     self.images = images
   }
+}
+
+public struct ChatSubagentRun: Decodable, Sendable {
+  public var state: String
+  public var outputIncomplete: Bool? = nil
+  public var items: [ChatItem]? = nil
 }
 
 public struct ChatRow: Equatable, Sendable {
@@ -509,17 +517,17 @@ public struct ChatTranscript: Sendable {
           guard item.type == "subagent_task", item.skipTranscript != true else { return nil }
           return ChatTranscript.subagentRow(entry: entry, item: item)
         }
-      }
+      }.groupedSubagents()
     }
     let groups = Dictionary(grouping: entries.filter { $0.executionId != nil }, by: { $0.executionId! })
     if processStartID == "__execution__",
        let groupID = entries.first(where: { $0.id == processEntryID })?.executionId,
        let members = groups[groupID] {
-      return executionProcess(members)
+      return executionProcess(members).groupedSubagents()
     }
     if !processEntryID.isEmpty {
       return entryRows(processEntryID: processEntryID, processStartID: processStartID, now: now, turnStartedAt: turnStartedAt,
-        flatItems: processStartID == "__subagent__")
+        flatItems: processStartID == "__subagent__").groupedSubagents()
     }
     let ordinary = Dictionary(grouping: entryRows(now: now, turnStartedAt: turnStartedAt), by: \.entryID)
     var emitted = Set<String>()
@@ -561,7 +569,7 @@ public struct ChatTranscript: Sendable {
         return ChatTranscript.hangSubagents(ordinary[entry.id] ?? [])
       }
       return ChatTranscript.hangSubagents(result)
-    }
+    }.groupedSubagents()
   }
 
   private func executionResultIDs(_ entry: ChatEntry) -> Set<String> {
@@ -895,10 +903,15 @@ extension ChatTranscript {
     let tool = item.lastToolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let summary = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let error = item.error?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let running = item.status == "in_progress" || item.status == "pending"
+    let status = ChatSubagentCard.status(item)
+    let running = status == "in_progress" || status == "pending"
     var detail = ""
-    if item.status == "in_progress", !tool.isEmpty {
+    if running, let step = ChatSubagentCard.latestStep(item.run) {
+      detail = step
+    } else if item.status == "in_progress", !tool.isEmpty {
       detail = String.localizedStringWithFormat(String(localized: "native.chat.subagent.runningTool", bundle: .lodyData), String(describing: tool))
+    } else if status == "unknown" {
+      detail = String(localized: "native.chat.subagent.unknownDetail", bundle: .lodyData)
     } else if item.status == "completed" {
       detail = summary
     } else if item.status == "failed" {
@@ -907,7 +920,7 @@ extension ChatTranscript {
     let card = ChatSubagentCard(
       actor: actor.isEmpty ? String(localized: "native.chat.transcript.subtask", bundle: .lodyData) : actor,
       description: description == actor ? "" : description,
-      status: item.status ?? "pending",
+      status: status,
       detail: detail,
       background: item.isBackgrounded == true
     )
@@ -918,7 +931,7 @@ extension ChatTranscript {
       text: [card.actor, card.description, detail].filter { !$0.isEmpty }.joined(separator: " · "),
       itemID: item.itemId,
       running: running,
-      attention: item.status == "failed"
+      attention: status == "failed"
     )
     row.symbol = "point.3.connected.trianglepath.dotted"
     row.actionable = true
@@ -933,6 +946,36 @@ public struct ChatSubagentCard: Equatable, Sendable {
   public var status: String
   public var detail: String
   public var background: Bool
+  public var groupTitle = ""
+
+  public static let runStatuses = ["running": "in_progress", "pending": "pending", "completed": "completed",
+    "failed": "failed", "cancelled": "cancelled", "unknown": "unknown"]
+
+  public static func status(_ item: ChatItem) -> String {
+    if let state = item.run?.state, let mapped = runStatuses[state] { return mapped }
+    return item.status ?? "pending"
+  }
+
+  public static func latestStep(_ run: ChatSubagentRun?) -> String? {
+    guard let last = run?.items?.last else { return nil }
+    switch last.type {
+    case "tool_call": return [last.title, last.path].compactMap { $0 }.first { !$0.isEmpty }
+    case "thought": return String(localized: "native.chat.transcript.activity.thinking", bundle: .lodyData)
+    case "text": return last.text?.split(separator: "\n").last.map(String.init)
+    default: return nil
+    }
+  }
+
+  public static func groupTitle(_ cards: [ChatSubagentCard]) -> String {
+    var parts = [String.localizedStringWithFormat(String(localized: "native.chat.subagent.group", bundle: .lodyData), cards.count)]
+    for (status, key) in [("in_progress", "groupRunning"), ("completed", "groupDone"), ("failed", "groupFailed")] {
+      let count = cards.filter { $0.status == status || (status == "in_progress" && $0.status == "pending") }.count
+      if count > 0 {
+        parts.append(String.localizedStringWithFormat(String(localized: String.LocalizationValue("native.chat.subagent." + key), bundle: .lodyData), count))
+      }
+    }
+    return parts.joined(separator: " · ")
+  }
 
   public init(actor: String, description: String, status: String, detail: String, background: Bool) {
     self.actor = actor
@@ -940,6 +983,22 @@ public struct ChatSubagentCard: Equatable, Sendable {
     self.status = status
     self.detail = detail
     self.background = background
+  }
+}
+
+extension Array where Element == ChatRow {
+  fileprivate func groupedSubagents() -> [ChatRow] {
+    var rows = self
+    var start = 0
+    while start < rows.count {
+      var end = start
+      while end < rows.count, rows[end].kind == "subagent_task", rows[end].entryID == rows[start].entryID { end += 1 }
+      if end - start >= 2 {
+        rows[start].subagent?.groupTitle = ChatSubagentCard.groupTitle(rows[start..<end].compactMap(\.subagent))
+      }
+      start = Swift.max(end, start + 1)
+    }
+    return rows
   }
 }
 

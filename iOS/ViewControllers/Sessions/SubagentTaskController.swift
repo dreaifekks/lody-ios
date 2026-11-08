@@ -1,10 +1,15 @@
+import LodyCore
 import UIKit
 
 @MainActor
 final class SubagentTaskController: UIViewController {
   let entryId: String
   let itemId: String
-  private var item: [String: Any]
+  private let store: SubagentRunStore
+  private var item: [String: Any] { store.displayedItem }
+  private let runMeta = UILabel()
+  private let incomplete = UILabel()
+  private let runHeader = UIStackView()
   private let chat = LodyChatView(frame: .zero)
   private lazy var copyItem: UIBarButtonItem = {
     let copy = UIBarButtonItem(image: UIImage(systemName: "doc.on.doc"), primaryAction: UIAction { [weak self] _ in self?.copyResult() })
@@ -16,8 +21,9 @@ final class SubagentTaskController: UIViewController {
   var onFile: ((String, Int) -> Void)?
   var onLink: ((String) -> Void)?
 
-  init(entryId: String, item: [String: Any]) {
-    self.entryId = entryId; self.item = item; itemId = item["itemId"] as! String
+  init(sessionId: String, entryId: String, item: [String: Any], generation: Int, service: ItemDetailService) {
+    self.entryId = entryId; itemId = item["itemId"] as! String
+    store = SubagentRunStore(sessionId: sessionId, entryId: entryId, item: item, generation: generation, service: service)
     super.init(nibName: nil, bundle: nil)
     chat.setProcessEntryID(entryId); chat.setProcessStartID("__subagent__"); chat.setComposerState("{}")
     chat.setEmptyText(String(localized: "process.empty", bundle: .lody))
@@ -34,13 +40,34 @@ final class SubagentTaskController: UIViewController {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
 
+  isolated deinit { store.finish() }
+
   var pageTitle: String {
     (item["description"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? actor
   }
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    chat.frame = view.bounds; chat.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.addSubview(chat)
+    runHeader.axis = .vertical; runHeader.spacing = 4
+    for label in [runMeta, incomplete] {
+      label.font = .preferredFont(forTextStyle: .footnote)
+      label.textColor = .secondaryLabel; label.numberOfLines = 0
+      label.adjustsFontForContentSizeCategory = true
+      runHeader.addArrangedSubview(label)
+    }
+    runMeta.accessibilityIdentifier = "subagent-run-meta"
+    incomplete.accessibilityIdentifier = "subagent-run-incomplete"
+    incomplete.text = String(localized: "subagent.run.incomplete", bundle: .lody)
+    for child in [runHeader, chat] as [UIView] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
+    NSLayoutConstraint.activate([
+      runHeader.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+      runHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+      runHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+      chat.topAnchor.constraint(equalTo: runHeader.bottomAnchor), chat.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+      chat.leadingAnchor.constraint(equalTo: view.leadingAnchor), chat.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+    ])
+    store.changed = { [weak self] in self?.render() }
+    store.start()
     render()
   }
 
@@ -50,22 +77,33 @@ final class SubagentTaskController: UIViewController {
   }
 
   func update(_ json: String) {
-    if let next = SessionController.item(in: json, entryId: entryId, itemId: itemId) { item = next }
-    if isViewLoaded { render() }
+    if let next = SessionController.item(in: json, entryId: entryId, itemId: itemId) { store.update(next) }
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if SettingsPage.leaving(self) { store.finish() }
+  }
+
+  func runItem(_ id: String) -> [String: Any]? {
+    ((item["run"] as? [String: Any])?["items"] as? [[String: Any]])?.first { $0["itemId"] as? String == id }
   }
 
   private var actor: String {
     (item["actor"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "native.chat.transcript.subtask", bundle: .lody)
   }
 
-  private var status: String { item["status"] as? String ?? "" }
+  private var status: String {
+    if let run = item["run"] as? [String: Any] { return ChatSubagentCard.runStatuses[run["state"] as? String ?? ""] ?? "unknown" }
+    return item["status"] as? String ?? "pending"
+  }
 
   private var result: String {
     (item[status == "failed" ? "error" : "summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private var caption: String {
-    let key = ["pending": "pending", "in_progress": "running", "completed": "completed", "failed": "failed"][status]
+    let key = ["pending": "pending", "in_progress": "running", "completed": "completed", "failed": "failed", "cancelled": "cancelled", "unknown": "unknown"][status]
     var labels = [actor]
     if let key { labels.append(String(localized: String.LocalizationValue("native.chat.subagent." + key), bundle: .lody)) }
     if item["isBackgrounded"] as? Bool == true { labels.append(String(localized: "native.chat.subagent.background", bundle: .lody)) }
@@ -93,6 +131,22 @@ final class SubagentTaskController: UIViewController {
   }
 
   private func render() {
+    guard isViewLoaded else { return }
+    let run = item["run"] as? [String: Any]
+    var metadata: [String] = []
+    if let model = run?["modelId"] as? String { metadata.append(model) }
+    if let tokens = run?["totalTokens"] as? Double {
+      let value = tokens >= 1000 ? String(format: "%.1fk", tokens / 1000) : String(format: "%g", tokens)
+      metadata.append(String.localizedStringWithFormat(String(localized: "subagent.run.tokens", bundle: .lody), value))
+    }
+    if let tools = run?["toolCallCount"] as? Int {
+      metadata.append(String.localizedStringWithFormat(String(localized: "subagent.run.tools", bundle: .lody), tools))
+    }
+    if let percent = run?["contextUsagePercent"] as? Double {
+      metadata.append(String.localizedStringWithFormat(String(localized: "subagent.run.context", bundle: .lody), String(format: "%g", percent)))
+    }
+    runMeta.text = metadata.joined(separator: " · "); runMeta.isHidden = metadata.isEmpty
+    incomplete.isHidden = run?["outputIncomplete"] as? Bool != true
     var items: [[String: Any]]
     var state: String
     if let run = item["run"] as? [String: Any] {
@@ -109,8 +163,12 @@ final class SubagentTaskController: UIViewController {
     let resultID = resultItem?["itemId"] as? String ?? itemId + ":result"
     chat.itemAccessibilityIDs = result.isEmpty ? [:] : [resultID: "subagent-detail-result"]
     let entry: [String: Any] = ["id": entryId, "role": "assistant", "status": state,
-      "finished": !["pending", "running", "in_progress"].contains(state), "items": items]
+      "finished": ["completed", "failed", "cancelled"].contains(state), "items": items]
     let data = try! JSONSerialization.data(withJSONObject: [entry])
+    if run != nil {
+      let empty = ["pending", "running"].contains(state) ? String(localized: "subagent.run.silent", bundle: .lody) : ""
+      chat.setEmptyText(empty)
+    }
     chat.setEntries(String(decoding: data, as: UTF8.self)); chat.scheduleUpdate()
     if isViewLoaded, view.window != nil { applyHeader() }
   }

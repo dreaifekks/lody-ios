@@ -70,7 +70,8 @@ extension SessionController {
   }
 
   private func activity(entryId: String, itemId: String, from source: UIViewController? = nil) {
-    let item = Self.item(in: feed?.state.entriesJSON ?? "[]", entryId: entryId, itemId: itemId)
+    let item = (source as? SubagentTaskController)?.runItem(itemId)
+      ?? Self.item(in: feed?.state.entriesJSON ?? "[]", entryId: entryId, itemId: itemId)
     if item?["type"] as? String == "system_notice", item?["name"] as? String == "chat_failed" {
       open("agent-error", item?["meta"] as? [String: Any] ?? [:], present: true, from: source)
       return
@@ -95,7 +96,7 @@ extension SessionController {
       return
     }
     if item["type"] as? String == "subagent_task" {
-      let page = SubagentTaskController(entryId: entryId, item: item)
+      let page = SubagentTaskController(sessionId: sessionId, entryId: entryId, item: item, generation: feed?.generation ?? 0, service: itemDetailService)
       subagentPage = page
       page.onActivity = { [weak self, weak page] entry, item in self?.activity(entryId: entry, itemId: item, from: page) }
       page.onFile = { [weak self, weak page] path, line in self?.openFile(path, line: line, from: page) }
