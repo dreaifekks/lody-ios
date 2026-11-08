@@ -62,6 +62,7 @@ struct UsageWindow: Codable, Equatable, Sendable {
 struct AgentQuota: Codable, Equatable, Sendable {
   var id: String
   var provider: String
+  var configId: String?
   var name: String?
   var windows: [UsageWindow]
 }
@@ -96,7 +97,7 @@ enum RemoteSettingsFailure {
 
 enum RemoteSettingsSections {
   private static let paceTolerance = 0.02
-  private static let agentNames = ["claude": "Claude Code", "codex": "Codex", "kimi": "Kimi Code", "kimi-code": "Kimi Code",
+  private static let agentNames = ["antigravity-acp": "Antigravity", "claude": "Claude Code", "codex": "Codex", "kimi": "Kimi Code", "kimi-code": "Kimi Code",
                                    "opencode": "OpenCode"]
   private static let iconKinds: Set<String> = [
     "claude", "codex", "kimi", "grok", "deepseek", "minimax", "glm", "mimo", "opencode", "gemini", "openai",
@@ -105,7 +106,7 @@ enum RemoteSettingsSections {
   static func agentName(_ type: String) -> String { agentNames[type] ?? type }
 
   static func agentIcon(_ type: String) -> String {
-    let kind = ["claude-p": "claude", "kimi-code": "kimi"][type] ?? type
+    let kind = ["antigravity-acp": "gemini", "claude-p": "claude", "kimi-code": "kimi"][type] ?? type
     return iconKinds.contains(kind) ? "lody-agent-\(kind)" : ""
   }
 
@@ -158,9 +159,13 @@ enum RemoteSettingsSections {
   static func rings(_ item: RemoteSetting, _ usage: AgentUsage?, now: Double) -> [LodyListVisualItem] {
     guard let usage, let config = usage.configs.first(where: { $0.id == item.id }), config.eligible else { return [] }
     if let detail = item.detail, !detail.isEmpty, detail != config.provider { return [] }
-    return usage.quotas.filter { $0.provider == config.provider }.flatMap { quota in
+    let scoped = usage.quotas.filter { $0.configId == config.id }
+    let quotas = scoped.isEmpty ? usage.quotas.filter { $0.configId == nil && $0.provider == config.provider } : scoped
+    return quotas.filter { config.provider != "antigravity-acp" || ["gemini", "argon"].contains($0.id) }.flatMap { quota in
       quota.windows.enumerated().map { index, window in
-        let name = quota.name.flatMap { $0.isEmpty ? nil : $0 } ?? agentNames[config.provider] ?? config.provider
+        let name: String
+        if quota.id == "argon" { name = "Argon" }
+        else { name = quota.name.flatMap { $0.isEmpty ? nil : $0 } ?? agentNames[config.provider] ?? config.provider }
         let label = [name, windowDuration(window.duration), window.label ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         let used = min(1, max(0, window.usedPercent / 100))
         let value = String.localizedStringWithFormat(String(localized: "settings.usage.left", bundle: .lody), String(describing: Int(((1 - used) * 100).rounded())))

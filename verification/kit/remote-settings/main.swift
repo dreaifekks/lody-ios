@@ -126,3 +126,22 @@ let body = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteSe
 precondition((body["edit"] as! [String: Any])["enabledByDefault"] == nil && body["remove"] == nil, "Only the kind's fields are sent")
 
 print("PASS: remote settings sections, agent usage rings and pace, saved snapshots, failure mapping")
+
+let scopedUsage = try! JSONDecoder().decode(AgentUsage.self, from: Data(#"{"configs":[{"id":"one","name":"One","provider":"codex","eligible":true},{"id":"two","name":"Two","provider":"codex","eligible":true},{"id":"legacy","name":"Legacy","provider":"codex","eligible":true}],"quotas":[{"id":"one-limit","provider":"codex","configId":"one","windows":[{"usedPercent":13}]},{"id":"two-limit","provider":"codex","configId":"two","windows":[{"usedPercent":81}]},{"id":"legacy-limit","provider":"codex","windows":[{"usedPercent":29}]}]}"#.utf8))
+let oneRings = RemoteSettingsSections.rings(agent("one"), scopedUsage, now: now)
+let twoRings = RemoteSettingsSections.rings(agent("two"), scopedUsage, now: now)
+let legacyRings = RemoteSettingsSections.rings(agent("legacy"), scopedUsage, now: now)
+precondition(oneRings.map(\.fraction) == [0.13] && twoRings.map(\.fraction) == [0.81], "Different accounts on one provider must not borrow each other's quota")
+precondition(legacyRings.map(\.fraction) == [0.29], "Only unscoped old quotas can satisfy a missing config")
+var missingUsage = scopedUsage
+missingUsage.quotas.removeAll { $0.configId == nil }
+precondition(RemoteSettingsSections.rings(agent("legacy"), missingUsage, now: now).isEmpty, "Another config's quota is never a fallback")
+let antigravity = AgentUsage(configs: [.init(id: "agy", name: "", provider: "antigravity-acp", eligible: true)], quotas: [
+  .init(id: "gemini", provider: "antigravity-acp", configId: "agy", name: "Gemini", windows: [.init(usedPercent: 17)]),
+  .init(id: "argon", provider: "antigravity-acp", configId: "agy", name: "Old name", windows: [.init(usedPercent: 62)]),
+  .init(id: "other", provider: "antigravity-acp", configId: "agy", windows: [.init(usedPercent: 99)]),
+])
+let agyRings = RemoteSettingsSections.rings(agent("agy", detail: "antigravity-acp"), antigravity, now: now)
+precondition(agyRings.map(\.fraction) == [0.17, 0.62] && agyRings.map(\.label) == ["Gemini · settings.usage.window", "Argon · settings.usage.window"])
+precondition(RemoteSettingsSections.agentName("antigravity-acp") == "Antigravity" && RemoteSettingsSections.agentIcon("antigravity-acp") == "lody-agent-gemini")
+print("PASS: decoded config quotas stay scoped; legacy provider fallback and Antigravity Gemini/Argon parity")
