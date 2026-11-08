@@ -145,6 +145,11 @@ class SessionController: UIViewController {
     }
   }
 
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if SettingsPage.leaving(self) { simulator?.finish() }
+  }
+
   func render() {
     guard isViewLoaded else { return }
     let state = source.state

@@ -12,14 +12,20 @@ enum OutboxError: Error { case scopeExpired }
   var calls: [String] = []
   var pending: CheckedContinuation<SimulatorService.Reply, Error>?
   var deferResume = false
+  var deferList = false
+  var invalidate: (() -> Void)?
+  var releases = 0
   let device = SessionSimulator.Device(udid: "phone", name: "Phone", runtime: "iOS", deviceType: "iPhone", state: "Booted", available: true, occupancy: .available)
   func ready(_ operation: String) -> SimulatorService.Reply {
     .init(success: true, preview: .init(operationId: operation, udid: "phone", phase: .ready, transport: .remote, viewerUrl: "lody-simulator-fixture://stream"))
   }
   var service: SimulatorService {
-    .init(call: { [self] command in
+    .init(isLAN: true, release: { [self] in releases += 1; invalidate?() }, whenReleased: { [self] in invalidate = $0 }, call: { [self] command in
       switch command {
-      case .list: calls.append("list"); return .init(success: true, devices: [device])
+      case .list:
+        calls.append("list")
+        if deferList { return try await withCheckedThrowingContinuation { pending = $0 } }
+        return .init(success: true, devices: [device])
       case .start: calls.append("start"); return ready("new")
       case .status:
         calls.append("status")
@@ -51,7 +57,19 @@ enum OutboxError: Error { case scopeExpired }
     let accepted = try await stale.value
     precondition(!accepted && store.preview?.operationId == "new")
     precondition(fixture.calls.filter { $0 == "start" }.count == 1)
+    fixture.deferResume = false; fixture.deferList = true; fixture.pending = nil
+    let duringList = Task { try await store.resume() }
+    while fixture.pending == nil { await Task.yield() }
+    let ownership = store.ownership
+    fixture.invalidate?()
+    fixture.pending!.resume(returning: .init(success: true, devices: [fixture.device]))
+    let listAccepted = try await duringList.value
+    precondition(!listAccepted && store.sourceJSON.isEmpty && store.ownership > ownership)
+    fixture.deferList = false
+    store.start(fixture.device)
+    while store.phase != "ready" { await Task.yield() }
     store.finish()
-    print("PASS: resume discovers the device, floating preview hides independently, stale status cannot replace a new start, writes are not replayed")
+    precondition(fixture.releases == 2 && store.phase == "closed" && store.sourceJSON.isEmpty)
+    print("PASS: resume discovers the device, floating preview hides independently, stale status cannot replace a new start, writes are not replayed; runtime release during list cannot adopt and finish releases/clears LAN preview")
   }
 }

@@ -7,18 +7,13 @@ public struct SimulatorService: Sendable {
   public typealias Reply = RuntimeContract.IosSimulatorControlResult
   public var call: @MainActor (Command) async throws -> Reply
 
-  public static func live(workspaceId: String, userId: String, sessionId: String) -> Self {
-    Self(call: { command in
-      guard let runtime = DataRuntime.current, runtime.workspace == workspaceId, runtime.userId == userId else {
-        throw OutboxError.scopeExpired
-      }
-      return try await runtime.perform(RuntimeContract.Calls.IosSimulatorControl.self,
-        .init(workspaceId: workspaceId, sessionId: sessionId, userId: userId, command: command))
-    })
-  }
+  public var release: @MainActor () -> Void
+  public let isLAN: Bool
+  public var canReuse: @MainActor () -> Bool
+  public var whenReleased: @MainActor (@escaping @MainActor () -> Void) -> Void
 
-  public init(call: @escaping @MainActor (Command) async throws -> Reply) {
-    self.call = call
+  public init(isLAN: Bool = false, release: @escaping @MainActor () -> Void = {}, whenReleased: @escaping @MainActor (@escaping @MainActor () -> Void) -> Void = { _ in }, canReuse: @escaping @MainActor () -> Bool = { true }, call: @escaping @MainActor (Command) async throws -> Reply) {
+    self.isLAN = isLAN; self.release = release; self.whenReleased = whenReleased; self.canReuse = canReuse; self.call = call
   }
 }
 
@@ -32,6 +27,7 @@ public final class SessionSimulator {
   public private(set) var phase = "closed"
   public private(set) var message = ""
   public private(set) var preview: RuntimeContract.IosSimulatorControlResultPreview?
+  public private(set) var ownership = 0
   private var version = 0
   private var task: Task<Void, Never>?
   private var watchers: [Watcher] = []
@@ -50,9 +46,21 @@ public final class SessionSimulator {
   }
   public var previewJSON: String { hidden == preview?.operationId ? "" : sourceJSON }
 
-  public init(sessionId: String, service: SimulatorService) { self.sessionId = sessionId; self.service = service }
-  isolated deinit { task?.cancel() }
-  public func finish() { version += 1; task?.cancel(); task = nil }
+  public init(sessionId: String, service: SimulatorService) {
+    self.sessionId = sessionId; self.service = service
+    service.whenReleased { [weak self] in self?.released() }
+  }
+  isolated deinit { task?.cancel(); service.release() }
+  private func released() {
+    ownership += 1
+    version += 1; task?.cancel(); task = nil
+    preview = nil; phase = "closed"; publish()
+  }
+  public func finish() {
+    ownership += 1
+    version += 1; task?.cancel(); task = nil; service.release()
+    if service.isLAN { preview = nil; phase = "closed"; publish() }
+  }
   public func watch(_ owner: AnyObject, changed: @escaping () -> Void) { watchers.append(.init(owner: owner, changed: changed)) }
   private func publish() { watchers.removeAll { $0.owner == nil }; for watcher in watchers { watcher.changed() } }
   public func hidePreview() { hidden = preview?.operationId; publish() }
@@ -66,7 +74,8 @@ public final class SessionSimulator {
   public func resume() async throws -> Bool {
     version += 1
     let token = version
-    phase = "connecting"; message = ""; publish()
+    if !running { phase = "connecting" }
+    message = ""; publish()
     do {
       let reply = try await request(.status(.init()))
       guard token == version else { return false }
@@ -101,6 +110,7 @@ public final class SessionSimulator {
   public func stop() async throws {
     version += 1; task?.cancel(); task = nil
     let operationId = preview?.operationId
+    service.release()
     preview = nil; phase = "closed"; publish()
     guard let operationId else { return }
     _ = try await request(.stop(.init(operationId: operationId)))

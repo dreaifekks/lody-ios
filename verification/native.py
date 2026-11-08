@@ -59,6 +59,7 @@ checks = {
     'project-index': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Views/List/LodyListState.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionDeletion.swift', 'iOS/Models/Sessions/SessionRows.swift', 'iOS/Models/Home/Inbox/InboxProjectNavigation.swift', 'iOS/Models/Home/Inbox/InboxSections.swift', 'Sessions/SessionEnvelope.swift', 'Sessions/SessionPermission.swift'],
     'ai-usage': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Views/List/LodyListState.swift', 'Settings/AIUsageModels.swift', 'iOS/Models/Settings/AIUsageSections.swift'],
     'settings-roles': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Models/Settings/PromptShortcutSections.swift', 'iOS/Models/Settings/AgentRoleSections.swift'],
+    'lan-simulator': ['Auth/LanInvite.swift', 'LAN/LanMemberProtocol.swift', 'LAN/LanMemberChannel.swift', 'LAN/LanSimulator.swift', 'LAN/LanSimulatorTunnel.swift', 'Cloud/DataRuntime+Simulator.swift', 'Sessions/SessionSimulator.swift', 'Sessions/SessionCatalog.swift'],
     'lan-files': ['LAN/LanMemberProtocol.swift', 'LAN/LanMemberChannel.swift', 'LAN/LanFileChannel.swift'],
     'lan-files-cache': ['LAN/LanImageCache.swift'],
     'lan-terminal': ['LAN/LanMemberProtocol.swift', 'LAN/LanTerminalLink.swift', 'Sessions/SessionCatalog.swift'],

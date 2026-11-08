@@ -3,13 +3,25 @@ import SafariServices
 import UIKit
 
 extension SessionController {
+  var isLANSession: Bool { LanInvite.isWorkspace(source.state.workspaceId) }
+
   func prepareSimulator(_ state: SessionListState, _ session: SessionItem) {
-    guard !LanComposerPolicy.isLAN, simulator == nil, state.catalog.machineSimulators[session.machineId] != nil else { return }
+    guard state.catalog.simulatorAvailability(for: session, lan: isLANSession) != nil else {
+      let old = simulator; simulator = nil; old?.finish(); chat.setSimulatorPreview("")
+      return
+    }
+    guard simulator == nil else { return }
     let store = SessionSimulator(sessionId: sessionId,
-      service: simulatorService ?? .live(workspaceId: state.workspaceId, userId: state.userId, sessionId: sessionId))
+      service: simulatorService ?? .live(workspaceId: state.workspaceId, userId: state.userId, sessionId: sessionId, target: { [source, sessionId] in
+        let state = source.state
+        guard let session = state.catalog.session(sessionId),
+          state.catalog.simulatorAvailability(for: session, lan: true) == "available",
+          let endpoint = state.catalog.machineTerminals[session.machineId] else { return nil }
+        return (endpoint, session.machineId)
+      }))
     simulator = store
     store.watch(self) { [weak self, weak store] in
-      guard let self, let store else { return }
+      guard let self, let store, simulator === store else { return }
       chat.setSimulatorPreview(store.previewJSON)
       renderComposer()
       render()
@@ -18,9 +30,8 @@ extension SessionController {
   }
 
   var simulatorChip: [String: Any]? {
-    guard !LanComposerPolicy.isLAN else { return nil }
     guard let session = source.state.catalog.session(sessionId),
-      source.state.catalog.machineSimulators[session.machineId] == "available", let simulator,
+      source.state.catalog.simulatorAvailability(for: session, lan: isLANSession) == "available", let simulator,
       session.iosSimulatorPreviewRequestId != nil || simulator.running else { return nil }
     let name = simulator.running ? simulator.name : String(localized: "simulator.menu", bundle: .lody)
     var chip: [String: Any] = ["label": name, "symbol": "iphone", "state": simulator.connecting ? "connecting" : "ready",
@@ -30,9 +41,8 @@ extension SessionController {
   }
 
   func simulatorMenu() -> [UIMenuElement] {
-    guard !LanComposerPolicy.isLAN else { return [] }
     guard let session = source.state.catalog.session(sessionId),
-      let availability = source.state.catalog.machineSimulators[session.machineId] else { return [] }
+      let availability = source.state.catalog.simulatorAvailability(for: session, lan: isLANSession) else { return [] }
     let action = UIAction(title: String(localized: "simulator.menu", bundle: .lody), image: UIImage(systemName: "iphone")) { [weak self] _ in self?.openSimulator() }
     if availability == "upgrade-required" { action.subtitle = String(localized: "simulator.upgradeRequired", bundle: .lody) }
     else if let simulator, simulator.running { action.subtitle = simulator.phaseText + " · " + simulator.name }
@@ -40,24 +50,35 @@ extension SessionController {
   }
 
   func openSimulator() {
-    guard !LanComposerPolicy.isLAN, !openingSimulator, let session = source.state.catalog.session(sessionId), let simulator else { return }
-    if source.state.catalog.machineSimulators[session.machineId] == "upgrade-required" {
+    guard !openingSimulator, let session = source.state.catalog.session(sessionId),
+      let availability = source.state.catalog.simulatorAvailability(for: session, lan: isLANSession), let simulator else { return }
+    if availability == "upgrade-required" {
       let alert = UIAlertController(title: String(localized: "simulator.menu", bundle: .lody), message: String(localized: "simulator.upgradeRequired", bundle: .lody), preferredStyle: .alert)
       alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default)); present(alert, animated: true); return
     }
+    let ownership = simulator.ownership
+    let scope = source.state.key
     openingSimulator = true
     Task { [weak self] in
       guard let self else { return }
       defer { openingSimulator = false }
       do {
         simulator.revealPreview()
-        if simulator.running { showSimulator(); return }
-        if try await simulator.resume() { showSimulator(); return }
+        if simulator.connecting { showSimulator(); return }
+        if simulator.running, simulator.service.canReuse() { showSimulator(); return }
+        let resumed = try await simulator.resume()
+        guard viewIfLoaded?.window != nil, source.state.key == scope, simulator.ownership == ownership else { return }
+        if resumed { showSimulator(); return }
         let picker = SimulatorPickerController(store: simulator) { [weak self] device in
-          simulator.start(device); self?.showSimulator()
+          guard let self, viewIfLoaded?.window != nil, source.state.key == scope,
+                simulator.ownership == ownership else { return }
+          simulator.start(device); showSimulator()
         }
         LodyShell.shared.present(picker, title: String(localized: "simulator.choose", bundle: .lody), grabber: true)
-      } catch { toolError(error) }
+      } catch {
+        guard viewIfLoaded?.window != nil, source.state.key == scope, simulator.ownership == ownership else { return }
+        toolError(error)
+      }
     }
   }
   private func showSimulator() {
@@ -99,7 +120,7 @@ extension SessionController {
 
 extension SessionController {
   var browserChip: [String: Any]? {
-    guard AuthSession.shared.snapshot.account?.lan == nil, let preview = feed?.state.preview else { return nil }
+    guard !isLANSession, AuthSession.shared.snapshot.account?.lan == nil, let preview = feed?.state.preview else { return nil }
     var actions: [[String: Any]] = [["id": "copy", "title": String(localized: "session.preview.copyLink", bundle: .lody), "symbol": "link"]]
     if preview.active { actions.append(["id": "stop", "title": String(localized: "session.preview.stop", bundle: .lody), "symbol": "stop.circle", "destructive": true]) }
     return ["label": browserBusy ? String(localized: "session.preview.connecting", bundle: .lody) : preview.label,
