@@ -207,3 +207,50 @@ test(
     }
   },
 );
+
+test(
+  'app regeneration preserves scoped tailnet HTTP policy and fork push identity',
+  { skip: !available },
+  async () => {
+    const root = await fixture();
+    try {
+      const source = await readFile(
+        new URL('../../iOS/Info.plist', import.meta.url),
+        'utf8',
+      );
+      await writeFile(join(root, 'iOS/Info.plist'), source);
+      for (const [environment, expectedAppId] of [
+        [{}, 'e383bf31-7c8e-4641-b3f6-3486e77b9a82'],
+        [{ LODY_BUNDLE_ID: 'com.dreaife.lody' }, ''],
+        [
+          {
+            LODY_BUNDLE_ID: 'com.dreaife.lody',
+            LODY_ONESIGNAL_APP_ID: 'explicit-provider',
+          },
+          'explicit-provider',
+        ],
+      ]) {
+        const result = generate(root, environment);
+        assert.equal(result.status, 0, result.stderr);
+        const info = plist(join(root, '.generated/Lody/Info.plist'));
+        assert.equal(info.LodyOneSignalAppId, expectedAppId);
+        const ats = info.NSAppTransportSecurity;
+        assert.equal(ats.NSAllowsArbitraryLoads, false);
+        assert.equal(ats.NSAllowsLocalNetworking, true);
+        assert.deepEqual(ats.NSExceptionDomains, {
+          '100.64.0.0/10': { NSExceptionAllowsInsecureHTTPLoads: true },
+          'ts.net': {
+            NSIncludesSubdomains: true,
+            NSExceptionAllowsInsecureHTTPLoads: true,
+          },
+        });
+        assert.equal(
+          await readFile(join(root, 'iOS/Info.plist'), 'utf8'),
+          source,
+        );
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

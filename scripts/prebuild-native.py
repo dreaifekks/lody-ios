@@ -14,8 +14,11 @@ def generate(root, environment):
     build = environment.get('BUILD_NUMBER', info['CFBundleVersion'])
     info['CFBundleShortVersionString'] = version
     info['CFBundleVersion'] = build
+    bundle = environment.get('LODY_BUNDLE_ID', 'app.innei.lody')
     if 'LODY_ONESIGNAL_APP_ID' in environment:
         info['LodyOneSignalAppId'] = environment['LODY_ONESIGNAL_APP_ID']
+    elif bundle != 'app.innei.lody':
+        info['LodyOneSignalAppId'] = ''
     (generated / 'Lody/Info.plist').write_bytes(plistlib.dumps(info))
     spec = {
         'include': ['project.yml'],
@@ -24,7 +27,6 @@ def generate(root, environment):
     for key in ('LODY_BUNDLE_ID', 'LODY_APPLE_TEAM_ID'):
         if key in environment:
             spec['settings']['base'][key] = environment[key]
-    bundle = environment.get('LODY_BUNDLE_ID', 'app.innei.lody')
     profiles = json.loads(environment.get('IOS_PROFILE_MAP', '{}'))
     if profiles:
         # Release signing is another XcodeGen input, never a post-generation project edit.
