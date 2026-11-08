@@ -10,6 +10,7 @@ enum DebugSceneFactory {
     "terminal-preview": { params in TerminalFixtureController(scenario: params["scenario"] as? String ?? "ready") },
     "answer-folding": { params in AnswerFoldingPreviewController(scenario: params["scenario"] as? String ?? "postscript") },
     "continue-marker": { params in ContinueMarkerPreviewController(scenario: params["scenario"] as? String ?? "settled") },
+    "message-cost": { params in MessageCostPreviewController(scenario: params["scenario"] as? String ?? "tiny") },
     "subagent-run": { _ in SubagentRunPreviewController() },
     "message-links": { params in MessageLinksPreviewController(scenario: params["scenario"] as? String ?? "session") },
     "lan-chat-board": { _ in LanChatPreviewController(board: true) },

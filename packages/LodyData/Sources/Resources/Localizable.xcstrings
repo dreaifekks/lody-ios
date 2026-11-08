@@ -1,6 +1,40 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "message.details.cost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cost estimate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预估费用"
+          }
+        }
+      }
+    },
+    "message.details.costHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated from the provider’s reported usage, not an invoice."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据提供方报告的用量估算，非账单金额。"
+          }
+        }
+      }
+    },
     "native.chat.message.continued": {
       "extractionState": "manual",
       "localizations": {
