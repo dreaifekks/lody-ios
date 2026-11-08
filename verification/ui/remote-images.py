@@ -74,13 +74,24 @@ for count, href, row, name in [(3, HTTP, 'remote-images:answer', 'http'),
     ui.wait(lambda items: probe(items).get('host') == 'fixture', 'Large preview did not close')
 print('PASS: production Markdown HTTP/HTTPS and plan image taps, same-href ordinary link, file icon range zero, literal code, share JPEG, no public bearer and protected references blocked')
 
+def table_link(row, host):
+    before = probe()
+    count = len(before['links'])
+    tap(target(HTTP, False, row=row))
+    def routed(items):
+        added = probe(items).get('links', [])[count:]
+        return bool(added) and all(href == HTTP for href in added)
+    ui.wait(routed, 'Table link did not route its own href')
+    after = probe()
+    assert after['host'] == host and after['files'] == before['files'], after
+    assert after['requests'] == before['requests'] and not after['galleryReady'], after
+
 # A cell-local range can be much larger than the body attachment label.
 ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title='External images'), '--post-delay', '.4')
 ui.wait(lambda items: not probe(items), 'Body fixture did not close')
 ui.open_case('remote-images-table')
 ui.wait(lambda items: probe(items).get('scenario') == 'table' and probe(items).get('cloudReferenceBlocked'), 'Table fixture did not load')
-tap(target(HTTP, False))
-ui.wait(lambda items: probe(items).get('links') == [HTTP], 'Table ordinary link was mistaken for an outer image')
+table_link('remote-images:answer', 'fixture')
 tap(target(HTTPS, True))
 ui.wait(lambda items: probe(items).get('galleryReady'), 'Inline table picture did not open')
 public_requests(1)
@@ -89,8 +100,7 @@ ui.axe('tap', '--label', catalog.text('native.chat.image.closePreview'), '--post
 ui.wait(lambda items: probe(items).get('host') == 'fixture', 'Inline table image did not close')
 ui.axe('tap', '--label', 'Expand', '--post-delay', '.5')
 ui.wait(lambda items: probe(items).get('host') == 'table', 'Expanded table did not open')
-tap(target(HTTP, False, row=''))
-ui.wait(lambda items: probe(items).get('links') == [HTTP, HTTP], 'Expanded table ordinary link was misrouted')
+table_link('', 'table')
 tap(target(HTTPS, True, row=''))
 ui.wait(lambda items: probe(items).get('galleryReady'), 'Expanded table picture did not open')
 public_requests(2)

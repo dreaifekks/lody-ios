@@ -120,7 +120,8 @@ extension LodyChatView {
       openMessageLink(source)
       return
     }
-    guard let controller = LodyShell.shared.presenter, controller.presentedViewController == nil else { return }
+    guard imagePreview == nil, let controller = LodyShell.shared.presenter,
+      controller.presentedViewController == nil else { return }
     pauseTracking()
     let item = ChatImagePreviewItem(id: source,
       image: ChatImage(id: "", fileName: url.lastPathComponent, storageSessionId: nil, width: nil, height: nil),
