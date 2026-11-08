@@ -28,6 +28,7 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
   public var shareTasks: [String: Task<Void, Never>] = [:]
   public var health = RuntimeHealth()
   private var pingPending = false
+  var simulatorClients: [WeakLanSimulator] = []
   var lan: LanInvite?
   private var lanHandler: LanHubSchemeHandler?
   private var followTask: Task<Void, Never>?
@@ -173,6 +174,7 @@ public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDe
     } catch { disposeView(); publish("failed", reason: "missing_resource") }
   }
   private func disposeView() {
+    simulatorClients.forEach { $0.value?.release() }; simulatorClients.removeAll()
     SessionBackgroundTasks.shared.finishAll(owner: owner)
     for task in attachmentTasks.values { task.cancel() }
     attachmentTasks.removeAll()

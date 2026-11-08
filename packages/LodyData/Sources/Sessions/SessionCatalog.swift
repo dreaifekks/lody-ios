@@ -158,6 +158,13 @@ public struct SessionCatalog: Equatable, Sendable {
   public var machineNames: [String: String] = [:]
   public var machineTerminals: [String: LanTerminalEndpoint] = [:]
   public var machineSimulators: [String: String] = [:]
+  public var machineLanSimulators: [String: String] = [:]
+
+  public func simulatorAvailability(for session: SessionItem, lan: Bool) -> String? {
+    if !lan { return machineSimulators[session.machineId] }
+    guard !session.archived, machineTerminals[session.machineId] != nil else { return nil }
+    return machineLanSimulators[session.machineId]
+  }
 
   public func session(_ id: String) -> SessionItem? { sessions.first { $0.id == id } }
 
@@ -180,13 +187,15 @@ public struct SessionCatalog: Equatable, Sendable {
       public var machineNames: Lossy<[String: String]>?
       public var machineTerminals: Lossy<[String: Lossy<LanTerminalEndpoint>]>?
       public var machineSimulators: Lossy<[String: String]>?
+      public var machineLanSimulators: Lossy<[String: String]>?
 
-      public init(projects: [Lossy<SessionProject>], sessions: [Lossy<SessionItem>], machineIds: [Lossy<String>], machineNames: Lossy<[String: String]>? = nil, machineSimulators: Lossy<[String: String]>? = nil, machineTerminals: Lossy<[String: Lossy<LanTerminalEndpoint>]>? = nil) {
+      public init(projects: [Lossy<SessionProject>], sessions: [Lossy<SessionItem>], machineIds: [Lossy<String>], machineNames: Lossy<[String: String]>? = nil, machineSimulators: Lossy<[String: String]>? = nil, machineLanSimulators: Lossy<[String: String]>? = nil, machineTerminals: Lossy<[String: Lossy<LanTerminalEndpoint>]>? = nil) {
         self.projects = projects
         self.sessions = sessions
         self.machineIds = machineIds
         self.machineNames = machineNames
         self.machineSimulators = machineSimulators
+        self.machineLanSimulators = machineLanSimulators
         self.machineTerminals = machineTerminals
       }
     }
@@ -194,17 +203,18 @@ public struct SessionCatalog: Equatable, Sendable {
     guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
-      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
+      machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:], machineLanSimulators: shape.machineLanSimulators?.value ?? [:],
       machineTerminals: (shape.machineTerminals?.value ?? [:]).compactMapValues(\.value)
     )
   }
 
-  public init(projects: [SessionProject] = [], sessions: [SessionItem] = [], machineIds: [String] = [], machineNames: [String: String] = [:], machineSimulators: [String: String] = [:], machineTerminals: [String: LanTerminalEndpoint] = [:]) {
+  public init(projects: [SessionProject] = [], sessions: [SessionItem] = [], machineIds: [String] = [], machineNames: [String: String] = [:], machineSimulators: [String: String] = [:], machineLanSimulators: [String: String] = [:], machineTerminals: [String: LanTerminalEndpoint] = [:]) {
     self.projects = projects
     self.sessions = sessions
     self.machineIds = machineIds
     self.machineNames = machineNames
     self.machineSimulators = machineSimulators
+    self.machineLanSimulators = machineLanSimulators
     self.machineTerminals = machineTerminals
   }
 }

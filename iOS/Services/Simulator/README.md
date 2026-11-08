@@ -17,7 +17,7 @@ unchanged. This is data-channel transport, not RTP video.
 ICE credentials stay in the operation's native peer and ephemeral HTTP session.
 Requests retain the viewer capability and Origin, reject redirects and bound
 signaling responses. No cloud credential is fetched by the iOS viewer itself.
-Quick Tunnel is still required for signaling, artwork and WebSocket fallback.
+On Cloud, Quick Tunnel carries signaling, artwork and WebSocket fallback.
 WebRTC may use TURN, so it does not imply a direct route.
 The localized local-network permission explains connections to the user's Mac;
 declining it can still leave TURN or WebSocket available. No Bonjour browsing,
@@ -32,6 +32,19 @@ The peer is libdatachannel, built by `Libraries/SimulatorTransport/DataChannel/b
 into `Libraries/SimulatorTransport/Vendor/LodyDataChannel.xcframework` during `pnpm prebuild` (needs `cmake`); notices ship in Settings. Its ICE agent,
 libjuice, relays through TURN over UDP only: `turn:?transport=tcp` and `turns:`
 servers are skipped, and a UDP-blocked network falls back to WebSocket.
+On a LAN, `SimulatorService.live` routes control directly to the session Mac's
+TLS-PSK `control` service. `LanSimulator` in LodyData carries the returned viewer
+through the member's `tunnel` service on the same loopback port, retaining its
+Host/Origin and capability query. Leaving the session or replacing its runtime
+releases only this device's listener and connections. A ready preview opens
+without control RPCs; a changed member address updates the listener's next
+connection, retaining its port. A dead listener is recovered with status. Stop ends the remote
+preview operation and leaves the Mac's Simulator running.
+`pnpm verify:native --case lan-simulator` uses a synthetic loopback member to
+check control identity, byte forwarding, half-close and ownership release;
+`pnpm verify:ui --suite lan-simulator` exercises the native picker, viewer,
+composer chip and floating preview offline in English light/dark.
+
 Run `pnpm verify:native --case simulator-transport` for native transport behavior
 and `pnpm verify:ui --app <app> --case simulator-preview` for both preview hosts.
 These offline checks do not prove real TURN service availability or WAN performance.

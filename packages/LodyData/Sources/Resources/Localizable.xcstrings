@@ -25201,6 +25201,24 @@
           }
         }
       }
+    },
+    "native.simulator.lan.portBusy": {
+      "extractionState": "manual",
+      "comment": "1: port",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Port %@ is in use on this device. Start the simulator preview again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此设备的端口 %@ 已被占用，请重新启动模拟器预览。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -13,7 +13,7 @@ final class SessionPreviewController: SessionController {
   private var sawFade = false
 
   init(scenario: String) {
-    let fixture = SessionPreviewFixture(offline: scenario == "offline", tasks: scenario == "tasks", restore: scenario == "stream-restore")
+    let fixture = SessionPreviewFixture(offline: scenario == "offline", tasks: scenario == "tasks", restore: scenario == "stream-restore", lanSimulator: scenario.hasPrefix("lan-simulator") ? scenario : nil)
     self.fixture = fixture
     var environment = SessionSendEnvironment.live
     environment.composer = SessionComposerService(options: { _, _ in
@@ -46,9 +46,13 @@ final class SessionPreviewController: SessionController {
           "type": .string("terminal_output"), "output": .string("Session tool detail"),
         ])], truncated: false)
       }, observe: { _ in {} }),
-      simulator: .init(call: { command in
-        if case .stop = command { return .init(success: true) }
+      simulator: .init(isLAN: fixture.lanSimulator != nil, release: { fixture.record("simulator-release") }, call: { command in
+        if case .status = command { fixture.record("simulator-status") }
+        if case .stop = command { fixture.simulatorStarted = false; fixture.record("simulator-stop"); return .init(success: true) }
+        if case .status = command, fixture.lanSimulator != nil, !fixture.simulatorStarted { return .init(success: true) }
+        if case .start = command { fixture.simulatorStarted = true; fixture.record("simulator-start") }
         if case .list = command {
+          fixture.record("simulator-list")
           return .init(success: true, devices: [.init(udid: "native-fixture-phone", name: "Fixture Phone", runtime: "iOS 27", deviceType: "iPhone", state: "Booted", available: true, occupancy: .available)])
         }
         return .init(success: true, preview: .init(operationId: "native-fixture", udid: "native-fixture-phone", phase: .ready, transport: .remote, viewerUrl: "lody-simulator-fixture://stream"))
@@ -56,7 +60,7 @@ final class SessionPreviewController: SessionController {
       pullRequest: { _, _ in PullRequestPreviewController(params: [:]) },
       browser: { _, _ in .init(url: "https://native-fixture.trycloudflare.com") }
     )
-    if scenario == "lan" { chat.usesLAN = { true } }
+    if scenario == "lan" || fixture.lanSimulator != nil { chat.usesLAN = { true } }
   }
 
   @available(*, unavailable)
@@ -141,6 +145,8 @@ private final class SessionPreviewFixture {
   static let sessionId = "native-session"
   private(set) var log: [String] = []
   var changed: (() -> Void)?
+  let lanSimulator: String?
+  var simulatorStarted = false
   private let offline: Bool
   let tasks: Bool
   let restore: Bool
@@ -153,7 +159,8 @@ private final class SessionPreviewFixture {
   private var receive: (@MainActor (SessionRuntimeEvent) -> Void)?
   private var revision = 1
 
-  init(offline: Bool, tasks: Bool, restore: Bool = false, now: Double = LodyRelativeTime.now()) {
+  init(offline: Bool, tasks: Bool, restore: Bool = false, lanSimulator: String? = nil, now: Double = LodyRelativeTime.now()) {
+    self.lanSimulator = lanSimulator
     self.offline = offline
     self.tasks = tasks
     self.restore = restore
@@ -168,11 +175,19 @@ private final class SessionPreviewFixture {
       ],
       machineIds: ["preview-mac"], machineNames: ["preview-mac": "Preview Mac"], machineSimulators: ["preview-mac": "available"]
     )
+    if let lanSimulator {
+      catalog.machineSimulators = [:]
+      catalog.machineLanSimulators = ["preview-mac": lanSimulator == "lan-simulator-upgrade" ? "upgrade-required" : "available"]
+      if lanSimulator != "lan-simulator-no-endpoint" {
+        catalog.machineTerminals = ["preview-mac": .init(host: "127.0.0.1", port: 8789)]
+      }
+      if lanSimulator == "lan-simulator-archived" { catalog.sessions[0].archived = true }
+    }
   }
 
   var state: SessionListState {
     SessionListState(
-      userId: "preview-user", workspaceId: "preview-workspace",
+      userId: lanSimulator == nil ? "preview-user" : "local:fixture", workspaceId: lanSimulator == nil ? "preview-workspace" : "lw_fixture",
       presence: SettingsMachinePresence(state: "live", onlineMachineIds: ["preview-mac"]),
       workspaces: [AuthWorkspace(id: "preview-workspace", name: "Preview", slug: "preview", image: nil)], catalog: catalog
     )
