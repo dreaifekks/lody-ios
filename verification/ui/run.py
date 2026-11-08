@@ -36,8 +36,8 @@ SUITES = {
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
-CASES = PHONE_CASES + PAD_CASES + ['lan-entry', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'composer-fullscreen', 'session-stream-restore', 'model-values']
-HOME_CASES = {'home-states', 'home-project-bar', 'home-project-index', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'project-history-entry', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
+CASES = PHONE_CASES + PAD_CASES + ['lan-entry', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'composer-fullscreen', 'session-stream-restore', 'model-values']
+HOME_CASES = {'home-states', 'home-project-bar', 'home-project-index', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'project-history-entry', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
 PREVIEW = {
     'lan-files': 'lan-files-preview',
     'lan-terminal': 'terminal-preview',
@@ -466,9 +466,11 @@ try:
                     launch = ['launch', args.udid, BUNDLE_ID, '--ui-verify']
                     if case in HOME_CASES:
                         launch.append('--ui-verify-home')
+                    if case == 'roles-production':
+                        launch.append('--ui-verify-role-presence')
                     if case in {'session-search', 'session-search-pad'}:
                         launch.append('--ui-verify-search')
-                    if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
+                    if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
                         launch.append('--ui-verify-mentions')
                     if mode[2] or (case.startswith('attachment-camera-') and args.camera_access == 'fixture'):
                         sim('privacy', args.udid, 'reset', 'photos', BUNDLE_ID)
@@ -586,6 +588,8 @@ try:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'composer-glass-chat':
                     script = Path(__file__).with_name('composer-glass.py')
+                if case == 'roles-production':
+                    script = Path(__file__).with_name('roles-production.py')
                 if case == 'mentions-production':
                     script = Path(__file__).with_name('mentions-production.py')
                 if case in ['role-mention-chat', 'role-mention-sheet']:
@@ -679,7 +683,7 @@ try:
                 elif case == 'home':
                     # Create, Debug, Settings and workspace editing share this case; ~540s alone on the native inbox.
                     check_timeout = 600
-                elif case in ('session-search', 'mentions-production'):
+                elif case in ('session-search', 'mentions-production', 'roles-production'):
                     # Long search and mention-kind loops reach ~290s alone.
                     check_timeout = 420
                 elif case == 'session-native':

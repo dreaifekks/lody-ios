@@ -445,7 +445,7 @@ test('fresh v2 role references reach durable history and queue with an explicit 
   }
 });
 
-test('Role references are global across authorized machines and require current live presence', async () => {
+test('Role references retain all authorized machines while presence syncs', async () => {
   const c = catalog();
   c.put('multi', {
     v: 2,
@@ -457,12 +457,15 @@ test('Role references are global across authorized machines and require current 
   c.presence({ state: 'live', onlineMachineIds: ['m2'] });
   assert.deepEqual(
     (await c.mentions()).items.map((item) => item.path),
-    ['multi@m2'],
+    ['multi@m1', 'multi@m2'],
   );
   c.bootstrap(() => c.presence({ state: 'unknown', onlineMachineIds: [] }));
   const unavailable = await c.mentions();
   assert.equal(unavailable.incomplete, true);
-  assert.deepEqual(unavailable.items, []);
+  assert.deepEqual(
+    unavailable.items.map((item) => item.path),
+    ['multi@m1', 'multi@m2'],
+  );
   await assert.rejects(
     runtime.expandMentions('@role:multi@m2', c.mentions),
     /mention_expansion_failed/,
@@ -550,4 +553,67 @@ test('same-machine v2 targets keep separate mention identities, with the preferr
     async () => mentions,
   );
   assert.match(expanded, /agentRoleMachineId: m1, agentRoleInstanceId: second/);
+});
+
+test('fork v1 instances retain every machine and same-machine identity through discovery, editing and expansion', async () => {
+  const c = catalog();
+  const instances = [
+    {
+      id: 'nuc-opus',
+      machineId: 'm1',
+      agentConfigId: 'a1',
+      alias: 'Opus',
+      runConfig: { modelId: 'opus' },
+    },
+    {
+      id: 'nuc-sol',
+      machineId: 'm1',
+      agentConfigId: 'a1',
+      alias: 'Sol',
+      runConfig: { modelId: 'sol' },
+    },
+    {
+      id: 'mini-sol',
+      machineId: 'm2',
+      agentConfigId: 'a2',
+      alias: 'Mini',
+      runConfig: { memory: { providerId: 'p', memoryId: 'm' } },
+    },
+  ];
+  c.put('fork', { instances, targetId: 'nuc-opus' });
+  const base = (await c.list()).roles[0];
+  assert.deepEqual(
+    base.targets.map((target) => target.id),
+    instances.map((target) => target.id),
+  );
+  const mentions = runtime.roleMentions(
+    c.remote.scan(),
+    'me',
+    c.machines,
+    { state: 'unknown', onlineMachineIds: [] },
+    new Map([
+      ['m1', 'NUC'],
+      ['m2', 'Mini'],
+    ]),
+    'm2',
+  );
+  assert.equal(mentions.incomplete, true);
+  assert.deepEqual(
+    mentions.items.map((item) => item.path),
+    ['fork@m2', 'fork@m1@nuc-opus', 'fork@m1@nuc-sol'],
+  );
+  await c.save(base, { name: 'Changed on iOS' });
+  assert.deepEqual(c.remote.get(['agentRole', 'fork']).instances, instances);
+  assert.equal(c.remote.get(['agentRole', 'fork']).targetId, 'nuc-opus');
+  const expanded = await runtime.expandMentions(
+    '@role:fork@m1@nuc-sol',
+    c.mentions,
+  );
+  assert.match(
+    expanded,
+    /id: fork, agentRoleMachineId: m1, agentRoleInstanceId: nuc-sol, name: Changed on iOS/,
+  );
+  c.put('inline', { targetId: 'stable-primary' });
+  const inline = (await c.list()).roles.find((role) => role.id === 'inline');
+  assert.equal(inline.targets[0].id, 'stable-primary');
 });

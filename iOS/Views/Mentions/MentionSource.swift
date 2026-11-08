@@ -19,6 +19,7 @@ struct MentionService {
   var load: @MainActor (MentionSource, String) async throws -> MentionCatalog
 
   static let live = MentionService { source, category in
+    if let catalog = try await MentionPresenceFixture.response(source, category) { return catalog }
     if let fixture = MentionFixture.response(payload(source, category)),
        let catalog = try? JSONDecoder().decode(MentionCatalog.self, from: Data(fixture.utf8)) {
       return catalog
@@ -45,6 +46,7 @@ struct MentionService {
 
 @MainActor
 final class MentionCatalogStore {
+  static let didChange = Notification.Name("LodyMentionCatalogDidChange")
   static let categories = ["file", "skill", "session", "role", "issue", "pr", "cmd"]
 
   let source: MentionSource
@@ -53,10 +55,42 @@ final class MentionCatalogStore {
   private var catalogs: [String: MentionCatalog] = [:]
   private var pending: [String: Task<MentionCatalog, Error>] = [:]
   private var failed: Set<String> = []
+  private var observer: NSObjectProtocol?
+  private var catalogState: CatalogState?
+
+  private struct Presence: Decodable, Equatable {
+    let workspaceId: String
+    let presence: RuntimeContract.MachinePresence
+  }
+
+  private struct CatalogState: Decodable, Equatable {
+    let presence: Presence
+    let connected: Bool
+    let catalogRevision: Int
+  }
 
   init(source: MentionSource, service: MentionService = .live) {
     self.source = source
     self.service = service
+    catalogState = Self.currentState()
+    observer = NotificationCenter.default.addObserver(forName: .lodyCatalogDidChange, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.catalogChanged() }
+    }
+  }
+
+  isolated deinit {
+    if let observer { NotificationCenter.default.removeObserver(observer) }
+  }
+
+  private static func currentState() -> CatalogState? {
+    try? JSONDecoder().decode(CatalogState.self, from: Data(CatalogSession.published.json.utf8))
+  }
+
+  private func catalogChanged() {
+    let next = Self.currentState()
+    guard next?.presence.workspaceId == source.workspaceId, next != catalogState else { return }
+    catalogState = next
+    Task { _ = try? await load("role", refresh: true) }
   }
 
   func catalog(_ category: String) -> MentionCatalog? { catalogs[category] }
@@ -75,6 +109,7 @@ final class MentionCatalogStore {
       failed.remove(category)
       catalogs[category] = value
       changed?()
+      NotificationCenter.default.post(name: Self.didChange, object: self, userInfo: ["category": category])
       return value
     } catch {
       guard pending[category] == task else { throw error }
@@ -87,10 +122,11 @@ final class MentionCatalogStore {
 
   func composerItemsJSON() -> String {
     let rows: [[String: Any]] = Self.categories.filter { category in
-      ["file", "skill", "session"].contains(category) || failed.contains(category) || catalogs[category]?.items.isEmpty == false
+      ["file", "skill", "session", "role"].contains(category) || failed.contains(category) || catalogs[category]?.incomplete == true || catalogs[category]?.items.isEmpty == false
     }.map { category in
-      [
-        "path": category, "kind": "category", "subtitle": Self.notice(catalogs[category]),
+      let subtitle = failed.contains(category) ? String(localized: "mentions.error", bundle: .lody) : Self.notice(catalogs[category])
+      return [
+        "path": category, "kind": "category", "subtitle": subtitle,
         "name": String(localized: String.LocalizationValue("native.chat.mention." + (ChatMentionItem.labels[category] ?? category)), bundle: .lody),
       ]
     }
@@ -102,6 +138,7 @@ final class MentionCatalogStore {
   }
 
   static func notice(_ catalog: MentionCatalog?) -> String {
+    if catalog == nil { return String(localized: "common.reading", bundle: .lody) }
     if catalog?.incomplete == true { return String(localized: "mentions.incomplete", bundle: .lody) }
     if catalog?.truncated == true { return String(localized: "mentions.truncated", bundle: .lody) }
     return ""

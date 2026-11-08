@@ -51,6 +51,8 @@ per batch, then launches a fresh app for each case. Run English only (`en`,
 | `settings-workspace` / `settings` batch | Agents, prompt shortcuts, project visibility, GitHub, usage, MCP, memory, published shares, agent roles and archived sessions                       |
 | Individual iPad cases                   | Adaptive split, creation, chrome, sidebar, devices, search, deletion and wide panels                                                                |
 
+`roles-production` checks that the real chat and new-session hosts retain the Roles category while presence is incomplete, update an already-open picker on live presence, recover an initial Role load failure, refresh when catalog revision changes with presence still live, ignore an older reload succeeding or failing after that update, and preserve same-machine instance and remote-machine references. Run it in both appearances (the default).
+
 The native boundaries are `LodyShell`, `AuthSession`, `CatalogSession`,
 `OutboxSession`, `LodyCore.AppRouting`, and feature preview controllers.
 Add checks to the runner inventory and exercise production controllers.

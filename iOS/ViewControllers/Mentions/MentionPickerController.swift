@@ -14,6 +14,7 @@ final class MentionPickerController: UIViewController {
   private var failed = false
   private var generation = 0
   private var searchCommand = 0
+  private var observer: NSObjectProtocol?
 
   init(category: String, query: String, store: MentionCatalogStore?, initial: MentionCatalog?, onPick: @escaping (MentionItem) -> Void) {
     self.category = category
@@ -28,6 +29,10 @@ final class MentionPickerController: UIViewController {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
 
+  isolated deinit {
+    if let observer { NotificationCenter.default.removeObserver(observer) }
+  }
+
   override func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = .lodyGroupedBackground
@@ -35,6 +40,22 @@ final class MentionPickerController: UIViewController {
       child.frame = view.bounds
       child.autoresizingMask = [.flexibleWidth, .flexibleHeight]
       view.addSubview(child)
+    }
+    if let store {
+      observer = NotificationCenter.default.addObserver(forName: MentionCatalogStore.didChange, object: nil, queue: .main) { [weak self, weak store] note in
+        let sender = note.object as? MentionCatalogStore
+        let category = note.userInfo?["category"] as? String
+        MainActor.assumeIsolated {
+          guard let self, let store, sender === store,
+                category == self.category,
+                let value = store.catalog(self.category) else { return }
+          self.generation += 1
+          self.catalog = value
+          self.loading = false
+          self.failed = false
+          self.render()
+        }
+      }
     }
     status.forwarded = { [weak self] name, _ in
       if name == "rowPress" { self?.reload(refresh: true) }

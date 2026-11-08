@@ -9,6 +9,7 @@ enum DebugSceneCoordinator {
       do { try HomeFixture.prepare() }
       catch { preconditionFailure("Invalid offline fixture: \(error)") }
     }
+    if MentionPresenceFixture.active { MentionPresenceFixture.setLive(false) }
     let root: UIViewController = LodyUIVerify.has("--ui-verify-home") ? HomeController() : DebugViewController()
     LodyShell.shared.start(in: window, content: root, title: root is DebugViewController ? "Debug" : "")
     let ready = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
@@ -21,6 +22,22 @@ enum DebugSceneCoordinator {
   static func open(_ params: [String: String]) {
     guard let scenario = params["verifyCase"] else {
       LodyShell.shared.pushRoot(DebugViewController(), title: "Debug")
+      return
+    }
+    if MentionPresenceFixture.active, scenario == "roles-catalog-revision" {
+      MentionPresenceFixture.reviseCatalog()
+      return
+    }
+    if MentionPresenceFixture.active, scenario == "roles-reload-hold" {
+      MentionPresenceFixture.armReload()
+      return
+    }
+    if MentionPresenceFixture.active, ["roles-reload-success", "roles-reload-failure"].contains(scenario) {
+      MentionPresenceFixture.finishReload(failed: scenario == "roles-reload-failure")
+      return
+    }
+    if MentionPresenceFixture.active, ["roles-presence-reset", "roles-presence-live"].contains(scenario) {
+      MentionPresenceFixture.setLive(scenario == "roles-presence-live")
       return
     }
     if scenario == "home-layout-alert" {

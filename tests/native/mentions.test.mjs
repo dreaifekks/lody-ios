@@ -235,6 +235,7 @@ test('Role references filter private rows and invalid machine bindings before ex
   assert.deepEqual(
     result.items.map((item) => [item.path, item.name]),
     [
+      ['far', 'far'],
       ['own', 'own'],
       ['shared', 'shared'],
     ],
@@ -244,7 +245,7 @@ test('Role references filter private rows and invalid machine bindings before ex
       state: 'live',
       onlineMachineIds: ['other'],
     }).items.length,
-    0,
+    3,
   );
   assert.equal(
     mentions.expandMentionText('@role:own', result.items),

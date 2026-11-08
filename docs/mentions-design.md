@@ -8,13 +8,19 @@ session, another Role, or a file with the same name. Labels in the picker remain
 human readable. This deliberately retains the namespaced spelling rather than
 introducing a second persisted range/chip model in the native composer.
 
-A Role is a template and its instances are what run, so a Role reference names
-one instance (`@role:<instance id>`). A mention starts another session, which
-need not run where the composer does, so the picker lists one entry per instance
-group of every Role: the group's instance on the composer's machine when it has
-one, else its first. Entries on the composer's machine come first; one that runs
-elsewhere names its machine. A Role with several groups shows each group's name
-(its alias, else its agent's) beside its own.
+A Role is a template and its targets are what run. The catalog reads the fork's
+v1 `instances`, v1 inline plus `additionalTargets`, and v2 `targets`, retaining
+every target's stable identity. The picker lists every configured target across
+machines, with the composer's machine first. Entries name their machine; sibling
+targets on one machine also name their alias or agent. Native text keeps the
+explicit `@role:<role id>@<machine id>@<target id>` identity when that machine has
+several targets, and only needs the machine suffix for a unique machine target.
+
+Role discovery does not depend on machine liveness: a Role starts another session,
+which need not run where the composer does. While presence is unknown, the catalog
+is marked incomplete and the Roles category remains visible. Presence, connection readiness and catalog revision changes
+refresh the category and an already-open picker; send-time expansion still waits
+for a complete catalog.
 
 The runtime expands immediately before `sendTurn` writes history or the queue.
 Creation's first turn uses that same send operation; Steer moves an already
@@ -29,7 +35,7 @@ checked before expansion. No separate Role store or CRUD is introduced here.
 
 Catalogs remain native-runtime owned. Session candidates use workspace metadata,
 exclude the current session and rank unarchived entries first. Commands come from
-the selected agent's machine capability. Optional catalogs with no usable rows
+the selected agent's machine capability. Optional catalogs other than Roles with no usable rows
 are hidden. File traversal and its 20,000-file ceiling remain unchanged, and
 partial/truncated results stay visible in the picker. Expansion failures happen
 before any durable write and leave the draft available to retry. Partial skill
