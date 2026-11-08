@@ -24218,6 +24218,54 @@
           }
         }
       }
+    },
+    "lan.error.invalidInvite": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid LAN invite. Check the link and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LAN 邀请格式错误，请检查链接后重试。"
+          }
+        }
+      }
+    },
+    "lan.error.unauthorized": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub rejected this invite. Check the LAN token."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hub 拒绝了此邀请，请检查 LAN 令牌。"
+          }
+        }
+      }
+    },
+    "lan.error.unreachable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reach the hub. Check its address and your connection."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 Hub，请检查地址和网络。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

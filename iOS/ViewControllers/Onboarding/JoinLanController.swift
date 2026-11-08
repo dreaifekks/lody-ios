@@ -52,6 +52,17 @@ final class JoinLanController: FormController {
     (parent ?? self).isModalInPresentation = busy
   }
 
+  static func errorMessage(_ error: any Error) -> String {
+    let key: String
+    switch error {
+    case is LanInvite.Failure: key = "lan.error.invalidInvite"
+    case LanHub.Failure.unauthorized: key = "lan.error.unauthorized"
+    case LanHub.Failure.unreachable: key = "lan.error.unreachable"
+    default: key = "lan.join.failed"
+    }
+    return String(localized: String.LocalizationValue(key), bundle: .lody)
+  }
+
   private func submit() {
     guard !busy, !invite.trimmed.isEmpty else { return }
     let raw = invite.trimmed
@@ -72,7 +83,7 @@ final class JoinLanController: FormController {
         guard let self, !Task.isCancelled else { return }
         self.busy = false
         // Do not reflect an invite or native credential in an error string.
-        self.failure.text = String(localized: "lan.join.failed", bundle: .lody)
+        self.failure.text = Self.errorMessage(error)
         self.render()
         UIAccessibility.post(notification: .announcement, argument: self.failure.text)
       }
