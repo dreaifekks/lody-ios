@@ -76,8 +76,8 @@ final class SubagentTaskController: UIViewController {
     applyHeader()
   }
 
-  func update(_ json: String) {
-    if let next = SessionController.item(in: json, entryId: entryId, itemId: itemId) { store.update(next) }
+  func update(_ json: String, generation: Int) {
+    if let next = SessionController.item(in: json, entryId: entryId, itemId: itemId) { store.update(next, generation: generation) }
   }
 
   override func viewDidDisappear(_ animated: Bool) {

@@ -43,7 +43,7 @@ struct Check {
     store.start(); await settle()
     precondition(io.pending.count == 1 && io.pending[0].0.run == true)
     precondition(io.pending[0].0.sessionId == "session" && io.pending[0].0.entryId == "entry" && io.pending[0].0.itemId == "task")
-    store.update(io.item(2)); store.update(io.item(3, text: "live tail")); await settle()
+    store.update(io.item(2), generation: 0); store.update(io.item(3, text: "live tail"), generation: 0); await settle()
     precondition(io.pending.count == 1, "Revisions coalesce behind one read")
     io.response(0, rev: 1, text: "early report"); await settle()
     precondition(io.pending.count == 2)
@@ -51,21 +51,25 @@ struct Check {
     io.response(1, rev: 3, text: "updated report at the same item count"); await settle()
     precondition(steps(store).first?["text"] as? String == "updated report at the same item count")
     precondition(steps(store).first?["itemId"] as? String == Harness.first, "Composite item IDs survive unchanged")
-    store.update(io.item(3)); await settle(); precondition(io.pending.count == 2)
-    store.update(io.item(4)); await settle()
+    store.update(io.item(3), generation: 0); await settle(); precondition(io.pending.count == 2)
+    store.update(io.item(4), generation: 0); await settle()
     io.pending[2].1.resume(throwing: CocoaError(.fileReadUnknown)); await settle()
     precondition(steps(store).first?["text"] as? String == "updated report at the same item count", "Failed refresh retains full history")
-    store.update(io.item(5)); await settle()
+    store.update(io.item(5), generation: 0); await settle()
     io.receive?(1, nil)
-    store.update(io.item(99)) // A pre-recovery owner update must not fence out the new generation.
+    store.update(io.item(99), generation: 0) // A pre-recovery owner update must not fence out the new generation.
     io.event(1, rev: 1); await settle()
     precondition(io.pending.count == 5 && steps(store).count == 1)
     let before = changes
+    store.update(io.item(99), generation: 0) // The old owner can also arrive after the new live.
+    precondition(changes == before && steps(store).count == 1)
+    io.event(1, rev: 2); await settle()
+    precondition(io.pending.count == 5, "New revisions still coalesce behind the generation's read")
     io.response(3, rev: 5, text: "stale generation"); await settle()
     precondition(changes == before && steps(store).count == 1)
     io.response(4, rev: 1, text: "new generation"); await settle()
     precondition(steps(store).first?["text"] as? String == "new generation")
-    store.update(io.item(2)); await settle()
+    store.update(io.item(3), generation: 1); await settle()
     let oldObserver = io.receive
     store.finish()
     let ended = changes

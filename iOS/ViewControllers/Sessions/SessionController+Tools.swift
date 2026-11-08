@@ -93,7 +93,7 @@ extension SessionController {
     LodyShell.shared.presentDetail(page, title: "PR #\(reference.number)", from: self, push: true)
   }
 
-  func updateDetails(_ json: String) { subagentPage?.update(json) }
+  func updateDetails(_ json: String) { subagentPage?.update(json, generation: feed?.generation ?? 0) }
 
 }
 

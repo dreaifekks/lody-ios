@@ -59,8 +59,8 @@ final class SubagentRunStore {
     again = false
   }
 
-  func update(_ item: [String: Any]) {
-    guard !waiting else { return }
+  func update(_ item: [String: Any], generation incoming: Int) {
+    guard incoming == generation, !waiting else { return }
     let next = item["rev"] as? Int ?? 0
     guard next >= revision else { return }
     self.item = item; revision = next
@@ -82,7 +82,7 @@ final class SubagentRunStore {
       let items = entries.first(where: { $0["id"] as? String == entryId })?["items"] as? [[String: Any]],
       let item = items.first(where: { $0["itemId"] as? String == itemId }) else { return }
     waiting = false
-    update(item)
+    update(item, generation: incoming)
   }
 
   private func load() {
