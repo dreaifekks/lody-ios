@@ -86,7 +86,7 @@ class ProjectController: UIViewController {
     list.setPreviewUserId(state.userId)
     list.setPreviewWorkspaceId(state.workspaceId)
     list.setPlaceholder(String(localized: String.LocalizationValue(placeholder), bundle: .lody))
-    list.setSections(sections)
+    list.setSections(SessionRows.restrictingCloud(sections, lan: LanInvite.isWorkspace(state.workspaceId)))
   }
 
   private func newSession() {
