@@ -8,6 +8,8 @@ enum DebugSceneFactory {
     "terminal-preview-late-open": { _ in TerminalFixtureController(scenario: "late-open") },
     "terminal-preview-failure": { _ in TerminalFixtureController(scenario: "failure") },
     "terminal-preview": { params in TerminalFixtureController(scenario: params["scenario"] as? String ?? "ready") },
+    "voice-preview": { _ in VoicePreviewController() },
+    "voice-create-preview": { _ in VoicePreviewController(host: "create") },
     "debug": { _ in DebugViewController() },
     "pull-request-preview": { params in PullRequestPreviewController(params: params) },
     "files-fixture": { params in

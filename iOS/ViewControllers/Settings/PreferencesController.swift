@@ -1,11 +1,19 @@
 import UIKit
 
 @MainActor
-final class PreferencesController: UIViewController {
+class PreferencesController: UIViewController {
   private let list = LodyGroupedList(frame: .zero)
-  private var observer: NSObjectProtocol?
+  private var observers: [NSObjectProtocol] = []
+  private let scope: SettingsScope
+  private let voiceAgents: @MainActor () async throws -> VoiceSettings.Snapshot
+  private var workspace = ""
+  private var snapshot: VoiceSettings.Snapshot?
+  private var failed = false
+  private var version = 0
 
-  init() {
+  init(scope: SettingsScope = .catalog, voiceAgents: @escaping @MainActor () async throws -> VoiceSettings.Snapshot = VoiceService.agents) {
+    self.scope = scope
+    self.voiceAgents = voiceAgents
     super.init(nibName: nil, bundle: nil)
     title = text("preferences.title")
   }
@@ -13,7 +21,7 @@ final class PreferencesController: UIViewController {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
 
-  isolated deinit { observer.map(NotificationCenter.default.removeObserver) }
+  isolated deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -21,12 +29,29 @@ final class PreferencesController: UIViewController {
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
     view.addSubview(list)
-    observer = NotificationCenter.default.addObserver(
-      forName: .lodyPreferencesDidChange, object: nil, queue: .main
-    ) { [weak self] _ in
-      MainActor.assumeIsolated { self?.render() }
+    for name in [Notification.Name.lodyPreferencesDidChange, VoicePreferences.didChange, scope.change] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.syncVoice() }
+      })
     }
+    syncVoice()
+  }
+
+  private func syncVoice() {
+    let key = scope.current().key
+    version += 1
+    let version = version
+    if workspace != key { snapshot = nil; failed = false }
+    workspace = key
     render()
+    guard VoicePreferences.enabled, !key.isEmpty else { return }
+    Task { [weak self, voiceAgents] in
+      let result = try? await voiceAgents()
+      guard let self, self.version == version else { return }
+      self.snapshot = result
+      self.failed = result == nil
+      self.render()
+    }
   }
 
   private func render() {
@@ -51,6 +76,7 @@ final class PreferencesController: UIViewController {
         queued,
         .item("quick-replies", text("quickReplies.title"), image: "text.bubble", disclosure: true, navigates: true),
       ]),
+      VoiceSettings.section(snapshot: snapshot, failed: failed, signedIn: !workspace.isEmpty),
     ])
   }
 
@@ -59,6 +85,11 @@ final class PreferencesController: UIViewController {
     switch (name, id, body["actionId"] as? String) {
     case ("rowAction", "queued-message-behavior", let value?) where ["queue", "guide"].contains(value):
       LodyPreferences.saveQueuedMessageBehavior(value)
+    case ("rowToggle", "voice-dictation", _):
+      let agent = VoicePreferences.agent
+      VoicePreferences.save(enabled: body["value"] as! Bool, configId: agent?["configId"] ?? "", machineId: agent?["machineId"] ?? "")
+    case ("rowAction", "voice-agent", let id?):
+      VoiceSettings.choose(id, snapshot: snapshot)
     case ("rowPress", "language", _):
       openLanguageSettings()
     case ("rowPress", "notifications", _):

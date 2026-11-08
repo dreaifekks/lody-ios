@@ -103,6 +103,8 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lody uses the microphone for voice dictation.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
