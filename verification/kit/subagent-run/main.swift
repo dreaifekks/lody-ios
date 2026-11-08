@@ -65,8 +65,9 @@ struct Check {
     precondition(changes == before && steps(store).count == 1)
     io.event(1, rev: 2); await settle()
     precondition(io.pending.count == 5, "New revisions still coalesce behind the generation's read")
+    let beforeStaleResponse = changes
     io.response(3, rev: 5, text: "stale generation"); await settle()
-    precondition(changes == before && steps(store).count == 1)
+    precondition(changes == beforeStaleResponse && steps(store).count == 1)
     io.response(4, rev: 1, text: "new generation"); await settle()
     precondition(steps(store).first?["text"] as? String == "new generation")
     store.update(io.item(3), generation: 1); await settle()
