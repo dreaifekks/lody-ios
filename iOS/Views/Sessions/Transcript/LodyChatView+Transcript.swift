@@ -306,8 +306,16 @@ extension LodyChatView {
     expandedMessages.formIntersection(entryIDsToRetain)
     expandedAttachments.formIntersection(entryIDsToRetain)
     expandedChanges.formIntersection(entryIDsToRetain)
-    collapsedMessageHeights = collapsedMessageHeights.filter { entryIDsToRetain.contains($0.key) }
-    for row in projected where row.kind == "user" && collapsedMessageHeights[row.entryID] == nil {
+    // An uncertain continuation exposes the recovery prompt, rather than keeping
+    // the short queue card's viewport after its handoff into the transcript.
+    let uncertainContinuations = Set(transcript.entries.filter {
+      $0.deliveryKind == "continue" && $0.status == "delivery_unknown"
+    }.map(\.id))
+    collapsedMessageHeights = collapsedMessageHeights.filter {
+      entryIDsToRetain.contains($0.key) && !uncertainContinuations.contains($0.key)
+    }
+    for row in projected where row.kind == "user" && collapsedMessageHeights[row.entryID] == nil
+      && !uncertainContinuations.contains(row.entryID) {
       if let height = ChatSendHandoff.sourceHeight(id: row.entryID) {
         collapsedMessageHeights[row.entryID] = min(ChatMessageContent.maximumCollapsedHeight, max(68, height))
       }

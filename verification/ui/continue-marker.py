@@ -36,13 +36,21 @@ for scenario in ['unknown', 'delivery-unknown', 'delivery-rejected', 'delivery-c
     original()
     if scenario.startswith('delivery-') and scenario != 'delivery-accepted':
         ui.element('continue:delivery')
+    if scenario == 'unknown':
+        unknown_height = ui.element('continue:user')['frame']['height']
     ui.capture(scenario)
 enter('queued')
 ui.wait(lambda items: probe(items).get('rows') == [], 'Queued input changed its existing transcript exclusion')
 assert kind() is None
 ui.axe('tap', '--id', 'continue-marker-advance')
 original()
+ui.wait(lambda items: abs(next((i['frame']['height'] for i in items if i.get('AXUniqueId') == 'continue:user'), 0) - unknown_height) < 1,
+        'Queued-to-uncertain prompt did not recover the normal readable preview height')
 ui.capture('queued-to-uncertain-prompt')
+ui.axe('tap', '--id', 'continue:user')
+ui.wait(lambda items: next((i['frame']['height'] for i in items if i.get('AXUniqueId') == 'continue:user'), 0) > unknown_height + 44,
+        'Uncertain recovery prompt did not expand to its complete text')
+ui.capture('queued-to-uncertain-expanded')
 enter('transition')
 original()
 ui.axe('tap', '--id', 'continue-marker-advance')
