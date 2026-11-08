@@ -27,7 +27,7 @@ enum ConnectionPreview {
         throw SettingsError("fixture")
       }
       return [
-        .init(id: "online", name: "mini.local", alias: "Online Mini", os: "macOS", version: "0.109.0-lan.3", online: true),
+        .init(id: "online", name: "mini.office.local", alias: "Online Mini", os: "macOS", version: "0.109.0-lan.synthetic", online: true),
         .init(id: "offline", name: "nuc.local", alias: "Offline NUC", os: "Linux", version: "0.109.0-lan.2", online: false),
       ]
     }, ping: { _, id in

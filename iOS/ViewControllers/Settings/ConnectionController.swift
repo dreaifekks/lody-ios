@@ -167,6 +167,7 @@ final class ConnectionController: UIViewController {
       if let os = machine.os { detail.append(os) }
       if let version = machine.version { detail.append("v" + version) }
       row.subtitle = detail.joined(separator: " · ")
+      row.wrapSubtitle = true
       row.image = "desktopcomputer"
       // Presence is authoritative. Ping only supplies latency and never promotes an offline member.
       switch machine.online {
