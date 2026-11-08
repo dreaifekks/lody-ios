@@ -14,7 +14,7 @@ tool = 'run-parent:["task-run","old-tool"]'
 card = ui.element('run-parent:task-run')
 assert '2 agents · 1 running · 1 done' in card['AXLabel'], card
 assert 'Latest step revision 1.' in card.get('AXValue', ''), card
-assert 'Completed' in ui.element('run-parent:task-done').get('AXValue', '')
+assert catalog.text('native.chat.subagent.completed') in ui.element('run-parent:task-done').get('AXValue', '')
 ui.capture('subagent-group-running')
 ui.axe('tap', '--id', 'run-parent:task-run', '--post-delay', '.5')
 ui.wait(lambda items: probe(items).get('reads') == 1, 'The page did not read a full run once')
