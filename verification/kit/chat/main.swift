@@ -930,8 +930,11 @@ let liveTaskRows = transcript.rows().filter { $0.kind == "subagent_task" }
 assert(liveTaskRows.map(\.itemID) == ["explore", "done"])
 assert(!transcript.rows().contains { $0.itemID == "house" })
 assert(liveTaskRows.allSatisfy(\.actionable))
-assert(liveTaskRows[0].subagent == ChatSubagentCard(actor: "Explore", description: "Find chrome", status: "in_progress",
-  detail: String.localizedStringWithFormat(String(localized: "native.chat.subagent.runningTool", bundle: .lody), String(describing: "Read")), background: false))
+let liveCard = liveTaskRows[0].subagent!
+assert(liveCard.actor == "Explore" && liveCard.description == "Find chrome" && liveCard.status == "in_progress")
+assert(liveCard.detail == String.localizedStringWithFormat(String(localized: "native.chat.subagent.runningTool", bundle: .lody), "Read"))
+assert(!liveCard.background && !liveCard.groupTitle.isEmpty && liveTaskRows[1].subagent?.groupTitle == "",
+  "Consecutive tasks carry one group summary on the first row")
 assert(transcript.rows().contains { $0.kind == "summary" })
 let processTasks = transcript.rows(processEntryID: "reply")
 assert(processTasks.contains { $0.itemID == "explore" && $0.kind == "subagent_task" })
