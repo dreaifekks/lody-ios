@@ -1,3 +1,4 @@
+import LodyCore
 import UIKit
 
 extension SessionController {
@@ -15,6 +16,7 @@ extension SessionController {
     chat.onFilePress = { [weak self] body in
       self?.openFile(body["path"] as? String ?? "", line: (body["line"] as? NSNumber)?.intValue ?? 0)
     }
+    chat.onLinkPress = { [weak self] href in self?.openMessageLink(href) }
     chat.onReviewChanges = { [weak self] in self?.openWorkspaceChanges() }
     chat.canReviewChanges = { [weak self] in self?.reviewable ?? false }
     chat.onTurnChangesPress = { [weak self] body in
@@ -60,6 +62,7 @@ extension SessionController {
     page.update(feed?.state.entriesJSON ?? "[]")
     page.onActivity = { [weak self, weak page] entry, item in self?.activity(entryId: entry, itemId: item, from: page) }
     page.onFile = { [weak self, weak page] path, line in self?.openFile(path, line: line, from: page) }
+    page.onLink = { [weak self, weak page] href in self?.openMessageLink(href, from: page) }
     LodyShell.shared.present(
       page, title: String(localized: String.LocalizationValue(startItemId == "__tasks__" ? "process.tasks" : "process.title"), bundle: .lody),
       detents: [0.6, 1], grabber: true
@@ -96,6 +99,7 @@ extension SessionController {
       subagentPage = page
       page.onActivity = { [weak self, weak page] entry, item in self?.activity(entryId: entry, itemId: item, from: page) }
       page.onFile = { [weak self, weak page] path, line in self?.openFile(path, line: line, from: page) }
+      page.onLink = { [weak self, weak page] href in self?.openMessageLink(href, from: page) }
       let title = page.pageTitle
       if source is ProcessController, let modal = source?.navigationController, modal.presentingViewController != nil {
         // Activity is transient; its selected task belongs to the session's detail stack.
@@ -111,18 +115,29 @@ extension SessionController {
     LodyShell.shared.present(page, title: String(localized: "detail.title", bundle: .lody), detents: [0.6, 1], grabber: true)
   }
 
+  func openMessageLink(_ href: String, from controller: UIViewController? = nil) {
+    let state = source.state
+    let machineId = state.catalog.session(sessionId)?.machineId ?? ""
+    let host = messageLinkService.isLAN() ? state.catalog.machineTerminals[machineId]?.host : nil
+    switch SessionMessageLink.resolve(href, workspaceId: state.workspaceId,
+      sessionIds: Set(state.catalog.sessions.map(\.id)), machineHost: host) {
+    case .session(let id): messageLinkService.openSession(id, source, controller ?? self)
+    case .url(let url): messageLinkService.openURL(url)
+    case .missingSession:
+      messageLinkService.notice(String(localized: "chat.link.sessionMissing", bundle: .lody), controller ?? self)
+    case .loopback:
+      messageLinkService.notice(String(localized: "chat.link.loopback", bundle: .lody), controller ?? self)
+    case .none: break
+    }
+  }
+
   private func openFile(_ path: String, line: Int, from source: UIViewController? = nil) {
     guard !openingFile, !path.isEmpty else { return }
     openingFile = true
     Task { @MainActor [weak self] in
       guard let self else { return }
       defer { self.openingFile = false }
-      var opened = false
-      if let runtime = DataRuntime.current {
-        opened = await FilePreviewCoordinator.open(sessionId: self.sessionId, path: path, line: line, runtime: runtime, from: source ?? self)
-      }
-      guard !opened, (source ?? self).view.window != nil else { return }
-      self.open("file-content", ["sessionId": self.sessionId, "path": path, "line": line], present: true, from: source)
+      await self.messageLinkService.openFile(self.sessionId, path, line, source ?? self)
     }
   }
 

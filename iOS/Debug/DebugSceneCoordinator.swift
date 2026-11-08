@@ -40,7 +40,7 @@ enum DebugSceneCoordinator {
     let content: UIViewController
     var id = scenario
     var fields: [String: Any] = [:]
-    let variants = ["session-preview-": "session-preview", "activity-preview-": "activity-preview",
+    let variants = ["message-links-": "message-links", "session-preview-": "session-preview", "activity-preview-": "activity-preview",
       "settings-baseline-": "settings-baseline", "edit-message-": "edit-message-preview"]
     for (prefix, page) in variants where scenario.hasPrefix(prefix) && scenario != page {
       id = page; fields["scenario"] = String(scenario.dropFirst(prefix.count)); break

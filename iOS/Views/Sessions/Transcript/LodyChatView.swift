@@ -59,6 +59,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var onShareImage: ([String: Any]) -> Void = { _ in }
   var imageSharingEnabled = false
   var onFilePress: ([String: Any]) -> Void = { _ in }
+  var onLinkPress: (String) -> Void = { _ in }
   var onTurnChangesPress: ([String: Any]) -> Void = { _ in }
   var onReviewChanges: () -> Void = {}
   var canReviewChanges: () -> Bool = { false }
@@ -663,8 +664,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     if let target = ChatFileLink(href) {
       onFilePress(["path": target.path, "line": target.line ?? 0])
-    } else if let url = URL(string: href), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-      UIApplication.shared.open(url)
+    } else {
+      onLinkPress(href)
     }
   }
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {

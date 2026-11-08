@@ -123,7 +123,7 @@ final class ChatStreamPerformanceProbe: NSObject {
     ]
     var checks = fixtures.sorted(by: { $0.key < $1.key }).map { name, source -> [String: Any] in
       let full = FileMarkdownView()
-      full.setContentImmediately(FileMarkdownView.content(MarkdownContent(parserResult: store.parser.parse(source), theme: store.theme)), theme: store.theme)
+      full.setContentImmediately(FileMarkdownView.content(MarkdownContent(parserResult: store.parser.parse(source), theme: store.theme), linkify: true), theme: store.theme)
       let reference = ceil(full.boundingSize(for: 350).height)
       let split = store.view(id: name, text: source, secondary: false, streaming: true, width: 350)
       return ["name": name, "referenceHeight": reference, "blockHeight": split.measuredHeight,

@@ -14,6 +14,7 @@ final class SubagentTaskController: UIViewController {
   }()
   var onActivity: ((String, String) -> Void)?
   var onFile: ((String, Int) -> Void)?
+  var onLink: ((String) -> Void)?
 
   init(entryId: String, item: [String: Any]) {
     self.entryId = entryId; self.item = item; itemId = item["itemId"] as! String
@@ -24,6 +25,7 @@ final class SubagentTaskController: UIViewController {
       guard let entry = body["entryId"] as? String, let item = body["itemId"] as? String else { return }
       self?.onActivity?(entry, item)
     }
+    chat.onLinkPress = { [weak self] href in self?.onLink?(href) }
     chat.onFilePress = { [weak self] body in
       guard let path = body["path"] as? String else { return }
       self?.onFile?(path, body["line"] as? Int ?? 0)

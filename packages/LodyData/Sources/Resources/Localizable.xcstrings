@@ -1,6 +1,40 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "chat.link.sessionMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That session is not in this workspace"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个会话不在当前工作区里"
+          }
+        }
+      }
+    },
+    "chat.link.loopback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This address is on the computer running the session, and that computer has no LAN address to reach it by"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个地址在运行会话的电脑上，而这台电脑没有可从手机访问的 LAN 地址"
+          }
+        }
+      }
+    },
     "terminal.key.shortcuts": {
       "extractionState": "manual",
       "localizations": {

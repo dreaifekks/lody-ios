@@ -5,6 +5,7 @@ final class ProcessController: UIViewController {
   private let chat = LodyChatView(frame: .zero)
   var onActivity: ((String, String) -> Void)?
   var onFile: ((String, Int) -> Void)?
+  var onLink: ((String) -> Void)?
 
   init(entryId: String, startItemId: String) {
     super.init(nibName: nil, bundle: nil)
@@ -16,6 +17,7 @@ final class ProcessController: UIViewController {
       guard let entryId = body["entryId"] as? String, let itemId = body["itemId"] as? String else { return }
       self?.onActivity?(entryId, itemId)
     }
+    chat.onLinkPress = { [weak self] href in self?.onLink?(href) }
     chat.onFilePress = { [weak self] body in
       guard let path = body["path"] as? String else { return }
       self?.onFile?(path, (body["line"] as? NSNumber)?.intValue ?? 0)

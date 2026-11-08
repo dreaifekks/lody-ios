@@ -8,6 +8,7 @@ enum DebugSceneFactory {
     "terminal-preview-late-open": { _ in TerminalFixtureController(scenario: "late-open") },
     "terminal-preview-failure": { _ in TerminalFixtureController(scenario: "failure") },
     "terminal-preview": { params in TerminalFixtureController(scenario: params["scenario"] as? String ?? "ready") },
+    "message-links": { params in MessageLinksPreviewController(scenario: params["scenario"] as? String ?? "session") },
     "lan-chat-board": { _ in LanChatPreviewController(board: true) },
     "lan-chat-authors": { _ in LanChatPreviewController() },
     "debug": { _ in DebugViewController() },
