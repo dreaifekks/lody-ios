@@ -208,6 +208,6 @@ var archiveAction = LodyListAction(); archiveAction.id = "archive"
 cloudRow.menuActions = [shareAction, archiveAction]
 lanSection.rows = [cloudRow]
 let restricted = SessionRows.restrictingCloud([lanSection], lan: true)[0].rows[0]
-precondition(restricted.preview.isEmpty && restricted.menuActions.map(\.id) == ["archive"])
+precondition(restricted.preview == "session" && restricted.menuActions.map(\.id) == ["archive"])
 precondition(SessionRows.restrictingCloud([lanSection], lan: false)[0].rows[0].preview == "session")
-print("PASS: LAN removes Cloud sharing and session previews while preserving native actions")
+print("PASS: LAN preserves cached session previews and native actions while removing Cloud sharing")

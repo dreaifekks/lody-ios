@@ -62,7 +62,6 @@ enum SessionRows {
       section.rows = section.rows.map { row in
         var row = row
         row.menuActions.removeAll { $0.id == "share" }
-        row.preview = ""
         return row
       }
       return section
