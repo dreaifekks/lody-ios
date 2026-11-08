@@ -34,9 +34,16 @@ sim('ui', udid, 'appearance', 'light')
 sim('launch', udid, bundle, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
 ui.element('onboarding-join-lan', timeout=60)
 ui.axe('tap', '--id', 'onboarding-join-lan')
-ui.axe('tap', '--id', 'lan-invite')
-ui.wait_for_keyboard('lan-invite')
-ui.axe('type', state['invite'])
+# Paste the exact fixture once; HID Shift state must not rewrite an invite.
+subprocess.run(['xcrun', 'simctl', 'pbcopy', udid], input=state['invite'], text=True, check=True, timeout=20)
+ui.axe('tap', '--id', 'lan-invite', '--post-delay', '.4')
+field = ui.element('lan-invite')['frame']
+ui.axe('touch', '-x', str(field['x'] + field['width'] / 2), '-y', str(field['y'] + field['height'] / 2), '--down', '--up', '--delay', '.8')
+paste = ui.wait(lambda items: next((item for item in items if item.get('AXLabel') == 'Paste'), None), 'Invite paste action did not appear')['frame']
+ui.axe('tap', '-x', str(paste['x'] + paste['width'] / 2), '-y', str(paste['y'] + paste['height'] / 2), '--post-delay', '.5')
+if any(item.get('AXLabel') == 'Allow Paste' for item in ui.state()):
+    ui.axe('tap', '--label', 'Allow Paste', '--post-delay', '.5')
+subprocess.run(['xcrun', 'simctl', 'pbcopy', udid], input='', text=True, check=True, timeout=20)
 ui.axe('tap', '--id', 'lan-join-submit')
 # Fresh installation must ask immediately after joining, before a relaunch.
 result = ui.wait(lambda items: next((item for item in items if item.get('AXLabel') == 'Allow' or
