@@ -15,6 +15,11 @@ def labeled(label):
     return ui.wait(lambda items: next((item for item in items if item.get('AXLabel') == label), None), f'Missing {label}')
 
 
+def assert_expansion(identifier, opened):
+    key = 'native.list.expanded' if opened else 'native.list.collapsed'
+    assert ui.element(identifier).get('AXValue') == catalog.text(key), (identifier, ui.element(identifier))
+
+
 def choose(key):
     ui.axe('tap', '--label', catalog.text('inbox.settings.section.view'), '--post-delay', '.4')
     labeled(catalog.text('inbox.settings.' + key))
@@ -34,17 +39,22 @@ assert alpha['frame']['height'] >= 44, ('Machine headers retain native touch tar
 for identifier in ('toggle:machine-boreal', 'toggle:machine-cedar', 'toggle:machine-atlas'):
     ui.element(identifier)
 assert 'project-bar' not in ids(ui.state()), 'By Machine has no project filter bar'
+assert_expansion('machine:machine-a', True)
+assert_expansion('machine:machine-z', True)
 ui.capture('machines-name')
 
 ui.axe('tap', '--id', 'machine:machine-a', '--post-delay', '.5')
 ui.wait(lambda items: 'toggle:machine-boreal' not in ids(items) and 'toggle:machine-cedar' not in ids(items), 'A machine title folds all of its projects')
 ui.element('toggle:machine-atlas')
+assert_expansion('machine:machine-a', False)
 ui.capture('machine-folded')
 ui.axe('tap', '--id', 'machine:machine-z', '--post-delay', '.5')
 ui.wait(lambda items: 'toggle:machine-atlas' not in ids(items), 'Second machine did not fold')
 ui.element('machine:machine-a')
 ui.element('machine:machine-z')
 assert not any(item.get('AXLabel') == catalog.text('sessions.placeholder.empty') for item in ui.state()), 'Collapsed machine headings are still content'
+assert_expansion('machine:machine-a', False)
+assert_expansion('machine:machine-z', False)
 ui.capture('all-machines-folded')
 
 choose('view.activity')
@@ -61,10 +71,14 @@ ui.element('toggle:machine-atlas')
 choose('sort.activity')
 alpha, zulu = ui.element('machine:machine-a'), ui.element('machine:machine-z')
 assert zulu['frame']['y'] < alpha['frame']['y'], 'Activity orders machines by their first project'
+assert_expansion('machine:machine-a', True)
+assert_expansion('machine:machine-z', True)
 ui.capture('machines-activity')
 choose('sort.urgency')
 alpha, zulu = ui.element('machine:machine-a'), ui.element('machine:machine-z')
 assert alpha['frame']['y'] < zulu['frame']['y'], 'Urgency orders machines by their first project'
+assert_expansion('machine:machine-a', True)
+assert_expansion('machine:machine-z', True)
 ui.capture('machines-urgency')
 
 # A6: the Home host uses exactly the LAN-local cached transcript preview.

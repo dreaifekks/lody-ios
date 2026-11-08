@@ -982,6 +982,13 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     }
     let live = Set(rowsByID.keys.map(\.row))
     toggles = toggles.filter { live.contains($0.key) }
+    // Start disclosure rotation alongside the snapshot's row animation.
+    for index in collection.indexPathsForVisibleSupplementaryElements(ofKind: UICollectionView.elementKindSectionHeader) {
+      guard previous.sectionIdentifiers.indices.contains(index.section),
+            let section = value.first(where: { $0.id == previous.sectionIdentifiers[index.section] }),
+            let view = collection.supplementaryView(forElementKind: UICollectionView.elementKindSectionHeader, at: index) as? SectionSupplementaryCell else { continue }
+      configureSupplementary(view, section: section, header: true)
+    }
     // Hierarchy belongs to the data, even when sections arrives before contentStyle.
     if hasHierarchy {
       applyOutline(value, previous: previous)
@@ -1005,13 +1012,6 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     })
     snapshot.reloadItems(Array(rekinded))
     snapshot.reconfigureItems(retained.filter { !rekinded.contains($0) })
-    // Start disclosure rotation alongside the snapshot's row animation.
-    for index in collection.indexPathsForVisibleSupplementaryElements(ofKind: UICollectionView.elementKindSectionHeader) {
-      guard previous.sectionIdentifiers.indices.contains(index.section),
-            let section = value.first(where: { $0.id == previous.sectionIdentifiers[index.section] }),
-            let view = collection.supplementaryView(forElementKind: UICollectionView.elementKindSectionHeader, at: index) as? SectionSupplementaryCell else { continue }
-      configureSupplementary(view, section: section, header: true)
-    }
     let animate = animated
       && window != nil
       && !previous.sectionIdentifiers.isEmpty
@@ -1022,15 +1022,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       )
     let finish: () -> Void = { [weak self] in
       guard let self else { return }
-      for kind in [UICollectionView.elementKindSectionHeader, UICollectionView.elementKindSectionFooter] {
-        for index in self.collection.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
-          if let view = self.collection.supplementaryView(forElementKind: kind, at: index) as? SectionSupplementaryCell,
-             let section = self.section(at: index.section) {
-            self.configureSupplementary(view, section: section, header: kind == UICollectionView.elementKindSectionHeader)
-          }
-        }
-      }
-      self.collection.collectionViewLayout.invalidateLayout()
+      self.refreshSupplementaryViews()
     }
     if animate {
       dataSource.apply(snapshot, animatingDifferences: true, completion: finish)
@@ -1040,6 +1032,18 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
         self.collection.layoutIfNeeded()
       }
     }
+  }
+
+  private func refreshSupplementaryViews() {
+    for kind in [UICollectionView.elementKindSectionHeader, UICollectionView.elementKindSectionFooter] {
+      for index in collection.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+        if let view = collection.supplementaryView(forElementKind: kind, at: index) as? SectionSupplementaryCell,
+           let section = section(at: index.section) {
+          configureSupplementary(view, section: section, header: kind == UICollectionView.elementKindSectionHeader)
+        }
+      }
+    }
+    collection.collectionViewLayout.invalidateLayout()
   }
 
   private func itemCounts(in snapshot: NSDiffableDataSourceSnapshot<String, ListItemID>) -> [String: Int] {
@@ -1062,11 +1066,17 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       dataSource.apply(main, animatingDifferences: false)
     }
     let animate = sameSections && window != nil && !UIAccessibility.isReduceMotionEnabled
-    for section in value {
+    for (index, section) in value.enumerated() {
       let snapshot = section.outlineSnapshot(collapsed: collapsedSessions) {
         ListItemID(section: section.id, row: $0)
       }
-      dataSource.apply(snapshot, to: section.id, animatingDifferences: animate)
+      let completion: (() -> Void)?
+      if index == value.count - 1 {
+        completion = { [weak self] in self?.refreshSupplementaryViews() }
+      } else {
+        completion = nil
+      }
+      dataSource.apply(snapshot, to: section.id, animatingDifferences: animate, completion: completion)
     }
     for index in collection.indexPathsForVisibleItems {
       guard let cell = collection.cellForItem(at: index) as? UICollectionViewListCell, let row = row(at: index) else { continue }
@@ -1452,7 +1462,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
         let rotation = { arrow.transform = expanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity }
         if shouldAnimate {
           UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut], animations: rotation)
-        } else if changed {
+        } else {
           UIView.performWithoutAnimation(rotation)
         }
         arrow.tintColor = .secondaryLabel
