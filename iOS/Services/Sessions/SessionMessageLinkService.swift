@@ -6,7 +6,7 @@ struct SessionMessageLinkService {
   var isLAN: () -> Bool
   var openSession: (String, SessionSource, UIViewController) -> Void
   var openURL: (URL) -> Void
-  var openFile: (String, String, Int, UIViewController) async -> Void
+  var openFile: @MainActor (String, String, Int, UIViewController) async -> Void
   var notice: (String, UIViewController) -> Void
 
   static let live = SessionMessageLinkService(
