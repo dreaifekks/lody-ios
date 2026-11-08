@@ -26,6 +26,7 @@ BATCHES = {
     'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
 }
 SUITES = {
+    'lan-home': ['home-machine', 'connection', 'lan-agent-usage', 'lan-session-menus', 'lan-join-errors'],
     'settings-workspace': BATCHES['settings'],
     'guidance-scroll': ['send-scroll-normal', 'send-scroll-guide', 'send-scroll-queue'],
     'core': ['onboarding', 'home-settings', 'navigation', 'send', 'session-native', 'create-parity'],
