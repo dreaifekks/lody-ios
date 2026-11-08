@@ -11,6 +11,7 @@ final class ConnectionController: UIViewController {
   private var error = false
   private var round = 0
   private var scope = ""
+  private var presenceState = ""
   private var currentScope: String {
     let state = source.state
     return (state.account?.user.id ?? "") + "/" + (state.workspace?.id ?? "")
@@ -54,8 +55,9 @@ final class ConnectionController: UIViewController {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated {
           guard let self, self.viewIfLoaded?.window != nil else { return }
+          if name == UIApplication.didBecomeActiveNotification { self.hub.stop() }
           self.hub.start(self.source.state.account?.lan)
-          let changed = self.scope != self.currentScope
+          let changed = self.scope != self.currentScope || self.presenceState != self.service.presence()
           self.render()
           if changed || name == UIApplication.didBecomeActiveNotification { self.refresh() }
         }
@@ -67,6 +69,7 @@ final class ConnectionController: UIViewController {
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     hub.start(source.state.account?.lan)
+    timer?.cancel()
     refresh()
     timer = Task { [weak self] in
       while !Task.isCancelled {
@@ -121,6 +124,7 @@ final class ConnectionController: UIViewController {
 
   private func render() {
     let state = source.state
+    presenceState = service.presence()
     if scope != currentScope {
       scope = currentScope
       round += 1
@@ -154,9 +158,9 @@ final class ConnectionController: UIViewController {
     var presence = LodyListRow()
     presence.id = "presence"
     presence.title = SettingsSections.text("connection.presence")
-    presence.value = SettingsSections.text("connection.presence." + service.presence())
+    presence.value = SettingsSections.text("connection.presence." + presenceState)
     presence.image = "waveform.path.ecg"
-    presence.imageTint = service.presence() == "live" ? "blue" : "secondary"
+    presence.imageTint = presenceState == "live" ? "blue" : "secondary"
     sections.append(section("sync", "connection.sync", [sync, presence]))
     var rows = machines.map { machine in
       var row = LodyListRow()
@@ -185,7 +189,7 @@ final class ConnectionController: UIViewController {
       row.accessibilityValue = row.value
       return row
     }
-    if error {
+    if error && machines.isEmpty {
       var retry = LodyListRow()
       retry.id = "retry"
       retry.title = SettingsSections.text("connection.listFailed")

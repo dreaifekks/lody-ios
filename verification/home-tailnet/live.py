@@ -60,6 +60,7 @@ seen('machine:home-nuc', 'Offline NUC')
 ui.capture('tailnet-by-machine')
 ui.axe('tap', '--id', 'machine:home-mini')
 ui.wait(lambda items: not any((i.get('AXUniqueId') or '').startswith('toggle:') and 'Mini Project' in str(i) for i in items), 'Machine did not fold')
+assert ui.element('machine:home-mini').get('AXValue') == catalog.text('native.list.collapsed')
 ui.capture('tailnet-machine-folded')
 ui.axe('tap', '--id', 'machine:home-mini')
 ui.axe('tap', '--label', catalog.text('tabs.settings'))
@@ -77,7 +78,20 @@ assert 'Online' in str(online) and 'darwin' in str(online) and 'v0.109.0-lan.syn
 assert offline.get('AXValue') == 'Offline' and 'linux' in str(offline) and 'v0.109.0-lan.synthetic' in str(offline), offline
 seen('hub', 'ms')
 ui.capture('tailnet-connection-live')
+# A cancelled native pop invokes willAppear again. Only one 15s poll may remain.
+def ping_count():
+    events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines()]
+    return sum(event.get('event') == 'ping_answered' for event in events)
+
+prior = ping_count()
+ui.axe('drag', '--start-x', '2', '--start-y', '450', '--end-x', '65', '--end-y', '450', '--duration', '1', '--post-delay', '.6')
+seen('presence', 'Live')
+ui.wait(lambda _: ping_count() > prior, 'Cancelled pop did not resume the connection page', timeout=5)
+before = ping_count()
+time.sleep(17)
+assert ping_count() - before == 1, 'Cancelled pop left duplicate machine polling timers'
+ui.capture('tailnet-cancelled-pop-single-poll')
 sim('ui', udid, 'appearance', 'dark')
 ui.capture('tailnet-connection-live-dark')
-(root / 'outcome.json').write_text(json.dumps({'joined': True, 'postJoinPermission': True, 'byMachine': True, 'machineFold': True, 'hubLatency': True, 'onlineHeartbeatAndPing': True, 'offlineHeartbeat': True, 'presence': 'live', 'sync': 'live'}, indent=2) + '\n')
+(root / 'outcome.json').write_text(json.dumps({'joined': True, 'postJoinPermission': True, 'byMachine': True, 'machineFold': True, 'cancelledPopSinglePoll': True, 'hubLatency': True, 'onlineHeartbeatAndPing': True, 'offlineHeartbeat': True, 'presence': 'live', 'sync': 'live'}, indent=2) + '\n')
 print('PASS: synthetic tailnet join, immediate permission, By Machine, folding, hub latency, online ping/offline heartbeat and sync health')

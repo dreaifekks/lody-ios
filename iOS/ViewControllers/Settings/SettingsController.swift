@@ -34,7 +34,14 @@ class SettingsController: UIViewController {
     view.addSubview(list)
     for name in source.changes + [UIApplication.didBecomeActiveNotification] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-        MainActor.assumeIsolated { self?.render() }
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          if name == UIApplication.didBecomeActiveNotification, self.viewIfLoaded?.window != nil {
+            self.latency.stop()
+            self.latency.start(self.source.state.account?.lan)
+          }
+          self.render()
+        }
       })
     }
     latency.changed = { [weak self] in self?.render() }
@@ -44,6 +51,7 @@ class SettingsController: UIViewController {
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     latency.start(source.state.account?.lan)
+    render()
   }
 
   override func viewDidDisappear(_ animated: Bool) {

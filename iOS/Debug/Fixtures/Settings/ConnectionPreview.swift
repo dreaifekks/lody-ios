@@ -5,6 +5,8 @@ enum ConnectionPreview {
   static func make(settings: Bool) -> UIViewController {
     final class Fixture {
       var fail = true
+      var loads = 0
+      var measurements = 17
       var synced = false
       let lan = LanHubSummary(LanInvite(url: "http://hub.example.test:8788", token: "offline-fixture", name: "Preview LAN"))
       var state: SettingsState {
@@ -22,7 +24,8 @@ enum ConnectionPreview {
       NotificationCenter.default.post(name: change, object: nil)
     }, logout: {})
     let service = ConnectionService(machines: { _ in
-      if fixture.fail {
+      fixture.loads += 1
+      if fixture.fail || fixture.loads == 3 {
         fixture.fail = false
         throw SettingsError("fixture")
       }
@@ -34,7 +37,10 @@ enum ConnectionPreview {
       if id == "online" { throw SettingsError("no answer") }
       // A successful ping must not promote a member without a fresh heartbeat.
       return 7
-    }, latency: { _ in 18 }, presence: { fixture.synced ? "live" : "unknown" })
+    }, latency: { _ in
+      fixture.measurements += 1
+      return fixture.measurements
+    }, presence: { fixture.synced ? "live" : "unknown" })
     if settings { return SettingsController(source: source, connectionService: service) }
     return ConnectionController(source: source, service: service)
   }
