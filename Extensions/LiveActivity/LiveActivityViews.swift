@@ -943,3 +943,17 @@ extension View {
     }
   }
 }
+
+/// Same account boundary for the widget and offline small-card verification.
+struct LodySupplementalActivityView: View {
+  let userId: String
+  let state: LodyState
+  let isStale: Bool
+  var body: some View {
+    if userId.hasPrefix("local:") {
+      LodyCompactActivityView(state: state, isStale: isStale)
+    } else {
+      LodySmallActivityView(state: state, isStale: isStale)
+    }
+  }
+}

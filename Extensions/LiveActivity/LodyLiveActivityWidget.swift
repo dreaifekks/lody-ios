@@ -37,16 +37,30 @@ struct LodyLiveActivityWidget: Widget {
       // carries the focus block and, at most, the pending command; the tap hint and
       // other sessions stay on the Lock Screen, where the card has the height.
       DynamicIslandExpandedRegion(.bottom) {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
           if state.showsOverview {
             Text(isStale ? state.staleLabel : state.runningSummary).font(.headline)
             if !isStale, let focus {
               IslandRow(item: focus, state: state)
             }
+          } else if let focus, !isStale, PermissionButtons.shows(focus) {
+            // Room for the decision itself: what is asked and the two answers.
+            FocusTitle(item: focus)
+              .font(.subheadline.weight(.semibold))
+            if let command = focus.permissionCommand {
+              Text(command)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            }
+            PermissionButtons(focus: focus, copy: state, compact: true)
           } else if let focus {
-            FocusText(focus: focus, othersCount: state.othersCount, isStale: isStale, copy: state)
+            FocusText(focus: focus, othersCount: state.othersCount, isStale: isStale, copy: state, thoughtLines: 1)
             if !isStale, focus.status == .permission, let command = focus.permissionCommand {
               CommandStrip(command: command)
+            } else if !isStale, focus.status == .running, WorkDetail.shows(focus) {
+              WorkDetail(item: focus)
             }
           } else {
             Text(state.emptyLabel)
@@ -128,8 +142,8 @@ private struct LodyActivityContent: View {
 
   var body: some View {
     if family == .small {
-      LodySmallActivityView(state: context.state, isStale: context.isStale)
-        .widgetURL(context.attributes.route(for: context.state))
+      LodySupplementalActivityView(userId: context.attributes.userId, state: context.state, isStale: context.isStale)
+      .widgetURL(context.attributes.route(for: context.state))
     } else {
       LodyLockScreenView(
         state: context.state,

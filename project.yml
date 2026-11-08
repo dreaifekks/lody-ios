@@ -55,6 +55,9 @@ settings:
     MARKETING_VERSION: '0.2.0'
     CURRENT_PROJECT_VERSION: '1'
 packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC.git
+    exactVersion: 154.0.0
   # Stable 1.x UIKit API, Swift tools 6.0. 1.99.x uses the 2.0 ownership API.
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
@@ -136,6 +139,7 @@ targets:
       - package: LodyCore
         product: LodyRuntime
       - package: LodyData
+      - package: WebRTC
       - package: SwiftTerm
       - package: ChatKit
         product: ChatKit

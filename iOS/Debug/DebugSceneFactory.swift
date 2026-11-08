@@ -16,6 +16,8 @@ enum DebugSceneFactory {
     "message-links": { params in MessageLinksPreviewController(scenario: params["scenario"] as? String ?? "session") },
     "lan-chat-board": { _ in LanChatPreviewController(board: true) },
     "lan-chat-authors": { _ in LanChatPreviewController() },
+    "voice-preview": { _ in VoicePreviewController() },
+    "voice-create-preview": { _ in VoicePreviewController(host: "create") },
     "debug": { _ in DebugViewController() },
     "pull-request-preview": { params in PullRequestPreviewController(params: params) },
     "files-fixture": { params in

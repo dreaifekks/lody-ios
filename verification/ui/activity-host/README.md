@@ -60,3 +60,17 @@ verification locale. Phone Lock Screen / Island should be checked in light/dark;
 Watch Smart Stack uses its dark appearance.
 
 After installing the phone host, run `python3 verification/ui/activity-host-phone.py <output>` within its lease to capture running, permission and completed states on the actual Lock Screen and Dynamic Island in both appearances, with video. This checks the production Widget; full-app catalog delivery and deep-link handling remain separate.
+
+LAN `.small` activities use `LodyCompactActivityView` through the same
+`LodySupplementalActivityView` as the production widget; the non-LAN small view
+remains selected for other user identities. The phone host's `-render-watch`
+launch argument writes production small-card ImageRenderer PNGs (152 × 69.5 and
+184 × 80.5 pt, 3×) into Documents for permission and running fixtures. These prove
+layout only, not watchOS mirroring or real Watch intent forwarding. The phone
+host installs a credential-free permission handler that records the selected ids;
+it never forwards a decision to a hub.
+
+Phone system captures use `simctl --mask black`: this runtime places the expanded
+Dynamic Island in the display mask layer, which default `ignored` screenshots
+and recordings omit. Locked widgets can be absent from AX while visible in the
+framebuffer; their content still requires visual review.

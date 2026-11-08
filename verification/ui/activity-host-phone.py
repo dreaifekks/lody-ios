@@ -23,6 +23,12 @@ def sim(*args):
     return subprocess.run(['xcrun', 'simctl', *args], check=True, capture_output=True, text=True, timeout=30)
 
 
+def capture(name):
+    # The default 'ignored' mask omits the Simulator's Dynamic Island layer.
+    sim('io', udid, 'screenshot', '--mask', 'black', str(output / f'{name}.png'))
+    (output / f'{name}.json').write_text(ui.axe('describe-ui'))
+
+
 def select(name):
     sim('launch', '--terminate-running-process', udid, BUNDLE_ID, '-fixture', name, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
     ui.invalidate_axe()
@@ -38,7 +44,7 @@ def allow():
 
 
 record_log = (output / 'recording.log').open('w')
-recording = subprocess.Popen(['xcrun', 'simctl', 'io', udid, 'recordVideo', '--force', '--codec=h264', str(output / 'phone.mp4')],
+recording = subprocess.Popen(['xcrun', 'simctl', 'io', udid, 'recordVideo', '--force', '--codec=h264', '--mask=black', str(output / 'phone.mp4')],
                              stdout=subprocess.DEVNULL, stderr=record_log)
 results = []
 try:
@@ -51,23 +57,31 @@ try:
             ui.axe('button', 'home')
             time.sleep(1)
             allow()
-            ui.capture(f'{appearance}-{fixture}-compact')
+            capture(f'{appearance}-{fixture}-compact')
             ui.axe('touch', '-x', '201', '-y', '33', '--down', '--up', '--delay', '.9')
-            time.sleep(1)  # Let the system expansion finish before capturing.
+            ui.wait(lambda items: any(title in (item.get('AXLabel') or '') for item in items), 'Expanded Island did not become ready')
+            time.sleep(.4)  # Settle the system expansion after AX first sees its content.
             # Capture before querying AX: a slow Accessibility response can take
             # longer than the system's expanded-Island auto-dismiss deadline.
-            ui.capture(f'{appearance}-{fixture}-expanded')
+            capture(f'{appearance}-{fixture}-expanded')
             tree = json.loads((output / f'{appearance}-{fixture}-expanded.json').read_text())
             def labels(nodes):
                 for node in nodes:
                     yield node.get('AXLabel') or ''
                     yield from labels(node.get('children', []))
-            assert any(title in label for label in labels(tree)), 'Expanded Island title missing'
+            expanded_labels = list(labels(tree))
+            assert any(title in label for label in expanded_labels), 'Expanded Island title missing'
+            if fixture == 'permission':
+                assert all(any(answer in label for label in expanded_labels) for answer in ['Allow', 'Deny']), 'Expanded Island permission answers missing'
+            if fixture == 'single':
+                assert any('Reading Shared/UIKit/Views' in label for label in expanded_labels), 'Expanded Island work detail missing'
             ui.axe('button', 'home')
             ui.axe('button', 'lock')
             time.sleep(1)
             allow()
-            ui.capture(f'{appearance}-{fixture}-lock')
+            capture(f'{appearance}-{fixture}-lock')
+            # SpringBoard omits the locked widget from AX on this runtime. Its
+            # actual framebuffer is reviewed visually, including Allow / Deny.
             ui.axe('button', 'lock')
             ui.axe('swipe', '--start-x', '200', '--start-y', '800', '--end-x', '200', '--end-y', '300', '--duration', '.4', '--post-delay', '1')
             results.append({'appearance': appearance, 'fixture': fixture, 'entrySeconds': round(time.monotonic() - start, 2), 'visualReview': 'pending'})

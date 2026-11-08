@@ -8,6 +8,8 @@ final class DebugViewController: UIViewController {
       ("pull-request-preview", "GitHub PR / CI 预览", "arrow.triangle.pull"),
       ("project-picker-preview", "选择项目验收", "folder"),
       ("notification-preview", "通知权限验收", "bell"),
+      ("voice-preview", "Voice dictation", "mic"),
+      ("voice-create-preview", "Voice new session", "mic"),
       ("live-activity-preview", "Live Activity 演示", "sparkles"),
       ("push-subscription-verify", "验证 OneSignal 订阅", "bell.badge"),
       ("permission-preview", "权限验收", "hand.raised"),

@@ -27,6 +27,12 @@ const workspacePackages = ['.', 'packages/cloud-runtime'];
  */
 const nativeComponents = [
   {
+    name: 'WebRTC',
+    license: 'BSD-3-Clause',
+    url: 'https://webrtc.org/support/license',
+    file: 'iOS/Resources/Licenses/WebRTC-LICENSE.txt',
+  },
+  {
     name: 'SwiftTerm',
     license: 'MIT',
     url: 'https://github.com/migueldeicaza/SwiftTerm',

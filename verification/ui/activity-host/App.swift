@@ -19,6 +19,13 @@ struct ActivityVerifyApp: App {
       }
       .onOpenURL { url in select(url.lastPathComponent) }
       .task {
+        if ProcessInfo.processInfo.arguments.contains("-render-watch") { renderWatch() }
+        LodyLiveActivityActions.respond = { session, request, option in
+          result = "Answered \(session)/\(request)/\(option)"
+          for activity in Activity<LodyActivityAttributes>.activities {
+            await activity.update(ActivityContent(state: LiveActivityFixtures.single, staleDate: .now.addingTimeInterval(1800)))
+          }
+        }
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-fixture"), arguments.indices.contains(index + 1) {
           select(arguments[index + 1])
@@ -60,4 +67,22 @@ struct ActivityVerifyApp: App {
       }
     }
   }
+  @MainActor
+  private func renderWatch() {
+    let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let sizes: [(String, CGFloat, CGFloat)] = [("40mm", 152, 69.5), ("45mm", 184, 80.5)]
+    let states = [("permission", LiveActivityFixtures.permission), ("running", LiveActivityFixtures.single)]
+    for (size, width, height) in sizes {
+      for (name, state) in states {
+        let view = LodySupplementalActivityView(userId: "local:fixture", state: state, isStale: false)
+          .padding(4).frame(width: width, height: height).background(.black)
+          .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 3
+        try! renderer.uiImage!.pngData()!.write(to: directory.appendingPathComponent("watch-\(size)-\(name).png"))
+      }
+    }
+    result = "Rendered Watch fixtures"
+  }
+
 }

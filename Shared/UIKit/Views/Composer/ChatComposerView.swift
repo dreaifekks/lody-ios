@@ -637,6 +637,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
   }
   private let mentionButton = UIButton(type: .system)
+  /// Experimental dictation through a Codex agent; shown only once enabled in Settings.
+  private let voiceButton = UIButton(type: .system)
+  private var voiceWidth: NSLayoutConstraint!
+  #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
+  var voiceFactory: () -> VoiceDictation = { VoiceService.dictation() }
+  private lazy var dictation = makeDictation()
+  private var dictationBase = ""
+  func resetVoiceDictation() { dictation.stop(); dictation = makeDictation() }
+  #endif
   private let permissionButton = UIButton(type: .system)
   private var modelLeading: NSLayoutConstraint?
   private var permissionLeading: NSLayoutConstraint?
@@ -865,6 +874,11 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     mentionButton.accessibilityLabel = String(localized: "native.chat.mention.open", bundle: .lody)
     mentionButton.accessibilityIdentifier = "session-mention"
     mentionButton.addTarget(self, action: #selector(openMentions), for: .touchUpInside)
+    voiceButton.accessibilityIdentifier = "session-voice"
+    voiceButton.addTarget(self, action: #selector(toggleDictation), for: .touchUpInside)
+    #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
+    NotificationCenter.default.addObserver(self, selector: #selector(voicePreferencesChanged), name: VoicePreferences.didChange, object: nil)
+    #endif
     permissionButton.setImage(UIImage(systemName: "shield.lefthalf.filled", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular)), for: .normal)
     permissionButton.tintColor = .label
     permissionButton.accessibilityLabel = String(localized: "model.tab.permission", bundle: .lody)
@@ -917,10 +931,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       sheetContent.trailingAnchor.constraint(equalTo: inputSurface.contentView.trailingAnchor),
       sheetContentBottom,
     ])
-    for view in [mentionPanel, mentionSeparator, attachmentBar, editorView, hint, formatBar, accessoryBar, attach, attachmentStack, modelButton, mentionButton, permissionButton, send, grabber] {
+    for view in [mentionPanel, mentionSeparator, attachmentBar, editorView, hint, formatBar, accessoryBar, attach, attachmentStack, modelButton, mentionButton, permissionButton, voiceButton, send, grabber] {
       inputSurface.contentView.addSubview(view)
     }
-    for view in [composer, mentionPanel, mentionSeparator, mentionButton, permissionButton, queueView, quickRepliesView, inputSurface, attachmentStack, notice, attachmentBar, quotaNotice, editorView, hint, formatBar, accessoryBar, send, attach, modelButton, grabber] {
+    for view in [composer, mentionPanel, mentionSeparator, mentionButton, permissionButton, voiceButton, queueView, quickRepliesView, inputSurface, attachmentStack, notice, attachmentBar, quotaNotice, editorView, hint, formatBar, accessoryBar, send, attach, modelButton, grabber] {
       view.translatesAutoresizingMaskIntoConstraints = false
     }
     inputHeight = editorView.heightAnchor.constraint(equalToConstant: 48)
@@ -938,6 +952,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     queueGap = queueView.topAnchor.constraint(equalTo: quickRepliesView.bottomAnchor)
     quickRepliesHeight = quickRepliesView.heightAnchor.constraint(equalToConstant: 0)
     mentionHeight = mentionPanel.heightAnchor.constraint(equalToConstant: 0)
+    voiceWidth = voiceButton.widthAnchor.constraint(equalToConstant: 0)
     surfaceLayout.activate()
     NSLayoutConstraint.activate([
       composer.topAnchor.constraint(equalTo: topAnchor),
@@ -994,7 +1009,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       permissionButton.widthAnchor.constraint(equalToConstant: 44), permissionButton.heightAnchor.constraint(equalToConstant: 44),
       modelButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
       modelButton.heightAnchor.constraint(equalToConstant: 44),
-      modelButton.trailingAnchor.constraint(equalTo: send.leadingAnchor, constant: -2),
+      modelButton.trailingAnchor.constraint(equalTo: voiceButton.leadingAnchor),
+      voiceButton.trailingAnchor.constraint(equalTo: send.leadingAnchor, constant: -2),
+      voiceButton.centerYAnchor.constraint(equalTo: send.centerYAnchor),
+      voiceButton.heightAnchor.constraint(equalToConstant: 44), voiceWidth,
     ])
     attachLeading = attach.leadingAnchor.constraint(equalTo: inputSurface.contentView.leadingAnchor, constant: 2)
     attachLeading.isActive = true
@@ -1032,11 +1050,13 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     onDraftChange?(input.draftEnvelope)
   }
   @objc private func appDidEnterBackground() {
+    stopDictation()
     saveDraft()
   }
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
+      stopDictation()
       saveDraft()
       collapseCompletionID += 1
       collapseAnimator?.stopAnimation(true)
@@ -1671,6 +1691,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     sendVisual.render(actionMode)
     sendVisual.isHidden = false
     sendVisual.alpha = send.isEnabled || loading ? 1 : 0.35
+    updateVoiceButton(expanded: expanded, sending: sending)
     let restingHidesSend = !hasContent && !stop && !loading
     send.isHidden = !expanded && restingHidesSend
     send.alpha = restingHidesSend ? sheetShare : 1
@@ -1907,6 +1928,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
   }
   func textViewDidEndEditing(_ textView: UITextView) {
+    stopDictation()
     if input.preservesViewport {
       saveDraft()
       return
@@ -1935,6 +1957,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   @objc private func submit() {
     guard send.isEnabled else { return }
+    stopDictation()
     if previewBeforeSubmit?() == true { return }
     if state.running == true && input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty {
       onStop?()
@@ -1989,4 +2012,71 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     saveDraft()
   }
+  // MARK: - Dictation
+
+  private func updateVoiceButton(expanded: Bool, sending: Bool) {
+    #if LODY_SHARE_EXTENSION || LODY_COMPOSER_VERIFY
+    voiceButton.isHidden = true
+    voiceButton.accessibilityElementsHidden = true
+    #else
+    let active = dictation.state != .idle
+    let shown = active || (VoicePreferences.enabled && expanded && state.editable)
+    voiceButton.isHidden = !shown
+    voiceButton.isAccessibilityElement = shown
+    voiceButton.accessibilityElementsHidden = !shown
+    voiceWidth.constant = shown ? 44 : 0
+    voiceButton.isEnabled = active || (!sending && !relaying)
+    var configuration = UIButton.Configuration.plain()
+    configuration.image = UIImage(systemName: active ? "mic.fill" : "mic")
+    configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+    configuration.baseForegroundColor = active ? .systemRed : .secondaryLabel
+    configuration.showsActivityIndicator = dictation.state == .connecting
+    voiceButton.configuration = configuration
+    voiceButton.accessibilityLabel = String(localized: String.LocalizationValue(active ? "native.voice.stop" : "native.voice.dictate"), bundle: .lody)
+    voiceButton.accessibilityValue = dictation.state == .active ? String(localized: "native.voice.listening", bundle: .lody) : nil
+    #endif
+  }
+
+  private func stopDictation() {
+    #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
+    guard dictation.state != .idle else { return }
+    dictation.stop()
+    #endif
+  }
+
+  @objc private func toggleDictation() {
+    #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
+    if dictation.state != .idle {
+      dictation.stop()
+      return
+    }
+    guard VoicePreferences.enabled, state.editable, pendingDraft == nil else { return }
+    dictationBase = input.text ?? ""
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    dictation.start(agent: VoicePreferences.agent)
+    #endif
+  }
+
+  #if !LODY_SHARE_EXTENSION && !LODY_COMPOSER_VERIFY
+  private func makeDictation() -> VoiceDictation {
+    let dictation = voiceFactory()
+    dictation.onState = { [weak self] _ in self?.updateComposer() }
+    dictation.onTranscript = { [weak self] text in
+      guard let self, self.pendingDraft == nil else { return }
+      let base = self.dictationBase
+      let separator = base.isEmpty || base.last?.isWhitespace == true ? "" : " "
+      self.input.text = base + separator + String(text.drop(while: \.isWhitespace))
+      self.updateComposer()
+    }
+    dictation.onError = { message in
+      LodyToastOverlay.shared.show(message: String(format: String(localized: "native.voice.stopped", bundle: .lody), message), kind: "error")
+    }
+    return dictation
+  }
+
+  @objc private func voicePreferencesChanged() {
+    if !VoicePreferences.enabled { stopDictation() }
+    updateComposer()
+  }
+  #endif
 }

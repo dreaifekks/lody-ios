@@ -107,6 +107,7 @@ checks = {
         'Shared/UIKit/Feedback/LodySessionBannerView.swift',
     ],
     'chat-title': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Debug/LodyUIVerify.swift', 'Shared/UIKit/Styling/LodyTint.swift', 'iOS/Views/Chrome/LodyNavigationHeader.swift', 'iOS/Views/Chrome/LodyNavigationSearch.swift', 'iOS/Views/Sessions/Transcript/ChatNavigationTitle.swift'],
+    'voice-dictation': [ 'iOS/Services/Voice/VoiceDictation.swift', 'Shared/UIKit/Models/VoicePreferences.swift', 'iOS/Models/Settings/VoiceSettings.swift', 'Shared/UIKit/Models/List/LodyListModels.swift'],
     'live-activity-registration': ['iOS/Platform/Notifications/LiveActivityRegistration.swift'],
     'live-activity': ['Shared/LiveActivity/LodyActivityAttributes.swift', 'Shared/LiveActivity/LiveActivityCatalog.swift'],
     'page-progress': ['Shared/UIKit/Views/List/LodyPageProgress.swift'],
@@ -215,7 +216,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             subprocess.run(['swift', 'run', '--package-path', str(package), '--scratch-path', str(root / '.artifacts/native-local-store')], check=True, timeout=600)
             continue
         binary = str(Path(output) / name)
-        simulator = name in ['fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'context-chip', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'project-index', 'banner', 'chat-title', 'live-activity', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'mermaid']
+        simulator = name in ['voice-dictation', 'fold-host', 'message-details', 'simulator-transport', 'share-ingest', 'chat-kit', 'scroll-edges', 'glass-transition', 'model-panel', 'chat-render', 'composer', 'context-chip', 'attachments', 'inline-diff', 'list', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'project-index', 'banner', 'chat-title', 'live-activity', 'chat-chrome', 'design', 'form', 'chat-subagent', 'chat-files', 'mermaid']
         command = ['xcrun', '--sdk', 'iphonesimulator', 'swiftc'] if simulator else ['xcrun', 'swiftc']
         command += ['-swift-version', '6']
         if name in ['message-details', 'list-snapshots', 'ai-usage', 'workspace-settings-pages', 'settings-roles', 'settings-runtime-pages', 'remote-settings', 'session-rows', 'project-index']:
@@ -240,7 +241,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 *map(str, sources), '-o', str(Path(output) / 'libAnchoredOverlayKit.a'),
             ], check=True, timeout=120)
             command += ['-I', output, '-L', output, '-lAnchoredOverlayKit']
-        if name in ['session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'subagent-run', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings']:
+        if name in ['voice-dictation', 'session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'subagent-run', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings']:
             command += ['-parse-as-library']
         if name == 'inline-diff':
             command += ['-framework', 'UIKit']
