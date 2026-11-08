@@ -83,7 +83,7 @@ final class RemoteImagesPreviewController: UIViewController {
     }
     let item = ChatImagePreviewItem(id: "public-picture",
       image: .init(id: "public-picture", fileName: "Markdown picture", storageSessionId: nil, width: nil, height: nil),
-      remoteURL: URL(string: source)!)
+      localURI: nil, remoteURL: URL(string: source)!)
     gallery = ImagePreviewController.present(from: self, items: [item], index: 0,
       workspace: "lw_offline_images", session: "offline-session", placeholders: [:], sourceView: { _ in nil }, imageSession: imageSession)
   }
