@@ -51,14 +51,18 @@ enum InboxSections {
 
   static func projects(
     _ catalog: SessionCatalog, expanded: [String: Bool] = [:], sort: InboxSort = .name, pinOrder: [String] = [],
-    filter: String? = nil, now: Double = LodyRelativeTime.now()
+    filter: String? = nil, byMachine: Bool = false, now: Double = LodyRelativeTime.now()
   ) -> [LodyListSection] {
     if let filter, filter != allFilter, let section = filtered(catalog, id: filter, pinOrder: pinOrder, now: now) {
       return [section]
     }
     let unpinned = catalog.sessions.filter { !$0.pinned && !$0.archived }
     let pinned = orderPinned(catalog.sessions.filter { $0.pinned && !$0.archived }, pinOrder: pinOrder)
-    var sections = sortProjects(catalog.projects, sessions: unpinned, sort: sort).map { project in
+    let sorted = sortProjects(catalog.projects, sessions: unpinned, sort: sort)
+    let projects = byMachine ? machineOrder(catalog, projects: sorted, sort: sort) : sorted
+    var sections = projects.enumerated().flatMap { index, project -> [LodyListSection] in
+      let machineId = machineSectionId(project.machineId)
+      let machineOpen = !byMachine || (expanded[machineId] ?? true)
       let sessions = unpinned.filter { $0.projectId == project.id }.sorted(by: SessionRows.byActivity)
       let open = expanded[project.id] ?? true
       var group = sessionGroup(
@@ -66,7 +70,14 @@ enum InboxSections {
         now: now
       )
       group.headerExpanded = open
-      return group
+      let sections = machineOpen ? [group] : []
+      guard byMachine, index == 0 || projects[index - 1].machineId != project.machineId else { return sections }
+      var machine = section(machineId, header: machineName(catalog, project.machineId), rows: [])
+      let count = projects.filter { $0.machineId == project.machineId }.count
+      machine.headerValue = String.localizedStringWithFormat(String(localized: "inbox.machine.projects", bundle: .lody), count)
+      machine.headerActionId = machineId
+      machine.headerExpanded = machineOpen
+      return [machine] + sections
     }
     let chats = unpinned.filter { SessionRows.isChat($0.projectId) }.sorted(by: SessionRows.byActivity)
     if !chats.isEmpty {
@@ -81,6 +92,26 @@ enum InboxSections {
     let rows = SessionRows.treeRows(pinned, all: catalog.sessions) { SessionRows.row($0, now: now) }
     if !sections.isEmpty { sections[0].gap = .group }
     return [pinnedSection(rows, expanded: expanded)] + sections
+  }
+
+  static func machineSectionId(_ machineId: String) -> String { "machine:\(machineId)" }
+
+  static func isMachineSectionId(_ id: String) -> Bool { id.hasPrefix("machine:") }
+
+  private static func machineName(_ catalog: SessionCatalog, _ machineId: String) -> String {
+    let name = catalog.machineNames[machineId] ?? ""
+    return name.isEmpty ? machineId : name
+  }
+
+  // Preserve the chosen project order within each machine. Activity and urgency
+  // order machines by their first project; name order uses the machine's alias.
+  private static func machineOrder(_ catalog: SessionCatalog, projects: [SessionProject], sort: InboxSort) -> [SessionProject] {
+    var machines: [String] = []
+    for project in projects where !machines.contains(project.machineId) { machines.append(project.machineId) }
+    if sort == .name {
+      machines.sort { machineName(catalog, $0).localizedCompare(machineName(catalog, $1)) == .orderedAscending }
+    }
+    return machines.flatMap { machine in projects.filter { $0.machineId == machine } }
   }
 
   static func chips(_ catalog: SessionCatalog, sort: InboxSort = .name) -> [InboxProjectChip] {

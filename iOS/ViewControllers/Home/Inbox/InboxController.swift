@@ -9,7 +9,7 @@ final class InboxController: UIViewController {
   private let projectIndex = InboxProjectIndex()
   private var creationProjectId: String?
   private lazy var actions = SessionActions(source: source)
-  private var mode = InboxController.storedIndex("inboxView")
+  private var mode = InboxController.storedIndex("inboxView", count: 4)
   private var sort = InboxSort.allCases[InboxController.storedIndex("inboxProjectSort")]
   private var expanded = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
   private var query = ""
@@ -117,6 +117,13 @@ final class InboxController: UIViewController {
       projectIndex.update(InboxProjectIndexModel.items(sectionIds: sections.map(\.id), chips: chips))
       projectIndex.enabled = shown && filter == InboxSections.allFilter
       view.setNeedsLayout()
+    } else if mode == 3 {
+      projectIndex.enabled = false
+      list.setTopAccessory(nil, height: 0)
+      list.setSections(SessionRows.restrictingCloud(
+        InboxSections.projects(catalog, expanded: expanded, sort: sort, pinOrder: pinOrder, byMachine: true),
+        lan: LanInvite.isWorkspace(state.workspaceId)
+      ))
     } else {
       projectIndex.enabled = false
       list.setTopAccessory(nil, height: 0)
@@ -242,16 +249,24 @@ final class InboxController: UIViewController {
       setView(2)
       return true
     }
+    if InboxSections.isMachineSectionId(id) {
+      saveExpansion(id, open: !(expanded[id] ?? true))
+      return true
+    }
     if id.hasPrefix("toggle:") {
       let project = String(id.dropFirst(7))
-      expanded[project] = open
-      var stored = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
-      stored[project] = open
-      UserDefaults.standard.set(stored, forKey: "inboxExpansion")
-      render()
+      saveExpansion(project, open: open)
       return true
     }
     return InboxSections.isChatRow(id)
+  }
+
+  private func saveExpansion(_ project: String, open: Bool) {
+    expanded[project] = open
+    var stored = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
+    stored[project] = open
+    UserDefaults.standard.set(stored, forKey: "inboxExpansion")
+    render()
   }
 
   private func wireIndex() {
@@ -333,7 +348,7 @@ final class InboxController: UIViewController {
   }
 
   private func loadPreferences() {
-    mode = Self.storedIndex("inboxView")
+    mode = Self.storedIndex("inboxView", count: 4)
     sort = InboxSort.allCases[Self.storedIndex("inboxProjectSort")]
     expanded = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
   }
@@ -343,9 +358,9 @@ final class InboxController: UIViewController {
     render()
   }
 
-  private static func storedIndex(_ key: String) -> Int {
+  private static func storedIndex(_ key: String, count: Int = 3) -> Int {
     let value = UserDefaults.standard.integer(forKey: key)
-    return (0...2).contains(value) ? value : 0
+    return (0..<count).contains(value) ? value : 0
   }
 }
 

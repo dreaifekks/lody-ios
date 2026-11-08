@@ -211,3 +211,36 @@ let restricted = SessionRows.restrictingCloud([lanSection], lan: true)[0].rows[0
 precondition(restricted.preview == "session" && restricted.menuActions.map(\.id) == ["archive"])
 precondition(SessionRows.restrictingCloud([lanSection], lan: false)[0].rows[0].preview == "session")
 print("PASS: LAN preserves cached session previews and native actions while removing Cloud sharing")
+
+// By Machine follows project ownership, keeping pinned sessions and unassigned
+// chats outside machine groups exactly as in the fork's project projection.
+var machineProjects = [
+  SessionProject(id: "ma", name: "A project"),
+  SessionProject(id: "mb", name: "B project"),
+  SessionProject(id: "mc", name: "C project"),
+]
+machineProjects[0].machineId = "z"
+machineProjects[1].machineId = "a"
+machineProjects[2].machineId = "a"
+let machineCatalog = SessionCatalog(projects: machineProjects, sessions: [
+  item("machine-latest", project: "ma", at: midday),
+  item("machine-attention", "waiting", project: "mb", at: midday - day),
+  item("machine-complete", project: "mc", at: midday - 2 * day),
+  item("machine-pinned", project: "ma", at: midday) { $0.pinned = true },
+  item("machine-chat", project: "w:unassigned", at: midday),
+], machineIds: ["z", "a"], machineNames: ["z": "Zulu", "a": "Alpha"])
+let byMachine = InboxSections.projects(machineCatalog, byMachine: true, now: midday)
+precondition(byMachine.map(\.id) == ["pinned", "machine:a", "mb", "mc", "machine:z", "ma", "chat"])
+let alpha = byMachine[1]
+precondition(alpha.header == "Alpha" && alpha.rows.isEmpty && alpha.headerActionId == "machine:a" && alpha.headerExpanded == true)
+precondition(InboxSections.projects(machineCatalog, expanded: ["machine:a": false], byMachine: true, now: midday).map(\.id)
+  == ["pinned", "machine:a", "machine:z", "ma", "chat"])
+precondition(InboxSections.projects(machineCatalog, sort: .activity, byMachine: true, now: midday).map(\.id)
+  == ["pinned", "machine:z", "ma", "machine:a", "mb", "mc", "chat"])
+precondition(InboxSections.projects(machineCatalog, sort: .urgency, byMachine: true, now: midday).map(\.id)
+  == ["pinned", "machine:a", "mb", "mc", "machine:z", "ma", "chat"])
+var unnamedMachine = machineCatalog
+unnamedMachine.machineNames = [:]
+precondition(InboxSections.projects(unnamedMachine, byMachine: true, now: midday)[1].header == "a")
+precondition(InboxSections.machineSectionId("a") == "machine:a" && InboxSections.isMachineSectionId("machine:a"))
+print("PASS: By Machine project ownership, aliases, name/activity/urgency sorting and machine collapse")

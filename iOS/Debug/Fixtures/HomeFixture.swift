@@ -72,6 +72,21 @@ enum HomeFixture {
     }
   }
 
+  static func prepareMachines() {
+    catalog = HomeMachineFixture.catalog
+    workspaces = [["id": "lw_home-machine", "name": "Machine Preview"]]
+    selected = "lw_home-machine"
+    presence = ["state": "live", "onlineMachineIds": ["machine-a"]]
+    UserDefaults.standard.set(3, forKey: "inboxView")
+    UserDefaults.standard.set(0, forKey: "inboxProjectSort")
+    UserDefaults.standard.set([String: Bool](), forKey: "inboxExpansion")
+    try! LocalStore.queue.sync {
+      try LocalStore.shared.write("session:[\"ui-home\",\"lw_home-machine\",\"boreal-session\"]", HomeMachineFixture.preview)
+    }
+    publish()
+    NotificationCenter.default.post(name: .lodyInboxPreferencesReset, object: nil)
+  }
+
   static func apply(_ action: String, _ fields: [String: Any]) throws {
     switch action {
     case "selectWorkspace": selected = fields["workspaceId"] as! String
@@ -106,7 +121,7 @@ enum HomeFixture {
   }
 
   private static func publish() {
-    let catalogs = ["ui-home": catalog, "ui-states": statesCatalog, "ui-other": otherCatalog]
+    let catalogs = ["ui-home": catalog, "ui-states": statesCatalog, "ui-other": otherCatalog, "lw_home-machine": catalog]
     let empty: [String: Any] = ["projects": [], "sessions": [], "machineIds": []]
     let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": ""], "workspaces": workspaces],
       "workspaceId": selected, "catalog": catalogs[selected] ?? empty,

@@ -23,6 +23,7 @@ final class InboxChrome {
   static let editId = "workspace:edit"
   private static let views = [
     (mode: 0, key: "inbox.settings.view.projects", icon: "folder"),
+    (mode: 3, key: "inbox.settings.view.machines", icon: "desktopcomputer"),
     (mode: 1, key: "inbox.settings.view.activity", icon: "clock"),
     (mode: 2, key: "inbox.settings.view.chat", icon: "bubble.left"),
   ]
