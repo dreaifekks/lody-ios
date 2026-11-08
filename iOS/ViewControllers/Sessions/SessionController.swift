@@ -19,6 +19,7 @@ class SessionController: UIViewController {
   let errorRetry = SessionDecision(.retry)
   let itemDetailService: ItemDetailService
   let permissionService: PermissionService
+  let messageLinkService: SessionMessageLinkService
   var permissionGate = SessionPermissionGate()
   weak var subagentPage: SubagentTaskController?
   var simulator: SessionSimulator?
@@ -48,7 +49,7 @@ class SessionController: UIViewController {
        feed: SessionFeedService = .live, environment: SessionSendEnvironment = .live, permission: PermissionService = .live,
        itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil,
        pullRequest: @escaping @MainActor (SessionPullRequest, SessionListState) -> PullRequestController = SessionController.livePullRequest,
-       browser: BrowserRequest? = nil) {
+       browser: BrowserRequest? = nil, messageLinks: SessionMessageLinkService = .live) {
     requestBrowserPreview = browser ?? { state, action in
       guard let runtime = DataRuntime.current, runtime.workspace == state.workspaceId, runtime.userId == state.userId else { throw OutboxError.scopeExpired }
       return try await runtime.perform(RuntimeContract.Calls.SessionPreview.self, .init(sessionId: sessionId, userId: state.userId, action: action))
@@ -58,6 +59,7 @@ class SessionController: UIViewController {
     self.source = source
     self.environment = environment
     permissionService = permission
+    messageLinkService = messageLinks
     itemDetailService = itemDetail ?? .live(sessionId: sessionId)
     simulatorService = simulator
     pullRequestPage = pullRequest

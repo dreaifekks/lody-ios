@@ -129,3 +129,11 @@ render(row)
 precondition(status.text == row.subagent?.detail, "Running tool activity must appear in the trailing status")
 precondition(detail.isHidden && cell.bounds.height == 30, "Running tool activity must not repeat as a second line")
 print("Chat subagent: rail geometry, tree continuity, status, detail, reuse and accessibility passed")
+
+row.subagent?.groupTitle = "2 agents · 1 running · 1 done"
+render(row)
+let group = descendants(cell.contentView).compactMap { $0 as? UILabel }.first { $0.text == row.subagent?.groupTitle }!
+precondition(!group.isHidden && group.frame.maxY <= title.frame.minY, "The group summary sits above the task title")
+precondition(glyph.frame.midY > lineOneY && title.frame.maxY <= cell.bounds.height, "The header height moves the task and its elbow together")
+precondition(cell.accessibilityLabel?.hasPrefix("2 agents · 1 running · 1 done, ") == true)
+print("PASS: group header, task title, rail elbow and VoiceOver remain aligned")

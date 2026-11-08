@@ -40,6 +40,7 @@ checks = {
     'session-simulator': ['Sessions/SessionSimulator.swift'],
     'preview-feedback': ['Outbox/OutboxRecord.swift', 'Outbox/OutboxStore.swift', 'iOS/Views/Files/HTMLPreview/PreviewFeedback.swift'],
     'pull-request': ['iOS/Services/PullRequests/PullRequestStore.swift'],
+    'subagent-run': ['iOS/Services/Sessions/ItemDetails/ItemDetailStore.swift', 'iOS/Services/Sessions/ItemDetails/SubagentRunStore.swift'],
     'item-details': ['iOS/Services/Sessions/ItemDetails/ItemDetailStore.swift'],
     'message-details': ['Shared/UIKit/Localization/LodyLocalization.swift', 'Shared/UIKit/Models/List/LodyListModels.swift', 'iOS/Views/List/LodyListState.swift', 'Chat/ChatTurnMetadata.swift', 'iOS/Models/Sessions/Messages/MessageDetailsSections.swift'],
     'html-preview': ['Shared/UIKit/Localization/LodyLocalization.swift', 'iOS/Views/Files/HTMLPreview/HTMLPreviewResource.swift', 'iOS/Views/Files/HTMLPreview/HTMLPreviewText.swift'],
@@ -238,7 +239,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 *map(str, sources), '-o', str(Path(output) / 'libAnchoredOverlayKit.a'),
             ], check=True, timeout=120)
             command += ['-I', output, '-L', output, '-lAnchoredOverlayKit']
-        if name in ['session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings']:
+        if name in ['session-feed', 'session-simulator', 'preview-feedback', 'pull-request', 'item-details', 'subagent-run', 'attachments', 'auth', 'outbox', 'github-mentions', 'github-pr', 'session-sharing', 'settings']:
             command += ['-parse-as-library']
         if name == 'inline-diff':
             command += ['-framework', 'UIKit']

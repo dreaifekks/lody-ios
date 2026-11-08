@@ -966,3 +966,14 @@ for style in [UIUserInterfaceStyle.light, .dark] {
 let glyphFill = glyphBubble.backgroundColor!.resolvedColor(with: glyphBubble.traitCollection)
 precondition(glyphFill == UIColor.lodyInset.resolvedColor(with: glyphBubble.traitCollection), "The on-screen user bubble paints the inset fill")
 print("Chat render: user bubbles use the neutral inset fill")
+
+// F12 reuses the ordinary native metadata-sized row, without a user bubble.
+let continuedRow = ChatRow(id: "continued:user", entryID: "continued", kind: "continued",
+  text: String(localized: "native.chat.message.continued", bundle: .lody), symbol: "play.circle")
+let continuedCell = ChatCell(frame: CGRect(x: 0, y: 0, width: 358, height: 40))
+continuedCell.configure(continuedRow, text: NSAttributedString(string: continuedRow.text, attributes: [.font: ChatCell.messageFont(for: continuedRow, compatibleWith: .current)]))
+continuedCell.layoutIfNeeded()
+precondition(continuedCell.bubble.isHidden && continuedCell.icon.image != nil && !continuedCell.label.isHidden)
+precondition(continuedCell.accessibilityLabel == continuedRow.text && !continuedCell.accessibilityTraits.contains(.button))
+precondition(continuedCell.label.attributedTextValue.string == continuedRow.text)
+print("PASS: Continue uses its native play icon and accessible compact label without a prompt bubble")

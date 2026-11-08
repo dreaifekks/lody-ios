@@ -42,6 +42,21 @@ enum MessageDetailsSections {
       if values["reasoningOutputTokens"]! > 0 { add("reasoningTokens", number(values["reasoningOutputTokens"]!)) }
       add("cacheRead", number(values["cacheReadInputTokens"]!))
       add("cacheWrite", number(values["cacheCreationInputTokens"]!))
+      if let cost = usage?.costUSD {
+        let currency = NumberFormatter()
+        currency.locale = LodyFormat.locale
+        currency.numberStyle = .currency
+        currency.currencyCode = "USD"
+        currency.minimumFractionDigits = 2
+        if cost > 0 && cost < 0.01 { currency.maximumFractionDigits = 8 }
+        else if cost < 1 { currency.maximumFractionDigits = 4 }
+        else { currency.maximumFractionDigits = 2 }
+        var row = LodyListRow()
+        row.id = "cost"; row.title = text("cost")
+        row.value = currency.string(from: NSNumber(value: cost))!
+        row.subtitle = text("costHint"); row.wrapSubtitle = true
+        rows.append(row)
+      }
       sections.append(section("tokens", rows: rows, footer: text("explanation")))
     }
     return sections

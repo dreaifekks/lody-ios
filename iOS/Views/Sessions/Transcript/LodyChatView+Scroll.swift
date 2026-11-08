@@ -99,6 +99,7 @@ extension LodyChatView {
       if let image = imageCell(id: item.id)?.displayedImage { placeholders[item.id] = image }
     }
     if let source, let image = source.displayedImage { placeholders[id] = image }
+    imagePreviewFollowsTranscript = true
     imagePreview = ImagePreviewController.present(
       from: controller,
       items: items,
@@ -112,6 +113,23 @@ extension LodyChatView {
       },
       keptImages: keptImages
     )
+  }
+
+  func openMarkdownImage(_ source: String) {
+    guard let url = URL(string: source), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+      openMessageLink(source)
+      return
+    }
+    guard imagePreview == nil, let controller = LodyShell.shared.presenter,
+      controller.presentedViewController == nil else { return }
+    pauseTracking()
+    let item = ChatImagePreviewItem(id: source,
+      image: ChatImage(id: "", fileName: url.lastPathComponent, storageSessionId: nil, width: nil, height: nil),
+      localURI: nil, remoteURL: url)
+    imagePreviewFollowsTranscript = false
+    imagePreview = ImagePreviewController.present(from: controller, items: [item], index: 0,
+      workspace: imageWorkspace, session: imageSession, placeholders: [:], sourceView: { _ in nil },
+      keptImages: keptImages, imageSession: imageURLSession)
   }
 
   func openAttachment(_ attachment: ChatMessageAttachment) {

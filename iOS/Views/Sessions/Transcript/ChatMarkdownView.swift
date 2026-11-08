@@ -57,6 +57,7 @@ final class ChatMarkdownView: UIView {
     }
   }
   var onLink: ((String) -> Void)?
+  var onImage: ((String) -> Void)?
   weak var trackedScrollView: UIScrollView? {
     didSet {
       guard trackedScrollView !== oldValue else { return }
@@ -79,11 +80,15 @@ final class ChatMarkdownView: UIView {
     for (index, source) in sources.enumerated() {
       if index == blocks.count {
         let block = Block()
+        block.view.onImage = { [weak self] source in self?.onImage?(source) }
         block.view.linkHandler = { [weak self] payload, _, _ in
+          let link: String
           switch payload {
-          case .url(let url): self?.onLink?(url.absoluteString)
-          case .string(let string): self?.onLink?(string)
+          case .url(let url): link = url.absoluteString
+          case .string(let value): link = value
           }
+          if let source = FileMarkdownView.imageLinkSource(link) { self?.onImage?(source) }
+          else { self?.onLink?(link) }
         }
         block.view.trackedScrollView = trackedScrollView
         blocks.append(block)

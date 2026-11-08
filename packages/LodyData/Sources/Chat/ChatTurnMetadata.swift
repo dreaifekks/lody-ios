@@ -3,11 +3,17 @@ import Foundation
 // Optional metadata comes from peer history. Invalid usage is absent, never zero.
 public struct ChatTurnUsage: Decodable, Sendable {
   public let values: [String: Double]?
+  public let costUSD: Double?
+  private enum CostKey: String, CodingKey { case costUSD }
   private enum Key: String, CodingKey, CaseIterable {
     case inputTokens, outputTokens, reasoningOutputTokens, cacheReadInputTokens, cacheCreationInputTokens
   }
 
   public init(from decoder: Decoder) throws {
+    if let costContainer = try? decoder.container(keyedBy: CostKey.self),
+       let cost = try? costContainer.decode(Double.self, forKey: .costUSD), cost.isFinite, cost >= 0 {
+      costUSD = cost
+    } else { costUSD = nil }
     guard let container = try? decoder.container(keyedBy: Key.self) else { values = nil; return }
     var raw: [String: Double] = [:]
     for key in Key.allCases {

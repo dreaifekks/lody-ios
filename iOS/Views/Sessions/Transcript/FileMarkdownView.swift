@@ -11,11 +11,20 @@ final class FileMarkdownView: MarkdownTextView {
   private static let imageMarker = "\u{F0000}lody-image:"
   private static let htmlMarker = "\u{F0000}lody-html:"
   static let searchExcluded = NSAttributedString.Key("lody-search-excluded")
+  static let imageSource = NSAttributedString.Key("lody-markdown-image-source")
+  var onImage: ((String) -> Void)?
 
-  static func content(_ source: MarkdownContent, streaming: Bool = false) -> MarkdownContent {
+  // MarkdownView forwards the highlight's link payload from body and table labels.
+  static func imageLinkSource(_ value: String) -> String? {
+    guard value.hasPrefix(imageMarker) else { return nil }
+    return String(value.dropFirst(imageMarker.count))
+  }
+
+  static func content(_ source: MarkdownContent, streaming: Bool = false, linkify: Bool = false) -> MarkdownContent {
     let ruby = MarkdownRuby.blocks(source.blocks)
     let rendered = streaming ? ruby : MarkdownMermaid.blocks(ruby)
-    let blocks = rendered.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
+    let linked = linkify ? linkified(rendered) : rendered
+    let blocks = linked.rewrite { (node: MarkdownInlineNode) -> [MarkdownInlineNode] in
       if case let .image(source, _) = node { return [.text(imageMarker + source)] }
       if case let .html(source) = node { return [.text(htmlMarker + source)] }
       guard case let .link(destination, children) = node,
@@ -23,6 +32,36 @@ final class FileMarkdownView: MarkdownTextView {
       return [.link(destination: destination, children: [.text(marker + destination)] + children)]
     }
     return MarkdownContent(blocks: blocks, rendered: source.rendered, highlightMaps: source.highlightMaps, locale: source.locale)
+  }
+
+  /// Walk parents first so explicit links and images keep their literal labels.
+  private static func linkified(_ blocks: [MarkdownBlockNode]) -> [MarkdownBlockNode] {
+    func inline(_ node: MarkdownInlineNode) -> [MarkdownInlineNode] {
+      switch node {
+      case .link, .image: return [node]
+      case let .text(value):
+        return ChatBareLinks.split(value).map { segment in
+          if let href = segment.href { return .link(destination: href, children: [.text(segment.text)]) }
+          return .text(segment.text)
+        }
+      case .code: return [node]
+      default:
+        var copy = node
+        copy.children = node.children.flatMap(inline)
+        return [copy]
+      }
+    }
+    return blocks.rewrite { (block: MarkdownBlockNode) -> [MarkdownBlockNode] in
+      switch block {
+      case let .paragraph(content): return [.paragraph(content: content.flatMap(inline))]
+      case let .heading(level, content): return [.heading(level: level, content: content.flatMap(inline))]
+      case let .table(alignments, rows):
+        return [.table(columnAlignments: alignments, rows: rows.map { row in
+          RawTableRow(cells: row.cells.map { RawTableCell(content: $0.content.flatMap(inline)) })
+        })]
+      default: return [block]
+      }
+    }
   }
 
   override func layoutSubviews() {
@@ -65,7 +104,8 @@ final class FileMarkdownView: MarkdownTextView {
       let source = String(text.string.dropFirst(prefix.count))
       var attributes: [NSAttributedString.Key: Any] = [Self.searchExcluded: true]
       if prefix == Self.imageMarker {
-        attributes.merge([.link: source, .font: theme.fonts.body, .foregroundColor: theme.colors.body]) { _, new in new }
+        let link = onImage == nil ? source : Self.imageMarker + source
+        attributes.merge([.link: link, Self.imageSource: source, .font: theme.fonts.body, .foregroundColor: theme.colors.body]) { _, new in new }
       } else {
         attributes.merge([.font: theme.fonts.codeInline, .foregroundColor: theme.colors.code,
           .backgroundColor: theme.colors.codeBackground.withAlphaComponent(0.05)]) { _, new in new }
@@ -105,7 +145,17 @@ final class FileMarkdownView: MarkdownTextView {
     // Read the parsed content, including tables and the latest streamed links,
     // rather than the label's previous frame while throttled rendering catches up.
     return MarkdownMermaid.actions(content.blocks) + inlineNodes(content.blocks).collect { node -> [UIAccessibilityCustomAction] in
-      guard case let .link(href, children) = node, let target = ChatFileLink(href) else { return [] }
+      if case let .text(value) = node, value.hasPrefix(Self.imageMarker), self.onImage != nil {
+        let source = String(value.dropFirst(Self.imageMarker.count))
+        let label = String.localizedStringWithFormat(String(localized: "native.chat.image.label", bundle: .lody), source)
+          + " · " + String(localized: "native.chat.image.openPreview", bundle: .lody)
+        return [UIAccessibilityCustomAction(name: label) { [weak self] _ in
+          self?.onImage?(source)
+          return true
+        }]
+      }
+      guard case let .link(href, children) = node else { return [] }
+      let target = ChatFileLink(href)
       let label = children.collect { child -> [String] in
         switch child {
         case .text(let text) where !text.hasPrefix(Self.marker): return [text]
@@ -113,7 +163,8 @@ final class FileMarkdownView: MarkdownTextView {
         default: return []
         }
       }.joined()
-      return [UIAccessibilityCustomAction(name: label.isEmpty ? (target.path as NSString).lastPathComponent : label) { [weak self] _ in
+      let fallback = target.map { ($0.path as NSString).lastPathComponent } ?? href
+      return [UIAccessibilityCustomAction(name: label.isEmpty ? fallback : label) { [weak self] _ in
         self?.linkHandler?(.string(href), NSRange(location: 0, length: 0), .zero)
         return true
       }]
