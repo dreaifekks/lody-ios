@@ -18,6 +18,13 @@ ALLOW = {'Allow', 'Always Allow', '允许', '始终允许'}
 OPEN = {'Open', '打开'}
 
 
+def capture(name):
+    # iOS 27 puts the expanded Island in the display mask layer.
+    subprocess.run(['xcrun', 'simctl', 'io', udid, 'screenshot', '--mask=black', str(ui.output / f'{name}.png')],
+                   check=True, capture_output=True, timeout=30)
+    (ui.output / f'{name}.json').write_text(ui.axe('describe-ui'))
+
+
 def status():
     return ui.element('live-activity-status').get('AXLabel') or ''
 
@@ -82,7 +89,7 @@ def change_icon(value):
         ui.invalidate_axe()
         ui.wait(lambda _: ui.element(f'app-icon-{value}').get('AXValue') == selected,
                 'System icon change did not complete')
-    ui.capture(f'icon-{value}')
+    capture(f'icon-{value}')
     ui.axe('tap', '--id', 'BackButton', '--post-delay', '.6')
     ui.element('live-activity-status')
 
@@ -107,14 +114,14 @@ assert status() != '0 active', 'Toggling the injected switch ended the fixture a
 
 ui.axe('button', 'home')
 time.sleep(2)
-ui.capture('island-default-icon')
+capture('island-default-icon')
 foreground()
 change_icon('Aqua')
 assert status() != '0 active', 'Changing the icon ended the running activity'
 
 ui.axe('button', 'home')
 time.sleep(2)
-ui.capture('island-running')
+capture('island-running')
 summary = catalog.text('native.liveActivity.runningSummary').replace('{count}', '2')
 running_expanded = expand_island(summary, 'Expanded island never showed the task overview')
 assert 'git push origin main --force' not in running_expanded, \
@@ -126,7 +133,7 @@ assert catalog.text('native.liveActivity.openHint') not in running_expanded, \
 for over_ceiling in [catalog.text('native.liveActivity.debug.title2'), catalog.text('native.liveActivity.debug.title3')]:
     assert over_ceiling not in running_expanded, \
         f'The island listed {over_ceiling!r}, which pushes it past the height that renders'
-ui.capture('island-running-expanded')
+capture('island-running-expanded')
 ui.axe('button', 'home')
 time.sleep(1)
 
@@ -138,7 +145,7 @@ allow(2)
 time.sleep(1)
 # A locked device exposes only its own Lock Screen in the accessibility tree, so the
 # capsule is evidence by capture alone, as the permission capture below also is.
-ui.capture('lockscreen-running')
+capture('lockscreen-running')
 ui.axe('button', 'lock')
 time.sleep(1)
 ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
@@ -148,13 +155,15 @@ ui.axe('tap', '--id', 'live-activity-permission', '--tap-style', 'physical')
 time.sleep(2)
 ui.axe('button', 'home')
 time.sleep(2)
-ui.capture('island-permission')
+capture('island-permission')
 
 expanded = expand_island(catalog.text('native.liveActivity.debug.title2'),
                          'Expanded island never showed the permission focus')
+# The permission bottom region shows the decision, while the trailing region retains the running count.
 for expected in [
-    catalog.text('native.liveActivity.status.permission'),
     catalog.text('native.liveActivity.runningSummary').replace('{count}', '1'),
+    catalog.text('native.liveActivity.deny'),
+    catalog.text('native.liveActivity.allow'),
     'git push origin main --force',
 ]:
     assert expected in expanded, f'Expanded island never showed {expected!r}'
@@ -164,7 +173,7 @@ assert catalog.text('native.liveActivity.openHint') not in expanded, \
 for over_ceiling in [catalog.text('native.liveActivity.debug.title1'), catalog.text('native.liveActivity.debug.title3')]:
     assert over_ceiling not in expanded, \
         f'The island listed {over_ceiling!r}, which pushes it past the height that renders'
-ui.capture('island-expanded')
+capture('island-expanded')
 ui.axe('button', 'home')
 time.sleep(1)
 
@@ -172,7 +181,7 @@ ui.axe('button', 'lock')
 time.sleep(2)
 allow(2)
 time.sleep(1)
-ui.capture('lockscreen-permission')
+capture('lockscreen-permission')
 ui.axe('button', 'lock')
 time.sleep(1)
 ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
@@ -185,7 +194,9 @@ time.sleep(2)
 remaining = expand_island(catalog.text('native.liveActivity.debug.title2'), 'Remaining task did not replace completed task')
 assert catalog.text('native.liveActivity.debug.title1') not in remaining
 assert re.search(r'\d+:\d\d', remaining), 'Single remaining task lost its elapsed timer'
-ui.capture('one-remaining')
+assert 'git push origin main --force' not in remaining, 'A running remaining task retained the old permission command'
+assert catalog.text('native.liveActivity.deny') not in remaining and catalog.text('native.liveActivity.allow') not in remaining, 'A running remaining task retained the old permission buttons'
+capture('one-remaining')
 ui.axe('button', 'home')
 foreground()
 ui.axe('tap', '--id', 'live-activity-complete-all', '--tap-style', 'physical')
@@ -194,24 +205,24 @@ ui.wait(lambda items: status() == '0 active', 'Completing all tasks did not end 
 # finished titles and frozen durations are readable; the island drops it at once.
 ui.axe('button', 'lock')
 time.sleep(1)
-ui.capture('lockscreen-completed')
+capture('lockscreen-completed')
 time.sleep(61)
-ui.capture('lockscreen-dismissed')
+capture('lockscreen-dismissed')
 ui.axe('button', 'lock')
 ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
 foreground()
-ui.capture('ended')
+capture('ended')
 # A new activity must also use the persisted choice, without another icon switch.
 ui.axe('tap', '--id', 'live-activity-start', '--tap-style', 'physical')
 ui.wait(lambda items: status() != '0 active', 'New work did not restart the activity')
 ui.axe('button', 'home')
 time.sleep(2)
-ui.capture('island-new-aqua')
+capture('island-new-aqua')
 foreground()
 change_icon('default')
 ui.axe('button', 'home')
 time.sleep(2)
-ui.capture('island-restored-default')
+capture('island-restored-default')
 # Compare only the app mark, excluding the clock, pulsing status and task count.
 # Coordinates are in points on the verification pool's iPhone 17 Pro.
 marks = {}
@@ -230,7 +241,7 @@ ui.axe('tap', '--id', 'live-activity-fail-all', '--tap-style', 'physical')
 ui.wait(lambda items: status() == '0 active', 'Failing every task did not end the activity')
 ui.axe('button', 'lock')
 time.sleep(1)
-ui.capture('lockscreen-failed')
+capture('lockscreen-failed')
 ui.axe('button', 'lock')
 ui.axe('swipe', '--start-x', '200', '--start-y', '780', '--end-x', '200', '--end-y', '300', '--duration', '0.4', '--post-delay', '1.0')
 foreground()
@@ -244,14 +255,23 @@ ui.wait(
 )
 labels = [i.get('AXLabel') or '' for i in ui.state()]
 assert not any('Unmatched' in label for label in labels), 'widget deep link landed on the Unmatched Route screen'
-ui.capture('deep-link')
+capture('deep-link')
 subprocess.run(['xcrun', 'simctl', 'openurl', udid, 'lody:///activity?workspaceId=debug&userId=debug'], check=True, timeout=30)
 allow(2, OPEN)
+# The deep link opens the production activity page. Its local account is not restored in the offline runner.
+ui.axe('tap', '--label', catalog.text('accessibility.closeSheet', title=''), '--post-delay', '.5')
+ui.wait(lambda items: any(item.get('AXLabel') == catalog.text('common.loading') for item in items)
+        and any(item.get('AXLabel') == catalog.text('inbox.settings.view.activity') for item in items),
+        'Unrestored overview did not show its localized activity title and loading state')
+capture('overview-current-account')
+# Exercise the production account fence after local restoration at its existing fixture boundary.
+ui.open_case('activity-preview-wrong-account')
 ui.wait(
-    lambda items: any(catalog.text('notifications.route.wrongAccount') in (i.get('AXLabel') or '') for i in items),
-    'Overview deep link must reject an account outside the signed-in context',
+    lambda items: any(catalog.text('notifications.route.wrongAccount') == (i.get('AXLabel') or '') for i in items),
+    'Restored overview must reject another account',
 )
+assert not any(item.get('AXUniqueId') in ['activity-running', 'activity-waiting'] for item in ui.state()), 'Another account saw this workspace activity'
 ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('inbox.settings.view.activity') for i in items),
         'Overview must use its localized title, not the raw route name')
-ui.capture('overview-account-boundary')
+capture('overview-account-boundary')
 print('PASS: island running, permission and both expanded states captured, switch toggled, activity ended, unavailable widget link preserves the current page', flush=True)

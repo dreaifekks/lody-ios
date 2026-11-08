@@ -548,7 +548,11 @@ try:
                     ui.element('ui-verify-ready')
                     links_ready = True
                 if require_video:
-                    recording = subprocess.Popen(['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=hevc', str(output / 'run.mp4')], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    video_command = ['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=hevc']
+                    if case == 'live-activity':
+                        video_command += ['--mask=black']
+                    video_command += [str(output / 'run.mp4')]
+                    recording = subprocess.Popen(video_command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                     deadline = time.monotonic() + 20
                     while time.monotonic() < deadline:
                         if select.select([recording.stderr], [], [], .5)[0]:
