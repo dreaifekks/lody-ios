@@ -35,10 +35,13 @@ sim('launch', udid, bundle, '-AppleLanguages', '(en)', '-AppleLocale', 'en_US')
 ui.element('onboarding-join-lan', timeout=60)
 ui.axe('tap', '--id', 'onboarding-join-lan')
 ui.axe('tap', '--id', 'lan-invite')
+ui.wait_for_keyboard('lan-invite')
 ui.axe('type', state['invite'])
 ui.axe('tap', '--id', 'lan-join-submit')
 # Fresh installation must ask immediately after joining, before a relaunch.
-ui.wait(lambda items: any(item.get('AXLabel') == 'Allow' for item in items), 'Joining LAN did not request notification permission', timeout=60)
+result = ui.wait(lambda items: next((item for item in items if item.get('AXLabel') == 'Allow' or
+    (item.get('AXUniqueId') == 'lan-join-error' and item.get('AXLabel'))), None), 'Joining LAN did not request notification permission', timeout=60)
+assert result.get('AXLabel') == 'Allow', result
 ui.capture('join-notification-permission')
 ui.axe('tap', '--label', 'Allow')
 ui.wait(lambda items: not any(item.get('AXUniqueId') == 'join-lan-form' for item in items), 'Join form stayed open', timeout=60)
