@@ -30,7 +30,8 @@ final class LanChatPreviewController: UIViewController {
       ["id": "human", "role": "user", "status": "completed", "finished": true,
        "items": [["itemId": "text", "type": "text", "text": "A message without an author stays unchanged."]]],
     ]
-    chat.setEntries(SessionController.json(board ? Self.boardEntries : entries), animate: false)
+    let json = String(decoding: try! JSONSerialization.data(withJSONObject: board ? Self.boardEntries : entries), as: UTF8.self)
+    chat.setEntries(json, animate: false)
     chat.scheduleUpdate()
   }
   private static let boardEntries: [[String: Any]] = [
