@@ -78,7 +78,7 @@ for scenario in ['nohost', 'cloud-localhost']:
 systems = [('http', 'http://example.invalid/path?q=1#frag'), ('https', 'https://example.invalid/path?q=1#frag'),
            ('file-url', 'file:///tmp/report%20one.md#L12'), ('tg', 'tg://resolve?domain=lody'),
            ('mailto', 'mailto:reader@example.invalid'), ('tel', 'tel:+15550100')]
-for scenario, href in systems:
+for scenario, href in systems + [('bare-' + name, href) for name, href in systems if name in ('file-url', 'tg', 'mailto', 'tel')]:
     enter(scenario)
     tap_target(href, ('url', href), host='system')
 

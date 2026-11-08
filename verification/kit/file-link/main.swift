@@ -26,6 +26,7 @@ assert(paths("https://example.com/x。src/file.swift") == ["src/file.swift"])
 assert(paths("SESSION://review") == [])
 assert(paths("session://" + String(repeating: "a", count: 8193)) == [])
 
-assert(paths("file:///tmp/report.md tg://resolve?domain=x mailto:reader@example.com tel:+15550100") == [])
+assert(paths("file:///tmp/report.md tg://resolve?domain=x mailto:reader@example.com tel:+15550100") == [
+  "file:///tmp/report.md", "tg://resolve?domain=x", "mailto:reader@example.com", "tel:+15550100"])
 assert(paths("ai.lody.stable://session/abc?workspace=ws lody-oss://session/def") == ["ai.lody.stable://session/abc?workspace=ws", "lody-oss://session/def"])
 print("PASS: bare paths and session resources retain settled punctuation and Unicode boundaries")

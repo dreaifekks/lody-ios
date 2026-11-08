@@ -147,8 +147,11 @@ enum ChatBareLinks {
       guard let path else { return nil }
       return (NSRange(location: match.range.location, length: (path as NSString).length), path)
     }
-    for match in urlMatches where SessionLink(match.href) != nil {
-      paths.append((match.range, match.href))
+    for match in urlMatches {
+      let scheme = URL(string: match.href)?.scheme?.lowercased() ?? ""
+      if SessionLink(match.href) != nil || ["file", "tg", "mailto", "tel"].contains(scheme) {
+        paths.append((match.range, match.href))
+      }
     }
     for (range, href) in paths.sorted(by: { $0.0.location < $1.0.location }) { append(range, href: href) }
     if cursor < source.length { result.append(Segment(text: source.substring(from: cursor))) }
