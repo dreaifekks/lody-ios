@@ -31,7 +31,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   func start(_ options: [UIApplication.LaunchOptionsKey: Any]?) {
     if LodyUIVerify.enabled || LodyUIVerify.offline { return }
     do {
-      if try LanHub.read() != nil { _ = startLan(requestPermissionOnLaunch: true); return }
+      if try LanHub.read() != nil { _ = startLan(); return }
     } catch {
       // A locked/unavailable Keychain is not evidence that this is a Cloud account.
       return
@@ -57,7 +57,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   /// OneSignal may already be initialized by a signed-out launch. Switch the
   /// active provider independently of SDK initialization, retaining its delegate for Cloud.
   @discardableResult
-  func startLan(requestPermissionOnLaunch: Bool = false) -> Bool {
+  func startLan() -> Bool {
     if LodyUIVerify.enabled || LodyUIVerify.offline { return false }
     guard (try? LanHub.read()) != nil else { return false }
     if !lanMode {
@@ -74,10 +74,8 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
       lanMode = true
       // Set during launch so a click that launched the app is not lost.
       UNUserNotificationCenter.current().delegate = self
-      if requestPermissionOnLaunch {
-        PushPermissionLaunchRequest.perform {
-          UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-        }
+      PushPermissionLaunchRequest.perform {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
       }
     }
     guard LanPush.shared.start() else { return false }
