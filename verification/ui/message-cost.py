@@ -31,7 +31,7 @@ def tokens():
 
 def cost(amount):
     def exact(row):
-        spoken = str(row.get('AXLabel') or '') + ' ' + str(row.get('AXValue') or '')
+        spoken = str(row)
         match = re.search(r'(?:USD|US\$|\$)\s*([0-9][0-9,]*\.[0-9]+)', spoken)
         return match is not None and match.group(1) == amount
     row = ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == 'cost' and exact(i)), None), 'Wrong USD cost: ' + amount)
