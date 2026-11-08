@@ -11,6 +11,8 @@ final class FileMarkdownView: MarkdownTextView {
   private static let imageMarker = "\u{F0000}lody-image:"
   private static let htmlMarker = "\u{F0000}lody-html:"
   static let searchExcluded = NSAttributedString.Key("lody-search-excluded")
+  static let imageSource = NSAttributedString.Key("lody-markdown-image-source")
+  var onImage: ((String) -> Void)?
 
   static func content(_ source: MarkdownContent, streaming: Bool = false, linkify: Bool = false) -> MarkdownContent {
     let ruby = MarkdownRuby.blocks(source.blocks)
@@ -96,7 +98,7 @@ final class FileMarkdownView: MarkdownTextView {
       let source = String(text.string.dropFirst(prefix.count))
       var attributes: [NSAttributedString.Key: Any] = [Self.searchExcluded: true]
       if prefix == Self.imageMarker {
-        attributes.merge([.link: source, .font: theme.fonts.body, .foregroundColor: theme.colors.body]) { _, new in new }
+        attributes.merge([.link: source, Self.imageSource: source, .font: theme.fonts.body, .foregroundColor: theme.colors.body]) { _, new in new }
       } else {
         attributes.merge([.font: theme.fonts.codeInline, .foregroundColor: theme.colors.code,
           .backgroundColor: theme.colors.codeBackground.withAlphaComponent(0.05)]) { _, new in new }
@@ -136,6 +138,15 @@ final class FileMarkdownView: MarkdownTextView {
     // Read the parsed content, including tables and the latest streamed links,
     // rather than the label's previous frame while throttled rendering catches up.
     return MarkdownMermaid.actions(content.blocks) + inlineNodes(content.blocks).collect { node -> [UIAccessibilityCustomAction] in
+      if case let .text(value) = node, value.hasPrefix(Self.imageMarker), self.onImage != nil {
+        let source = String(value.dropFirst(Self.imageMarker.count))
+        let label = String.localizedStringWithFormat(String(localized: "native.chat.image.label", bundle: .lody), source)
+          + " · " + String(localized: "native.chat.image.openPreview", bundle: .lody)
+        return [UIAccessibilityCustomAction(name: label) { [weak self] _ in
+          self?.onImage?(source)
+          return true
+        }]
+      }
       guard case let .link(href, children) = node else { return [] }
       let target = ChatFileLink(href)
       let label = children.collect { child -> [String] in

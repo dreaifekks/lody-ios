@@ -457,7 +457,7 @@ extension LodyChatView {
       if self.needsApply {
         self.needsApply = false
         self.applyRows()
-      } else {
+      } else if self.imagePreviewFollowsTranscript {
         self.imagePreview?.updateItems(ChatImageGallery.items(from: projected))
       }
     }

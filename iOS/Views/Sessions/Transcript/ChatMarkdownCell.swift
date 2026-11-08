@@ -8,6 +8,7 @@ final class ChatMarkdownCell: UICollectionViewCell {
   private(set) var row: ChatRow?
   private var topInset = ChatRowPadding.content
   var onLink: ((String) -> Void)?
+  var onImage: ((String) -> Void)?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -31,6 +32,7 @@ final class ChatMarkdownCell: UICollectionViewCell {
       contentView.addSubview(markdown)
     }
     markdown.onLink = { [weak self] in self?.onLink?($0) }
+    markdown.onImage = { [weak self] in self?.onImage?($0) }
     markdown.setShine(row.shines)
     icon.image = row.symbol.isEmpty ? nil : UIImage(systemName: row.symbol, withConfiguration: ChatCell.iconSymbolConfiguration(for: row))
     icon.tintColor = row.attention ? .systemOrange : .secondaryLabel
@@ -53,6 +55,7 @@ final class ChatMarkdownCell: UICollectionViewCell {
     if markdown?.superview === contentView {
       markdown?.clearSelection()
       markdown?.onLink = nil
+      markdown?.onImage = nil
       markdown?.removeFromSuperview()
     }
     markdown = nil

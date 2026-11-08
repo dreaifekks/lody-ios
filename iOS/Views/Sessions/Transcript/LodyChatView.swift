@@ -115,6 +115,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var collapsedMessageHeights: [String: CGFloat] = [:]
   var imageWorkspace = ""
   var imageSession = ""
+  var imageURLSession: URLSession = .shared
+  var imagePreviewFollowsTranscript = true
   weak var imagePreview: ImagePreviewController?
   var mentionRepository = "" {
     didSet {
@@ -961,6 +963,7 @@ extension LodyChatView {
       let width = max(1, ChatReadingColumn.itemWidth(in: collection.bounds.width) - 32)
       let markdown = self.store.view(id: id, text: row.text, secondary: false, streaming: row.streaming, width: width)
       markdown.onLink = { [weak self] in self?.openMessageLink($0) }
+      markdown.onImage = { [weak self] in self?.openMarkdownImage($0) }
       cell.configure(row, markdown: markdown, expanded: self.expandedPlans.contains(id))
       cell.onToggle = { [weak self] in self?.toggleExpansion(row) }
       cell.onDecision = { [weak self] action in self?.onPlanDecision(["entryId": row.entryID, "itemId": row.itemID, "action": action, "id": UUID().uuidString.lowercased()]) }
@@ -971,6 +974,7 @@ extension LodyChatView {
       let cell = collection.dequeueReusableCell(withReuseIdentifier: "markdown", for: index) as! ChatMarkdownCell
       let secondary = row.kind == "thought"
       cell.onLink = { [weak self] in self?.openMessageLink($0) }
+      cell.onImage = { [weak self] in self?.openMarkdownImage($0) }
       let width = ChatCell.textWidth(row, width: ChatReadingColumn.itemWidth(in: collection.bounds.width))
       cell.configure(
         row,

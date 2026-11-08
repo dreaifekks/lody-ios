@@ -128,6 +128,7 @@ final class ChatPlanCell: UICollectionViewCell, ChatGapCell {
     clearSelection()
     if markdown?.superview === viewport {
       markdown?.onLink = nil
+      markdown?.onImage = nil
       markdown?.removeFromSuperview()
     }
     markdown = nil
