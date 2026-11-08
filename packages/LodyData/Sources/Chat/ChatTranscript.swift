@@ -35,6 +35,23 @@ public struct ChatEntry: Decodable, Sendable {
       self.thoughtLevel = thoughtLevel
     }
   }
+  public struct Author: Decodable, Sendable {
+    public struct Role: Decodable, Sendable {
+      public let name: String
+      public let instanceLabel: String?
+    }
+    public let kind: String
+    public let name: String?
+    public let role: Role?
+    public let model: String?
+
+    public var title: String? {
+      guard kind == "agent", let name else { return nil }
+      let roleTitle = role.map { [$0.name, $0.instanceLabel].compactMap { $0 }.joined(separator: " · ") }
+      return [roleTitle, name, model].compactMap { $0 }.joined(separator: " · ")
+    }
+  }
+  public var author: Author? = nil
   public let id: String
   public let role: String
   public let status: String
@@ -66,7 +83,7 @@ public struct ChatEntry: Decodable, Sendable {
     return item.itemId
   }
 
-  public init(id: String, role: String, status: String, finished: Bool, timestamp: String?, endedAt: Double?, startedAt: Double?, permissionWaitMs: Double? = nil, items: [ChatItem], fileDiffs: [ChatFileDiff]?, inputConfig: ChatTurnInput? = nil, tokenUsage: ChatTurnUsage? = nil, modelInfo: ModelInfo? = nil, userTurnId: String? = nil, executionId: String? = nil, executionFinished: Bool? = nil, steerCount: Int? = nil, delivery: String? = nil, holdOpen: Bool? = nil, canSteer: Bool? = nil) {
+  public init(id: String, role: String, status: String, finished: Bool, timestamp: String?, endedAt: Double?, startedAt: Double?, permissionWaitMs: Double? = nil, items: [ChatItem], fileDiffs: [ChatFileDiff]?, inputConfig: ChatTurnInput? = nil, tokenUsage: ChatTurnUsage? = nil, modelInfo: ModelInfo? = nil, userTurnId: String? = nil, executionId: String? = nil, executionFinished: Bool? = nil, steerCount: Int? = nil, delivery: String? = nil, holdOpen: Bool? = nil, canSteer: Bool? = nil, author: Author? = nil) {
     self.id = id
     self.role = role
     self.status = status
@@ -87,6 +104,7 @@ public struct ChatEntry: Decodable, Sendable {
     self.delivery = delivery
     self.holdOpen = holdOpen
     self.canSteer = canSteer
+    self.author = author
   }
 }
 
@@ -251,6 +269,7 @@ public struct ChatRow: Equatable, Sendable {
   public var imageAsset = ""
   public var subagent: ChatSubagentCard? = nil
   public var detail = ""
+  public var author: String? = nil
   public var treeChild = false
   public var treeLast = false
   public var treeDown = false
@@ -259,7 +278,7 @@ public struct ChatRow: Equatable, Sendable {
   /// `only` / `first` / `middle` / `last` for consecutive file rows in one group.
   public var group = ""
 
-  public init(id: String, entryID: String, kind: String, text: String, errorMeta: ChatItem.NoticeMeta? = nil, errorRetry: ChatErrorRetryState? = nil, planIsLatest: Bool = true, planPermissionItemID: String = "", planDecision: ChatPlanDecisionState? = nil, symbol: String = "", itemID: String = "", processStartID: String = "", actionable: Bool = false, running: Bool = false, attention: Bool = false, streaming: Bool = false, localImageURI: String? = nil, image: ChatImage? = nil, file: ChatMessageAttachment? = nil, fileDiff: ChatFileDiff? = nil, attachments: [ChatMessageAttachment] = [], uploadProgress: [String: ChatAttachmentUploadProgress] = [:], workDurationMs: Int? = nil, imageAsset: String = "", subagent: ChatSubagentCard? = nil, detail: String = "", treeChild: Bool = false, treeLast: Bool = false, treeDown: Bool = false, group: String = "") {
+  public init(id: String, entryID: String, kind: String, text: String, errorMeta: ChatItem.NoticeMeta? = nil, errorRetry: ChatErrorRetryState? = nil, planIsLatest: Bool = true, planPermissionItemID: String = "", planDecision: ChatPlanDecisionState? = nil, symbol: String = "", itemID: String = "", processStartID: String = "", actionable: Bool = false, running: Bool = false, attention: Bool = false, streaming: Bool = false, localImageURI: String? = nil, image: ChatImage? = nil, file: ChatMessageAttachment? = nil, fileDiff: ChatFileDiff? = nil, attachments: [ChatMessageAttachment] = [], uploadProgress: [String: ChatAttachmentUploadProgress] = [:], workDurationMs: Int? = nil, imageAsset: String = "", subagent: ChatSubagentCard? = nil, detail: String = "", treeChild: Bool = false, treeLast: Bool = false, treeDown: Bool = false, group: String = "", author: String? = nil) {
     self.id = id
     self.entryID = entryID
     self.kind = kind
@@ -290,6 +309,7 @@ public struct ChatRow: Equatable, Sendable {
     self.treeLast = treeLast
     self.treeDown = treeDown
     self.group = group
+    self.author = author
   }
 }
 
@@ -562,7 +582,7 @@ public struct ChatTranscript: Sendable {
         }
         let text = entry.items.compactMap { $0.type == "text" ? $0.text : nil }.joined(separator: "\n\n")
         if !text.isEmpty {
-          result.append(ChatRow(id: entry.id + (result.isEmpty ? ":user" : ":user-text"), entryID: entry.id, kind: "user", text: text))
+          result.append(ChatRow(id: entry.id + (result.isEmpty ? ":user" : ":user-text"), entryID: entry.id, kind: "user", text: text, author: entry.author?.title))
         }
         if let delivery = entry.delivery, delivery != "accepted" {
           let key = "native.chat.message.guide." + delivery

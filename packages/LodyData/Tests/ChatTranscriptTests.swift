@@ -13,6 +13,21 @@ final class ChatTranscriptTests: XCTestCase {
     ChatTranscript(entries: try JSONDecoder().decode([ChatEntry].self, from: Data(json.utf8)))
   }
 
+  func testDelegatedAuthorsUseOnlyProjectedIdentity() throws {
+    let json = """
+    [{"id":"delegated","role":"user","status":"done","finished":true,
+      "author":{"kind":"agent","name":"Planner","role":{"name":"iosDev","instanceLabel":"Mini"},"model":"GPT"},
+      "items":[{"itemId":"text","type":"text","text":"Check the layout."}]},
+     {"id":"human","role":"user","status":"done","finished":true,
+      "author":{"kind":"human","name":"Human"},"items":[{"itemId":"text","type":"text","text":"Human message"}]}]
+    """
+    let rows = try transcript(json).rows()
+    XCTAssertEqual(rows.first?.author, "iosDev · Mini · Planner · GPT")
+    XCTAssertNil(rows.last?.author)
+    let noAuthor = json.replacingOccurrences(of: "\"kind\":\"agent\"", with: "\"kind\":\"unknown\"")
+    XCTAssertNil(try transcript(noAuthor).rows().first?.author)
+  }
+
   func testToolCallsFoldIntoAProcessSummary() throws {
     let rows = try transcript(reply).rows()
     XCTAssertTrue(rows.contains { $0.kind == "summary" && $0.actionable })
