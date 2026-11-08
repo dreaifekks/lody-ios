@@ -9,7 +9,7 @@ enum LiveActivityFixtures {
     workspaceId: "preview",
     workspaceSlug: "preview",
     workspaceName: "Preview",
-    userId: "preview"
+    userId: "local:preview"
   )
 
   static let copy = State.Copy(
@@ -47,7 +47,14 @@ enum LiveActivityFixtures {
       updatedAt: now - seconds * 1000,
       updatedAtLabel: "",
       startedAt: now - (seconds + (took ?? 0)) * 1000,
-      completedAt: took.map { _ in now - seconds * 1000 }
+      completedAt: took.map { _ in now - seconds * 1000 },
+      machineName: "Mini",
+      activity: status == .running ? "Reading Shared/UIKit/Views" : nil,
+      thought: status == .running ? "Checking the paging boundary before changing the list" : nil,
+      permissionOptions: command.map { _ in [
+        .init(id: "deny", label: "Deny", kind: "reject_once"),
+        .init(id: "allow", label: "Allow", kind: "allow_once"),
+      ] }
     )
   }
 
