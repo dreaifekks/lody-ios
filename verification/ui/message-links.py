@@ -4,6 +4,7 @@ import sys
 from driver import UI
 
 ui = UI(*sys.argv[1:])
+screen = next(i['frame'] for i in ui.state() if i.get('type') == 'Application')
 
 def probe(items=None):
     node = next((x for x in items or ui.state() if x.get('AXUniqueId') == 'message-links-probe'), None)
@@ -11,7 +12,15 @@ def probe(items=None):
 
 def enter(scenario):
     if probe():
-        ui.axe('tap', '--id', 'message-links-close')
+        buttons = ui.wait(lambda items: [i for i in items
+            if i.get('AXUniqueId') == 'message-links-close' and i.get('type') == 'Button'
+            and i['frame']['height'] > 0
+            and screen['y'] <= i['frame']['y'] + i['frame']['height'] / 2 < screen['y'] + screen['height']],
+            'Missing fixture close button')
+        # The presenting chat stays visible above a half-height process sheet.
+        # Its bar item shares this fixture action; tap the foreground sheet's copy.
+        frame = max(buttons, key=lambda item: item['frame']['y'])['frame']
+        ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.4')
         ui.wait(lambda items: not probe(items), 'Previous fixture did not close')
     ui.open_case('message-links-' + scenario)
     ui.wait(lambda items: probe(items).get('host') == 'session' and probe(items).get('scenario') == scenario, 'Message-links scene did not reset')
