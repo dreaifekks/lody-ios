@@ -36,6 +36,7 @@ final class DebugViewController: UIViewController {
     ]),
     ("chat", "聊天与输入", [
       ("answer-folding", "Answer Folding", "bubble.left"),
+      ("continue-marker", "Continue Marker", "bubble.left"),
       ("message-links", "Message links", "link"),
       ("item-detail-preview", "Item details", "doc.text.magnifyingglass"),
       ("edit-message-preview", "Message editing", "pencil"),

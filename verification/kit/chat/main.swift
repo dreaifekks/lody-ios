@@ -1199,3 +1199,31 @@ assert(ChatAnswerText.isSubstantive("\n 12) ASCII list"))
 assert(!ChatAnswerText.isSubstantive(String(repeating: "😀", count: 149) + "a"))
 assert(ChatAnswerText.isSubstantive(String(repeating: "😀", count: 150)))
 }
+
+// F12: uncertain delivery never hides the original recovery prompt.
+do {
+  func continued(_ status: String = "handled", delivery: String? = nil, kind: String? = "continue") -> ChatTranscript {
+    var entry: [String: Any] = ["id": "continue", "role": "user", "status": status, "finished": true,
+      "items": [["itemId": "prompt", "type": "text", "text": "Check the current state before repeating anything."]]]
+    entry["delivery"] = delivery; entry["deliveryKind"] = kind
+    return ChatTranscript(entries: try! JSONDecoder().decode([ChatEntry].self, from: JSONSerialization.data(withJSONObject: [entry])))
+  }
+  let settled = continued()
+  assert(settled.entries[0].deliveryKind == "continue")
+  assert(settled.entries[0].items[0].text == "Check the current state before repeating anything.")
+  assert(settled.rows().map(\.kind) == ["continued"] && settled.rows()[0].symbol == "play.circle")
+  assert(settled.rows()[0].id == "continue:user" && !settled.rows()[0].actionable)
+  assert(settled.rows(processEntryID: "continue").isEmpty)
+  assert(continued("delivery_unknown").rows().contains { $0.kind == "user" && $0.text.contains("current state") })
+  for delivery in ["unknown", "rejected", "confirming", "waiting", "accepted"] {
+    let rows = continued(delivery: delivery).rows()
+    assert(rows.contains { $0.kind == "user" && $0.text.contains("current state") })
+    assert(!rows.contains { $0.kind == "continued" })
+    if delivery != "accepted" { assert(rows.contains { $0.kind == "delivery" }) }
+  }
+  assert(continued("queued").rows().isEmpty, "Queued entries keep their existing outbox ownership")
+  assert(continued(kind: nil).rows().first?.kind == "user")
+  let restart = try! JSONDecoder().decode(ChatItem.NoticeMeta.self, from: Data(#"{"reason":"daemon_restart"}"#.utf8))
+  assert(ChatFailure.title(restart) == String(localized: "native.chat.error.daemon_restart", bundle: .lody))
+}
+print("PASS: settled Continue marker; original unknown/delivery prompts, queued ownership and restart reason retained")

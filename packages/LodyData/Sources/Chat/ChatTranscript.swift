@@ -72,6 +72,8 @@ public struct ChatEntry: Decodable, Sendable {
   public var delivery: String? = nil
   public var holdOpen: Bool? = nil
   public var canSteer: Bool? = nil
+  /// A delivered continuation uses a compact marker; uncertain deliveries retain their prompt.
+  public var deliveryKind: String? = nil
   public var isRunning: Bool { role == "assistant" && !finished }
   public var isQueued: Bool { role == "user" && status == "queued" }
 
@@ -83,7 +85,7 @@ public struct ChatEntry: Decodable, Sendable {
     return item.itemId
   }
 
-  public init(id: String, role: String, status: String, finished: Bool, timestamp: String?, endedAt: Double?, startedAt: Double?, permissionWaitMs: Double? = nil, items: [ChatItem], fileDiffs: [ChatFileDiff]?, inputConfig: ChatTurnInput? = nil, tokenUsage: ChatTurnUsage? = nil, modelInfo: ModelInfo? = nil, userTurnId: String? = nil, executionId: String? = nil, executionFinished: Bool? = nil, steerCount: Int? = nil, delivery: String? = nil, holdOpen: Bool? = nil, canSteer: Bool? = nil, author: Author? = nil) {
+  public init(id: String, role: String, status: String, finished: Bool, timestamp: String?, endedAt: Double?, startedAt: Double?, permissionWaitMs: Double? = nil, items: [ChatItem], fileDiffs: [ChatFileDiff]?, inputConfig: ChatTurnInput? = nil, tokenUsage: ChatTurnUsage? = nil, modelInfo: ModelInfo? = nil, userTurnId: String? = nil, executionId: String? = nil, executionFinished: Bool? = nil, steerCount: Int? = nil, delivery: String? = nil, holdOpen: Bool? = nil, canSteer: Bool? = nil, author: Author? = nil, deliveryKind: String? = nil) {
     self.id = id
     self.role = role
     self.status = status
@@ -105,6 +107,7 @@ public struct ChatEntry: Decodable, Sendable {
     self.holdOpen = holdOpen
     self.canSteer = canSteer
     self.author = author
+    self.deliveryKind = deliveryKind
   }
 }
 
@@ -668,6 +671,10 @@ public struct ChatTranscript: Sendable {
       if processOnly && entry.id != processEntryID { return [] }
       if entry.role == "user" {
         if processOnly || entry.isQueued { return [] }
+        if entry.deliveryKind == "continue", entry.delivery == nil, entry.status != "delivery_unknown" {
+          return [ChatRow(id: entry.id + ":user", entryID: entry.id, kind: "continued",
+            text: String(localized: "native.chat.message.continued", bundle: .lodyData), symbol: "play.circle")]
+        }
         var result: [ChatRow] = []
         let attachments = entry.items.compactMap { item -> ChatMessageAttachment? in
           if let image = item.image, item.type == "image" {
@@ -1208,7 +1215,7 @@ public enum ChatFailure: Sendable {
     if meta?.code == "git_executable_not_found" {
       return String(localized: "native.chat.error.git_executable_not_found", bundle: .lodyData)
     }
-    let known: Set<String> = ["unknown", "session_archived", "agent_type_mismatch", "session_init_failed", "session_restore_failed", "session_not_found", "memory_pressure", "acp_not_ready", "agent_disconnected", "agent_no_output", "turn_pre_prompt_failed", "message_delivery_failed", "machine_access_denied", "acp_auth_required", "acp_internal_error", "acp_upstream_api_error", "acp_provider_overloaded", "acp_session_storage_incompatible", "acp_resource_not_found", "acp_request_cancelled", "acp_method_not_found", "acp_invalid_params", "acp_invalid_request", "acp_parse_error", "acp_unknown_error"]
+    let known: Set<String> = ["unknown", "session_archived", "agent_type_mismatch", "session_init_failed", "session_restore_failed", "session_not_found", "memory_pressure", "acp_not_ready", "agent_disconnected", "agent_no_output", "turn_pre_prompt_failed", "message_delivery_failed", "machine_access_denied", "acp_auth_required", "acp_internal_error", "acp_upstream_api_error", "acp_provider_overloaded", "acp_session_storage_incompatible", "acp_resource_not_found", "acp_request_cancelled", "acp_method_not_found", "acp_invalid_params", "acp_invalid_request", "acp_parse_error", "acp_unknown_error", "daemon_restart"]
     let reason = meta?.reason ?? "unknown"
     return String(localized: String.LocalizationValue("native.chat.error." + (known.contains(reason) ? reason : "unknown")), bundle: .lodyData)
   }
