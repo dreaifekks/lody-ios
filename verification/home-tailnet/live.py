@@ -23,7 +23,7 @@ def sim(*args, check=True):
 
 
 def seen(id, text):
-    return ui.wait(lambda items: next((item for item in items if item.get('AXUniqueId') == id and text in str(item)), None), f'{id}: {text}', timeout=60)
+    return ui.wait(lambda items: next((item for item in reversed(items) if item.get('AXUniqueId') == id and text in str(item)), None), f'{id}: {text}', timeout=60)
 
 
 sim('terminate', udid, bundle, check=False)
@@ -62,9 +62,9 @@ ui.axe('tap', '--id', 'hub')
 seen('sync', catalog.text('settings.connection.live'))
 seen('presence', 'Live')
 online = seen('machine:home-mini', 'ms')
-offline = seen('machine:home-nuc', 'Offline')
+offline = seen('machine:home-nuc', 'linux')
 assert 'Online' in str(online) and 'darwin' in str(online) and 'v0.109.0-lan.synthetic' in str(online), online
-assert 'linux' in str(offline) and 'v0.109.0-lan.synthetic' in str(offline), offline
+assert offline.get('AXValue') == 'Offline' and 'linux' in str(offline) and 'v0.109.0-lan.synthetic' in str(offline), offline
 seen('hub', 'ms')
 ui.capture('tailnet-connection-live')
 sim('ui', udid, 'appearance', 'dark')
