@@ -35,10 +35,14 @@ SUITES = {
 }
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
-PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
-CASES = PHONE_CASES + PAD_CASES + ['lan-entry', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'composer-fullscreen', 'session-stream-restore', 'model-values']
-HOME_CASES = {'home-states', 'home-project-bar', 'home-project-index', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'project-history-entry', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
+PAD_CASES = ['home-machine-pad', 'devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
+CASES = PHONE_CASES + PAD_CASES + ['connection', 'lan-join-errors', 'lan-agent-usage', 'lan-session-menus', 'home-machine', 'lan-entry', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'composer-fullscreen', 'session-stream-restore', 'model-values']
+HOME_CASES = {'home-machine', 'home-machine-pad', 'home-states', 'home-project-bar', 'home-project-index', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'roles-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'project-history-entry', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
 PREVIEW = {
+    'connection': 'connection-settings-preview',
+    'lan-join-errors': 'lan-join-errors',
+    'lan-agent-usage': 'lan-agent-usage-preview',
+    'lan-session-menus': 'lan-session-menus-preview',
     'lan-files': 'lan-files-preview',
     'lan-terminal': 'terminal-preview',
     'lan-entry': 'onboarding-preview',
@@ -170,6 +174,10 @@ PREVIEW = {
     'community-notice': 'community-notice',
 }
 READY = {
+    'connection': 'account',
+    'lan-join-errors': 'lan-invite',
+    'lan-agent-usage': 'setting:agent:scoped:personal',
+    'lan-session-menus': 'lan-menu-active',
     'lan-files': 'lan-files-status',
     'lan-terminal': 'terminal-fixture-open',
     'role-mention-sheet': 'create-session-input',
@@ -466,6 +474,8 @@ try:
                     launch = ['launch', args.udid, BUNDLE_ID, '--ui-verify']
                     if case in HOME_CASES:
                         launch.append('--ui-verify-home')
+                    if case in ('home-machine', 'home-machine-pad'):
+                        launch.append('--ui-verify-machines')
                     if case == 'roles-production':
                         launch.append('--ui-verify-role-presence')
                     if case in {'session-search', 'session-search-pad'}:
@@ -588,6 +598,10 @@ try:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'composer-glass-chat':
                     script = Path(__file__).with_name('composer-glass.py')
+                if case in ('connection', 'lan-join-errors', 'lan-agent-usage', 'lan-session-menus', 'home-machine'):
+                    script = Path(__file__).with_name(f'{case}.py')
+                if case == 'home-machine-pad':
+                    script = Path(__file__).with_name('home-machine.py')
                 if case == 'roles-production':
                     script = Path(__file__).with_name('roles-production.py')
                 if case == 'mentions-production':

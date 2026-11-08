@@ -9,6 +9,7 @@ enum DebugSceneCoordinator {
       do { try HomeFixture.prepare() }
       catch { preconditionFailure("Invalid offline fixture: \(error)") }
     }
+    if LodyUIVerify.has("--ui-verify-machines") { HomeFixture.prepareMachines() }
     if MentionPresenceFixture.active { MentionPresenceFixture.setLive(false) }
     let root: UIViewController = LodyUIVerify.has("--ui-verify-home") ? HomeController() : DebugViewController()
     LodyShell.shared.start(in: window, content: root, title: root is DebugViewController ? "Debug" : "")

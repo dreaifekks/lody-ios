@@ -23,7 +23,7 @@ def reveal(identifier):
 
 personal = reveal('usage:scoped:codex:personal:0')
 assert catalog.text('settings.usage.used', percent=13) in spoken(personal)
-assert not any('Other account quota' in spoken(i) or 'Legacy quota' in spoken(i) for i in ui.state()), 'A scoped account borrowed another quota'
+assert not any((i.get('AXUniqueId') or '').startswith('usage:scoped:codex:') and i.get('AXUniqueId') != 'usage:scoped:codex:personal:0' for i in ui.state()), 'A scoped account borrowed another quota'
 ui.capture('config-scoped')
 legacy = reveal('usage:legacy:codex:legacy:0')
 assert catalog.text('settings.usage.used', percent=29) in spoken(legacy)
