@@ -994,7 +994,8 @@ extension Array where Element == ChatRow {
       var end = start
       while end < rows.count, rows[end].kind == "subagent_task", rows[end].entryID == rows[start].entryID { end += 1 }
       if end - start >= 2 {
-        rows[start].subagent?.groupTitle = ChatSubagentCard.groupTitle(rows[start..<end].compactMap(\.subagent))
+        let title = ChatSubagentCard.groupTitle(rows[start..<end].compactMap(\.subagent))
+        rows[start].subagent?.groupTitle = title
       }
       start = Swift.max(end, start + 1)
     }
