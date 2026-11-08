@@ -4,10 +4,14 @@ import UIKit
 final class AccountController: UIViewController {
   private let list = LodyGroupedList(frame: .zero)
   private let source: SettingsSource
+  private let connectionService: ConnectionService
+  private let latency: HubLatencyObserver
   private var observers: [NSObjectProtocol] = []
 
-  init(source: SettingsSource = .live) {
+  init(source: SettingsSource = .live, connectionService: ConnectionService = .live) {
     self.source = source
+    self.connectionService = connectionService
+    latency = HubLatencyObserver(service: connectionService)
     super.init(nibName: nil, bundle: nil)
     title = String(localized: "account.title", bundle: .lody)
   }
@@ -23,8 +27,12 @@ final class AccountController: UIViewController {
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.setPlaceholder(String(localized: "account.placeholder", bundle: .lody))
     list.forwarded = { [weak self] name, body in
-      guard name == "rowPress", body["id"] as? String == "logout" else { return }
-      self?.confirmLogout()
+      guard name == "rowPress", let self, let id = body["id"] as? String else { return }
+      if id == "logout" { self.confirmLogout() }
+      if id == "hub" {
+        LodyShell.shared.push(ConnectionController(source: self.source, service: self.connectionService),
+          title: SettingsSections.text("section.connection"), from: self)
+      }
     }
     view.addSubview(list)
     for name in source.changes {
@@ -32,7 +40,18 @@ final class AccountController: UIViewController {
         MainActor.assumeIsolated { self?.render() }
       })
     }
+    latency.changed = { [weak self] in self?.render() }
     render()
+  }
+
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    latency.start(source.state.account?.lan)
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    latency.stop()
   }
 
   private func render() {
@@ -64,7 +83,20 @@ final class AccountController: UIViewController {
     actions.id = "logout"
     actions.footer = state.error ?? ""
     actions.rows = [logout]
-    list.setSections(account.lan == nil ? [profile, actions] : [actions])
+    if let lan = account.lan {
+      if viewIfLoaded?.window != nil { latency.start(lan) }
+      var hub = LodyListRow()
+      hub.id = "hub"
+      hub.title = lan.name
+      hub.subtitle = lan.url.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+      hub.value = latency.value.text
+      hub.image = "server.rack"
+      hub.action = true
+      hub.disclosure = true
+      hub.navigates = true
+      profile.rows = [hub]
+    }
+    list.setSections([profile, actions])
   }
 
   private func confirmLogout() {

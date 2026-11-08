@@ -62,6 +62,7 @@ enum PageFactory {
     "prompt-shortcuts": { _ in PromptShortcutsController() },
     "agent-roles": { _ in AgentRolesController() },
     "settings": { _ in SettingsController() },
+    "connection": { _ in ConnectionController() },
     "archived-sessions": { _ in ArchivedSessionsController() },
     "workspace-editor": { params in WorkspaceEditorController(params: params) },
     "session": { params in SessionController(params: params) },

@@ -1,11 +1,11 @@
 import Foundation
 
 enum SettingsSections {
-  static func make(_ state: SettingsState, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
+  static func make(_ state: SettingsState, hubLatency: String? = nil, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
     let account = state.account
     let workspace = account == nil ? nil : state.workspace
     var sections = [
-      section("account", rows: [accountRow(account)]),
+      section("account", rows: [accountRow(account, latency: hubLatency)]),
       section("personal", header: text("section.personal"), rows: [
         row("preferences", text("preferences.title"), subtitle: text("preferences.subtitle"), image: "slider.horizontal.3"),
         row("appearance", text("appearance.title"), subtitle: text("appearance.subtitle"), image: "paintpalette"),
@@ -87,9 +87,11 @@ enum SettingsSections {
     return section
   }
 
-  private static func accountRow(_ account: AuthAccount?) -> LodyListRow {
+  private static func accountRow(_ account: AuthAccount?, latency: String?) -> LodyListRow {
     if let lan = account?.lan {
-      return row("account", lan.name, subtitle: String(localized: "lan.leave.action", bundle: .lody), image: "network")
+      let address = lan.url.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+      let subtitle = [address, latency].compactMap { $0 }.joined(separator: " · ")
+      return row("account", lan.name, subtitle: subtitle, image: "network")
     }
     var result = row(
       "account", account?.user.name ?? text("account.welcome"), subtitle: account?.user.email ?? text("account.signInHint"),

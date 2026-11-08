@@ -4,11 +4,15 @@ import UIKit
 class SettingsController: UIViewController {
   let list = LodyGroupedList(frame: .zero)
   let source: SettingsSource
+  private let connectionService: ConnectionService
+  private let latency: HubLatencyObserver
   private var state = SettingsState()
   private var observers: [NSObjectProtocol] = []
 
-  init(source: SettingsSource = .live) {
+  init(source: SettingsSource = .live, connectionService: ConnectionService = .live) {
     self.source = source
+    self.connectionService = connectionService
+    latency = HubLatencyObserver(service: connectionService)
     super.init(nibName: nil, bundle: nil)
     title = String(localized: "tabs.settings", bundle: .lody)
   }
@@ -33,12 +37,25 @@ class SettingsController: UIViewController {
         MainActor.assumeIsolated { self?.render() }
       })
     }
+    latency.changed = { [weak self] in self?.render() }
     render()
+  }
+
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    latency.start(source.state.account?.lan)
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    latency.stop()
   }
 
   func render() {
     state = source.state
-    list.setSections(SettingsSections.make(state))
+    if viewIfLoaded?.window != nil { latency.start(state.account?.lan) }
+    let value = latency.value == .measuring ? nil : latency.value.text
+    list.setSections(SettingsSections.make(state, hubLatency: value))
   }
 
   private func open(_ id: String) {
@@ -68,7 +85,7 @@ class SettingsController: UIViewController {
         WorkspaceEditorController(params: params), title: text("workspace.general"), detents: [0.5]
       )
     } else if id == "account", state.account != nil {
-      LodyShell.shared.push(AccountController(source: source), title: state.account?.lan == nil ? String(localized: "account.title", bundle: .lody) : String(localized: "lan.leave.action", bundle: .lody), from: self)
+      LodyShell.shared.push(AccountController(source: source, connectionService: connectionService), title: state.account?.lan == nil ? String(localized: "account.title", bundle: .lody) : String(localized: "lan.leave.action", bundle: .lody), from: self)
     } else if id == "archived", workspace != nil {
       push("archived-sessions", title: String(localized: "settings.archived.title", bundle: .lody))
     } else if id == "project-history", workspace != nil {
