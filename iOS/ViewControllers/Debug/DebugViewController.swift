@@ -35,6 +35,7 @@ final class DebugViewController: UIViewController {
       ("create-parity", "Create parity verification", "square.on.square"),
     ]),
     ("chat", "聊天与输入", [
+      ("answer-folding", "Answer Folding", "bubble.left"),
       ("message-links", "Message links", "link"),
       ("item-detail-preview", "Item details", "doc.text.magnifyingglass"),
       ("edit-message-preview", "Message editing", "pencil"),
