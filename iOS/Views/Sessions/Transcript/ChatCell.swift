@@ -273,6 +273,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate, Ch
   let processDetail = UILabel()
   let processDot = UIView()
   let processTree = CAShapeLayer()
+  private let noticeSeparator = UIView()
   var row: ChatRow?
   var onInteraction: (() -> Void)?
   var canEdit: (() -> Bool)?
@@ -300,6 +301,10 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate, Ch
     contentView.addSubview(messageContent)
     messageContent.disclosure.addAction(UIAction { [weak self] _ in self?.onToggle?() }, for: .touchUpInside)
     contentView.addSubview(icon)
+    noticeSeparator.backgroundColor = .separator
+    noticeSeparator.isHidden = true
+    noticeSeparator.isUserInteractionEnabled = false
+    contentView.addSubview(noticeSeparator)
     icon.contentMode = .center
     processTree.fillColor = nil
     processTree.lineWidth = 1
@@ -332,6 +337,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate, Ch
     bubble.isHidden = row.kind != "user"
     applyLeadingMark(for: row, previousSymbol: previousSymbol, sameRow: sameRow)
     applyProcess(row)
+    noticeSeparator.isHidden = row.kind != "noticeDivider"
     accessibilityIdentifier = row.id
     accessibilityLabel = row.kind == "duration"
       ? [row.text, row.detail].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -562,7 +568,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate, Ch
 
   static func leading(_ row: ChatRow) -> CGFloat {
     switch row.kind {
-    case "text", "user", "duration", "delivery": return 0
+    case "text", "user", "duration", "delivery", "noticeDivider": return 0
     case "summary": return railText
     default: return 24
     }
@@ -597,6 +603,8 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate, Ch
     layoutGap()
     guard let row else { return }
     let width = contentView.bounds.width
+    let pixel = 1 / traitCollection.displayScale
+    noticeSeparator.frame = CGRect(x: 0, y: contentView.bounds.height - pixel, width: width, height: pixel)
     if row.kind == "duration" {
       isAccessibilityElement = true
       label.isAccessibilityElement = false

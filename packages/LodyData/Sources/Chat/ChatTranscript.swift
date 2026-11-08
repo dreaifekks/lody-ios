@@ -173,7 +173,38 @@ public struct ChatMessageAttachment: Decodable, Equatable, Sendable {
 public struct ChatItem: Decodable, Sendable {
   public struct Permission: Decodable, Sendable { public let requestId: String; public let pending: Bool }
   public struct Plan: Decodable, Sendable { public let content: String; public let status: String }
-  public struct NoticeMeta: Decodable, Equatable, Sendable { public let reason: String?; public let code: String?; public let message: String? }
+  public struct ProposalFields: Decodable, Equatable, Sendable {
+    public let name: String?
+    public let description: String?
+    public let promptPrefix: String?
+  }
+  public struct ProposalCommand: Decodable, Equatable, Sendable {
+    public let action: String
+    public let name: String?
+    public let description: String?
+    public let promptPrefix: String?
+    public let patch: ProposalFields?
+  }
+  public struct NoticeMeta: Decodable, Equatable, Sendable {
+    public let reason: String?; public let code: String?; public let message: String?
+    public var trigger: String? = nil
+    public var status: String? = nil
+    public var kind: String? = nil
+    public var command: ProposalCommand? = nil
+    public var before: ProposalFields? = nil
+    public var outcome: String? = nil
+  }
+  public struct OperationMember: Decodable, Sendable {
+    public let title: String
+    public let status: String
+  }
+  public var memberCount: Int? = nil
+  public var members: [OperationMember]? = nil
+  public var deliveryStatus: String? = nil
+  public var isOrchestration: Bool {
+    type == "operation_completion_batch" || type == "operation_completion"
+      || (type == "system_notice" && ["board_context_maintenance", "board_chain_limit", "agent_role_proposal"].contains(name ?? ""))
+  }
   public var meta: NoticeMeta? = nil
   public var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
   public let itemId: String
@@ -197,7 +228,7 @@ public struct ChatItem: Decodable, Sendable {
   public var isBackgrounded: Bool? = nil
   public var skipTranscript: Bool? = nil
   public var processDurationMs: Int? = nil
-  public var isProcess: Bool { type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  public var isProcess: Bool { !isOrchestration && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   public var hidesFromTranscript: Bool {
     if type == "proposed_plan" {
       return !["delta", "completed"].contains(status ?? "") || (markdown ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -554,6 +585,20 @@ public struct ChatTranscript: Sendable {
     }
   }
 
+  private static func roleProposal(_ meta: ChatItem.NoticeMeta?) -> String {
+    guard let command = meta?.command else { return String(localized: "native.chat.board.roleProposal", bundle: .lodyData) }
+    let fields = command.patch ?? ChatItem.ProposalFields(name: command.name, description: command.description, promptPrefix: command.promptPrefix)
+    let name = fields.name ?? meta?.before?.name ?? ""
+    var lines = [String.localizedStringWithFormat(String(localized: String.LocalizationValue("native.chat.board.role." + command.action), bundle: .lodyData), name)]
+    for (key, value) in [("name", fields.name), ("description", fields.description), ("promptPrefix", fields.promptPrefix)] {
+      if let value {
+        lines.append(String(localized: String.LocalizationValue("native.chat.board.field." + key), bundle: .lodyData) + ": " + value)
+      }
+    }
+    if let outcome = meta?.outcome { lines.append(String(localized: String.LocalizationValue("native.chat.board.role." + outcome), bundle: .lodyData)) }
+    return lines.joined(separator: "\n")
+  }
+
   private func entryRows(
     processEntryID: String = "",
     processStartID: String = "",
@@ -563,6 +608,8 @@ public struct ChatTranscript: Sendable {
   ) -> [ChatRow] {
     entries.enumerated().flatMap { entryIndex, source -> [ChatRow] in
       var entry = source
+      if entry.role == "system", !entry.items.isEmpty,
+         entry.items.allSatisfy({ $0.type == "system_notice" && $0.name == "board_context_maintenance" && $0.meta?.trigger == "idle" && $0.meta?.status == "interrupted" }) { return [] }
       // Older cached projections omitted notice names. Neither these placeholders nor
       // agent warnings belong in the conversation's execution process.
       entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning")) }
@@ -640,7 +687,7 @@ public struct ChatTranscript: Sendable {
         let turn: ChatEntry?
         if let userTurnID = entry.userTurnId {
           // A reply may arrive before its input; never borrow a neighboring turn's clock.
-          turn = entries.first { $0.role == "user" && $0.id == userTurnID }
+          turn = entries.first { ($0.role == "user" || $0.role == "system") && $0.id == userTurnID }
         } else {
           turn = entries[..<entryIndex].last { $0.role == "user" }
         }
@@ -721,6 +768,27 @@ public struct ChatTranscript: Sendable {
           row.attention = true
           row.errorMeta = item.meta
           row.actionable = false
+        case "operation_completion_batch", "operation_completion":
+          row.kind = "orchestration"
+          let key = item.deliveryStatus == "unknown" ? "native.chat.board.resultsUnknown" : "native.chat.board.results"
+          row.text = String.localizedStringWithFormat(String(localized: String.LocalizationValue(key), bundle: .lodyData), item.memberCount ?? 0)
+          let members = (item.members ?? []).map {
+            $0.title + " · " + String(localized: String.LocalizationValue("native.chat.board.status." + $0.status), bundle: .lodyData)
+          }
+          if !members.isEmpty { row.text += "\n" + members.joined(separator: "\n") }
+          row.symbol = "checklist"
+        case "system_notice" where item.name == "board_context_maintenance":
+          row.kind = "noticeDivider"
+          let kind = String(localized: String.LocalizationValue("native.chat.board.kind." + (item.meta?.kind ?? "compact")), bundle: .lodyData)
+          let status = String(localized: String.LocalizationValue("native.chat.board.status." + (item.meta?.status ?? "running")), bundle: .lodyData)
+          row.text = String.localizedStringWithFormat(String(localized: "native.chat.board.maintenance", bundle: .lodyData), kind, status)
+        case "system_notice" where item.name == "board_chain_limit":
+          row.kind = "noticeDivider"
+          row.text = String(localized: "native.chat.board.chainLimit", bundle: .lodyData)
+        case "system_notice" where item.name == "agent_role_proposal":
+          row.kind = "orchestration"
+          row.symbol = "person.crop.rectangle"
+          row.text = Self.roleProposal(item.meta)
         case "file":
           guard let file = item.file else { continue }
           if let image = file.shownAsImage.image {

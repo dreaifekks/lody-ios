@@ -28,6 +28,35 @@ final class ChatTranscriptTests: XCTestCase {
     XCTAssertNil(try transcript(noAuthor).rows().first?.author)
   }
 
+  func testBoardRowsRetainDetailsAndHideOnlyIdleInterruptedMaintenance() throws {
+    let json = """
+    [{"id":"b","role":"system","status":"done","finished":true,"items":[
+      {"itemId":"batch","type":"operation_completion_batch","memberCount":2,"members":[{"title":"A","status":"succeeded"},{"title":"B","status":"failed"}]},
+      {"itemId":"proposal","type":"system_notice","name":"agent_role_proposal","meta":{"command":{"action":"update","patch":{"description":"Native chat"}},"before":{"name":"iosDev"},"outcome":"saved"}},
+      {"itemId":"manual","type":"system_notice","name":"board_context_maintenance","meta":{"kind":"compact","status":"interrupted","trigger":"manual"}}]},
+    {"id":"idle","role":"system","status":"done","finished":true,"items":[
+      {"itemId":"hidden","type":"system_notice","name":"board_context_maintenance","meta":{"kind":"compact","status":"interrupted","trigger":"idle"}}]}]
+    """
+    let rows = try transcript(json).rows()
+    XCTAssertEqual(rows.map(\.kind), ["orchestration", "orchestration", "noticeDivider"])
+    XCTAssertTrue(rows[0].text.contains("A · "))
+    XCTAssertTrue(rows[0].text.contains("B · "))
+    XCTAssertTrue(rows[1].text.contains("iosDev"))
+    XCTAssertTrue(rows[1].text.contains("Native chat"))
+    XCTAssertFalse(rows.contains { $0.actionable || $0.entryID == "idle" })
+    XCTAssertFalse(try transcript(json).entries[0].items[0].isProcess)
+  }
+
+  func testBoardMaintenanceReplyUsesItsSystemTurnClock() throws {
+    let json = """
+    [{"id":"maintenance","role":"system","status":"done","finished":true,"startedAt":1000,"items":[
+      {"itemId":"compact","type":"system_notice","name":"board_context_maintenance","meta":{"kind":"compact","status":"done"}}]},
+    {"id":"reply","role":"assistant","status":"done","finished":true,"endedAt":6000,"userTurnId":"maintenance",
+      "items":[{"itemId":"text","type":"text","text":"Maintenance complete"}]}]
+    """
+    XCTAssertEqual(try transcript(json).rows().first { $0.kind == "duration" }?.workDurationMs, 5000)
+  }
+
   func testToolCallsFoldIntoAProcessSummary() throws {
     let rows = try transcript(reply).rows()
     XCTAssertTrue(rows.contains { $0.kind == "summary" && $0.actionable })
