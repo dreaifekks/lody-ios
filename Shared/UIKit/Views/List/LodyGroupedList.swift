@@ -1439,7 +1439,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
         content.text = nil
         content.attributedText = title
         content.directionalLayoutMargins.top = 10
-        content.directionalLayoutMargins.bottom = section.headerActionId.isEmpty ? 4 : 18
+        content.directionalLayoutMargins.bottom = section.headerActionId.isEmpty ? 4 : 19
       }
     }
     if header && !section.headerActionId.isEmpty {
