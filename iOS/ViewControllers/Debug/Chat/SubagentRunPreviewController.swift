@@ -43,7 +43,8 @@ final class SubagentRunPreviewController: SessionController {
     else { host = self }
     if probe.superview !== host.view { host.view.addSubview(probe) }
     let header = LodyNavigationHeader.of((host.parent ?? host).navigationItem)
-    if !header.rightItems.contains(where: { $0 === advanceItem }) { header.rightItems += [advanceItem] }
+    let items = header.rightItems ?? []
+    if !items.contains(where: { $0 === advanceItem }) { header.rightItems = items + [advanceItem] }
     probe.accessibilityValue = Self.json(["reads": fixture.reads, "details": fixture.details,
       "observers": fixture.observers.count, "revision": fixture.revision, "host": host === self ? "session" : "run"])
   }
