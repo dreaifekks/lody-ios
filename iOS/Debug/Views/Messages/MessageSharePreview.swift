@@ -5,6 +5,7 @@ final class MessageSharePreview: UIView, UIScrollViewDelegate {
   var onState: ((_ state: String, _ message: String, _ retryable: Bool) -> Void)?
   var onBlocks: (([[String: Any]]) -> Void)?
   weak var owner: UIViewController?
+  private let imageSession: URLSession
   private var selected: Set<Int>?
   private let scroll = UIScrollView()
   private let preview = UIImageView()
@@ -15,8 +16,9 @@ final class MessageSharePreview: UIView, UIScrollViewDelegate {
   private var file: URL?
   private weak var scrollOwner: UIViewController?
 
-  init(contentJSON: String) {
+  init(contentJSON: String, imageSession: URLSession = .shared) {
     self.contentJSON = contentJSON
+    self.imageSession = imageSession
     super.init(frame: .zero)
     scroll.delegate = self
     scroll.contentInsetAdjustmentBehavior = .automatic
@@ -99,7 +101,7 @@ final class MessageSharePreview: UIView, UIScrollViewDelegate {
           currentView.onState?("empty", "", true)
           return
         }
-        let paper = try await ChatSharePaper.make(content, selected: selection)
+        let paper = try await ChatSharePaper.make(content, selected: selection, imageSession: currentView.imageSession)
         try Task.checkCancellation()
         guard let self, self.revision == current, self.window != nil else { return }
         // Mount the print view so UIKit resolves attachment views and traits.

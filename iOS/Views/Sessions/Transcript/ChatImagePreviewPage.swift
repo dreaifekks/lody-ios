@@ -2,6 +2,7 @@ import UIKit
 
 final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
   var keptImages = ChatKeptImageService.live
+  var imageSession: URLSession = .shared
   let scroll = UIScrollView()
   let photo = UIImageView()
   private let spinner = UIActivityIndicatorView(style: .large)
@@ -124,9 +125,8 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
       }
       return
     }
-    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else { spinner.stopAnimating(); retry.isHidden = true; return }
     if let remote = item.remoteURL {
-      fetch(remote, fallback: nil)
+      fetch(remote, fallback: nil, authenticated: false)
       return
     }
     guard !workspace.isEmpty, !session.isEmpty, !item.image.id.isEmpty else {
@@ -143,7 +143,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     let original = SessionAttachments.imageDownloadURL(
       workspace: workspace, session: storage, imageId: item.image.id
     )
-    fetch(thumbnail, fallback: original)
+    fetch(thumbnail, fallback: original, authenticated: true)
   }
 
   func resetZoom() {
@@ -172,19 +172,20 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     photo.accessibilityValue = "\(Int(scroll.zoomScale * 100))%"
   }
 
-  private func fetch(_ url: URL, fallback: URL?) {
-    guard let token = try? AuthKeychain.read() else {
-      spinner.stopAnimating()
-      retry.isHidden = photo.image != nil
-      return
-    }
+  private func fetch(_ url: URL, fallback: URL?, authenticated: Bool) {
     let requestID = UUID()
     self.requestID = requestID
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    if authenticated {
+      guard let token = try? AuthKeychain.read() else {
+        spinner.stopAnimating(); retry.isHidden = photo.image != nil
+        return
+      }
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
     request.setValue("image/*,*/*", forHTTPHeaderField: "Accept")
     spinner.startAnimating()
-    task = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+    task = imageSession.dataTask(with: request) { [weak self] data, response, _ in
       let valid = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
       let image = valid ? data.flatMap(UIImage.init(data:)) : nil
       DispatchQueue.main.async {
@@ -198,7 +199,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
           return
         }
         if let fallback {
-          self.fetch(fallback, fallback: nil)
+          self.fetch(fallback, fallback: nil, authenticated: authenticated)
           return
         }
         self.task = nil

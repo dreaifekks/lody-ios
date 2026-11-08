@@ -38,7 +38,7 @@ final class ChatSharePaper: UIView {
     return UIColor(patternImage: tile)
   }()
 
-  static func make(_ content: ChatMessageShare, selected: Set<Int>? = nil) async throws -> ChatSharePaper {
+  static func make(_ content: ChatMessageShare, selected: Set<Int>? = nil, imageSession: URLSession = .shared) async throws -> ChatSharePaper {
     guard content.text.utf8.count <= 128 * 1024, content.parts.count <= 128 else { throw Failure.tooLarge }
     let paper = ChatSharePaper(frame: .zero)
     paper.overrideUserInterfaceStyle = .light
@@ -64,7 +64,7 @@ final class ChatSharePaper: UIView {
     for part in content.parts {
       try Task.checkCancellation()
       if let image = part.image, included() {
-        let bitmap = try await loadImage(image: image, source: nil, content: content)
+        let bitmap = try await loadImage(image: image, source: nil, content: content, imageSession: imageSession)
         let view = UIImageView(image: bitmap)
         let height = width * bitmap.size.height / max(1, bitmap.size.width)
         try append(view, width: width, height: height, y: &y, to: paper)
@@ -82,7 +82,7 @@ final class ChatSharePaper: UIView {
         }
         guard sources.count <= 16 else { throw Failure.tooLarge }
         for source in sources {
-          view.images[source] = try await loadImage(image: nil, source: source, content: content)
+          view.images[source] = try await loadImage(image: nil, source: source, content: content, imageSession: imageSession)
         }
         let rewritten = blocks.rewrite { (node: MarkdownBlockNode) -> [MarkdownBlockNode] in
           guard case let .codeBlock(language, code) = node else { return [node] }
@@ -203,16 +203,16 @@ final class ChatSharePaper: UIView {
     return overflow
   }
 
-  private static func loadImage(image: ChatImage?, source: String?, content: ChatMessageShare) async throws -> UIImage {
+  private static func loadImage(image: ChatImage?, source: String?, content: ChatMessageShare, imageSession: URLSession) async throws -> UIImage {
     if LodyUIVerify.enabled, image.map({ ChatImageCell.isVerifyImage($0.id) }) == true { return ChatImageCell.verifyBitmap() }
     if let image, image.machineId != nil {
       let url = try await LanKeptImages.file(image, workspace: content.workspace, session: content.session)
       guard let bitmap = ChatAttachment.thumbnail(url) else { throw Failure.image }
       return bitmap
     }
-    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(content.workspace) else { throw Failure.image }
     var request: URLRequest
     if let image {
+      guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(content.workspace) else { throw Failure.image }
       guard !content.workspace.isEmpty, !content.session.isEmpty, let token = try AuthKeychain.read() else { throw Failure.image }
       request = URLRequest(url: SessionAttachments.imageThumbnailURL(workspace: content.workspace, session: image.storageSessionId ?? content.session, imageId: image.id, width: 1080))
       request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -220,7 +220,7 @@ final class ChatSharePaper: UIView {
       request = URLRequest(url: url)
     } else { throw Failure.image }
     request.timeoutInterval = 30
-    let (url, response) = try await URLSession.shared.download(for: request)
+    let (url, response) = try await imageSession.download(for: request)
     defer { try? FileManager.default.removeItem(at: url) }
     guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),
       let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 20 * 1024 * 1024,

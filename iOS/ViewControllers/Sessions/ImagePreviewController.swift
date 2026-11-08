@@ -2,6 +2,7 @@ import UIKit
 
 final class ImagePreviewController: UIViewController, UIGestureRecognizerDelegate {
   var keptImages = ChatKeptImageService.live
+  private var imageSession: URLSession = .shared
   private var items: [ChatImagePreviewItem]
   private var page: Int
   private var workspace: String
@@ -64,7 +65,8 @@ final class ImagePreviewController: UIViewController, UIGestureRecognizerDelegat
     session: String,
     placeholders: [String: UIImage],
     sourceView: @escaping (String) -> UIView?,
-    keptImages: ChatKeptImageService = .live
+    keptImages: ChatKeptImageService = .live,
+    imageSession: URLSession = .shared
   ) -> ImagePreviewController? {
     guard controller.presentedViewController == nil, !items.isEmpty else { return nil }
     let preview = ImagePreviewController(
@@ -76,6 +78,7 @@ final class ImagePreviewController: UIViewController, UIGestureRecognizerDelegat
       sourceView: sourceView
     )
     preview.keptImages = keptImages
+    preview.imageSession = imageSession
     preview.preferredTransition = .zoom { [weak preview] _ in preview?.currentSourceView() }
     controller.present(preview, animated: true)
     return preview
@@ -285,6 +288,7 @@ final class ImagePreviewController: UIViewController, UIGestureRecognizerDelegat
     for index in keep {
       let pageView = pages[index] ?? ChatImagePreviewPage()
       pageView.keptImages = keptImages
+      pageView.imageSession = imageSession
       if pages[index] == nil {
         pagesHost.addSubview(pageView)
         pages[index] = pageView

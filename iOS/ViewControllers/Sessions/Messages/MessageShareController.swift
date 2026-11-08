@@ -37,8 +37,8 @@ final class MessageShareController: UIViewController {
     ) { [weak self] in self?.dismiss(animated: true) }
   }()
 
-  init(contentJSON: String) {
-    preview = MessageSharePreview(contentJSON: contentJSON)
+  init(contentJSON: String, imageSession: URLSession = .shared) {
+    preview = MessageSharePreview(contentJSON: contentJSON, imageSession: imageSession)
     super.init(nibName: nil, bundle: nil)
     title = Self.text("preview")
   }
