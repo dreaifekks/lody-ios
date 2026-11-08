@@ -81,17 +81,14 @@ final class ChatMarkdownView: UIView {
       if index == blocks.count {
         let block = Block()
         block.view.onImage = { [weak self] source in self?.onImage?(source) }
-        block.view.linkHandler = { [weak self, weak label = block.label] payload, range, _ in
-          // File icon and accessibility link actions use (0, 0), not a rendered run.
-          if range.length > 0,
-             let source = label?.attributedText.attribute(FileMarkdownView.imageSource, at: range.location, effectiveRange: nil) as? String {
-            self?.onImage?(source)
-            return
-          }
+        block.view.linkHandler = { [weak self] payload, _, _ in
+          let link: String
           switch payload {
-          case .url(let url): self?.onLink?(url.absoluteString)
-          case .string(let string): self?.onLink?(string)
+          case .url(let url): link = url.absoluteString
+          case .string(let value): link = value
           }
+          if let source = FileMarkdownView.imageLinkSource(link) { self?.onImage?(source) }
+          else { self?.onLink?(link) }
         }
         block.view.trackedScrollView = trackedScrollView
         blocks.append(block)

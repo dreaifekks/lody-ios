@@ -6,6 +6,7 @@ import UIKit
 /// The transcript opens its own gallery; only URLSession returns scripted image bytes.
 @MainActor
 final class RemoteImagesPreviewController: UIViewController {
+  private let scenario: String
   private let chat = LodyChatView(frame: .zero)
   private let probe = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
   private let imageSession: URLSession
@@ -17,11 +18,17 @@ final class RemoteImagesPreviewController: UIViewController {
   private var openedFiles: [String] = []
   private let urls = ["http://offline-image.invalid/picture.png", "https://offline-image.invalid/picture.png"]
   private var content: ChatMessageShare {
-    .init(parts: [.init(text: "![HTTP picture](\(urls[0]))\n\n[Same image address](\(urls[0]))\n\n[Local file](docs/README.md)\n\n![HTTPS picture](\(urls[1]))\n\n`![Literal picture](\(urls[1]))`")],
+    if scenario == "table" {
+      let prefix = String(repeating: "prefix ", count: 8)
+      let text = "# Table images\n\n| Content |\n| --- |\n| " + prefix + "[Table link](\(urls[0])) |\n| ![Table picture](\(urls[1])) |"
+      return .init(parts: [.init(text: text)], model: "Offline model", workspace: "lw_offline_images", session: "offline-session")
+    }
+    return .init(parts: [.init(text: "![HTTP picture](\(urls[0]))\n\n[Same image address](\(urls[0]))\n\n[Local file](docs/README.md)\n\n![HTTPS picture](\(urls[1]))\n\n`![Literal picture](\(urls[1]))`")],
       model: "Offline model", workspace: "lw_offline_images", session: "offline-session")
   }
 
-  init() {
+  init(scenario: String = "body") {
+    self.scenario = scenario
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [RemoteImageProtocol.self]
     imageSession = URLSession(configuration: configuration)
@@ -61,11 +68,13 @@ final class RemoteImagesPreviewController: UIViewController {
     chat.onFilePress = { [weak self] body in
       if let path = body["path"] as? String { self?.openedFiles.append(path) }
     }
+    var items: [[String: Any]] = [["itemId": "answer", "type": "text", "text": content.text]]
+    if scenario != "table" {
+      items.append(["itemId": "plan", "type": "proposed_plan", "status": "completed", "isLatest": false,
+        "markdown": "![Plan picture](\(urls[1]))"])
+    }
     let entries: [[String: Any]] = [
-      ["id": "remote-images", "role": "assistant", "status": "completed", "finished": true, "items": [
-        ["itemId": "answer", "type": "text", "text": content.text],
-        ["itemId": "plan", "type": "proposed_plan", "status": "completed", "isLatest": false,
-         "markdown": "![Plan picture](\(urls[1]))"]]],
+      ["id": "remote-images", "role": "assistant", "status": "completed", "finished": true, "items": items],
     ]
     let data = try! JSONSerialization.data(withJSONObject: entries)
     chat.setEntries(String(decoding: data, as: UTF8.self), animate: false)
@@ -97,6 +106,10 @@ final class RemoteImagesPreviewController: UIViewController {
     var host: UIViewController = self
     var kind = "fixture"
     if let page = sharePage, page.viewIfLoaded?.window != nil { host = page; kind = "share" }
+    if scenario == "table", let navigation = LodyShell.shared.presenter as? UINavigationController,
+       let top = navigation.visibleViewController, String(describing: type(of: top)).contains("TableSheet") {
+      host = top; kind = "table"
+    }
     if let page = chat.imagePreview, page.viewIfLoaded?.window != nil { host = page; kind = "gallery" }
     if probe.superview !== host.view { host.view.addSubview(probe) }
     let children = descendants(host.view)
@@ -113,7 +126,8 @@ final class RemoteImagesPreviewController: UIViewController {
       }
       return ""
     }
-    for view in descendants(chat) {
+    let targetRoot = kind == "table" ? host.view! : chat
+    for view in descendants(targetRoot) {
       if let button = view as? UIButton, button.accessibilityLabel == "README.md", let window = button.window {
         let frame = button.convert(button.bounds, to: window)
         if frame.width > 0, frame.height > 0, window.bounds.contains(CGPoint(x: frame.midX, y: frame.midY)) {
@@ -128,10 +142,11 @@ final class RemoteImagesPreviewController: UIViewController {
         else if let value = value as? URL { href = value.absoluteString }
         else { return }
         let image = text.attribute(FileMarkdownView.imageSource, at: range.location, effectiveRange: nil) != nil
+        let target = FileMarkdownView.imageLinkSource(href) ?? href
         for box in label.textLayout.rects(for: range) {
           let rect = label.convert(label.viewRect(fromLayoutRect: box), to: window)
           guard window.bounds.contains(CGPoint(x: rect.midX, y: rect.midY)), rect.width > 0 else { continue }
-          targets.append(["href": href, "image": image, "row": rowID(label), "start": range.location,
+          targets.append(["href": target, "image": image, "row": rowID(label), "start": range.location,
             "x": rect.midX, "y": rect.midY])
         }
       }
@@ -145,7 +160,7 @@ final class RemoteImagesPreviewController: UIViewController {
       }
     }
     let calls = RemoteImageProtocol.calls.withLock { $0 }
-    probe.accessibilityValue = SessionController.json(["host": kind, "paperReady": paper?.image != nil,
+    probe.accessibilityValue = SessionController.json(["host": kind, "scenario": scenario, "paperReady": paper?.image != nil,
       "galleryReady": loaded, "cloudReferenceBlocked": blockedCloudReference, "targets": targets, "code": code,
       "fileIcon": fileIcon, "links": openedLinks, "files": openedFiles,
       "requests": calls.map { ["url": $0.url, "authorized": $0.authorized] }])

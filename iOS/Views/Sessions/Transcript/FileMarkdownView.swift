@@ -14,6 +14,12 @@ final class FileMarkdownView: MarkdownTextView {
   static let imageSource = NSAttributedString.Key("lody-markdown-image-source")
   var onImage: ((String) -> Void)?
 
+  // MarkdownView forwards the highlight's link payload from body and table labels.
+  static func imageLinkSource(_ value: String) -> String? {
+    guard value.hasPrefix(imageMarker) else { return nil }
+    return String(value.dropFirst(imageMarker.count))
+  }
+
   static func content(_ source: MarkdownContent, streaming: Bool = false, linkify: Bool = false) -> MarkdownContent {
     let ruby = MarkdownRuby.blocks(source.blocks)
     let rendered = streaming ? ruby : MarkdownMermaid.blocks(ruby)
@@ -98,7 +104,8 @@ final class FileMarkdownView: MarkdownTextView {
       let source = String(text.string.dropFirst(prefix.count))
       var attributes: [NSAttributedString.Key: Any] = [Self.searchExcluded: true]
       if prefix == Self.imageMarker {
-        attributes.merge([.link: source, Self.imageSource: source, .font: theme.fonts.body, .foregroundColor: theme.colors.body]) { _, new in new }
+        let link = onImage == nil ? source : Self.imageMarker + source
+        attributes.merge([.link: link, Self.imageSource: source, .font: theme.fonts.body, .foregroundColor: theme.colors.body]) { _, new in new }
       } else {
         attributes.merge([.font: theme.fonts.codeInline, .foregroundColor: theme.colors.code,
           .backgroundColor: theme.colors.codeBackground.withAlphaComponent(0.05)]) { _, new in new }
