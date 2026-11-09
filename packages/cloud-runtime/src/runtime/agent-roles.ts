@@ -38,8 +38,6 @@ export function roleMentions(
   machineNames: Map<string, string> = new Map(),
   preferredMachineId?: string,
 ): MentionCatalog {
-  if (presence.state !== 'live')
-    return { items: [], truncated: false, incomplete: true };
   const items: MentionItem[] = [];
   const itemMachines = new Map<string, string>();
   for (const row of rows) {
@@ -53,7 +51,6 @@ export function roleMentions(
     const role = readRole(row.value, row.key[1]);
     if (!role || !readableRole(role, userId)) continue;
     for (const target of role.targets) {
-      if (!presence.onlineMachineIds.includes(target.machineId)) continue;
       const agent = machines
         .get(target.machineId)
         ?.get(['agentConfig', target.agentConfigId]) as
@@ -98,5 +95,5 @@ export function roleMentions(
       a.name.localeCompare(b.name) ||
       a.path.localeCompare(b.path),
   );
-  return { items, truncated: false, incomplete: false };
+  return { items, truncated: false, incomplete: presence.state !== 'live' };
 }

@@ -1,5 +1,11 @@
 import { openSettings, settingsRows } from './settings';
 
+class McpCatalogUnavailable extends Error {
+  constructor(readonly retryable: boolean) {
+    super('mcp_catalog_unavailable');
+  }
+}
+
 // Selection is absent for a fresh draft, but [] explicitly disables all servers.
 export async function sessionMcpSelection(
   workspaceId: string,
@@ -35,6 +41,20 @@ export async function sessionMcpSelection(
     if (error instanceof Error && error.message === 'not_found') return [];
     if (error instanceof Error && error.message === 'mcp_connection_missing')
       throw error;
-    throw new Error('mcp_catalog_unavailable');
+    // Only known transport failures/deadlines are safe to wait and retry. A
+    // forbidden catalog, malformed data or missing connection needs user action.
+    const network =
+      error instanceof Error &&
+      ['network_error', 'timeout'].includes(error.message);
+    const interrupted =
+      error instanceof Error &&
+      (['AbortError', 'TimeoutError'].includes(error.name) ||
+        error.message === 'unknown');
+    const deadline =
+      interrupted &&
+      signal.aborted &&
+      signal.reason instanceof Error &&
+      signal.reason.name === 'TimeoutError';
+    throw new McpCatalogUnavailable(network || deadline);
   }
 }

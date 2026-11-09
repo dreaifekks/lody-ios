@@ -1,0 +1,415 @@
+"""Real system share sheet check for the Share Extension, with no login and no cloud.
+
+python3 verification/ui/share-probe.py --app /path/to/Lody.app
+
+Signed out: the extension loads with Lody stopped, explains sign-in and keeps Send
+disabled. With a fixture App Group snapshot: the shared text fills the native form,
+Send writes one inbox entry carrying the chosen agent, and Lody comes forward.
+The model switch also carries an explicit false value into the shared draft.
+"""
+from driver import BUNDLE_ID, configure_app
+import argparse
+import json
+import os
+from pathlib import Path
+import platform
+import plistlib
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+from driver import UI
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from simulator import MANAGED_NAME, SimulatorPool, run_with_simulator
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--app', required=True)
+parser.add_argument('--host-app', type=Path, help='Reuse an already built ShareProbeHost.app without compiling or signing')
+parser.add_argument('--udid', default=os.environ.get('LODY_VERIFY_UDID'))
+parser.add_argument('--output', default='.artifacts/share-probe/ui')
+parser.add_argument('--appearance', choices=['light', 'dark'], default='light')
+parser.add_argument('--branches', action='store_true', help='Exercise cached GitHub branch selection and missing-cache handoff')
+parser.add_argument('--lan-branches', action='store_true', help='Exercise LAN manual branch selection in the real offline Share Extension')
+args = parser.parse_args()
+args.branches = args.branches or args.lan_branches
+if not args.udid:
+    raise SystemExit(run_with_simulator(SimulatorPool(), 'Share Probe', [sys.executable, __file__, *sys.argv[1:]]))
+
+app = Path(args.app).resolve()
+BUNDLE_ID, APP_GROUP = configure_app(app)
+assert (app / 'PlugIns/LodyShare.appex').is_dir(), 'Build the Share Extension target first'
+output = Path(args.output).resolve()
+output.mkdir(parents=True, exist_ok=True)
+
+
+def sim(*command, check=True, **kwargs):
+    return subprocess.run(['xcrun', 'simctl', *command], check=check, timeout=120, **kwargs)
+
+
+# A launchd environment change is scoped strictly to this caller-owned simulator.
+assert os.environ.get('LODY_VERIFY_UDID') == args.udid, 'Share probe requires its current Verify Simulator lease'
+inventory = json.loads(sim('list', 'devices', '--json', capture_output=True, text=True).stdout)
+device = next((device for devices in inventory['devices'].values() for device in devices if device['udid'] == args.udid), None)
+assert device and device['state'] == 'Booted' and MANAGED_NAME.fullmatch(device['name']), 'Share probe requires a booted managed Verify Simulator'
+
+
+def application_pid():
+    processes = sim('spawn', args.udid, 'launchctl', 'list', capture_output=True, text=True).stdout
+    app = next((line.split() for line in processes.splitlines() if 'UIKitApplication:' + BUNDLE_ID + '[' in line), None)
+    if app and app[0].isdigit():
+        return int(app[0])
+    return None
+
+
+def cold_handoff(name):
+    # Require the actual destination process, not disappearance of the source UI.
+    def foreground(items):
+        if any(item.get('AXLabel') == '“Lody” Would Like to Send You Notifications' for item in items):
+            ui.capture(name + '-unexpected-notification-permission')
+            raise AssertionError('Offline cold handoff requested notification permission')
+        pid = application_pid()
+        if pid and any(item.get('role') == 'AXApplication' and item.get('pid') == pid for item in items):
+            return pid
+        return None
+
+    ui.invalidate_axe()
+    try:
+        pid = ui.wait(foreground, 'Lody did not become the foreground AX application', timeout=12)
+        command = subprocess.check_output(['ps', 'eww', '-p', str(pid), '-o', 'command='], text=True, timeout=10)
+        flag = re.search(r'(?:^|\s)LODY_VERIFY_OFFLINE=([^\s]*)', command)
+        value = flag.group(1) if flag else None
+        # Save only the one non-secret verification value, never the process environment.
+        evidence = {'pid': pid, 'environmentOffline': value, 'uiVerifyArgument': '--ui-verify' in command,
+                    'offlineArgument': '--lody-offline' in command, 'offlineMarkerObserved': False}
+        marker = 'LodyUIVerify environment offline enabled'
+        deadline = time.monotonic() + 5
+        while True:
+            observed = sim('spawn', args.udid, 'log', 'show', '--last', '2m', '--style', 'json',
+                           '--predicate', f'processIdentifier == {pid} AND eventMessage CONTAINS "{marker}"',
+                           capture_output=True, text=True).stdout
+            events = json.loads(observed)
+            evidence['offlineMarkerObserved'] = any(event.get('eventMessage') == marker for event in events)
+            (output / (name + '-offline.json')).write_text(json.dumps(evidence, indent=2))
+            if evidence['offlineMarkerObserved'] or time.monotonic() >= deadline:
+                break
+            time.sleep(.2)
+        assert value == '1', 'Cold App did not inherit the simulator offline environment'
+        assert not evidence['uiVerifyArgument'] and not evidence['offlineArgument'], 'Cold handoff must not substitute an argv-launched App'
+        assert evidence['offlineMarkerObserved'], 'Cold App did not observe offline mode; rebuild with the verification environment support'
+    except Exception:
+        ui.capture(name + '-missing')
+        raise
+    ui.capture(name)
+
+
+if args.host_app:
+    host = args.host_app.resolve()
+    assert (host / 'ShareProbeHost').is_file(), 'Missing prebuilt ShareProbeHost executable'
+    info = plistlib.loads((host / 'Info.plist').read_bytes())
+    assert info['CFBundleIdentifier'] == BUNDLE_ID + '.share-probe-host', 'Share host identity does not match the selected app'
+else:
+    host = output / 'ShareProbeHost.app'
+    host.mkdir(exist_ok=True)
+    (host / 'Info.plist').write_bytes(plistlib.dumps({
+        'CFBundleIdentifier': BUNDLE_ID + '.share-probe-host',
+        'CFBundleExecutable': 'ShareProbeHost',
+        'CFBundleName': 'ShareProbeHost',
+        'CFBundlePackageType': 'APPL',
+        'CFBundleShortVersionString': '1.0',
+        'CFBundleVersion': '1',
+        'MinimumOSVersion': '26.0',
+        'LSRequiresIPhoneOS': True,
+        'UIDeviceFamily': [1],
+        'UILaunchScreen': {},
+        'UIApplicationSceneManifest': {
+            'UIApplicationSupportsMultipleScenes': False,
+            'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{
+                'UISceneConfigurationName': 'Share Source',
+                'UISceneDelegateClassName': 'ShareProbeHost.ShareProbeHostScene',
+            }]},
+        },
+    }))
+    sdk = subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path'], text=True).strip()
+    arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
+    subprocess.run([
+        'xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-swift-version', '6', '-parse-as-library', '-module-name', 'ShareProbeHost',
+        '-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator',
+        str(Path(__file__).with_name('share-probe-host.swift')), '-o', str(host / 'ShareProbeHost'),
+    ], check=True, timeout=120)
+    subprocess.run(['codesign', '--force', '--sign', '-', str(host)], check=True, timeout=30)
+sim('install', args.udid, str(app))
+sim('install', args.udid, str(host))
+sim('ui', args.udid, 'appearance', args.appearance)
+for bundle in [BUNDLE_ID + '.share', BUNDLE_ID + '.share-probe-host']:
+    sim('spawn', args.udid, 'defaults', 'write', bundle, 'AppleLanguages', '-array', 'en')
+    sim('spawn', args.udid, 'defaults', 'write', bundle, 'AppleLocale', 'en_US')
+group = Path(subprocess.check_output(
+    ['xcrun', 'simctl', 'get_app_container', args.udid, BUNDLE_ID, APP_GROUP], text=True).strip())
+store = group / 'Library/LodyShare'
+ui = UI(args.udid, output)
+
+
+def flatten(node):
+    yield node
+    for child in node.get('children', []):
+        yield from flatten(child)
+
+
+def open_extension(name):
+    # The containing app stays stopped; the system hosts only its extension.
+    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID], capture_output=True, timeout=30)
+    subprocess.run(['xcrun', 'simctl', 'terminate', args.udid, BUNDLE_ID + '.share-probe-host'], capture_output=True, timeout=30)
+    assert application_pid() is None, 'Containing App must be stopped before opening the Share Extension'
+    (output / f'{name}-app-stopped.json').write_text(json.dumps({'appRunning': False}))
+    launched = sim('launch', args.udid, BUNDLE_ID + '.share-probe-host', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US', capture_output=True, text=True)
+    (output / f'{name}-launch.txt').write_text(launched.stdout + launched.stderr)
+    ui.invalidate_axe()
+    try:
+        ui.element('share-probe-host.open')
+    except Exception:
+        ui.screenshot(f'{name}-host-missing')
+        try:
+            (output / f'{name}-host-missing-ax.json').write_text(ui.axe('describe-ui'))
+        except Exception as error:
+            (output / f'{name}-host-missing-ax-error.txt').write_text(str(error))
+        process = sim('spawn', args.udid, 'launchctl', 'list', capture_output=True, text=True)
+        relevant = [line for line in process.stdout.splitlines() if BUNDLE_ID in line or 'com.apple.SpringBoard' in line]
+        (output / f'{name}-processes.txt').write_text('\n'.join(relevant))
+        raise
+    ui.axe('tap', '--id', 'share-probe-host.open', '--tap-style', 'physical', '--post-delay', '1')
+    ui.capture(f'{name}-tray')
+    items = ui.state()
+    if any(item.get('AXLabel') == 'Lody' for item in items):
+        ui.axe('tap', '--label', 'Lody', '--tap-style', 'physical', '--post-delay', '1')
+    else:
+        # iOS 26.5's compact remote tray exposes only "dismiss popup" to AXe. Visually
+        # confirmed 402x874 row: Reminders, Lody, More. A missed tap fails below.
+        root = next(item for item in items if item.get('role') == 'AXApplication')
+        assert root['frame']['width'] == 402 and root['frame']['height'] == 874
+        ui.axe('tap', '-x', '156', '-y', '653', '--tap-style', 'physical', '--post-delay', '1')
+    # Remote extension trees are hit-tested, not descendants of the source app.
+    deadline = time.monotonic() + 30
+    retried_tray = False
+    while True:
+        send = find_send()
+        if send and send['frame']['y'] < 830:
+            return send
+        if not retried_tray and time.monotonic() > deadline - 25:
+            items = ui.state()
+            if any(item.get('AXLabel') in ['Lody', 'dismiss popup'] for item in items):
+                ui.axe('tap', '-x', '156', '-y', '653', '--tap-style', 'physical', '--post-delay', '1')
+            retried_tray = True
+        if time.monotonic() >= deadline:
+            ui.capture(f'{name}-unsettled')
+            log = subprocess.run(['xcrun', 'simctl', 'spawn', args.udid, 'log', 'show', '--last', '2m', '--style', 'compact',
+                '--predicate', 'process == "LodyShare" OR (eventMessage CONTAINS "LodyShare")'], capture_output=True, text=True, timeout=120)
+            (output / f'{name}-extension.log').write_text(log.stdout)
+            raise AssertionError('Extension did not settle')
+        time.sleep(.2)
+
+
+SEND_POINTS = ['362,808', '362,790', '200,808']
+
+
+def find_send():
+    for point in SEND_POINTS:
+        nodes = list(flatten(json.loads(ui.axe('describe-ui', '--point', point))))
+        send = next((n for n in nodes if n.get('AXUniqueId') == 'session-send'), None)
+        if send:
+            return send
+    return None
+
+
+def labels_at(*points):
+    return [n.get('AXLabel') or '' for point in points for n in flatten(json.loads(ui.axe('describe-ui', '--point', point)))]
+
+
+def remote(identifier, match=None):
+    match = match or (lambda node: node.get('AXUniqueId') == identifier)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        for point in ['200,244', '200,320', '200,440', '200,580', '200,150']:
+            nodes = list(flatten(json.loads(ui.axe('describe-ui', '--point', point))))
+            item = next((n for n in nodes if match(n)), None)
+            if item:
+                return item
+    (output / ('missing-' + identifier.replace(':', '-') + '.json')).write_text(json.dumps(nodes, indent=2))
+    ui.capture('missing-remote-element')
+    raise AssertionError('Missing remote extension element: ' + identifier)
+
+
+def remote_tap(identifier):
+    frame = remote(identifier)['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
+
+def remote_back():
+    nodes = list(flatten(json.loads(ui.axe('describe-ui', '--point', '30,112'))))
+    button = next(n for n in nodes if n.get('type') == 'Button' and n.get('AXLabel') in ['Back', 'New Session'])
+    frame = button['frame']
+    ui.axe('tap', '-x', str(frame['x'] + min(frame['width'], 44) / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
+
+
+# On this Simulator launchctl prints no bytes for absence and a newline for a
+# defined empty value. Preserve the raw observation to restore either exactly.
+def stop_probe(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
+for stop_signal in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(stop_signal, stop_probe)
+
+
+offline_key = 'LODY_VERIFY_OFFLINE'
+previous_offline = sim('spawn', args.udid, 'launchctl', 'getenv', offline_key, capture_output=True, text=True).stdout
+video = None
+try:
+    sim('spawn', args.udid, 'launchctl', 'setenv', offline_key, '1')
+    video = subprocess.Popen(['xcrun', 'simctl', 'io', args.udid, 'recordVideo', '--codec=h264', '--force', str(output / 'run.mp4')],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    shutil.rmtree(store, ignore_errors=True)
+    send = open_extension('signed-out')
+    assert send['enabled'] is False, 'Send must stay disabled without a snapshot'
+    ui.capture('signed-out')
+    assert any('sign in' in label for label in labels_at('200,300', '200,760')), 'Missing sign-in guidance'
+    close = next((n for n in flatten(json.loads(ui.axe('describe-ui', '--point', '362,112'))) if n.get('AXLabel') == 'Close New Session'), None)
+    assert close, 'Close button missing'
+    ui.axe('tap', '-x', '362', '-y', '112', '--tap-style', 'physical', '--post-delay', '1')
+    ui.element('share-probe-host.open')
+
+    (store / 'options').mkdir(parents=True)
+    project = {'id': 'ui:local:alpha', 'machineId': 'ui', 'name': 'Alpha', 'rootPath': '/tmp/alpha'}
+    if args.branches:
+        project = {'id': 'github:Owner/Repo', 'machineId': '', 'name': 'Owner/Repo', 'rootPath': ''}
+        (store / 'branches').mkdir()
+        (store / 'branches' / 'Owner%2FRepo.json').write_text(json.dumps({
+            'names': ['trunk', 'feature/cached'], 'defaultBranch': 'trunk', 'nextPage': 2,
+        }))
+    (store / 'catalog.json').write_text(json.dumps({'userId': 'probe-user', 'workspaceId': 'lw_probe' if args.lan_branches else 'probe-ws', 'projects': [project], 'machineNames': {'ui': 'Fixture Mac'}}))
+    options = {'sessionId': 'cached', 'project': project, 'agents': [{'id': 'agent', 'name': 'Fixture Agent', 'machineId': 'ui', 'machineName': 'Fixture Mac', 'cliType': 'builtin', 'agentType': 'codex'}],
+        'capabilities': [{'machineId': 'ui', 'cliType': 'builtin', 'agentType': 'codex', 'models': [{'id': 'a', 'name': 'Model A'}], 'modes': [], 'reasoningEfforts': {}, 'configOptions': [{'id': 'fast-mode', 'name': 'Fast mode', 'category': 'model_config', 'type': 'boolean', 'currentValue': False, 'options': []}]}]}
+    from urllib.parse import quote
+    for target in ['chat', quote(project['id'], safe='')]:
+        (store / 'options' / f'{target}.json').write_text(json.dumps(options))
+    send = open_extension('ready')
+    deadline = time.monotonic() + 10
+    while not send['enabled']:
+        assert time.monotonic() < deadline, 'Send stayed disabled with a ready snapshot'
+        time.sleep(.3)
+        send = find_send() or send
+    ui.capture('ready')
+    remote_tap('model')
+    # A point query returns only the leading segment, not the 'list-segments' container.
+    tab = remote('model-tab', lambda node: node.get('role_description') == 'tab')['frame']
+    ui.axe('tap', '-x', str(tab['x'] + tab['width'] * 1.5), '-y', str(tab['y'] + tab['height'] / 2), '--tap-style', 'physical', '--post-delay', '.6')
+    assert remote('fast-mode:toggle').get('AXValue') == '0'
+    for enabled in [True, False]:
+        ui.tap_switch(remote('fast-mode:toggle'))
+        expected = '1' if enabled else '0'
+        assert remote('fast-mode:toggle').get('AXValue') == expected, 'Extension model switch did not update'
+        ui.capture('model-fast-' + ('on' if enabled else 'off'))
+    remote_back()
+    send = find_send()
+    assert send and send['enabled'], 'Changing model options must keep the share ready'
+    if args.branches:
+        assert 'trunk' in str(remote('branch')), 'Cached default must be chosen in the extension'
+        remote_tap('branch')
+        remote('branch:trunk')
+        remote('branches-cached')
+        ui.capture('cached-branches')
+        remote_tap('list-search')
+        ui.axe('type', 'cached')
+        assert (remote('list-search').get('AXValue') or '').casefold() == 'cached', 'Search lost characters while refreshing'
+        remote('branch:feature/cached')
+        ui.capture('cached-search')
+        remote_tap('branch:feature/cached')
+        assert 'feature/cached' in str(remote('branch'))
+        ui.capture('cached-selected')
+        if args.lan_branches:
+            remote_tap('branch')
+            remote_tap('list-search')
+            ui.axe('type', 'discard-this')
+            remote('typed:discard-this')
+            remote_back()
+            assert 'feature/cached' in str(remote('branch')), 'Cancelled LAN candidate changed selection'
+            remote_tap('branch')
+            remote_tap('list-search')
+            ui.axe('type', ' release-next ')
+            remote('typed:release-next')
+            ui.capture('lan-manual-candidate')
+            remote_tap('typed:release-next')
+            assert 'release-next' in str(remote('branch'))
+            ui.capture('lan-manual-selected')
+        send = find_send()
+        assert send and send['enabled']
+    frame = send['frame']
+    ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '3')
+    entries = [json.loads((entry / 'manifest.json').read_text()) for entry in (store / 'inbox').iterdir()]
+    assert len(entries) == 1, f'Expected one inbox entry, found {len(entries)}'
+    entry = entries[0]
+    assert 'Lody share probe' in entry['text'], 'Shared text must reach the manifest'
+    assert entry['draft']['agent']['id'] == 'agent' and entry['draft']['sessionId'] != 'cached', 'Draft must carry the agent and a fresh session id'
+    assert entry['draft']['choice']['configOptionValues']['fast-mode'] is False, 'Explicit false model option must reach the share inbox'
+    if args.branches:
+        expected_branch = 'release-next' if args.lan_branches else 'feature/cached'
+        assert entry['draft']['branch'] == expected_branch, 'Selected branch must reach the inbox draft'
+    (output / 'manifest.json').write_text(json.dumps(entry, indent=2))
+    cold_handoff('handoff')
+    if args.branches:
+        shutil.rmtree(store / 'branches')
+        shutil.rmtree(store / 'inbox', ignore_errors=True)
+        send = open_extension('missing-cache')
+        remote_tap('branch')
+        remote('branches-cached')
+        ui.capture('missing-cache')
+        if args.lan_branches:
+            remote_tap('list-search')
+            ui.axe('type', 'release-without-list')
+            remote('typed:release-without-list')
+            remote_tap('typed:release-without-list')
+            assert 'release-without-list' in str(remote('branch'))
+            # Reopen and cancel so both modes take the same Back path below.
+            remote_tap('branch')
+        # Back belongs to the remote extension's own navigation stack.
+        remote_back()
+        send = find_send()
+        assert send and send['enabled'], 'No branch cache must still allow handoff to the app'
+        frame = send['frame']
+        ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--tap-style', 'physical', '--post-delay', '3')
+        entries = [json.loads((entry / 'manifest.json').read_text()) for entry in (store / 'inbox').iterdir()]
+        assert len(entries) == 1 and 'Lody share probe' in entries[0]['text']
+        if args.lan_branches:
+            assert entries[0]['draft']['branch'] == 'release-without-list', 'LAN manual branch must survive without a cached list'
+        else:
+            assert entries[0].get('draft') is None, 'Missing Cloud branch must defer resolution'
+        (output / 'unresolved-manifest.json').write_text(json.dumps(entries[0], indent=2))
+        cold_handoff('missing-cache-handoff')
+    print('PASS: signed-out guidance, ready snapshot form, inbox entry written, Lody opened')
+    if args.lan_branches:
+        print('PASS: LAN manual branches, trim/cancel and missing-list selection in the real Share Extension')
+    print('PASS: cold App inherited offline environment, observed offline mode and became foreground without notification permission UI')
+    print('NOT VERIFIED: authenticated ShareInbox drain into a live outbox')
+finally:
+    try:
+        if video is not None:
+            video.send_signal(signal.SIGINT)
+            video.wait(timeout=20)
+        shutil.rmtree(store, ignore_errors=True)
+    finally:
+        try:
+            # Do not leave a live process with the temporary offline environment.
+            for bundle in [BUNDLE_ID, BUNDLE_ID + '.share-probe-host']:
+                sim('terminate', args.udid, bundle, check=False, capture_output=True, text=True)
+        finally:
+            if previous_offline:
+                sim('spawn', args.udid, 'launchctl', 'setenv', offline_key, previous_offline.removesuffix('\n'))
+            else:
+                sim('spawn', args.udid, 'launchctl', 'unsetenv', offline_key)
+            restored = sim('spawn', args.udid, 'launchctl', 'getenv', offline_key, capture_output=True, text=True).stdout
+            (output / 'offline-environment-restored.json').write_text(json.dumps({
+                'previouslyPresent': bool(previous_offline), 'restored': restored == previous_offline,
+            }, indent=2))
+            assert restored == previous_offline, 'Simulator offline environment was not restored exactly'

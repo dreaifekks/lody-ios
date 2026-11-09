@@ -1,4 +1,4 @@
-// LodyAI/Lody a15cdae: agent-role.ts v1 inline / v2 targets wire shapes.
+// Lody agent-role.ts: v1 inline / fork instances and v2 targets wire shapes.
 // Keep the stored row intact: mobile edits shared metadata, not run configuration.
 type RecordValue = Record<string, unknown>;
 export const record = (value: unknown): value is RecordValue =>
@@ -83,11 +83,17 @@ export function readRole(value: unknown, id: unknown): StoredRole | undefined {
   if (value.v === 2 && Array.isArray(value.targets)) targets = value.targets;
   else if (
     value.v === 1 &&
+    Array.isArray(value.instances) &&
+    value.instances.length
+  )
+    targets = value.instances;
+  else if (
+    value.v === 1 &&
     (value.additionalTargets === undefined ||
       Array.isArray(value.additionalTargets))
   )
     targets = [
-      { ...value, id: undefined },
+      { ...value, id: value.targetId },
       ...((value.additionalTargets as unknown[]) ?? []),
     ];
   else return;

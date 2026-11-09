@@ -588,6 +588,7 @@ function summarizeItem(
     } as ItemSummary;
   }
   if (type === 'file') {
+    const mimeType = typeof raw.mimeType === 'string' ? raw.mimeType : '';
     const file = {
       id: String(raw.fileId ?? ''),
       fileName: String(raw.fileName ?? '附件'),
@@ -606,7 +607,7 @@ function summarizeItem(
         ? {
             machineId: raw.machineId,
             sha256: raw.sha256,
-            mimeType: typeof raw.mimeType === 'string' ? raw.mimeType : '',
+            mimeType,
           }
         : {}),
     };
@@ -1105,7 +1106,16 @@ function project(
               : 'queued',
           ...execution.get(item.userTurnId),
           finished: false,
-          rev: 0,
+          rev: bump(
+            projection,
+            `queue/${item.userTurnId}`,
+            JSON.stringify(item),
+          ),
+          author: readAuthor(item.author),
+          deliveryKind:
+            item.acpSessionConfig?._lodyDeliveryKind === 'continue'
+              ? ('continue' as const)
+              : undefined,
           timestamp: item.timestamp,
           items: (
             item.acpSessionConfig?.inputBlocks ?? [

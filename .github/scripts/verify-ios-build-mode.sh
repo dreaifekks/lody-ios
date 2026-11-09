@@ -1,33 +1,18 @@
 #!/bin/bash
-
 set -euo pipefail
 
 ios_directory="${1:?Usage: verify-ios-build-mode.sh <ios-directory>}"
-pods_directory="$ios_directory/Pods"
-
-if [ ! -d "$pods_directory" ]; then
-  echo "::error::CocoaPods directory does not exist: $pods_directory" >&2
+project="$ios_directory/Lody.xcodeproj/project.pbxproj"
+if [ ! -f "$project" ]; then
+  echo "::error::Native Xcode project is missing; run pnpm prebuild" >&2
   exit 1
 fi
-
-expo_precompiled=""
-for framework in ExpoModulesCore ExpoModulesWorklets; do
-  candidate="$pods_directory/$framework/$framework.xcframework"
-  if [ -d "$candidate" ]; then
-    expo_precompiled="$candidate"
-    break
-  fi
-done
-
-react_prebuilt="$pods_directory/React-Core-prebuilt/React.xcframework"
-if [ -n "$expo_precompiled" ] && [ ! -d "$react_prebuilt" ]; then
-  echo "::error::Mixed native build: Expo modules are precompiled, but React Native fell back to a source build." >&2
-  echo "::error::Found $expo_precompiled without $react_prebuilt." >&2
+if [ -e "$ios_directory/Pods" ] || [ -e "$ios_directory/Podfile" ]; then
+  echo "::error::Stale CocoaPods output in the XcodeGen project: $ios_directory" >&2
   exit 1
 fi
-
-if [ -n "$expo_precompiled" ]; then
-  echo "Compatible precompiled Expo and React Native build detected."
-else
-  echo "Expo modules are building from source; no mixed native build detected."
+if grep -Ei '(React[-./]|ReactAppDependencyProvider|RCTBridge|ExpoModules|Expo[./]|hermes[-.]|Metro|RNReanimated|RNScreens)' "$project"; then
+  echo '::error::React Native build reference in the standalone native project' >&2
+  exit 1
 fi
+echo 'Standalone XcodeGen project verified.'

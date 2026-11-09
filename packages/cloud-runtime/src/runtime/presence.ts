@@ -25,7 +25,9 @@ export function onlineMachineIds(states: Record<string, unknown>, now: number) {
     if (
       value?.kind === 'machine' &&
       typeof value.machineId === 'string' &&
+      value.machineId.length > 0 &&
       typeof value.updatedAt === 'number' &&
+      Number.isFinite(value.updatedAt) &&
       now - value.updatedAt < PRESENCE_TTL_MS
     )
       online.add(value.machineId);
@@ -76,15 +78,17 @@ const decodeBase64 = (text: string) =>
 
 const pause = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, { once: true });
   });
 
 /**
@@ -93,6 +97,7 @@ const pause = (ms: number, signal: AbortSignal) =>
  */
 export function createPresence(
   open: (signal: AbortSignal) => Promise<Response>,
+  publish: (online: Set<string> | undefined) => void = () => {},
 ) {
   let store: EphemeralStore | undefined;
   let controller: AbortController | undefined;
@@ -115,6 +120,10 @@ export function createPresence(
       try {
         touch();
         const response = await open(live.signal);
+        if (signal.aborted || live.signal.aborted) {
+          await response.body?.cancel().catch(() => {});
+          return;
+        }
         if (
           !response.ok ||
           !response.body ||
@@ -126,6 +135,7 @@ export function createPresence(
           touch,
           live.signal,
         )) {
+          if (signal.aborted) return;
           if (event !== 'bootstrap' && event !== 'data') continue;
           const bytes = decodeBase64(data);
           if (bytes.length) next.apply(bytes);
@@ -134,13 +144,18 @@ export function createPresence(
             failures = 0;
             bootstrapped();
           }
+          if (store === next)
+            publish(onlineMachineIds(next.getAllStates(), Date.now()));
         }
       } catch {
         // A dropped or refused channel is retried below; until then nothing is known.
       } finally {
         clearTimeout(timer);
         signal.removeEventListener('abort', abort);
-        if (store === next) store = undefined;
+        if (store === next) {
+          store = undefined;
+          publish(undefined);
+        }
         next.destroy();
       }
       await pause(Math.min(30_000, 1_000 * 2 ** failures++), signal);
@@ -151,6 +166,9 @@ export function createPresence(
     clearTimeout(idle);
     controller?.abort();
     controller = undefined;
+    store = undefined;
+    bootstrapped();
+    publish(undefined);
   }
 
   return {

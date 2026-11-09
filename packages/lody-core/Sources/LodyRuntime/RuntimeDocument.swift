@@ -4,11 +4,11 @@ import WebKit
 /// Platform owners supply lifecycle, resource location, credentials and messages.
 @MainActor
 public enum RuntimeDocument {
-  public static func makeWebView(handler: any WKScriptMessageHandler, delegate: any WKNavigationDelegate, configure: (WKWebViewConfiguration) -> Void = { _ in }) -> WKWebView {
+  public static func makeWebView(handler: any WKScriptMessageHandler, delegate: any WKNavigationDelegate, configure: ((WKWebViewConfiguration) -> Void)? = nil) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     configuration.userContentController.add(handler, name: "dataRuntime")
-    configure(configuration)
+    configure?(configuration)
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = delegate
     #if DEBUG
@@ -21,8 +21,12 @@ public enum RuntimeDocument {
     guard let url = bundle.url(forResource: "DataRuntime", withExtension: "html")
       ?? Bundle.main.url(forResource: "DataRuntime", withExtension: "html")
     else { throw CocoaError(.fileNoSuchFile) }
-    // Keep the official origin without loading remote documents or scripts.
+    // Keep the owner-selected origin without loading remote documents or scripts.
     view.loadHTMLString(try String(contentsOf: url, encoding: .utf8), baseURL: URL(string: origin))
+  }
+
+  public static func deliver(_ envelope: String, to view: WKWebView) {
+    view.callAsyncJavaScript("globalThis.dataRuntime.receive(envelope)", arguments: ["envelope": envelope], in: nil, in: .page, completionHandler: nil)
   }
 
   public static func allows(_ action: WKNavigationAction, origin: String = "https://lody.ai/") -> Bool {

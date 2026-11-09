@@ -85,6 +85,23 @@ export function isAttachmentBlock(block: RecordValue): boolean {
   );
 }
 
+/** LAN images are local file blocks; enforce one combined budget, including edits. */
+export function validAttachmentBlocks(
+  blocks: unknown,
+): blocks is RecordValue[] {
+  if (
+    !Array.isArray(blocks) ||
+    blocks.some((block) => !isAttachmentBlock(block))
+  )
+    return false;
+  const limit = blocks.some((block) => block.transport === 'local') ? 8 : 16;
+  return (
+    blocks.length <= limit &&
+    blocks.filter((block) => block.type === 'image').length <= 8 &&
+    blocks.filter((block) => block.type === 'file').length <= 8
+  );
+}
+
 export function editableUserTurn(
   history: RecordValue[],
   meta: RecordValue,
@@ -126,7 +143,9 @@ export function editableUserTurn(
   return turn;
 }
 
-export function editAttachments(turn: RecordValue): RecordValue[] {
+export function editAttachments(
+  turn: RecordValue,
+): (RecordValue & { type: 'image' | 'file'; editId: string })[] {
   return (turn.items ?? [])
     .flatMap((item: RecordValue) => {
       if (item.type === 'image_group') return item.images ?? [];
@@ -166,12 +185,7 @@ export function replacementInput(
       .map(({ editId, ...item }) => item),
     ...added,
   ];
-  if (
-    attachments.length > 16 ||
-    attachments.filter((item) => item.type === 'image').length > 8 ||
-    attachments.filter((item) => item.type === 'file').length > 8
-  )
-    throw new Error('attachment_limit');
+  if (!validAttachmentBlocks(attachments)) throw new Error('attachment_limit');
   if (!text.trim() && !attachments.length) throw new Error('empty_message');
   return {
     ...turn.inputConfig,

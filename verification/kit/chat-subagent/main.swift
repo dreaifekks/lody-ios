@@ -1,0 +1,139 @@
+import UIKit
+
+struct LodyListRow {
+  var parent = false
+  var imageTint = ""
+  var unread = false
+}
+
+@MainActor func descendants(_ view: UIView) -> [UIView] {
+  view.subviews.flatMap { [$0] + descendants($0) }
+}
+
+func sameColor(_ actual: UIColor?, _ expected: UIColor, traits: UITraitCollection) -> Bool {
+  actual?.resolvedColor(with: traits) == expected.resolvedColor(with: traits)
+}
+
+let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 400))
+window.isHidden = false
+let width: CGFloat = 358
+let traits = window.traitCollection
+var row = ChatRow(
+  id: "reply:subagent", entryID: "reply", kind: "subagent_task", text: "",
+  actionable: true,
+  subagent: ChatSubagentCard(actor: "Researcher", description: "Inspect routing", status: "in_progress", detail: "", background: false),
+  treeChild: true,
+  treeLast: true
+)
+let cell = ChatSubagentCell(frame: CGRect(x: 0, y: 0, width: width, height: 40))
+window.addSubview(cell)
+
+@MainActor func render(_ value: ChatRow) {
+  cell.frame.size.height = ChatSubagentCell.height(value, width: width, traits: traits)
+  cell.configure(value)
+  cell.setNeedsLayout()
+  cell.layoutIfNeeded()
+}
+
+@MainActor func treePath() -> CGPath? {
+  cell.contentView.layer.sublayers?.compactMap { $0 as? CAShapeLayer }.first { !$0.isHidden }?.path
+}
+
+render(row)
+let views = descendants(cell.contentView)
+precondition(views.contains { $0 is LodyStatusGlyphView }, "Sub-agent rows must render a native rail glyph")
+let glyph = views.compactMap { $0 as? LodyStatusGlyphView }.first!
+precondition(abs(glyph.frame.midX - (LodyDesign.Rail.chatChildCenter - 16)) < 0.01, "Child glyphs must align with the child rail")
+precondition(glyph.kind == .live, "Running tasks must show the live glyph")
+let labels = views.compactMap { $0 as? UILabel }
+let title = labels.first { $0.attributedText?.string == "Inspect routing · Researcher" }!
+precondition(abs(title.frame.minX - (LodyDesign.Rail.chatChildText - 16)) < 0.01, "Child titles must align with the child text column")
+let attributed = title.attributedText!
+let titleFont = attributed.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
+precondition(abs(titleFont.pointSize - LodyDesign.font(.subheadline, size: 14, compatibleWith: traits).pointSize) < 0.01)
+precondition(sameColor(attributed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .lodyInk, traits: traits))
+precondition(sameColor(attributed.attribute(.foregroundColor, at: attributed.length - 1, effectiveRange: nil) as? UIColor, .lodySecondary, traits: traits))
+precondition(title.numberOfLines == 1 && title.lineBreakMode == .byTruncatingTail)
+precondition(cell.bounds.height == 30, "Rows without detail are 30 pt, got \(cell.bounds.height)")
+let statusWords = ["pending", "running", "completed", "failed"].map { String(localized: String.LocalizationValue("native.chat.subagent." + $0), bundle: .lody) }
+precondition(!labels.contains { !$0.isHidden && statusWords.contains($0.text ?? "") }, "The rail glyph already shows the state, so no status word is drawn")
+let lastPath = treePath()!
+precondition(abs(lastPath.boundingBoxOfPath.minX - (LodyDesign.Rail.chatCenter - 16)) < 1.5, "The child tree must continue the process trunk")
+var curved = false
+lastPath.applyWithBlock { if $0.pointee.type == .addCurveToPoint { curved = true } }
+precondition(curved, "Sub-agents hang on a tentacle curve")
+precondition(cell.contentView.layer.sublayers?.contains { ($0 as? CAGradientLayer).map { !$0.isHidden } ?? false } != true, "Idle parents keep the neutral rail")
+row.parentLive = true
+render(row)
+let liveTree = cell.contentView.layer.sublayers?.compactMap { $0 as? CAGradientLayer }.first { !$0.isHidden }
+precondition(liveTree != nil && (liveTree!.mask as? CAShapeLayer)?.path != nil, "A running process draws Signal tentacles")
+row.parentLive = false
+render(row)
+precondition(lastPath.boundingBoxOfPath.minY == 0, "The tree must connect to the preceding row")
+precondition(abs(lastPath.boundingBoxOfPath.maxY - glyph.frame.midY) < 0.01, "The last child's tree must stop at its elbow")
+precondition(abs(lastPath.boundingBoxOfPath.maxX - (glyph.frame.minX - 1)) < 0.01, "The elbow must reach the glyph with the Home tree spacing")
+precondition(cell.accessibilityIdentifier == row.id && cell.accessibilityTraits == .button)
+precondition(cell.accessibilityLabel == "Researcher, Inspect routing", "The row must preserve its accessibility label")
+precondition(cell.accessibilityValue == String(localized: "native.chat.subagent.running", bundle: .lody))
+for view in views {
+  let alpha = view.backgroundColor?.resolvedColor(with: traits).cgColor.alpha ?? 0
+  precondition(alpha == 0 && view.layer.cornerRadius == 0, "Rail rows must have no card backgrounds or rounded subviews")
+}
+let lineOneY = glyph.frame.midY
+row.treeLast = false
+render(row)
+precondition(abs(treePath()!.boundingBoxOfPath.maxY - cell.bounds.height) < 0.01, "Non-last children must continue the trunk to the next row")
+
+row.subagent?.detail = "Read the routing implementation and report the result. " + String(repeating: "Details ", count: 20)
+row.subagent?.status = "completed"
+render(row)
+precondition(cell.bounds.height == 40, "Detail rows are 40 pt, got \(cell.bounds.height)")
+precondition(glyph.frame.midY == lineOneY, "Detail must not move the elbow away from line one")
+let detail = labels.first { $0.text == row.subagent?.detail }!
+precondition(detail.numberOfLines == 1 && detail.lineBreakMode == .byTruncatingTail, "Detail must occupy one tail-truncated line")
+precondition(detail.frame.minX == title.frame.minX && detail.frame.minY >= title.frame.maxY)
+precondition(detail.frame.maxY <= cell.bounds.height, "The second line must fit within the measured row")
+precondition(sameColor(detail.textColor, .lodySecondary, traits: traits))
+precondition(abs(detail.font.pointSize - LodyDesign.font(.footnote, size: 12, compatibleWith: traits).pointSize) < 0.01)
+
+row.treeChild = false
+render(row)
+precondition(abs(glyph.frame.midX - (LodyDesign.Rail.chatCenter - 16)) < 0.01, "Top-level glyphs must use the primary rail")
+precondition(abs(title.frame.minX - (LodyDesign.Rail.chatText - 16)) < 0.01, "Top-level titles must use the primary text column")
+precondition(treePath() == nil, "Reusing a child as a top-level row must clear the tree")
+
+row.subagent?.status = "failed"
+row.subagent?.background = true
+render(row)
+precondition(glyph.kind == .failed)
+let status = labels.first { $0.text == String(localized: "native.chat.subagent.background", bundle: .lody) }!
+precondition(!status.isHidden && sameColor(status.textColor, .lodyTertiary, traits: traits), "Background stays as the only trailing note")
+precondition(abs(status.font.pointSize - LodyDesign.mono(11.5, compatibleWith: traits).pointSize) < 0.01)
+precondition(status.frame.minX >= title.frame.maxX && status.frame.maxX <= cell.bounds.width, "Trailing status must not overlap the title")
+precondition(sameColor(detail.textColor, .lodySecondary, traits: traits), "Failure details retain the secondary text color")
+row.subagent?.status = "completed"
+row.subagent?.detail = ""
+row.subagent?.background = false
+row.actionable = false
+cell.prepareForReuse()
+render(row)
+precondition(glyph.kind == .done && cell.bounds.height == 30 && detail.isHidden)
+precondition(status.isHidden || (status.text ?? "").isEmpty, "A finished foreground task has no trailing text")
+precondition(cell.accessibilityTraits == .staticText)
+row.subagent?.status = "pending"
+render(row)
+precondition(glyph.kind == .live, "Pending tasks retain the existing active-state treatment")
+row.subagent?.status = "in_progress"
+row.subagent?.detail = String.localizedStringWithFormat(String(localized: "native.chat.subagent.runningTool", bundle: .lody), "bash")
+render(row)
+precondition(status.text == row.subagent?.detail, "Running tool activity must appear in the trailing status")
+precondition(detail.isHidden && cell.bounds.height == 30, "Running tool activity must not repeat as a second line")
+print("Chat subagent: rail geometry, tree continuity, status, detail, reuse and accessibility passed")
+
+row.subagent?.groupTitle = "2 agents · 1 running · 1 done"
+render(row)
+let group = descendants(cell.contentView).compactMap { $0 as? UILabel }.first { $0.text == row.subagent?.groupTitle }!
+precondition(!group.isHidden && group.frame.maxY <= title.frame.minY, "The group summary sits above the task title")
+precondition(glyph.frame.midY > lineOneY && title.frame.maxY <= cell.bounds.height, "The header height moves the task and its elbow together")
+precondition(cell.accessibilityLabel?.hasPrefix("2 agents · 1 running · 1 done, ") == true)
+print("PASS: group header, task title, rail elbow and VoiceOver remain aligned")

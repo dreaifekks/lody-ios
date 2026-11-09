@@ -7,10 +7,6 @@ on:
         required: false
         type: string
         default: ''
-      runtime_fingerprint:
-        required: false
-        type: string
-        default: ''
   workflow_dispatch:
     inputs:
       notes:
@@ -24,15 +20,12 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write
 
 env:
-  MOBILE_DIR: apps/mobile
-  # A fork sets these repository variables to sign under its own team and bundle ID.
-  APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'KAMM5N88X3' }}
-  LODY_APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'KAMM5N88X3' }}
+  IOS_DIR: .
+  APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || 'KAMM5N88X3' }}
+  LODY_APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || 'KAMM5N88X3' }}
   LODY_BUNDLE_ID: ${{ vars.LODY_BUNDLE_ID || 'app.innei.lody' }}
-  EXPO_USE_PRECOMPILED_MODULES: '0'
   ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
   ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
   ASC_BYPASS_KEYCHAIN: '1'
@@ -45,7 +38,6 @@ jobs:
     outputs:
       build_number: ${{ steps.build.outputs.build_number }}
       marketing_version: ${{ steps.build.outputs.marketing_version }}
-      fingerprint: ${{ steps.fp.outputs.hash }}
       source_short: ${{ steps.meta.outputs.source_short }}
     steps:
       - uses: actions/checkout@v6
@@ -82,28 +74,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Generate native runtime assets
-        working-directory: ${{ env.MOBILE_DIR }}
+        working-directory: ${{ env.IOS_DIR }}
         run: pnpm native:assets
-
-      - name: Compute and verify fingerprint
-        id: fp
-        working-directory: ${{ env.MOBILE_DIR }}
-        env:
-          EXPECTED: ${{ inputs.runtime_fingerprint }}
-        run: |
-          set -euo pipefail
-          hash="$(../../node_modules/.bin/fingerprint fingerprint:generate --platform ios | jq -r .hash)"
-          if [[ ! "$hash" =~ ^[a-zA-Z0-9]{16,}$ ]]; then
-            echo "::error::Could not compute iOS fingerprint."
-            exit 1
-          fi
-          if [ -n "$EXPECTED" ] && [ "$hash" != "$EXPECTED" ]; then
-            echo "::error::Ship fingerprint $EXPECTED does not match archive fingerprint $hash."
-            exit 1
-          fi
-          echo "hash=$hash" >> "$GITHUB_OUTPUT"
-          echo "EXPO_UPDATES_FINGERPRINT_OVERRIDE=$hash" >> "$GITHUB_ENV"
-          echo "iOS runtime fingerprint $hash"
 
       - name: Prepare App Store Connect authentication
         env:
@@ -120,12 +92,12 @@ jobs:
 
       - name: Resolve version and build number
         id: build
-        working-directory: ${{ env.MOBILE_DIR }}
+        working-directory: ${{ env.IOS_DIR }}
         run: |
           set -euo pipefail
-          marketing_version="$(npx expo config --json | jq -r '.version // empty')"
+          marketing_version="$(node -p "require('./package.json').version")"
           if [[ ! "$marketing_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Expo config produced invalid marketing version: $marketing_version"
+            echo "::error::package.json has an invalid marketing version: $marketing_version"
             exit 1
           fi
           build_number="$(asc builds next-build-number \
@@ -148,31 +120,20 @@ jobs:
           echo "Building $marketing_version ($build_number)"
 
       - name: Generate native iOS project
-        working-directory: ${{ env.MOBILE_DIR }}
-        run: npx expo prebuild --platform ios --non-interactive --no-install
+        working-directory: ${{ env.IOS_DIR }}
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          pnpm prebuild
 
       - name: Stamp build number
-        working-directory: ${{ env.MOBILE_DIR }}
+        working-directory: ${{ env.IOS_DIR }}
         run: |
           set -euo pipefail
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/Lody/Info.plist
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' ios/Lody/Info.plist)" = "$BUILD_NUMBER"
-
-      - name: Install CocoaPods
-        working-directory: ${{ env.MOBILE_DIR }}
-        run: |
-          set -euo pipefail
-          if command -v brew >/dev/null 2>&1 && brew --prefix ruby >/dev/null 2>&1; then
-            PATH="$(brew --prefix ruby)/bin:$PATH"
-            export PATH
-          fi
-          bundle config set --local path 'vendor/bundle'
-          bundle install
-          cd ios
-          bundle exec pod install
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" .generated/Lody/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' .generated/Lody/Info.plist)" = "$BUILD_NUMBER"
 
       - name: Verify compatible native build mode
-        run: /bin/bash .github/scripts/verify-ios-build-mode.sh "$MOBILE_DIR/ios"
+        run: /bin/bash .github/scripts/verify-ios-build-mode.sh "$IOS_DIR"
 
       - name: Import distribution certificate
         env:
@@ -214,79 +175,33 @@ jobs:
         run: |
           set -euo pipefail
           target_bundle_ids="$(
-            cd "$MOBILE_DIR"
-            node <<'NODE'
-          const { IOSConfig } = require('expo/config-plugins');
-          const project = IOSConfig.XcodeUtils.getPbxproj(process.cwd());
-          const base = process.env.LODY_BUNDLE_ID;
-          const unquote = (value) => String(value ?? '').replace(/^"|"$/g, '');
-          const identifiers = new Set();
-          for (const config of Object.values(project.pbxXCBuildConfigurationSection())) {
-            const settings = config?.buildSettings;
-            if (unquote(config?.name) !== 'Release') continue;
-            const identifier = unquote(settings?.PRODUCT_BUNDLE_IDENTIFIER);
-            if (identifier !== base && !identifier.startsWith(`${base}.`)) continue;
-            identifiers.add(identifier);
-          }
-          if (!identifiers.has(base)) {
-            throw new Error(`Generated project has no Release target for ${base}`);
-          }
-          process.stdout.write([...identifiers].sort().join('\n'));
-          NODE
+            xcodebuild -project "$IOS_DIR/Lody.xcodeproj" -alltargets \
+              -configuration Release -sdk iphoneos -showBuildSettings -json |
+              jq -r '[.[].buildSettings | select(.TARGET_NAME == "Lody" or .PRODUCT_TYPE == "com.apple.product-type.app-extension") | .PRODUCT_BUNDLE_IDENTIFIER] | unique[]'
           )"
           export TARGET_BUNDLE_IDS="$target_bundle_ids"
           /bin/bash .github/scripts/install-app-store-profiles.sh
 
       - name: Apply manual signing
-        working-directory: ${{ env.MOBILE_DIR }}
+        working-directory: ${{ env.IOS_DIR }}
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const { IOSConfig } = require('expo/config-plugins');
-          const { writeFileSync } = require('node:fs');
-          const { APPLE_TEAM_ID, IOS_PROFILE_MAP } = process.env;
-          if (!APPLE_TEAM_ID || !IOS_PROFILE_MAP) {
-            throw new Error('Team and installed provisioning profiles are required');
-          }
-          const profiles = JSON.parse(IOS_PROFILE_MAP);
-          const expected = new Set(Object.keys(profiles));
-          const project = IOSConfig.XcodeUtils.getPbxproj(process.cwd());
-          const unquote = (value) => String(value).replace(/^"|"$/g, '');
-          const patched = new Set();
-          for (const config of Object.values(project.pbxXCBuildConfigurationSection())) {
-            const settings = config?.buildSettings;
-            if (unquote(config?.name) !== 'Release') continue;
-            const identifier = unquote(settings?.PRODUCT_BUNDLE_IDENTIFIER);
-            if (!expected.has(identifier)) continue;
-            Object.assign(settings, {
-              CODE_SIGN_STYLE: 'Manual',
-              CODE_SIGN_IDENTITY: '"Apple Distribution"',
-              DEVELOPMENT_TEAM: APPLE_TEAM_ID,
-              PROVISIONING_PROFILE_SPECIFIER: `"${profiles[identifier]}"`,
-            });
-            patched.add(identifier);
-          }
-          const missing = [...expected].filter((identifier) => !patched.has(identifier));
-          if (missing.length > 0) {
-            throw new Error(`Could not apply signing to: ${missing.join(', ')}`);
-          }
-          writeFileSync(project.filepath, project.writeSync());
-          NODE
-          xcodebuild -project ios/Lody.xcodeproj -alltargets -configuration Release \
+          python3 scripts/prebuild-native.py
+          xcodebuild -project Lody.xcodeproj -alltargets -configuration Release \
             -sdk iphoneos -showBuildSettings -json > "$RUNNER_TEMP/signing-settings.json"
           jq -e \
             --arg team "$APPLE_TEAM_ID" \
             --argjson profiles "$IOS_PROFILE_MAP" \
-            -f ../../.github/scripts/verify-signing-settings.jq \
+            -f .github/scripts/verify-signing-settings.jq \
             "$RUNNER_TEMP/signing-settings.json"
 
       - name: Archive
-        working-directory: ${{ env.MOBILE_DIR }}/ios
+        working-directory: ${{ env.IOS_DIR }}
         run: |
           set -o pipefail
           command -v xcbeautify >/dev/null || brew install xcbeautify
           xcodebuild \
-            -workspace Lody.xcworkspace \
+            -project Lody.xcodeproj \
             -scheme Lody \
             -configuration Release \
             -destination 'generic/platform=iOS' \
@@ -305,18 +220,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "$LODY_BUNDLE_ID"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "$BUILD_NUMBER"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = "$MARKETING_VERSION"
-
-          runtime_config="$(/usr/libexec/PlistBuddy -c 'Print :EXUpdatesRuntimeVersion' "$APP/Expo.plist")"
-          if [ "$runtime_config" = 'file:fingerprint' ]; then
-            runtime_version="$(tr -d '\r\n' < "$APP/EXUpdates.bundle/fingerprint")"
-          else
-            runtime_version="$runtime_config"
-          fi
-          if [ "$runtime_version" != "$EXPO_UPDATES_FINGERPRINT_OVERRIDE" ]; then
-            echo "::error::Archive runtime $runtime_version does not match fingerprint $EXPO_UPDATES_FINGERPRINT_OVERRIDE."
-            exit 1
-          fi
-          echo "Archived $LODY_BUNDLE_ID $MARKETING_VERSION ($BUILD_NUMBER) runtime $runtime_version"
+          echo "Archived $LODY_BUNDLE_ID $MARKETING_VERSION ($BUILD_NUMBER)"
 
       - name: Export IPA
         run: |
@@ -391,16 +295,6 @@ jobs:
             --latest \
             --group "${{ vars.TESTFLIGHT_GROUP }}"
 
-      - name: Record fingerprint baseline
-        run: |
-          printf '%s' "$EXPO_UPDATES_FINGERPRINT_OVERRIDE" > "$RUNNER_TEMP/fingerprint"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ios-fingerprint
-          path: ${{ runner.temp }}/fingerprint
-          retention-days: 90
-
       - name: Clean up signing assets
         if: always()
         run: |
@@ -440,7 +334,7 @@ jobs:
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           text="$(printf '<b>%s</b>\n<b>提交</b>: <code>%s</code>\n<a href="%s">打开 GitHub Actions</a>' "$title" "$COMMIT" "$run_url")"
-          jq -n --arg text "$text" --arg chat "${{ vars.TELEGRAM_CHAT_ID || '@order_usagi' }}" \
-            '{chat_id: $chat, text: $text, parse_mode: "HTML", disable_web_page_preview: true}' \
+          jq -n --arg text "$text" \
+            '{chat_id: "@order_usagi", text: $text, parse_mode: "HTML", disable_web_page_preview: true}' \
             | curl -sS -f -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               -H 'Content-Type: application/json' -d @-

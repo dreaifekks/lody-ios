@@ -1,0 +1,369 @@
+import UIKit
+
+@MainActor
+final class InboxController: UIViewController {
+  let list = SessionListView()
+  let source: SessionSource
+  private let chrome = InboxChrome()
+  private let projectBar = InboxProjectBar()
+  private let projectIndex = InboxProjectIndex()
+  private var creationProjectId: String?
+  private lazy var actions = SessionActions(source: source)
+  private var mode = InboxController.storedIndex("inboxView", count: 4)
+  private var sort = InboxSort.allCases[InboxController.storedIndex("inboxProjectSort")]
+  private var expanded = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
+  private var query = ""
+  private var search: (key: String, catalog: SessionCatalog, hits: InboxSearchHits)?
+  private var requested: (key: String, catalog: SessionCatalog)?
+  private var searchTask: Task<Void, Never>?
+  private var views: [String: Double] = [:]
+  private var viewsKey = ""
+  private var viewsLoad = 0
+  private var observers: [NSObjectProtocol] = []
+
+  init(source: SessionSource = .live) {
+    self.source = source
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  isolated deinit {
+    searchTask?.cancel()
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+  }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    loadPreferences()
+    list.frame = view.bounds
+    list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    list.accessibilityIdentifier = "ipad-inbox-list"
+    list.setContentStyle(true)
+    list.forwarded = { [weak self] name, body in self?.event(name, body) }
+    view.addSubview(list)
+    wireChrome()
+    projectBar.selected = { [weak self] id in self?.setFilter(id) }
+    wireIndex()
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification]).map { name in
+      NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.render() }
+      }
+    }
+    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in self.render() }
+    // UI Verify can reset the prefs after this controller has already read them.
+    observers.append(NotificationCenter.default.addObserver(forName: .lodyInboxPreferencesReset, object: nil, queue: .main) {
+      [weak self] _ in MainActor.assumeIsolated { self?.reloadPreferences() }
+    })
+  }
+
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    chrome.layout()
+    layoutIndex()
+  }
+
+  override func didMove(toParent parent: UIViewController?) {
+    super.didMove(toParent: parent)
+    if let parent {
+      chrome.attach(to: parent, content: self, scrollView: list.sidebarScrollView)
+      render()
+    } else {
+      chrome.detach()
+    }
+  }
+
+  func render() {
+    guard isViewLoaded else { return }
+    creationProjectId = nil
+    let state = source.state
+    loadViews(state)
+    guard !state.userId.isEmpty else {
+      chrome.update(nil)
+      list.setPlaceholder("")
+      list.setSections([])
+      return
+    }
+    let catalog = state.catalog.viewed(views)
+    chrome.update(InboxChrome.Model(
+      workspaces: state.workspaces, selected: state.workspace,
+      devices: InboxDevices(catalog: state.catalog, presence: state.presence),
+      mode: mode, sort: sort, allowsWorkspaceEditing: AuthSession.shared.snapshot.account?.lan == nil
+    ))
+    list.setPreviewUserId(state.userId)
+    list.setPreviewWorkspaceId(state.workspaceId)
+    let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard term.isEmpty else {
+      projectIndex.enabled = false
+      list.setTopAccessory(nil, height: 0)
+      renderSearch(term, state: state, catalog: catalog)
+      return
+    }
+    list.setPlaceholder(listPlaceholder(state))
+    let pinOrder = pinOrder(state, catalog: catalog)
+    if mode == 0 {
+      let chips = InboxSections.chips(catalog, sort: sort)
+      let shown = chips.count > 1 && traitCollection.horizontalSizeClass != .regular
+      let stored = storedFilter(state)
+      let filter = shown && chips.contains { $0.id == stored } ? stored : InboxSections.allFilter
+      if catalog.projects.contains(where: { $0.id == filter && !SessionRows.isChat($0.id) }) {
+        creationProjectId = filter
+      }
+      projectBar.update(chips, selected: filter)
+      list.setTopAccessory(shown ? projectBar : nil, height: InboxProjectBar.height)
+      let sections = InboxSections.projects(catalog, expanded: expanded, sort: sort, pinOrder: pinOrder, filter: filter)
+      list.setSections(SessionRows.restrictingCloud(sections, lan: LanInvite.isWorkspace(state.workspaceId)))
+      projectIndex.update(InboxProjectIndexModel.items(sectionIds: sections.map(\.id), chips: chips))
+      projectIndex.enabled = shown && filter == InboxSections.allFilter
+      view.setNeedsLayout()
+    } else if mode == 3 {
+      projectIndex.enabled = false
+      list.setTopAccessory(nil, height: 0)
+      list.setSections(SessionRows.restrictingCloud(
+        InboxSections.projects(catalog, expanded: expanded, sort: sort, pinOrder: pinOrder, byMachine: true),
+        lan: LanInvite.isWorkspace(state.workspaceId)
+      ))
+    } else {
+      projectIndex.enabled = false
+      list.setTopAccessory(nil, height: 0)
+      list.setSections(SessionRows.restrictingCloud(InboxSections.inbox(catalog, chatOnly: mode == 2, pinOrder: pinOrder), lan: LanInvite.isWorkspace(state.workspaceId)))
+    }
+  }
+
+  private func wireChrome() {
+    chrome.selectWorkspace = { [weak self] id in self?.selectWorkspace(id) }
+    chrome.editWorkspace = { [weak self] in self?.editWorkspace() }
+    chrome.setView = { [weak self] mode in self?.setView(mode) }
+    chrome.setSort = { [weak self] sort in
+      guard let self else { return }
+      self.sort = sort
+      UserDefaults.standard.set(InboxSort.allCases.firstIndex(of: sort) ?? 0, forKey: "inboxProjectSort")
+      self.render()
+    }
+    // The application shell owns these presentations so external links can dismiss them.
+    chrome.openSettings = { [weak self] in
+      LodyShell.shared.openPage("settings", options: ["present": true], from: self?.parent)
+    }
+    chrome.openDebug = { [weak self] in LodyShell.shared.openPage("debug", from: self?.parent) }
+    chrome.newSession = { [weak self] in self?.newSession() }
+    chrome.searchChanged = { [weak self] text in
+      guard let self, text != self.query else { return }
+      self.query = text
+      self.render()
+    }
+  }
+
+  private func renderSearch(_ term: String, state: SessionListState, catalog: SessionCatalog) {
+    let key = [state.userId, state.workspaceId, term].joined(separator: "\0")
+    if requested?.key != key || requested?.catalog != catalog { requestSearch(term, key: key, state: state, catalog: catalog) }
+    let current = search.flatMap { $0.key == key && $0.catalog == catalog ? $0 : nil }
+    list.setPlaceholder(String(localized: String.LocalizationValue(current == nil ? "search.placeholder.loading" : "search.placeholder.noMatch"), bundle: .lody))
+    list.setSections(SessionRows.restrictingCloud(InboxSections.search(catalog, hits: current?.hits ?? InboxSearchHits(), query: term), lan: LanInvite.isWorkspace(source.state.workspaceId)))
+  }
+
+  private func requestSearch(_ term: String, key: String, state: SessionListState, catalog: SessionCatalog) {
+    requested = (key, catalog)
+    searchTask?.cancel()
+    guard !state.workspaceId.isEmpty else { return }
+    let (user, workspace) = (state.userId, state.workspaceId)
+    searchTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(120))
+      guard !Task.isCancelled else { return }
+      let result: Result<InboxSearchHits, Error> = await withCheckedContinuation { done in
+        LocalStore.queue.async {
+          done.resume(returning: Result {
+            Self.hits(try LocalStore.shared.searchInbox(userID: user, workspaceID: workspace, query: term))
+          })
+        }
+      }
+      guard let self, !Task.isCancelled, self.requested?.key == key else { return }
+      switch result {
+      case .success(let hits):
+        self.search = (key, catalog, hits)
+      case .failure:
+        LodyToastOverlay.shared.show(message: String(localized: "search.toast.failed", bundle: .lody), kind: "error")
+        self.search = (key, catalog, InboxSections.match(catalog, keyword: term))
+      }
+      self.render()
+    }
+  }
+
+  private nonisolated static func hits(_ raw: [String: Any]) -> InboxSearchHits {
+    let sessions = (raw["sessions"] as? [[String: Any]] ?? []).compactMap { item -> (id: String, snippet: String?)? in
+      guard let id = item["id"] as? String else { return nil }
+      return (id, item["snippet"] as? String)
+    }
+    return InboxSearchHits(projectIds: raw["projectIds"] as? [String] ?? [], sessions: sessions)
+  }
+
+  private func listPlaceholder(_ state: SessionListState) -> String {
+    if state.loading { return String(localized: "sessions.placeholder.loading", bundle: .lody) }
+    if !state.connected { return String(localized: "sessions.placeholder.offline", bundle: .lody) }
+    return String(localized: "sessions.placeholder.empty", bundle: .lody)
+  }
+
+  private func pinOrder(_ state: SessionListState, catalog: SessionCatalog) -> [String] {
+    let key = "inboxPinOrder.\(state.userId).\(state.workspaceId)"
+    let stored = state.workspaceId.isEmpty ? [] : UserDefaults.standard.stringArray(forKey: key) ?? []
+    let activity = Dictionary(catalog.sessions.map { ($0.id, $0.activityAt) }, uniquingKeysWith: { first, _ in first })
+    let order = InboxSections.reconcilePinOrder(
+      stored, pinned: catalog.sessions.filter(\.pinned).map(\.id), activity: { activity[$0] ?? 0 }
+    )
+    if !state.workspaceId.isEmpty, order != stored { UserDefaults.standard.set(order, forKey: key) }
+    return order
+  }
+
+  private func loadViews(_ state: SessionListState) {
+    if state.key != viewsKey {
+      viewsKey = state.key
+      views = [:]
+    }
+    viewsLoad += 1
+    let load = viewsLoad
+    Task { [weak self] in
+      let next = await SessionSource.views(userId: state.userId, workspaceId: state.workspaceId)
+      guard let self, self.viewsLoad == load, next != self.views else { return }
+      self.views = next
+      self.render()
+    }
+  }
+
+  private func event(_ name: String, _ body: [String: Any]) {
+    guard let id = body["id"] as? String else { return }
+    switch name {
+    case "rowPress":
+      if consume(id, expanded: body["expanded"] as? Bool ?? true) { return }
+      let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+      actions.open(id, findQuery: term.isEmpty ? nil : term, from: self)
+    case "rowAction":
+      guard let action = body["actionId"] as? String else { return }
+      actions.perform(action, row: id, from: self)
+    default:
+      break
+    }
+  }
+
+  private func consume(_ id: String, expanded open: Bool) -> Bool {
+    if id == "view:\(InboxSections.chatId)" {
+      setView(2)
+      return true
+    }
+    if InboxSections.isMachineSectionId(id) {
+      saveExpansion(id, open: !(expanded[id] ?? true))
+      return true
+    }
+    if id.hasPrefix("toggle:") {
+      let project = String(id.dropFirst(7))
+      saveExpansion(project, open: open)
+      return true
+    }
+    return InboxSections.isChatRow(id)
+  }
+
+  private func saveExpansion(_ project: String, open: Bool) {
+    expanded[project] = open
+    var stored = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
+    stored[project] = open
+    UserDefaults.standard.set(stored, forKey: "inboxExpansion")
+    render()
+  }
+
+  private func wireIndex() {
+    view.addSubview(projectIndex)
+    let grouped = list.groupedList
+    grouped.scrollPhase = { [weak self] scrolling in self?.projectIndex.setScrolling(scrolling) }
+    grouped.scrolled = { [weak self, weak grouped] in
+      guard let self, let grouped, self.projectIndex.shown else { return }
+      self.projectIndex.setCurrent(InboxProjectIndexModel.current(grouped.sectionTops(), edge: grouped.contentTop))
+    }
+    projectIndex.jump = { [weak grouped] id in grouped?.scrollToSection(id) }
+    projectIndex.visibilityChanged = { [weak self] shown in
+      self?.list.groupedList.setTrailingInset(shown ? InboxProjectIndex.room : 0)
+      self?.list.layoutIfNeeded()
+    }
+  }
+
+  private func layoutIndex() {
+    let grouped = list.groupedList
+    let top = grouped.contentTop + 8
+    let bottom = view.bounds.height - view.safeAreaInsets.bottom - 8
+    let height = min(bottom - top, projectIndex.height(available: bottom - top))
+    let center = projectIndex.center
+    projectIndex.bounds = CGRect(x: 0, y: 0, width: InboxProjectIndex.width, height: max(0, height))
+    projectIndex.center = CGPoint(x: view.bounds.width - view.safeAreaInsets.right - InboxProjectIndex.width / 2 - 2, y: (top + bottom) / 2)
+    if center != projectIndex.center { projectIndex.layoutIfNeeded() }
+  }
+
+  private func filterKey(_ state: SessionListState) -> String {
+    "inboxProjectFilter.\(state.userId).\(state.workspaceId)"
+  }
+
+  private func storedFilter(_ state: SessionListState) -> String {
+    UserDefaults.standard.string(forKey: filterKey(state)) ?? InboxSections.allFilter
+  }
+
+  private func setFilter(_ id: String) {
+    let state = source.state
+    guard !state.workspaceId.isEmpty else { return }
+    UserDefaults.standard.set(id, forKey: filterKey(state))
+    render()
+  }
+
+  private func setView(_ next: Int) {
+    mode = next
+    UserDefaults.standard.set(next, forKey: "inboxView")
+    render()
+  }
+
+  private func selectWorkspace(_ id: String) {
+    guard HomeFixture.active else {
+      CatalogSession.shared.selectWorkspace(id)
+      return
+    }
+    Task { try? await HomeFixture.request("selectWorkspace", ["workspaceId": id]) }
+  }
+
+  private func editWorkspace() {
+    guard !LanComposerPolicy.isLAN else { return }
+    guard let workspace = source.state.workspace else { return }
+    var params: [String: Any] = [
+      "workspaceId": workspace.id, "name": workspace.name,
+      "color": LodyAccentChoice.hex(UIColor.lodyAccent.resolvedColor(with: traitCollection)),
+    ]
+    params["image"] = workspace.image
+    LodyShell.shared.present(WorkspaceEditorController(params: params),
+      title: String(localized: "workspace.edit.title", bundle: .lody), detents: [0.5])
+  }
+
+  private func newSession() {
+    let state = source.state
+    guard state.workspace != nil else {
+      LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: "error")
+      return
+    }
+    var fields: [String: Any] = ["workspaceId": state.workspaceId, "zoomSourceLabel": String(localized: "tabs.newSession", bundle: .lody)]
+    if let creationProjectId { fields["projectId"] = creationProjectId }
+    SessionActions.create(fields)
+  }
+
+  private func loadPreferences() {
+    mode = Self.storedIndex("inboxView", count: 4)
+    sort = InboxSort.allCases[Self.storedIndex("inboxProjectSort")]
+    expanded = UserDefaults.standard.dictionary(forKey: "inboxExpansion") as? [String: Bool] ?? [:]
+  }
+
+  private func reloadPreferences() {
+    loadPreferences()
+    render()
+  }
+
+  private static func storedIndex(_ key: String, count: Int = 3) -> Int {
+    let value = UserDefaults.standard.integer(forKey: key)
+    return (0..<count).contains(value) ? value : 0
+  }
+}
+
+extension Notification.Name {
+  static let lodyInboxPreferencesReset = Notification.Name("LodyInboxPreferencesReset")
+}

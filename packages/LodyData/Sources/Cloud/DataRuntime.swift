@@ -1,0 +1,425 @@
+import LodyRuntime
+import LodyCore
+import WebKit
+
+// The owner lives in Swift, so a wedged JS event loop cannot disable its watchdog.
+@MainActor
+public final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+  public static weak var current: DataRuntime?
+  public var webView: WKWebView?
+  public var sessionId: String?
+  public private(set) var sessionSnapshot: (generation: Int, json: String)?
+  private var retainedSessions: [String] = []
+  private var sessionWatchers: [String: Int] = [:]
+  public var reservedSessions: [String] = []
+  public var userId = ""
+  private let localStore: LocalStore
+  public let billing = WorkspaceBilling()
+  private var cacheErrorShown = false
+  private var timer: Timer?
+  public var attachmentTasks: [String: Task<Void, Never>] = [:]
+  public var attachmentAttempts: [String: UUID] = [:]
+  public var grantTask: URLSessionDataTask?
+  public var grantWaiters: [String] = []
+  public var channel: RuntimeChannel?
+  public var contractReady = false
+  private var handshakeDeferred = false
+  public var githubTasks: [String: Task<Void, Never>] = [:]
+  public var shareTasks: [String: Task<Void, Never>] = [:]
+  public var health = RuntimeHealth()
+  private var pingPending = false
+  var simulatorClients: [WeakLanSimulator] = []
+  var lan: LanInvite?
+  private var lanHandler: LanHubSchemeHandler?
+  private var followTask: Task<Void, Never>?
+  private var followAttempt = UUID()
+  private var followedAt: TimeInterval = -.infinity
+  private var lastCatalog: String?
+  public var isLAN: Bool { lan != nil }
+  public var workspace: String?
+  private var workspaceSlug = ""
+  private var workspaceName = ""
+  public var owner = ""
+  public var generation = 0
+  public var backgrounded = false
+  private var phase = "stopped"
+  private var reason = ""
+  private var lastStartReason = ""
+  private var acknowledgements = 0
+  public var backgroundProbe = false
+  public var probeUpdates = 0
+  public var probeBackgroundUpdates = 0
+  private let observers = NotificationObservers()
+  public var onCatalogUpdate: ((_ owner: String, _ state: String, _ catalog: String?) -> Void)?
+  public var onMachinePresence: ((_ owner: String, _ presence: RuntimeContract.MachinePresence?) -> Void)?
+  public var knownRepos: [String: String] = [:]
+  private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+  public init(localStore: LocalStore) {
+    self.localStore = localStore
+    super.init()
+    observers.add(NotificationCenter.default.addObserver(forName: .lodyHostDidEnterBackground, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, self.workspace != nil else { return }
+        self.backgrounded = true
+        self.health.suspend()
+        self.publishPresenceUnknown()
+        self.dispatch(RuntimeContract.Calls.SetActive.self, .init(active: false))
+      }
+    })
+    observers.add(NotificationCenter.default.addObserver(forName: .lodyHostDidReceiveMemoryWarning, object: nil, queue: .main) { _ in
+      MainActor.assumeIsolated { ContentStore.shared.clearAll() }
+    })
+    observers.add(NotificationCenter.default.addObserver(forName: .lodyHostDidBecomeActive, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, self.workspace != nil, self.backgrounded else { return }
+        self.backgrounded = false
+        self.recordRuntime("runtime_resume", phase: self.phase, reason: self.reason, extra: [
+          "hasView": String(self.webView != nil), "contractReady": String(self.contractReady),
+          "handshakeDeferred": String(self.handshakeDeferred),
+        ])
+        self.lanHandler?.reconnect()
+        self.followHub(force: true)
+        self.health.resume(at: self.now)
+        if self.webView == nil { self.build(reason: "foreground") }
+        else {
+          self.dispatch(RuntimeContract.Calls.SetActive.self, .init(active: true))
+          if self.handshakeDeferred, let view = self.webView {
+            self.handshakeDeferred = false
+            self.handshake(view)
+          }
+          self.tick()
+        }
+      }
+    })
+  }
+  public func start(workspace: String, slug: String, name: String, owner: String, userId: String) {
+    cancelFollow()
+    lastCatalog = nil
+    lan = LanHub.credential(for: workspace)
+    followedAt = -.infinity
+    disposeView()
+    if self.workspace != workspace || self.userId != userId {
+      sessionId = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
+    }
+    self.userId = userId; cacheErrorShown = false
+    self.workspace = workspace; self.owner = owner; health = RuntimeHealth()
+    workspaceSlug = slug; workspaceName = name
+    guard !LanInvite.isWorkspace(workspace) || lan != nil else {
+      publish("failed", reason: "missing_lan_credential"); return
+    }
+    backgrounded = LodyHosting.current?.isBackground ?? false
+    if backgrounded { publish("background", reason: "paused") }
+    else { build(reason: "subscribe"); followHub(force: true) }
+  }
+  public func stop(owner: String? = nil) {
+    if let owner, self.owner != owner { return }
+    cancelFollow(); lastCatalog = nil; lan = nil
+    workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
+  }
+  public func status() -> [String: any Sendable] {
+    var value: [String: any Sendable] = ["owner": owner, "generation": generation, "state": phase, "reason": reason, "acknowledgements": acknowledgements, "lastStartReason": lastStartReason]
+    if backgroundProbe {
+      value["probeBackgroundUpdates"] = probeBackgroundUpdates
+      value["probeUpdates"] = probeUpdates
+      value["backgroundTaskState"] = SessionBackgroundTasks.shared.debugState
+      value["backgroundTaskCount"] = SessionBackgroundTasks.shared.debugCount
+    }
+    return value
+  }
+  private func publish(_ state: String, reason: String, catalog: String? = nil) {
+    if state != phase { recordRuntime("runtime_phase", phase: state, reason: reason) }
+    self.phase = state; self.reason = reason
+    emitStatus()
+    onCatalogUpdate?(owner, state, catalog)
+  }
+  private func emitStatus(_ extra: [String: Any] = [:]) {
+    let event = (status() as [String: Any]).merging(extra, uniquingKeysWith: { _, new in new })
+    if sessionSnapshot?.generation != generation || ["starting", "background", "failed", "stopped"].contains(phase) {
+      sessionSnapshot = nil
+    }
+    if let json = extra["session"] as? String { sessionSnapshot = (generation, json) }
+    NotificationCenter.default.post(name: .lodyDataRuntimeEvent, object: self, userInfo: event)
+  }
+  private func publishPresenceUnknown() {
+    emitStatus()
+    onMachinePresence?(owner, nil)
+  }
+  private func build(reason: String) {
+    guard workspace != nil else { return }
+    disposeView(); lastStartReason = reason; generation += 1; health.started(at: now); acknowledgements = 0
+    let view = RuntimeDocument.makeWebView(handler: self, delegate: self) { config in
+      if let lan = self.lan, !self.backgroundProbe {
+        config.preferences.inactiveSchedulingPolicy = .none
+        let handler = LanHubSchemeHandler(invite: lan)
+        config.setURLSchemeHandler(handler, forURLScheme: LanHubSchemeHandler.scheme)
+        self.lanHandler = handler
+      }
+    }
+    // A signature drift silently drops the optional policy witness, and with it the navigation guard.
+    assert(responds(to: #selector(webView(_:decidePolicyFor:decisionHandler:) as (WKWebView, WKNavigationAction, @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) -> Void)))
+    webView = view
+    publish("starting", reason: reason)
+    timer = Timer(timeInterval: 2, repeats: true) { [weak self] timer in
+      guard self != nil else { timer.invalidate(); return }
+      MainActor.assumeIsolated { self?.tick() }
+    }
+    if let timer { RunLoop.main.add(timer, forMode: .common) }
+    if backgroundProbe {
+      view.loadHTMLString(Self.backgroundProbeHTML, baseURL: URL(string: "https://lody.ai"))
+      return
+    }
+    do {
+      try RuntimeDocument.load(in: view, bundle: Bundle.main, origin: pageOrigin)
+    } catch { disposeView(); publish("failed", reason: "missing_resource") }
+  }
+  private func disposeView() {
+    simulatorClients.forEach { $0.value?.release() }; simulatorClients.removeAll()
+    SessionBackgroundTasks.shared.finishAll(owner: owner)
+    for task in attachmentTasks.values { task.cancel() }
+    attachmentTasks.removeAll()
+    attachmentAttempts.removeAll()
+    timer?.invalidate(); timer = nil
+    grantTask?.cancel(); grantTask = nil; grantWaiters.removeAll()
+    channel?.close("runtime_replaced"); channel = nil; contractReady = false; handshakeDeferred = false
+    githubTasks.values.forEach { $0.cancel() }; githubTasks.removeAll()
+    shareTasks.values.forEach { $0.cancel() }; shareTasks.removeAll()
+    lanHandler?.invalidate(); lanHandler = nil
+    pingPending = false
+    let old = webView; webView = nil
+    old?.configuration.userContentController.removeScriptMessageHandler(forName: "dataRuntime")
+    old?.navigationDelegate = nil
+    old?.stopLoading()
+  }
+  public func recover(_ reason: String) {
+    guard workspace != nil else { return }
+    recordRuntime("runtime_recover", phase: phase, reason: reason, extra: ["hasView": String(webView != nil)])
+    if backgrounded { disposeView(); publish("background", reason: reason); return }
+    if health.allowRestart(at: now) { build(reason: reason) }
+    else { disposeView(); publish("failed", reason: "restart_limit") }
+  }
+  private func tick() {
+    guard !backgrounded, webView != nil else { return }
+    if health.timedOut(at: now) { recover(health.ready ? "heartbeat_timeout" : "startup_timeout"); return }
+    guard health.ready, contractReady, !pingPending, let channel else { return }
+    pingPending = true
+    Task { @MainActor [weak self] in
+      let alive = (try? await channel.call(RuntimeContract.Calls.Ping.self, .init())) != nil
+      guard let self, self.channel === channel else { return }
+      self.pingPending = false
+      if alive { self.health.acknowledged(at: self.now); self.acknowledgements += 1 }
+    }
+  }
+  public func dispatch<C: RuntimeCall>(_ call: C.Type, _ params: C.Params) {
+    guard contractReady, let channel else { return }
+    Task { @MainActor in _ = try? await channel.call(call, params) }
+  }
+  public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    guard let view = webView, message.webView === view, message.frameInfo.isMainFrame,
+          let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+    switch type {
+    case "ready":
+      guard !health.ready, workspace != nil else { return }
+      health.acknowledged(at: now)
+      publish("syncing", reason: "runtime_ready")
+      handshake(view)
+    case "envelope":
+      guard let envelope = body["envelope"] as? String else { return }
+      channel?.receive(envelope)
+    case "backgroundProbe":
+      guard backgroundProbe else { return }
+      probeUpdates += 1
+      if LodyHosting.current?.isBackground == true { probeBackgroundUpdates += 1 }
+      emitStatus()
+    default: break
+    }
+  }
+  private func receiveSession(_ id: String, session: String?, synced: Bool?, work: (id: String, state: String)?, active: Bool) {
+    if let work { SessionBackgroundTasks.shared.update(id: work.id, state: work.state, owner: owner) }
+    guard let session else { return }
+    let fits = session.utf8.count <= 12 * 1024 * 1024
+    if fits, synced == true, let workspace, !userId.isEmpty {
+      let generation = self.generation, userId = self.userId
+      LocalStore.queue.async { [weak self] in
+        guard let self else { return }
+        do { try self.localStore.writeSession(session, userId: userId, workspace: workspace, id: id) }
+        catch {
+          DispatchQueue.main.async { [weak self] in
+            guard let self, self.generation == generation, self.workspace != nil, !self.cacheErrorShown else { return }
+            self.cacheErrorShown = true
+            self.emitStatus(["reason": "session_cache_failed"])
+          }
+        }
+      }
+    }
+    guard active, id == sessionId else { return }
+    let payload = fits ? session : #"{"v":1,"overflow":true}"#
+    emitStatus(["sessionId": id, "session": payload])
+  }
+  public func openSession(_ id: String) {
+    if sessionId != id { sessionSnapshot = nil }
+    sessionId = id
+    dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id))
+  }
+  public func watchSession(_ id: String) {
+    sessionWatchers[id, default: 0] += 1
+    openSession(id)
+  }
+  // A replaced chat page can deinit after its successor opened the same session.
+  public func unwatchSession(_ id: String) {
+    let remaining = (sessionWatchers[id] ?? 1) - 1
+    sessionWatchers[id] = remaining > 0 ? remaining : nil
+    if remaining <= 0 { closeSession(id) }
+  }
+  public func closeSession(_ id: String) {
+    ContentStore.shared.clear(session: id)
+    guard sessionId == id else { return }
+    sessionId = nil
+    sessionSnapshot = nil
+    dispatch(RuntimeContract.Calls.CloseSession.self, .init())
+    emitStatus()
+  }
+  public func ensureSession(_ id: String, sink: ReplySink) {
+    guard workspace != nil, !id.isEmpty else {
+      fail(sink, "not_ready", String(localized: "native.runtime.sessionNotSynced", bundle: .lodyData))
+      return
+    }
+    call(RuntimeContract.Calls.EnsureSession.self, .init(sessionId: id), sink: sink) { _ in nil }
+  }
+  private func handshake(_ view: WKWebView) {
+    self.channel?.close("runtime_replaced")
+    let channel = RuntimeChannel(generation: generation, post: { [weak view] envelope in
+      guard let view else { return }
+      RuntimeDocument.deliver(envelope, to: view)
+    })
+    channel.onEvent = { [weak self] event in self?.handle(event) }
+    channel.onRequest = { [weak self] id, request in self?.handle(id, request) }
+    self.channel = channel
+    let generation = self.generation
+    Task { @MainActor [weak self, weak view] in
+      let outcome: Result<RuntimeContract.HelloResult, RuntimeFailure>
+      do { outcome = .success(try await channel.call(RuntimeContract.Calls.Hello.self, .init(protocol: RuntimeContract.version, gen: generation))) }
+      catch { outcome = .failure(error as? RuntimeFailure ?? RuntimeFailure(code: "handshake_failed")) }
+      guard let self, let view, self.webView === view, self.channel === channel else { return }
+      if case .success(let hello) = outcome, hello.protocol == RuntimeContract.version,
+         Set(RuntimeContract.runtimeMethods).isSubset(of: hello.methods) {
+        self.contractReady = true
+        self.startRuntime(view)
+        return
+      }
+      if case .failure(let failure) = outcome, failure.code != "protocol_mismatch" {
+        if self.backgrounded { self.handshakeDeferred = true }
+        else { self.recover("handshake_failed") }
+        return
+      }
+      self.disposeView()
+      self.publish("failed", reason: "protocol_mismatch")
+    }
+  }
+  private func startRuntime(_ view: WKWebView) {
+    guard let workspace, let channel else { return }
+    let params = RuntimeContract.StartParams(workspaceId: workspace, userId: userId, active: !backgrounded, knownRepos: knownRepos)
+    Task { @MainActor [weak self, weak view] in
+      let started = (try? await channel.call(RuntimeContract.Calls.Start.self, params)) != nil
+      guard let self, let view, self.webView === view, self.channel === channel else { return }
+      guard started else { self.recover("start_failed"); return }
+      let current = self.sessionId.flatMap { $0.isEmpty ? nil : $0 }
+      self.dispatch(RuntimeContract.Calls.RestoreSessions.self, .init(
+        ids: self.retainedSessions, current: current, reserved: self.reservedSessions))
+    }
+  }
+  private func handle(_ event: RuntimeContract.Event) {
+    switch event {
+    case .catalog(let value):
+      guard value.catalog.utf8.count <= 12 * 1024 * 1024 else { return }
+      lastCatalog = value.catalog
+      publish("live", reason: "catalog", catalog: value.catalog)
+      LodyHosting.current?.catalogDidUpdate(value.catalog, workspaceId: workspace ?? "", workspaceSlug: workspaceSlug,
+        workspaceName: workspaceName, userId: userId)
+    case .shareProgress(let value):
+      NotificationCenter.default.post(name: .lodyShareProgress, object: value)
+    case .machinePresence(let value):
+      guard !backgrounded, value.onlineMachineIds.reduce(0, { $0 + $1.utf8.count }) <= 1024 * 1024 else { return }
+      reason = "machine_presence"
+      emitStatus()
+      onMachinePresence?(owner, value)
+    case .synced:
+      if phase != "live" { publish("live", reason: "synced") }
+    case .syncError(let value):
+      publish("offline", reason: value.reason.rawValue)
+      followHub()
+    case .sessionSubscriptions(let value):
+      retainedSessions = value.ids
+      reservedSessions = value.reserved
+    case .session(let value):
+      receiveSession(value.sessionId, session: value.session, synced: value.synced,
+        work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: true)
+    case .sessionCache(let value):
+      receiveSession(value.sessionId, session: value.session, synced: value.synced,
+        work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: false)
+    case .sessionTrace(let value):
+      recordSessionTrace(value)
+    #if DEBUG
+    case .diagnostic(let value):
+      NSLog("LodyRuntime stage=%@ stream=%@", value.stage, value.stream)
+    #else
+    case .diagnostic: break
+    #endif
+    }
+  }
+  private var pageOrigin: String {
+    guard let lan, !backgroundProbe else { return "https://lody.ai/" }
+    return LanHubSchemeHandler.origin(lan) + "/"
+  }
+
+  private func cancelFollow() {
+    followAttempt = UUID()
+    followTask?.cancel(); followTask = nil
+  }
+
+  private func followHub(force: Bool = false) {
+    guard let lan, !backgroundProbe, !backgrounded, workspace != nil,
+      followTask == nil, force || now - followedAt >= 60 else { return }
+    followedAt = now
+    let attempt = UUID(); followAttempt = attempt
+    let owner = self.owner, catalog = lastCatalog
+    let key = "catalog:\(userId):\(workspace ?? "")", store = localStore
+    followTask = Task { [weak self] in
+      let next = await LanHubFollower.locate(lan) {
+        let text: String?
+        if let catalog { text = catalog }
+        else {
+          text = await withCheckedContinuation { continuation in
+            LocalStore.queue.async { continuation.resume(returning: try? store.read(key)) }
+          }
+        }
+        return LanHubFollower.members(catalog: text)
+      }
+      guard let self, !Task.isCancelled, self.followAttempt == attempt else { return }
+      self.followTask = nil
+      guard let next, self.owner == owner, self.workspace == lan.workspaceId,
+        self.lan == lan, (try? LanHub.read()) == lan else { return }
+      do { try LanHub.save(next) } catch { return }
+      self.lan = next
+      AuthSession.shared.lanHubMoved(next)
+      guard next.url != lan.url else { return }
+      if self.backgrounded { self.disposeView(); self.publish("background", reason: "hub_moved") }
+      else { self.build(reason: "hub_moved") }
+      NotificationCenter.default.post(name: .lodyLANHubDidMove, object: LanHub.summary(next))
+    }
+  }
+
+  public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+    guard self.webView === webView else { decisionHandler(.cancel); return }
+    decisionHandler(RuntimeDocument.allows(navigationAction, origin: pageOrigin) ? .allow : .cancel)
+  }
+  public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { if self.webView === webView { recover("process_terminated") } }
+  public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { if self.webView === webView { recover("navigation_failed") } }
+  public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { if self.webView === webView { recover("navigation_failed") } }
+}
+
+public final class NotificationObservers {
+  private var tokens: [NSObjectProtocol] = []
+  public func add(_ token: NSObjectProtocol) { tokens.append(token) }
+  deinit { for token in tokens { NotificationCenter.default.removeObserver(token) } }
+}

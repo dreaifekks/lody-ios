@@ -1,0 +1,237 @@
+import UIKit
+
+@MainActor
+struct ChatKeptImageService {
+  var file: @MainActor (ChatImage, String, String) async throws -> URL
+  var identity: @MainActor () -> String
+  static let live = ChatKeptImageService(
+    file: { try await LanKeptImages.file($0, workspace: $1, session: $2) },
+    identity: { AttachmentUIIdentity.current }
+  )
+}
+
+/// A separate row keeps image geometry out of text measurement and message bubbles.
+final class ChatImageCell: UICollectionViewCell, ChatGapCell {
+  var gapAbove: CGFloat = 0 {
+    didSet { if gapAbove != oldValue { setNeedsLayout() } }
+  }
+  private var photo = UIImageView()
+  var compact = false
+  var keptImages = ChatKeptImageService.live
+  private let spinner = UIActivityIndicatorView(style: .medium)
+  private let failure = UILabel()
+  private var image: ChatImage?
+  private var workspace = ""
+  private var session = ""
+  private var handoffEntryID: String?
+  private var requestURL: URL?
+  private var requestID = UUID()
+  private var task: URLSessionDataTask?
+  private var keptTask: Task<Void, Never>?
+  private var keptScope: String?
+  private var cacheObserver: NSObjectProtocol?
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    photo.contentMode = .scaleAspectFit
+    photo.backgroundColor = .lodyInset
+    photo.layer.cornerRadius = 16
+    photo.layer.cornerCurve = .continuous
+    photo.clipsToBounds = true
+    photo.layer.borderWidth = 0.5
+    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (cell: ChatImageCell, _) in cell.setNeedsLayout() }
+    failure.text = String(localized: "native.chat.image.failed", bundle: .lody)
+    failure.font = .preferredFont(forTextStyle: .caption1)
+    failure.textColor = .secondaryLabel
+    failure.textAlignment = .center
+    failure.isHidden = true
+    contentView.addSubview(photo)
+    photo.addSubview(spinner)
+    photo.addSubview(failure)
+    isAccessibilityElement = true
+    accessibilityTraits = [.image, .button]
+    accessibilityHint = String(localized: "native.chat.image.openPreview", bundle: .lody)
+    cacheObserver = NotificationCenter.default.addObserver(forName: LanKeptImages.didCache, object: nil, queue: .main) { [weak self] event in
+      let digest = event.userInfo?["sha256"] as? String
+      let identity = event.userInfo?["scope"] as? String
+      MainActor.assumeIsolated {
+        guard let self, let image = self.image, self.photo.image == nil,
+          digest == image.sha256?.lowercased(),
+          identity == self.keptImages.identity() else { return }
+        self.loadKeptImage(image)
+      }
+    }
+  }
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  static func size(_ image: ChatImage, width: CGFloat) -> CGSize {
+    let ratio = max(0.1, min(10, (image.width ?? 4) / (image.height ?? 3)))
+    let maximum = min(240, width * 0.84)
+    return ratio >= 1 ? CGSize(width: maximum, height: maximum / ratio) : CGSize(width: maximum * ratio, height: maximum)
+  }
+  func configure(_ row: ChatRow, workspace: String, session: String) {
+    guard let image = row.image else { return }
+    let hadLocalImage = requestURL?.isFileURL == true && handoffEntryID == row.entryID
+    let contextChanged = self.workspace != workspace || self.session != session
+    let scopeChanged = keptScope.map { $0 != keptImages.identity() } ?? false
+    if self.image != image || contextChanged || scopeChanged {
+      keptTask?.cancel(); keptTask = nil; requestID = UUID()
+      if !hadLocalImage || contextChanged || scopeChanged { requestURL = nil; photo.image = nil }
+    }
+    self.image = image
+    self.workspace = workspace
+    self.session = session
+    if row.localImageURI != nil { handoffEntryID = row.entryID }
+    else if !hadLocalImage { handoffEntryID = nil }
+    accessibilityIdentifier = row.id
+    accessibilityLabel = String.localizedStringWithFormat(String(localized: "native.chat.image.label", bundle: .lody), String(describing: image.fileName))
+    setNeedsLayout()
+    if let uri = row.localImageURI, let url = URL(string: uri), url.isFileURL {
+      if requestURL == url, photo.image != nil { return }
+      task?.cancel(); task = nil; requestURL = url; requestID = UUID()
+      photo.image = ChatAttachment.thumbnail(url)
+      spinner.stopAnimating(); failure.isHidden = photo.image != nil
+      return
+    }
+    if LodyUIVerify.enabled, Self.isVerifyImage(image.id) {
+      keptTask?.cancel(); keptTask = nil
+      task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
+      photo.image = Self.verifyBitmap()
+      spinner.stopAnimating(); failure.isHidden = true
+      return
+    }
+    guard !workspace.isEmpty, !session.isEmpty, !image.id.isEmpty else {
+      keptTask?.cancel(); keptTask = nil
+      task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
+      photo.image = nil; spinner.stopAnimating(); failure.isHidden = false
+      return
+    }
+    if image.machineId != nil {
+      loadKeptImage(image)
+      return
+    }
+    guard !LanComposerPolicy.isLAN, !LanInvite.isWorkspace(workspace) else {
+      keptTask?.cancel(); keptTask = nil
+      task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
+      spinner.stopAnimating(); failure.isHidden = false
+      return
+    }
+    let storage = image.storageSessionId ?? session
+    let thumbnail = SessionAttachments.imageThumbnailURL(
+      workspace: workspace, session: storage, imageId: image.id, width: 768
+    )
+    let original = SessionAttachments.imageDownloadURL(
+      workspace: workspace, session: storage, imageId: image.id
+    )
+    if requestURL == thumbnail && (task != nil || photo.image != nil) { return }
+    if requestURL == original && (task != nil || photo.image != nil) { return }
+    let requestID = UUID(); self.requestID = requestID
+    task?.cancel(); requestURL = thumbnail
+    if !hadLocalImage { photo.image = nil }
+    failure.isHidden = true
+    guard let token = try? AuthKeychain.read() else { failure.isHidden = false; return }
+    fetch(thumbnail, fallback: original, requestID: requestID, token: token)
+  }
+
+  private func loadKeptImage(_ image: ChatImage) {
+    if keptTask != nil || (requestURL?.isFileURL == true && photo.image != nil) { return }
+    let requestID = UUID()
+    self.requestID = requestID
+    let workspace = self.workspace, session = self.session
+    let service = keptImages
+    let scope = service.identity()
+    keptScope = scope
+    task?.cancel(); task = nil; requestURL = nil
+    photo.image = nil; failure.isHidden = true; accessibilityValue = nil; spinner.startAnimating()
+    keptTask = Task { @MainActor [weak self] in
+      defer {
+        if let self, self.requestID == requestID {
+          self.spinner.stopAnimating(); self.keptTask = nil
+        }
+      }
+      do {
+        let url = try await service.file(image, workspace, session)
+        try Task.checkCancellation()
+        guard let self, self.requestID == requestID, self.image == image,
+          service.identity() == scope else { return }
+        self.requestURL = url
+        self.photo.image = ChatAttachment.thumbnail(url)
+        self.failure.isHidden = self.photo.image != nil
+        self.accessibilityValue = self.photo.image == nil
+          ? String(localized: "native.chat.image.failed", bundle: .lody)
+          : String(localized: "native.chat.image.loaded", bundle: .lody)
+      } catch {
+        guard !Task.isCancelled, let self, self.requestID == requestID,
+          service.identity() == scope else { return }
+        self.failure.isHidden = false
+        self.accessibilityValue = String(localized: "native.chat.image.failed", bundle: .lody)
+      }
+    }
+  }
+
+  private func fetch(_ url: URL, fallback: URL?, requestID: UUID, token: String) {
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue("image/*,*/*", forHTTPHeaderField: "Accept")
+    spinner.startAnimating()
+    task = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+      let valid = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+      let decoded = valid ? data.flatMap(UIImage.init(data:)) : nil
+      DispatchQueue.main.async {
+        guard let self, self.requestID == requestID else { return }
+        if let decoded {
+          self.task = nil
+          self.spinner.stopAnimating()
+          self.photo.image = decoded
+          self.failure.isHidden = true
+          return
+        }
+        if let fallback {
+          self.requestURL = fallback
+          self.fetch(fallback, fallback: nil, requestID: requestID, token: token)
+          return
+        }
+        self.task = nil
+        self.spinner.stopAnimating()
+        self.failure.isHidden = self.photo.image != nil
+      }
+    }
+    task?.resume()
+  }
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    keptTask?.cancel(); keptTask = nil; keptScope = nil
+    task?.cancel(); task = nil; requestURL = nil; requestID = UUID()
+    photo.image = nil; accessibilityValue = nil; spinner.stopAnimating(); failure.isHidden = true
+  }
+
+  isolated deinit {
+    task?.cancel(); keptTask?.cancel()
+    if let cacheObserver { NotificationCenter.default.removeObserver(cacheObserver) }
+  }
+
+  var zoomSource: UIView { photo }
+  var displayedImage: UIImage? { photo.image }
+
+  static func isVerifyImage(_ id: String) -> Bool {
+    id.hasPrefix("ui-verify-image")
+  }
+
+  static func verifyBitmap() -> UIImage {
+    UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { context in
+      UIColor.systemBlue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+      UIColor.white.setFill(); context.fill(CGRect(x: 100, y: 100, width: 400, height: 200))
+    }
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    layoutGap()
+    guard let image else { return }
+    photo.layer.borderColor = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+    let size = compact ? contentView.bounds.size : Self.size(image, width: contentView.bounds.width)
+    photo.frame = CGRect(x: 0, y: compact ? 0 : 6, width: size.width, height: size.height)
+    spinner.center = CGPoint(x: size.width / 2, y: size.height / 2)
+    failure.frame = photo.bounds.insetBy(dx: 4, dy: 4)
+  }
+}

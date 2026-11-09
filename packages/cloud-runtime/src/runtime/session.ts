@@ -1,3 +1,5 @@
+import type { SessionQueueRequest } from '../contract/queue.ts';
+import { mutateSessionQueue, readSessionQueue } from './session-queue.ts';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
@@ -13,10 +15,18 @@ import {
 import type { SteerReceipt } from './execution';
 import { machineRpc, type RpcReply } from './machine-rpc';
 import { retrySessionRead } from './session-read';
+import type {
+  CheckTurnQuotaResult,
+  ControlTurnResult,
+  EditSessionResult,
+  SendTurnResult,
+  SessionRuntimeEvent,
+  SessionTrace,
+} from '../contract/methods.ts';
 import {
   editableUserTurn,
   editAttachments,
-  isAttachmentBlock,
+  validAttachmentBlocks,
   replacementInput,
 } from './edit-session';
 import {
@@ -40,10 +50,11 @@ type SessionState = {
   client: StreamsClient;
   controller: AbortController;
   /** The read in flight, so a failed probe can restart it. */
-  read?: AbortController;
+  readController?: AbortController;
   /** When the hub last answered a read of this replica. */
   readAt: number;
   ready: boolean;
+  writeUncertain?: boolean;
   sending: boolean;
   working?: boolean;
   sendingId?: string;
@@ -67,9 +78,18 @@ type SessionState = {
     turnId: string,
     queued?: boolean,
   ) => Promise<void>;
-  emit: (event: object) => void;
+  emit: (event: SessionRuntimeEvent) => void;
   liveWaiters?: Array<(error?: Error) => void>;
+  read?: { stage: ReadStage; startedAt: number; stalled?: boolean };
+  readFailures: number;
 };
+type ReadStage = 'bootstrap' | 'catchup' | 'poll';
+const readLimit: Record<ReadStage, number> = {
+  bootstrap: 15_000,
+  catchup: 15_000,
+  poll: 35_000,
+};
+const stallGrace = 15_000;
 let active: SessionState | undefined;
 // Working sessions use visit order; idle visits never enter the background LRU.
 const sessions = new Map<string, SessionState>();
@@ -77,6 +97,75 @@ const reserved = new Set<string>();
 export const retainedSessionIds = () => [...sessions.keys()];
 export const reservedSessionIds = () => [...reserved];
 export const sessionDoc = (id: string) => sessions.get(id)?.doc;
+function traceCode(value: unknown) {
+  const pattern = /^[a-z][a-z0-9_]{0,47}$/;
+  if (typeof value === 'string') return pattern.test(value) ? value : undefined;
+  if (!(value instanceof Error)) return undefined;
+  if (pattern.test(value.message)) return value.message;
+  return value.name
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .slice(0, 48);
+}
+let traceSink: (event: SessionTrace) => void = () => {};
+export function setSessionTraceSink(sink: typeof traceSink) {
+  traceSink = sink;
+}
+function trace(
+  state: SessionState,
+  event: SessionTrace['event'],
+  fields: Omit<SessionTrace, 'sessionId' | 'event'> = {},
+) {
+  traceSink({ sessionId: state.id, event, ...fields });
+}
+async function readAttempt<T>(
+  state: SessionState,
+  stage: ReadStage,
+  read: () => Promise<T>,
+) {
+  const attempt = { stage, startedAt: Date.now() };
+  state.read = attempt;
+  try {
+    const result = await read();
+    const ageMs = Date.now() - attempt.startedAt;
+    if (ageMs > readLimit[stage] + stallGrace)
+      trace(state, 'slow', { stage, ageMs, attempts: state.readFailures + 1 });
+    state.readFailures = 0;
+    return result;
+  } catch (error) {
+    if (!state.controller.signal.aborted) {
+      state.readFailures += 1;
+      trace(state, 'retry', {
+        stage,
+        code: traceCode(error),
+        ageMs: Date.now() - attempt.startedAt,
+        attempts: state.readFailures,
+      });
+    }
+    throw error;
+  } finally {
+    if (state.read === attempt) state.read = undefined;
+  }
+}
+export function traceStalledReads(now = Date.now()) {
+  for (const state of sessions.values()) {
+    const read = state.read;
+    if (!read || read.stalled) continue;
+    const ageMs = now - read.startedAt;
+    if (ageMs < readLimit[read.stage] + stallGrace) continue;
+    read.stalled = true;
+    trace(state, 'stalled', { stage: read.stage, ageMs, status: state.status });
+  }
+}
+export function traceSessionResume() {
+  const state = active;
+  if (!state) return;
+  const read = state.read;
+  trace(state, 'resume', {
+    status: state.status,
+    ...(read ? { stage: read.stage, ageMs: Date.now() - read.startedAt } : {}),
+  });
+}
 function signalOf(state: SessionState, status: string) {
   const history = state.doc.getList('history');
   let finished = 0;
@@ -125,7 +214,7 @@ function backgroundProgress(state: SessionState) {
   const status = backgroundStatus(state, latestReply(state, work.turnId));
   if (['completed', 'waiting', 'failed'].includes(status))
     state.backgroundWork = undefined;
-  return { id: work.id, state: status };
+  return { id: work.id, state: status } as const;
 }
 function flush(state: SessionState) {
   clearTimeout(state.pending);
@@ -175,6 +264,12 @@ function isWorking(state: SessionState) {
   return false;
 }
 function scheduleEmit(state: SessionState, status: string, reason?: string) {
+  if (state.writeUncertain) {
+    status = 'failed';
+    reason = 'queue_write_unknown';
+  }
+  if (status !== state.status && sessions.get(state.id) === state)
+    trace(state, 'status', { status, code: traceCode(reason) });
   state.status = status;
   state.reason = reason;
   if (sessions.get(state.id) !== state) return;
@@ -317,9 +412,12 @@ export const REPLICA_FRESH_MS = 3000;
 async function reachable(state: SessionState) {
   if (Date.now() - state.readAt < REPLICA_FRESH_MS) return true;
   const probe = await state.client.head({ signal: AbortSignal.timeout(5000) });
-  if (probe.ok) return true;
+  if (probe.ok) {
+    state.readAt = Date.now();
+    return true;
+  }
   // A stalled read would hold the replica until its own timeout; start it again.
-  state.read?.abort();
+  state.readController?.abort();
   return false;
 }
 /**
@@ -372,7 +470,7 @@ export async function ensureSession(
   id: string,
   workspace: string,
   getGrant: () => Promise<Grant>,
-  emit: (event: object) => void,
+  emit: (event: SessionRuntimeEvent) => void,
   markDispatch: (
     sessionId: string,
     turnId: string,
@@ -416,7 +514,7 @@ export async function openSession(
   id: string,
   workspace: string,
   getGrant: () => Promise<Grant>,
-  emit: (event: object) => void,
+  emit: (event: SessionRuntimeEvent) => void,
   markDispatch: (
     sessionId: string,
     turnId: string,
@@ -435,7 +533,7 @@ export async function openSession(
     !reserved.has(active.id)
   )
     evict(active);
-  if (existing && existing.status !== 'offline') {
+  if (existing && existing.status !== 'offline' && !existing.writeUncertain) {
     existing.emit = emit;
     if (activate) {
       active = existing;
@@ -464,6 +562,7 @@ export async function openSession(
     getGrant,
     markDispatch,
     emit,
+    readFailures: 0,
   };
   if (activate) active = state;
   sessions.set(id, state);
@@ -480,15 +579,16 @@ export async function openSession(
     try {
       const data = await retrySessionRead(
         controller.signal,
-        async () => {
-          state.client = await clientFor(`${workspace}:s:${id}`, getGrant);
-          controller.signal.throwIfAborted();
-          const initial = await state.client.bootstrap({
-            signal: controller.signal,
-          });
-          if (!initial.ok) throw new Error(initial.result.code);
-          return initial.result;
-        },
+        () =>
+          readAttempt(state, 'bootstrap', async () => {
+            state.client = await clientFor(`${workspace}:s:${id}`, getGrant);
+            controller.signal.throwIfAborted();
+            const initial = await state.client.bootstrap({
+              signal: controller.signal,
+            });
+            if (!initial.ok) throw new Error(initial.result.code);
+            return initial.result;
+          }),
         retrying,
       );
       if (sessions.get(id) !== state) return;
@@ -509,9 +609,9 @@ export async function openSession(
         cursor = data.cursor,
         upToDate = data.upToDate;
       while (!controller.signal.aborted) {
-        state.ready = upToDate;
+        state.ready = upToDate && !state.writeUncertain;
         if (upToDate) {
-          settleLive(state);
+          if (!state.writeUncertain) settleLive(state);
           if (changed || state.status !== 'live') event('live');
           changed = false;
           pages = 0;
@@ -521,21 +621,20 @@ export async function openSession(
         }
         const next = await retrySessionRead(
           controller.signal,
-          async () => {
-            const read = new AbortController();
-            state.read = read;
-            const result = await state.client.readOnce({
-              offset,
-              cursor,
-              signal: AbortSignal.any([controller.signal, read.signal]),
-              ...(upToDate ? { live: 'long-poll' as const } : {}),
-            });
-            // The hub compacted below this offset or restarted from a standby
-            // copy: the offset will never be readable again.
-            if (!result.ok && result.result.code === 'gone') return undefined;
-            if (!result.ok) throw new Error(result.result.code);
-            return result;
-          },
+          () =>
+            readAttempt(state, upToDate ? 'poll' : 'catchup', async () => {
+              const read = new AbortController();
+              state.readController = read;
+              const result = await state.client.readOnce({
+                offset,
+                cursor,
+                signal: AbortSignal.any([controller.signal, read.signal]),
+                ...(upToDate ? { live: 'long-poll' as const } : {}),
+              });
+              if (!result.ok && result.result.code === 'gone') return undefined;
+              if (!result.ok) throw new Error(result.result.code);
+              return result;
+            }),
           retrying,
         );
         if (sessions.get(id) !== state) return;
@@ -618,7 +717,7 @@ export function appendUserTurn(
 export function checkTurnQuota(args: {
   sessionId: string;
   billingEntitlement?: BillingEntitlement | null;
-}) {
+}): CheckTurnQuotaResult {
   const state = sessions.get(args.sessionId);
   if (!state?.ready) return { state: 'allowed' };
   const reason = quotaReason(
@@ -639,24 +738,24 @@ export async function sendTurn(
     deliveryKind?: 'continue';
     sessionId: string;
     machineId: string;
-    userId: string;
+    userId?: string;
     text: string;
     attachmentBlocks?: Record<string, any>[];
-    cliType: string;
-    agentType: string;
+    cliType?: string;
+    agentType?: string;
     resume?: string;
     modelId?: string | null;
     modeId?: string;
     reasoningEffort?: string | null;
     reasoningEffortConfigId?: string;
-    configOptionValues?: Record<string, string | boolean>;
+    configOptionValues?: Record<string, unknown>;
     billingEntitlement?: BillingEntitlement | null;
   },
   expand: (text: string) => Promise<string> = async (text) => text,
-  protocolCapabilities?: Record<string, number>,
   selectMcp: (persisted: unknown) => Promise<string[]> = async (ids) =>
     Array.isArray(ids) ? ids : [],
-) {
+  protocolCapabilities?: Record<string, number>,
+): Promise<SendTurnResult> {
   if (args.id && uncertain.has(args.id))
     return { id: args.id, state: 'unknown', reason: 'turn_already_exists' };
   const state = sessions.get(args.sessionId);
@@ -709,11 +808,7 @@ export async function sendTurn(
   )
     return { state: 'not_sent', reason: 'invalid_config_options' };
   const attachments = args.attachmentBlocks ?? [];
-  if (
-    !Array.isArray(attachments) ||
-    attachments.length > 16 ||
-    attachments.some((block) => !isAttachmentBlock(block))
-  )
+  if (!validAttachmentBlocks(attachments))
     return { state: 'not_sent', reason: '附件信息无效，请重新选择' };
   if (
     (!text && !attachments.length) ||
@@ -816,7 +911,11 @@ export async function sendTurn(
         Array.isArray(item.acpSessionConfig?.mcpServerIds),
       )?.acpSessionConfig.mcpServerIds ?? previous.mcpServerIds,
     );
-    if (sessions.get(state.id) !== state || !state.ready)
+    if (
+      !(await reachable(state)) ||
+      sessions.get(state.id) !== state ||
+      !state.ready
+    )
       throw new Error('session_not_ready');
     const inputConfig = {
       cliType: args.cliType,
@@ -907,6 +1006,7 @@ export async function sendTurn(
         task: text,
         userId: args.userId,
         userTurnId: id,
+        author: { v: 1, kind: 'human', userId: args.userId },
         timestamp,
       }))
         item.set(key, value);
@@ -1049,7 +1149,7 @@ export async function sendTurn(
     throw new Error('ack_timeout');
   } catch (error) {
     // No automatic write replay: a lost HTTP ACK may still mean a durable write.
-    let delivery = 'not_sent';
+    let delivery: 'not_sent' | 'unknown' | 'uploaded' = 'not_sent';
     if (writeStarted) delivery = 'unknown';
     if (uploaded) delivery = 'uploaded';
     if (delivery === 'unknown') {
@@ -1061,6 +1161,15 @@ export async function sendTurn(
       id,
       state: delivery,
       reason: error instanceof Error ? error.message : 'send_failed',
+      // The native outbox can release inflight and wait only while nothing was
+      // written. Preserve the diagnostic reason; never replay unknown writes.
+      ...(!writeStarted &&
+      error instanceof Error &&
+      error.message === 'mcp_catalog_unavailable' &&
+      'retryable' in error &&
+      error.retryable === true
+        ? { retryable: true }
+        : {}),
     };
   } finally {
     state.sending = false;
@@ -1075,7 +1184,7 @@ export async function controlTurn(args: {
   turnId: string;
   messageId?: string;
   interrupt?: boolean;
-}) {
+}): Promise<ControlTurnResult> {
   const state = active;
   if (!state || state.id !== args.sessionId || !state.ready || state.sending)
     throw new Error('session_not_ready');
@@ -1264,7 +1373,7 @@ async function steerTurn(
   state: SessionState,
   machineId: string,
   params: Record<string, unknown>,
-) {
+): Promise<ControlTurnResult> {
   state.steerReceipts ??= new Map();
   const record = (delivery: SteerReceipt['state']) => {
     state.steerReceipts!.set(String(params.userTurnId), {
@@ -1343,7 +1452,7 @@ export async function editSession(
   },
   meta: Record<string, any>,
   capability?: Record<string, any>,
-) {
+): Promise<EditSessionResult> {
   const state = sessions.get(args.sessionId);
   if (!state?.ready || state.sending)
     return { state: 'not_sent', reason: 'session_not_ready' };
@@ -1518,6 +1627,13 @@ export async function itemDetail(args: {
       itemId: args.itemId,
       rev: itemRev(active.doc, args.entryId, args.itemId),
       run: subagentRun(active.doc, args.entryId, args.itemId, item) ?? null,
+      blocks: [] as unknown[],
+      rawInput: undefined as unknown,
+      rawOutput: undefined as unknown,
+      options: undefined as unknown,
+      outcome: undefined as unknown,
+      truncated: false,
+      nextCursor: undefined as string | undefined,
     };
   const raw: any = item?.toJSON() ?? locateRunItem(args.entryId, args.itemId);
   if (!raw) throw new Error('item_not_found');
@@ -1554,7 +1670,7 @@ export async function respondPermission(args: {
   itemId: string;
   requestId: string;
   optionId: string;
-  answers?: import('../models/session.ts').QuestionAnswers;
+  answers?: unknown;
 }) {
   const state = active;
   if (!state || state.id !== args.sessionId || !state.ready)
@@ -1612,4 +1728,46 @@ export async function respondPermission(args: {
   state.unsent.delete(key);
   if (active === state) scheduleEmit(state, 'live');
   return { state: 'accepted' as const };
+}
+
+// Explicit queue writes share the owned session and its durable dispatch watermark.
+// A lost ACK blocks further queue changes until an authoritative reconnect.
+export async function sessionQueue(args: SessionQueueRequest) {
+  const state = active;
+  if (
+    !state ||
+    state.id !== args.sessionId ||
+    !state.ready ||
+    state.status !== 'live' ||
+    state.sending
+  )
+    throw new Error('session_not_ready');
+  if (args.action === 'list')
+    return { state: 'ready' as const, items: readSessionQueue(state.doc) };
+  state.sending = true;
+  try {
+    const before = state.doc.version();
+    if (!mutateSessionQueue(state.doc, args))
+      return { state: 'stale' as const, items: readSessionQueue(state.doc) };
+    try {
+      const result = await state.client.append({
+        part: {
+          contentType: 'application/octet-stream',
+          body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
+        },
+      });
+      if (!result.ok) throw new Error('queue_write_unknown');
+      await state.markDispatch(state.id, '', true);
+      scheduleEmit(state, state.status);
+      return { state: 'ready' as const, items: readSessionQueue(state.doc) };
+    } catch {
+      state.writeUncertain = true;
+      state.ready = false;
+      settleLive(state, new Error('queue_write_unknown'));
+      scheduleEmit(state, 'failed', 'queue_write_unknown');
+      return { state: 'unknown' as const, items: [] };
+    }
+  } finally {
+    state.sending = false;
+  }
 }

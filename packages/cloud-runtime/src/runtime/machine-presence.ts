@@ -1,3 +1,4 @@
+import { createPresence } from './presence.ts';
 import { EphemeralStore } from 'loro-crdt/base64';
 import {
   EphemeralStoreAdaptor,
@@ -62,7 +63,11 @@ type Grant = {
 
 export function presenceURL(grant: Grant, workspace: string) {
   const base = new URL(grant.gatewayBaseUrl);
-  if (grant.shardHostSuffix && /^[a-z0-9.-]+$/i.test(grant.shardHostSuffix)) {
+  if (
+    base.protocol !== 'lody-hub:' &&
+    grant.shardHostSuffix &&
+    /^[a-z0-9.-]+$/i.test(grant.shardHostSuffix)
+  ) {
     base.protocol = 'https:';
     base.host = `presence.${grant.shardHostSuffix}`;
     base.port = '';
@@ -75,6 +80,50 @@ export function watchMachinePresence(
   getGrant: () => Promise<Grant>,
   publish: (value: MachinePresence) => void,
 ) {
+  // The custom origin cannot use the Cloud presence shard. One SSE owner feeds
+  // both product availability and LAN diagnostics, accepting legacy heartbeats.
+  if (globalThis.location?.protocol === 'lody-hub:') {
+    let stopped = false;
+    const presence = createPresence(
+      async (signal) => {
+        const grant = await getGrant();
+        signal.throwIfAborted();
+        return fetch(`${presenceURL(grant, workspace)}&live=sse`, {
+          headers: {
+            Accept: 'text/event-stream',
+            Authorization: `Bearer ${grant.token}`,
+          },
+          signal,
+        });
+      },
+      (online) => {
+        if (!stopped)
+          publish(
+            online
+              ? { state: 'live', onlineMachineIds: [...online].sort() }
+              : { state: 'unknown', onlineMachineIds: [] },
+          );
+      },
+    );
+    const refresh = async () => {
+      const online = await presence.online();
+      if (!stopped)
+        publish(
+          online
+            ? { state: 'live', onlineMachineIds: [...online].sort() }
+            : { state: 'unknown', onlineMachineIds: [] },
+        );
+    };
+    publish({ state: 'unknown', onlineMachineIds: [] });
+    void refresh();
+    const tick = setInterval(() => void refresh(), 5000);
+    return () => {
+      stopped = true;
+      clearInterval(tick);
+      presence.stop();
+      publish({ state: 'unknown', onlineMachineIds: [] });
+    };
+  }
   let stopped = false;
   let generation = 0;
   let close = () => {};

@@ -1,0 +1,383 @@
+import Foundation
+
+struct InboxSearchHits: Equatable, Sendable {
+  var projectIds: [String] = []
+  var sessions: [(id: String, snippet: String?)] = []
+
+  static func == (left: InboxSearchHits, right: InboxSearchHits) -> Bool {
+    left.projectIds == right.projectIds
+      && left.sessions.map(\.id) == right.sessions.map(\.id) && left.sessions.map(\.snippet) == right.sessions.map(\.snippet)
+  }
+}
+
+enum InboxSort: String, CaseIterable, Sendable {
+  case name, activity, urgency
+}
+
+enum InboxSections {
+  static let chatId = "chat"
+  static let pinnedId = "pinned"
+  static let allFilter = ""
+  private static let groups = ["attention", "pinned", "live", "unread", "today", "yesterday", "week", "month", "older"]
+  private static let day = 86_400_000.0
+
+  static func inbox(
+    _ catalog: SessionCatalog, keyword: String = "", chatOnly: Bool = false, pinOrder: [String] = [],
+    now: Double = LodyRelativeTime.now()
+  ) -> [LodyListSection] {
+    let names = projectNames(catalog)
+    let term = keyword.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let visible = catalog.sessions
+      .filter { !chatOnly || SessionRows.isChat($0.projectId) }
+      .filter { !$0.archived || !term.isEmpty }
+      .filter { term.isEmpty || "\($0.title) \(place($0, names))".lowercased().contains(term) }
+      .sorted(by: SessionRows.byActivity)
+    var buckets: [String: [SessionItem]] = [:]
+    for session in visible { buckets[group(session, now: now), default: []].append(session) }
+    return groups.compactMap { id in
+      var sessions = buckets[id] ?? []
+      if id == pinnedId { sessions = orderPinned(sessions, pinOrder: pinOrder) }
+      let rows = SessionRows.treeRows(sessions, all: catalog.sessions) { session in
+        var row = SessionRows.row(session, projectName: place(session, names), now: now)
+        let state = SessionState(session)
+        row.diff = [:]
+        row.imageTint = state == .live || !state.badge.isEmpty ? state.tint : ""
+        return row
+      }
+      guard !rows.isEmpty else { return nil }
+      return section(id, header: String(localized: String.LocalizationValue("inbox.section." + id), bundle: .lody), rows: rows)
+    }
+  }
+
+  static func projects(
+    _ catalog: SessionCatalog, expanded: [String: Bool] = [:], sort: InboxSort = .name, pinOrder: [String] = [],
+    filter: String? = nil, byMachine: Bool = false, now: Double = LodyRelativeTime.now()
+  ) -> [LodyListSection] {
+    if let filter, filter != allFilter, let section = filtered(catalog, id: filter, pinOrder: pinOrder, now: now) {
+      return [section]
+    }
+    let unpinned = catalog.sessions.filter { !$0.pinned && !$0.archived }
+    let pinned = orderPinned(catalog.sessions.filter { $0.pinned && !$0.archived }, pinOrder: pinOrder)
+    let sorted = sortProjects(catalog.projects, sessions: unpinned, sort: sort)
+    let projects = byMachine ? machineOrder(catalog, projects: sorted, sort: sort) : sorted
+    var sections = projects.enumerated().flatMap { index, project -> [LodyListSection] in
+      let machineId = machineSectionId(project.machineId)
+      let machineOpen = !byMachine || (expanded[machineId] ?? true)
+      let sessions = unpinned.filter { $0.projectId == project.id }.sorted(by: SessionRows.byActivity)
+      let open = expanded[project.id] ?? true
+      var group = sessionGroup(
+        project.id, parent: projectRow(project, sessions: sessions, open: open), sessions: sessions, all: catalog.sessions,
+        now: now
+      )
+      group.headerExpanded = open
+      let sections = machineOpen ? [group] : []
+      guard byMachine, index == 0 || projects[index - 1].machineId != project.machineId else { return sections }
+      var machine = section(machineId, header: machineName(catalog, project.machineId), rows: [])
+      let count = projects.filter { $0.machineId == project.machineId }.count
+      machine.headerValue = String.localizedStringWithFormat(String(localized: "inbox.machine.projects", bundle: .lody), count)
+      machine.headerActionId = machineId
+      machine.headerExpanded = machineOpen
+      return [machine] + sections
+    }
+    let chats = unpinned.filter { SessionRows.isChat($0.projectId) }.sorted(by: SessionRows.byActivity)
+    if !chats.isEmpty {
+      let open = expanded[chatId] ?? true
+      let parent = chatParent(chats, open: open)
+      var group = sessionGroup(chatId, parent: parent, sessions: chats, all: catalog.sessions, now: now, moreId: "view:\(chatId)")
+      group.headerExpanded = open
+      group.gap = .group
+      sections.append(group)
+    }
+    guard !pinned.isEmpty else { return sections }
+    let rows = SessionRows.treeRows(pinned, all: catalog.sessions) { SessionRows.row($0, now: now) }
+    if !sections.isEmpty { sections[0].gap = .group }
+    return [pinnedSection(rows, expanded: expanded)] + sections
+  }
+
+  static func machineSectionId(_ machineId: String) -> String { "machine:\(machineId)" }
+
+  static func isMachineSectionId(_ id: String) -> Bool { id.hasPrefix("machine:") }
+
+  private static func machineName(_ catalog: SessionCatalog, _ machineId: String) -> String {
+    let name = catalog.machineNames[machineId] ?? ""
+    return name.isEmpty ? machineId : name
+  }
+
+  // Preserve the chosen project order within each machine. Activity and urgency
+  // order machines by their first project; name order uses the machine's alias.
+  private static func machineOrder(_ catalog: SessionCatalog, projects: [SessionProject], sort: InboxSort) -> [SessionProject] {
+    var machines: [String] = []
+    for project in projects where !machines.contains(project.machineId) { machines.append(project.machineId) }
+    if sort == .name {
+      machines.sort { machineName(catalog, $0).localizedCompare(machineName(catalog, $1)) == .orderedAscending }
+    }
+    return machines.flatMap { machine in projects.filter { $0.machineId == machine } }
+  }
+
+  static func chips(_ catalog: SessionCatalog, sort: InboxSort = .name) -> [InboxProjectChip] {
+    let open = catalog.sessions.filter { !$0.archived }
+    var chips = sortProjects(catalog.projects, sessions: open.filter { !$0.pinned }, sort: sort).compactMap { project -> InboxProjectChip? in
+      let sessions = open.filter { $0.projectId == project.id }
+      guard !sessions.isEmpty else { return nil }
+      var chip = InboxProjectChip(id: project.id, title: project.name)
+      chip.image = ownerAvatar(project.repoFullName ?? "")
+      chip.monogram = String(project.name.prefix(1))
+      rank(&chip, sessions: sessions)
+      return chip
+    }
+    let chats = open.filter { SessionRows.isChat($0.projectId) }
+    if !chats.isEmpty {
+      var chip = InboxProjectChip(id: chatId, title: String(localized: "inbox.section.chat", bundle: .lody))
+      chip.symbol = "bubble.left"
+      rank(&chip, sessions: chats)
+      chips.append(chip)
+    }
+    return chips
+  }
+
+  static func search(
+    _ catalog: SessionCatalog, hits: InboxSearchHits, query: String = "", now: Double = LodyRelativeTime.now()
+  ) -> [LodyListSection] {
+    let names = projectNames(catalog)
+    let projectIds = Set(hits.projectIds)
+    let snippets = Dictionary(hits.sessions.map { ($0.id, $0.snippet) }, uniquingKeysWith: { first, _ in first })
+    let projects = catalog.projects.filter { projectIds.contains($0.id) }.map { project in
+      var row = LodyListRow()
+      row.id = "project:\(project.id)"
+      row.title = project.name
+      row.subtitle = project.rootPath
+      row.image = "folder"
+      row.action = true
+      row.disclosure = true
+      row.navigates = true
+      row.menuActions = SessionRows.projectMenu(project)
+      row.highlight = query
+      return row
+    }
+    let sessions = catalog.sessions.filter { snippets[$0.id] != nil }.sorted(by: SessionRows.byActivity)
+    let rows = SessionRows.treeRows(sessions, all: catalog.sessions) { session in
+      var row = SessionRows.row(session, projectName: place(session, names), now: now)
+      row.highlight = query
+      if let snippet = snippets[session.id] ?? nil {
+        row.subtitle = snippet
+        row.subtitleMono = false
+        row.wrapSubtitle = true
+      }
+      return row
+    }
+    return [
+      section("projects", header: String(localized: "inbox.section.projects", bundle: .lody), rows: projects),
+      section("sessions", header: String(localized: "inbox.section.sessions", bundle: .lody), rows: rows),
+    ].filter { !$0.rows.isEmpty }
+  }
+
+  static func match(_ catalog: SessionCatalog, keyword: String) -> InboxSearchHits {
+    let term = keyword.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !term.isEmpty else { return InboxSearchHits() }
+    let names = projectNames(catalog)
+    let projects = catalog.projects.filter { !SessionRows.isChat($0.id) && $0.name.lowercased().contains(term) }
+    let sessions = catalog.sessions
+      .filter { "\($0.title) \(place($0, names))".lowercased().contains(term) }
+      .sorted(by: SessionRows.byActivity)
+    return InboxSearchHits(projectIds: projects.map(\.id), sessions: sessions.map { ($0.id, nil) })
+  }
+
+  static func isChatRow(_ id: String) -> Bool {
+    ["chat", "toggle:chat", "view:chat", "project:chat"].contains(id)
+  }
+
+  static func reconcilePinOrder(_ order: [String], pinned: [String], activity: (String) -> Double) -> [String] {
+    let current = Set(pinned)
+    let kept = order.filter { current.contains($0) }
+    let known = Set(kept)
+    let unknown = pinned.filter { !known.contains($0) }.sorted { left, right in
+      let (a, b) = (activity(left), activity(right))
+      return a == b ? left < right : a > b
+    }
+    return unknown + kept
+  }
+
+  static func orderPinned(_ sessions: [SessionItem], pinOrder: [String]) -> [SessionItem] {
+    let rank = Dictionary(pinOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+    return sessions.sorted { left, right in
+      let (a, b) = (rank[left.id] ?? .max, rank[right.id] ?? .max)
+      return a == b ? left.activityAt > right.activityAt : a < b
+    }
+  }
+
+  static func sortProjects(_ projects: [SessionProject], sessions: [SessionItem], sort: InboxSort) -> [SessionProject] {
+    let owned = projects.filter { !SessionRows.isChat($0.id) }
+    let grouped = Dictionary(owned.map { project in
+      (project.id, sessions.filter { $0.projectId == project.id && !$0.archived })
+    }, uniquingKeysWith: { first, _ in first })
+    return owned.sorted { left, right in
+      compare((left.name, grouped[left.id] ?? []), (right.name, grouped[right.id] ?? []), sort: sort)
+    }
+  }
+
+  static func activityBucket(_ value: Double, now: Double, calendar: Calendar = .current) -> String {
+    let today = calendar.startOfDay(for: Date(timeIntervalSince1970: now / 1000)).timeIntervalSince1970 * 1000
+    if value.isNaN || value >= today { return "today" }
+    if value >= today - day { return "yesterday" }
+    if value >= today - 7 * day { return "week" }
+    if value >= today - 30 * day { return "month" }
+    return "older"
+  }
+
+  private static func compare(_ left: (name: String, sessions: [SessionItem]), _ right: (name: String, sessions: [SessionItem]), sort: InboxSort) -> Bool {
+    if sort != .name {
+      if sort == .urgency {
+        let rank = urgency(left.sessions) - urgency(right.sessions)
+        if rank != 0 { return rank < 0 }
+      }
+      let activity = latest(right.sessions) - latest(left.sessions)
+      if activity != 0 { return activity < 0 }
+    }
+    return left.name.localizedCompare(right.name) == .orderedAscending
+  }
+
+  private static func urgency(_ sessions: [SessionItem]) -> Int {
+    let states = sessions.map(SessionState.init)
+    if states.contains(where: { $0 == .attention || $0 == .failed }) { return 0 }
+    return states.contains(.live) ? 1 : 2
+  }
+
+  private static func latest(_ sessions: [SessionItem]) -> Double {
+    sessions.reduce(0) { max($0, $1.activityAt) }
+  }
+
+  private static func group(_ session: SessionItem, now: Double) -> String {
+    let state = SessionState(session)
+    if state == .attention || state == .failed { return "attention" }
+    if state == .live { return "live" }
+    if SessionRows.isUnread(session) { return "unread" }
+    if session.pinned { return pinnedId }
+    return activityBucket(session.activityAt, now: now)
+  }
+
+  private static func projectNames(_ catalog: SessionCatalog) -> [String: String] {
+    Dictionary(catalog.projects.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  static func place(_ session: SessionItem, _ names: [String: String]) -> String {
+    SessionRows.isChat(session.projectId) ? String(localized: "inbox.section.chat", bundle: .lody) : names[session.projectId] ?? ""
+  }
+
+  private static func projectRow(_ project: SessionProject, sessions: [SessionItem], open: Bool) -> LodyListRow {
+    var row = LodyListRow()
+    row.id = sessions.isEmpty ? "project:\(project.id)" : "toggle:\(project.id)"
+    row.parent = true
+    row.monogram = String(project.name.prefix(1))
+    row.image = ownerAvatar(project.repoFullName ?? "")
+    row.title = project.name
+    row.subtitle = project.rootPath.replacingOccurrences(of: #"^/(Users|home)/[^/]+"#, with: "~", options: .regularExpression)
+    row.subtitleMono = true
+    row.action = true
+    row.menuActions = SessionRows.projectMenu(project)
+    trailing(&row, sessions: sessions, open: open)
+    return row
+  }
+
+  private static func ownerAvatar(_ repo: String) -> String {
+    guard let owner = repo.split(separator: "/").first, !owner.isEmpty,
+      let encoded = String(owner).addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-._~")))
+    else { return "" }
+    return "https://avatars.githubusercontent.com/\(encoded)?size=96"
+  }
+
+  private static func trailing(_ row: inout LodyListRow, sessions: [SessionItem], open: Bool) {
+    guard !sessions.isEmpty else {
+      row.badge = "0"
+      row.disclosure = true
+      row.navigates = true
+      return
+    }
+    guard open else {
+      row.badge = String(sessions.count)
+      return
+    }
+    let states = sessions.map(SessionState.init)
+    for state in [SessionState.failed, .attention, .live] {
+      let count = states.filter { $0 == state }.count
+      guard count > 0 else { continue }
+      row.value = String.localizedStringWithFormat(String(localized: String.LocalizationValue("inbox.project." + state.rawValue), bundle: .lody), count)
+      row.imageTint = state.tint
+      return
+    }
+  }
+
+  private static func rank(_ chip: inout InboxProjectChip, sessions: [SessionItem]) {
+    let states = sessions.map(SessionState.init)
+    for state in [SessionState.failed, .attention, .live] {
+      let count = states.filter { $0 == state }.count
+      guard count > 0 else { continue }
+      chip.state = state
+      chip.count = count
+      return
+    }
+  }
+
+  // A filtered project is the whole point of the filter, so it shows every session and cannot fold.
+  private static func filtered(_ catalog: SessionCatalog, id: String, pinOrder: [String], now: Double) -> LodyListSection? {
+    let open = catalog.sessions.filter { !$0.archived }
+    let owned = id == chatId ? open.filter { SessionRows.isChat($0.projectId) } : open.filter { $0.projectId == id }
+    let project = catalog.projects.first { $0.id == id && !SessionRows.isChat($0.id) }
+    guard !owned.isEmpty, id == chatId || project != nil else { return nil }
+    var parent = project.map { projectRow($0, sessions: owned, open: true) } ?? chatParent(owned, open: true)
+    parent.action = false
+    let ordered = orderPinned(owned.filter(\.pinned), pinOrder: pinOrder) + owned.filter { !$0.pinned }.sorted(by: SessionRows.byActivity)
+    let rows = SessionRows.treeRows(ordered, all: catalog.sessions) { SessionRows.row($0, now: now) }
+    var group = section(id, rows: [parent] + rows)
+    group.headerExpanded = true
+    return group
+  }
+
+  private static func chatParent(_ chats: [SessionItem], open: Bool) -> LodyListRow {
+    var parent = LodyListRow()
+    parent.id = "toggle:\(chatId)"
+    parent.parent = true
+    parent.image = "bubble.left"
+    parent.title = String(localized: "inbox.section.chat", bundle: .lody)
+    parent.action = true
+    parent.menuActions = [SessionRows.newChat()]
+    trailing(&parent, sessions: chats, open: open)
+    return parent
+  }
+
+  private static func sessionGroup(
+    _ id: String, parent: LodyListRow, sessions: [SessionItem], all: [SessionItem], now: Double, moreId: String? = nil
+  ) -> LodyListSection {
+    var rows = [parent] + SessionRows.treeRows(sessions, all: all, maxRoots: 5) { SessionRows.row($0, now: now) }
+    let rest = sessions.count - (rows.count - 1)
+    if rest > 0 {
+      var more = LodyListRow()
+      more.id = moreId ?? "project:\(id)"
+      more.title = String.localizedStringWithFormat(String(localized: "inbox.project.more", bundle: .lody), rest)
+      more.action = true
+      more.disclosure = true
+      more.navigates = true
+      rows.append(more)
+    }
+    return section(id, rows: rows)
+  }
+
+  private static func pinnedSection(_ rows: [LodyListRow], expanded: [String: Bool]) -> LodyListSection {
+    var parent = LodyListRow()
+    parent.id = "toggle:\(pinnedId)"
+    parent.parent = true
+    parent.image = "pin.fill"
+    parent.title = String(localized: "inbox.section.pinned", bundle: .lody)
+    parent.action = true
+    var group = section(pinnedId, rows: [parent] + rows)
+    group.headerExpanded = expanded[pinnedId] ?? true
+    return group
+  }
+
+  private static func section(_ id: String, header: String = "", rows: [LodyListRow]) -> LodyListSection {
+    var section = LodyListSection()
+    section.id = id
+    section.header = header
+    section.rows = rows
+    return section
+  }
+}
