@@ -5,7 +5,7 @@ final class LodyLicenseListTests: XCTestCase {
   func testTheGeneratedCatalogDecodesWithSharedTexts() throws {
     let json = #"""
     {"packages":[
-      {"name":"Lody for iOS","license":"AGPL-3.0-only","url":"https://github.com/Innei/lody-ios","firstParty":true,"text":0},
+      {"name":"Lody for iOS","license":"AGPL-3.0-only","url":"https://github.com/LodyAI/lody-ios","firstParty":true,"text":0},
       {"name":"Litext","license":"MIT","text":1},
       {"name":"zod","version":"3.25.76","license":"MIT","text":1},
       {"name":"broken","license":"MIT","text":9}

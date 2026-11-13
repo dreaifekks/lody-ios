@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/assets/lody-ios-logo.png" width="100" height="100" alt="Lody iOS Logo" />
   <h1>Lody iOS</h1>
-  <p><b>Independent iOS Native Client</b> · AI Collaboration & Session Companion for Mobile</p>
+  <p><b>Native iOS Client for Lody</b> · AI Collaboration on iPhone & iPad</p>
 
   <p>
     <img src="https://img.shields.io/badge/Platform-iOS%2026%2B-blue?style=flat-square&logo=apple" alt="Platform" />
@@ -24,22 +24,15 @@ https://github.com/user-attachments/assets/0bc0ab48-6f12-44e9-ae13-07af9c6b780d
 ---
 
 > [!IMPORTANT]
-> **This is a third-party project.** Lody iOS is an independent, community-maintained client. It is not affiliated with, endorsed by, or supported by the official Lody team. Report issues in this repository, not upstream.
->
-> **The project is still under development.** It iterates quickly, so APIs, sync behavior, and UI may change without notice, and builds can be unstable or break existing sessions. Evaluate the risk yourself before relying on it.
-
-> [!IMPORTANT]
-> **本项目为第三方项目。** Lody iOS 由社区独立维护，与 Lody 官方团队无关，也不代表官方立场；本项目的问题请在本仓库反馈，不要提交给上游。
->
-> **项目仍在开发中。** 迭代速度较快，接口、同步行为与界面可能随时调整，版本可能不稳定甚至破坏已有会话数据，请在评估风险后使用。
+> **Lody iOS is under active development.** TestFlight builds are pre-release; features, sync behavior and UI may change between builds. Report iOS client issues in this repository.
 
 ---
 
 ## TestFlight Beta
 
-Install the current build on your iPhone through TestFlight:
+Install the current build on your iPhone or iPad through TestFlight:
 
-**<https://testflight.apple.com/join/1rR6Ku8f>**
+**<Placeholder>**
 
 Requires iOS 26 or later. Beta builds track `main` and update automatically; they are pre-release and may be unstable, as described above.
 
@@ -47,25 +40,11 @@ Requires iOS 26 or later. Beta builds track `main` and update automatically; the
 
 ## Overview
 
-**Lody iOS** is an independent open-source client crafted for iPhone, providing a lightweight and secure bridge between remote Lody services and local workspaces.
+**Lody iOS** brings Lody sessions, remote workspaces and agent collaboration to iPhone and iPad. Follow live conversations, send new turns, review code changes and access development previews from a native iOS interface.
 
-The application UI and native state run in Swift and UIKit. The iOS App target owns navigation, screens and platform integration; LodyData owns shared authentication, catalog projections and durable sends. A Swift-managed offscreen WebView runs the bundled Loro/Flock protocol engine; React Native, Expo, Hermes and Metro are no longer app dependencies.
+This standalone repository contains the iOS client. See the main [Lody repository](https://github.com/LodyAI/Lody) for the desktop app and CLI.
 
----
-
-## How this was built
-
-Lody iOS started as a one-day prototype and became a usable TestFlight client in about a week, driven by coding agents under tight product constraints: iOS only, one native kit module, system UI when React Native cannot meet HIG, and an offscreen WebView for Flock/Loro because official Node/CRDT packages do not bundle in Metro.
-
-The full first-person write-up is **[Prototype in a Day, Shipped in a Week: Building Lody iOS in Live](https://innei.in/en/posts/tech/lody-ios-prototype-to-product)**.
-
-What that week actually looked like:
-
-- **Constraints before features.** The first prompt named the architecture (RN template, one Kit module, no Android, Swift when RN is not enough) and left product surface to be inferred.
-- **Decide, then implement.** Navigation chrome, search, iPad shell, and onboarding were argued in the open; rejected paths stayed off `main`.
-- **HIG as acceptance, not taste.** Native `UIBarButtonItem`, system sheets, and semantic colors were required; RN fakes of system chrome were rejected on screenshots.
-- **Verify without login.** Offline Debug scenes, leased Simulators, screenshots for visual state, and video for temporal behavior became the gate: if the verify script was right, the change shipped.
-- **RN as the base, Swift where it matters.** Chat, composer, list rows, and diffs moved into LodyiOSKit. Swift grew from a few hundred lines on day one to nearly half the UI surface by the end of the week.
+The application UI and native state run in Swift and UIKit. The iOS App target owns navigation, screens and platform integration; LodyData owns shared authentication, catalog projections and durable sends. A Swift-managed offscreen WebView runs the bundled Loro/Flock protocol engine.
 
 ---
 
@@ -182,7 +161,7 @@ packages/lexical-swift/    # Native editor
 1. **Clone the repository and install JavaScript dependencies**:
 
    ```sh
-   git clone https://github.com/Innei/lody-ios.git
+   git clone --recurse-submodules https://github.com/LodyAI/lody-ios.git
    cd lody-ios
    pnpm install
    ```
@@ -242,7 +221,9 @@ Pushing to `main` or dispatching `.github/workflows/ship.yml` archives a TestFli
 
 ## License
 
-Lody iOS is released under the [GNU Affero General Public License v3.0](LICENSE) (**AGPL-3.0-only**). You may use, modify, and distribute it, including commercially, provided that derivative works and network-served modifications stay under the same license and their source stays available to users.
+Copyright © 2026 LoroHub LLC.
+
+Lody iOS is released under the [GNU Affero General Public License v3.0](LICENSE) (**AGPL-3.0-only**).
 
 Bundled third-party libraries and assets keep their own licenses. The full list and license texts are available in the app under **Settings → Open Source Licenses**. The notices are generated from the production dependency closure by `pnpm licenses:build` and verified in CI by `pnpm check`.
 
@@ -250,12 +231,12 @@ Bundled third-party libraries and assets keep their own licenses. The full list 
 
 ## Acknowledgements
 
+Lody iOS was originally created by [Innei](https://github.com/Innei). The early development story is documented in [Prototype in a Day, Shipped in a Week: Building Lody iOS in Live](https://innei.in/en/posts/tech/lody-ios-prototype-to-product).
+
 Lody iOS is made possible thanks to these open-source projects and creators:
 
 - **[FlowDown](https://github.com/Lakr233/FlowDown)**: Thanks to [Lakr233](https://github.com/Lakr233) and contributors. Lody's native message collection view, stream batching mechanism, and dynamic measurement cache architecture drew significant inspiration from FlowDown.
-- **[unixzii](https://github.com/unixzii)**: Original author of Litext, the CoreText rich-text engine underneath MarkdownView and Lody's native chat rendering. Also a generous teacher — a great deal of this project's iOS knowledge came from him.
 - **[MarkdownView](https://github.com/Lakr233/MarkdownView) & [Litext](https://github.com/Lakr233/Litext)**: High-performance, extensible CoreText Markdown rendering and typography for iOS.
-- **[Loro](https://github.com/loro-dev/loro)**: High-performance, production-grade next-generation CRDT state synchronization.
 - **[AXe](https://github.com/cameroncooke/AXe)**: Simulator UI automation driving the offline UI baselines.
 - **[baguette](https://github.com/tddworks/baguette)**: Headless iOS Simulator control and streaming (Apache-2.0). The native simulator viewer is a client of its HTTP and WebSocket protocol; baguette itself runs on the Mac and is not bundled.
 - **[libdatachannel](https://github.com/paullouisageneau/libdatachannel)**: Native data-only Simulator transport (MPL-2.0), built from pinned source at `pnpm prebuild` with media and WebSocket disabled, over [libjuice](https://github.com/paullouisageneau/libjuice) (MPL-2.0), [usrsctp](https://github.com/sctplab/usrsctp) (BSD-3-Clause) and [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) (Apache-2.0). No camera, microphone or WebView is involved.

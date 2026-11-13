@@ -107,7 +107,7 @@ const targets = [
     firstParty: {
       name: 'Lody for iOS',
       license: 'AGPL-3.0-only',
-      url: 'https://github.com/Innei/lody-ios',
+      url: 'https://github.com/LodyAI/lody-ios',
       file: 'LICENSE',
     },
     components: nativeComponents,

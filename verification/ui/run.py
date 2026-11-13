@@ -163,7 +163,6 @@ PREVIEW = {
     'composer-fullscreen': 'send-preview',
     'inbox': 'inbox-preview',
     'onboarding': 'onboarding-preview',
-    'community-notice': 'community-notice',
 }
 READY = {
     'role-mention-sheet': 'create-session-input',
@@ -277,7 +276,6 @@ READY = {
     'composer-fullscreen': 'session-input',
     'inbox': 'inbox-wait',
     'onboarding': 'onboarding-connect',
-    'community-notice': 'community-notice',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
@@ -535,7 +533,7 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'community-notice', 'live-activity', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-history-entry', 'project-history', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'appearance', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'live-activity', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:

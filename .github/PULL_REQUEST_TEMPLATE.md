@@ -1,7 +1,7 @@
 <!--
 AGENT-INSTRUCTIONS — follow these. Keep them commented out. Do not copy them into the visible description. Delete them after you comply.
 
-You are the agent preparing this pull request for Innei/lody-ios. Decide who wrote the change, then edit this body.
+You are the agent preparing this pull request for Lody iOS. Decide who wrote the change, then edit this body.
 
 HUMAN — a person wrote the code. No agent produced the diff.
 - Fill the Human section.
@@ -10,9 +10,10 @@ HUMAN — a person wrote the code. No agent produced the diff.
 AI — an agent produced the diff.
 - Fill the Human section too: what changed, screenshots or recordings, how it was verified, acceptance, and the related issue.
 - Then decide if the AI section stays:
-  - Run `gh api user --jq .login`.
-  - `Innei` is the owner of `Innei/lody-ios`. Delete the entire AI section. Do not use `gh repo view` on a fork; a fork owner's login is not this repository's owner.
-  - Anything else — another login, a 404, an error, or a failed check — means an outside collaborator or an external contributor. The AI section is mandatory. Do not delete it.
+  - Identify the pull request's base repository from the PR target, not from a fork's owner or the local `origin` remote.
+  - Check the authenticated account's permissions on that base repository with `gh api repos/{base-owner}/{base-repo} --jq '.permissions.admin == true or .permissions.maintain == true'`, replacing the placeholders with the actual base repository.
+  - If the check returns `true`, the author is a repository administrator or maintainer and may delete the entire AI section.
+  - For any other result — including missing permissions, a 404, an error, or a failed check — the AI section is mandatory. Do not delete it.
 
 When the AI section is mandatory you MUST fill all four fields. Leaving a placeholder is not done.
 
@@ -85,7 +86,7 @@ Required for a UI change. One group per case and appearance. Point each image an
 <!--
 Link the issue this PR addresses.
 Example: Closes #123, Refs #123
-Companion Cloud PR, when this client depends on one: https://github.com/loro-dev/lody/pull/NNNN
+Companion Lody PR, when this client depends on one: https://github.com/LodyAI/Lody/pull/NNNN
 -->
 
 ### AI
@@ -94,8 +95,8 @@ Delete this section if a person wrote the change.
 
 <!--
 AGENT-INSTRUCTIONS — keep this commented out.
-A person wrote the change, or `gh api user --jq .login` prints `Innei`: delete this entire AI section.
-An agent wrote the change and the author is an outside collaborator or an external contributor: do not delete this section. Fill every field below. Do not leave the placeholders.
+A person wrote the change, or the base-repository permission check above confirms the author is an administrator or maintainer: delete this entire AI section.
+An agent wrote the change and those permissions are not confirmed: do not delete this section. Fill every field below. Do not leave the placeholders.
 Harness: product and version.
 Model: the model id this session called.
 Thinking level: the level this session was set to, or `n/a` when this harness has none.

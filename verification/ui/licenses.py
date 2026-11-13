@@ -66,6 +66,18 @@ ui.axe('tap', '--id', 'BackButton', '--post-delay', '1')
 ui.element('base64-js')
 ui.capture('back')
 
+# The final section carries the product copyright in the current locale.
+footer = catalog.text('settings.licenses.footer')
+for _ in range(30):
+    if any(footer in (item.get('AXLabel') or '') for item in ui.state()):
+        break
+    ui.axe('drag', '--start-x', '200', '--start-y', '650', '--end-x', '200', '--end-y', '250', '--duration', '.3', '--post-delay', '.2')
+ui.wait(
+    lambda items: any(footer in (item.get('AXLabel') or '') for item in items),
+    'The license list must display the product copyright footer',
+)
+ui.capture('copyright')
+
 # Return through About before reaching the Settings sheet root.
 ui.axe('tap', '--id', 'BackButton', '--post-delay', '1')
 ui.element('licenses')
