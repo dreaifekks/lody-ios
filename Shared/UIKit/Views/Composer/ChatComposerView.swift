@@ -468,12 +468,22 @@ private enum ChatComposerActionMode {
   case send
   case loading
   case stop
+  case dictate
 
   var color: UIColor {
     switch self {
     case .send: LodyAccentChoice.current.color
     case .loading: .systemGray
     case .stop: .systemRed
+    case .dictate: .clear
+    }
+  }
+
+  var symbolTint: UIColor {
+    switch self {
+    case .send: LodyAccentChoice.current.foregroundColor
+    case .dictate: .label
+    case .loading, .stop: .white
     }
   }
 
@@ -481,7 +491,13 @@ private enum ChatComposerActionMode {
     switch self {
     case .send, .loading: "arrow.up"
     case .stop: "stop.fill"
+    case .dictate: "mic"
     }
+  }
+
+  var symbolConfiguration: UIImage.SymbolConfiguration {
+    if self == .dictate { return UIImage.SymbolConfiguration(pointSize: 17, weight: .regular) }
+    return UIImage.SymbolConfiguration(pointSize: 14, weight: .bold, scale: .medium)
   }
 }
 
@@ -533,14 +549,14 @@ private final class ChatComposerActionVisual: UIView {
 
   @objc private func refreshAccent() {
     backgroundColor = mode?.color
-    symbol.tintColor = mode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = mode?.symbolTint
   }
 
   func render(_ nextMode: ChatComposerActionMode) {
     guard mode != nextMode else { return }
     let shouldAnimate = mode != nil && window != nil
     mode = nextMode
-    symbol.tintColor = nextMode == .send ? LodyAccentChoice.current.foregroundColor : .white
+    symbol.tintColor = nextMode.symbolTint
     guard shouldAnimate else {
       backgroundColor = nextMode.color
       applyContent(nextMode)
@@ -578,10 +594,7 @@ private final class ChatComposerActionVisual: UIView {
   }
 
   private func applyContent(_ mode: ChatComposerActionMode) {
-    symbol.image = UIImage(
-      systemName: mode.symbolName,
-      withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .bold, scale: .medium)
-    )
+    symbol.image = UIImage(systemName: mode.symbolName, withConfiguration: mode.symbolConfiguration)
     symbol.isHidden = mode == .loading
     if mode == .loading { progress.startAnimating() } else { progress.stopAnimating() }
   }
@@ -597,6 +610,17 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private let quotaNotice = UILabel()
   private let send = UIButton(type: .system)
   private let sendVisual = ChatComposerActionVisual()
+  private lazy var dictator = ComposerDictator(input: input) { [weak self] in self?.updateComposer() }
+  /// The speech engine behind the empty composer's microphone; `nil` hides dictation.
+  var dictation: ComposerDictating? {
+    get { dictator.engine }
+    set {
+      dictator.cancel()
+      dictator.engine = newValue
+      updateComposer()
+    }
+  }
+  private var offersDictation = false
   private let sendFeedback = UIImpactFeedbackGenerator(style: .medium)
   #if !LODY_SHARE_EXTENSION
   private let attachmentOverlay = AnchoredOverlayController()
@@ -1029,6 +1053,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
+      dictator.cancel()
       saveDraft()
       collapseCompletionID += 1
       collapseAnimator?.stopAnimation(true)
@@ -1127,6 +1152,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
 
   private func takeDraft() {
+    dictator.cancel()
     guard pendingDraft == nil else { return }
     pendingDraft = (input.markdown, attachments, input.serializedState)
     // Cross-container creation keeps its draft visible while its host dismisses.
@@ -1591,6 +1617,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       attachments.isEmpty && connection.isEmpty
   }
   private func updateComposer() {
+    if dictator.isActive && !state.editable {
+      dictator.cancel()
+      return
+    }
     mentionPanel.update(input: input, items: activeMentionItems ?? [], enabled: activeMentionItems != nil)
     mentionHeight.constant = mentionPanel.panelHeight
     mentionSeparator.alpha = mentionPanel.panelHeight > 0 ? 1 : 0
@@ -1628,22 +1658,40 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     hint.isHidden = !input.text.isEmpty
     let hasContent = !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     let stop = !hasContent && state.running == true
+    let loading = sending || state.stopping == true
+    let blocked = failedDraft != nil || displayError != nil || !state.editable || state.controlling == true
+    offersDictation = dictator.isAvailable && !dictator.isActive && !hasContent && !stop && !loading && !blocked
     var label = "native.chat.composer.send"
     if stop { label = "native.chat.composer.stop" }
-    let loading = sending || state.stopping == true
     if sending { label = "native.chat.composer.sending" }
     if state.stopping == true { label = "native.chat.composer.stopping" }
     let actionable = stop ? state.canStop == true : state.canSend && hasContent
-    send.isEnabled = failedDraft == nil && displayError == nil && state.editable && actionable && !loading && state.controlling != true
-    if send.isEnabled && !stop { sendFeedback.prepare() }
-    send.accessibilityLabel = String(localized: String.LocalizationValue(label), bundle: .lody)
-    send.accessibilityIdentifier = stop ? "session-stop" : "session-send"
     var actionMode: ChatComposerActionMode = stop ? .stop : .send
     if loading { actionMode = .loading }
+    send.isEnabled = !blocked && actionable && !loading
+    switch dictator.state {
+    case .listening:
+      actionMode = .stop
+      label = "native.chat.composer.stopDictation"
+      send.isEnabled = true
+    case .preparing, .finishing:
+      actionMode = .loading
+      label = "native.chat.composer.stopDictation"
+      send.isEnabled = dictator.state == .preparing
+    case .idle where offersDictation:
+      actionMode = .dictate
+      label = "native.chat.composer.dictate"
+      send.isEnabled = true
+    case .idle:
+      break
+    }
+    if send.isEnabled && actionMode == .send { sendFeedback.prepare() }
+    send.accessibilityLabel = String(localized: String.LocalizationValue(label), bundle: .lody)
+    send.accessibilityIdentifier = stop && !dictator.isActive ? "session-stop" : "session-send"
     sendVisual.render(actionMode)
     sendVisual.isHidden = false
-    sendVisual.alpha = send.isEnabled || loading ? 1 : 0.35
-    let restingHidesSend = !hasContent && !stop && !loading
+    sendVisual.alpha = send.isEnabled || actionMode == .loading ? 1 : 0.35
+    let restingHidesSend = !hasContent && !stop && !loading && !dictator.isActive
     send.isHidden = !expanded && restingHidesSend
     send.alpha = restingHidesSend ? sheetShare : 1
     queueView.render(queuedDrafts, enabled: state.canStop == true && !sending && state.controlling != true, steeringID: state.steerID ?? "", firstOnly: state.steerInterrupts == true)
@@ -1862,7 +1910,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     guard activeMentionItems != nil else { return }
     updateComposer()
   }
-  func textViewDidChange(_ textView: UITextView) { updateComposer() }
+  func textViewDidChange(_ textView: UITextView) {
+    dictator.cancel()
+    updateComposer()
+  }
   func textViewDidBeginEditing(_ textView: UITextView) {
     grabber.releaseKeyboard()
     if completingCollapse {
@@ -1907,6 +1958,18 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   @objc private func submit() {
     guard send.isEnabled else { return }
+    switch dictator.state {
+    case .preparing, .listening:
+      dictator.stop()
+      return
+    case .finishing:
+      return
+    case .idle where offersDictation:
+      dictator.start()
+      return
+    case .idle:
+      break
+    }
     if previewBeforeSubmit?() == true { return }
     if state.running == true && input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty {
       onStop?()

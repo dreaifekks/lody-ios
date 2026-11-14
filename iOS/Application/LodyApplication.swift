@@ -28,6 +28,7 @@ public final class LodyApplication {
     precondition(observers.isEmpty, "Lody supports one active scene")
     PageFactory.debugSceneFactory = DebugSceneFactory.make
     LodyHosting.current = LodyUIKitHost.shared
+    ComposerDictator.defaultEngine = DictationFixture.engine ?? SpeechDictation.shared
     ContentPreviewCoordinator.clearAll()
     if LodyUIVerify.offline { URLProtocol.registerClass(OfflineProbe.self) }
     lodyApplyWindowAccent()

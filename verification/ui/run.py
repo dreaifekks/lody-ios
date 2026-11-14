@@ -21,7 +21,7 @@ CHAT = ROOT / 'verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-settings', 'home-workspace', 'home-states', 'home-project-bar', 'home-project-index', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'project-history', 'project-history-entry', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'live-activity', 'settings-baseline', 'appearance', 'queued-message-behavior'],
-    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-taps', 'chat-thread', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'mermaid'],
+    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'session-taps', 'chat-thread', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'mermaid', 'dictation'],
     'settings': ['agents-settings', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'mcp-settings', 'memory-settings', 'memory-states', 'published-shares', 'published-share-states', 'agent-roles', 'archived-sessions'],
 }
 SUITES = {
@@ -82,6 +82,7 @@ PREVIEW = {
     'context-chip': 'quick-replies-preview',
     'reply-haptics': 'reply-haptics-preview',
     'scroll-edge': 'chat-preview',
+    'dictation': 'session-preview',
     'scroll-edge-pages': 'scroll-edge-pages',
     'scroll-edge-diff': 'scroll-edge-diff',
     'proposed-plan': 'proposed-plan-preview',
@@ -203,6 +204,7 @@ READY = {
     'context-chip': 'quick-reset',
     'reply-haptics': 'reply-haptics-start',
     'scroll-edge': 'session-input',
+    'dictation': 'session-input',
     'scroll-edge-pages': 'create-session-input',
     'scroll-edge-diff': 'scroll-edge-diff-toolbar',
     'proposed-plan': 'plan-preview:document',
@@ -469,6 +471,8 @@ try:
                         launch.append('--ui-verify-scroll')
                     if case == 'navigation-toolbar':
                         launch.append('--ui-verify-opening')
+                    if case == 'dictation':
+                        launch.append('--ui-verify-dictation')
                     if trace_throw:
                         launch.append('--ui-verify-throw')
                     launch += [
@@ -542,7 +546,7 @@ try:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
-                if case in {'home-settings', 'home-workspace', 'ipad-create', 'quick-replies', 'context-chip', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity'}:
+                if case in {'home-settings', 'home-workspace', 'ipad-create', 'quick-replies', 'context-chip', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'dictation'}:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case in ['session-tree', 'session-tree-pad']:
                     script = Path(__file__).with_name('session-tree.py')

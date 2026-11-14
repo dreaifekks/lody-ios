@@ -58,8 +58,12 @@
 	<string>Take photos to attach to your messages.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect to your Mac on the local network to view and control its iOS Simulator.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dictate messages. Your voice is turned into text on this device, and the recording is not saved or uploaded.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose photos to attach to your messages.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Turn what you dictate into message text. Recognition runs on this device.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
