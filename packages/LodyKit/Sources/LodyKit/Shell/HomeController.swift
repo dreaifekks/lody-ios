@@ -307,6 +307,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       split.setViewController(primary, for: .primary)
     }
     compactTabsInstalled = compact
+    tabPages.values.forEach { $0.additionalSafeAreaInsets.bottom = compact ? Self.tabContentClearance : 0 }
     markListSelection()
     if !compact {
       if selectedTab == .schedules, session == nil { showSchedulesInDetail() } else { selectedTab = .chats }
@@ -399,6 +400,9 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
 
   func newSchedule() { schedules?.newSchedule() }
 
+  // The tab bar's bottom scroll edge blurs past its own top; the last row ends above that blur.
+  private static let tabContentClearance = LodySpacing.xxl
+
   private func tabPage(_ tab: HomeTab) -> LodyPageController {
     if let page = tabPages[tab] { return page }
     let (content, title): (UIViewController, String) = switch tab {
@@ -409,6 +413,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     }
     let next = page(content, title: title)
     next.hidesBottomBarWhenPushed = false
+    next.additionalSafeAreaInsets.bottom = compactTabsInstalled ? Self.tabContentClearance : 0
     tabPages[tab] = next
     return next
   }
