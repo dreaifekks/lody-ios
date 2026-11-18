@@ -404,7 +404,7 @@ struct CreateContextPanel: View {
                 .frame(width: LodyIconSize.md, height: LodyIconSize.md)
                 .foregroundStyle(worktree ? LodyColor.accentDefault : LodyColor.iconTertiary)
               Text(String(localized: "create.context.worktree", bundle: .lody))
-                .lodyTextStyle(.subhead)
+                .lodyTextStyle(.body)
                 .foregroundStyle(LodyColor.textSecondary)
             }
             .padding(.horizontal, LodySpacing.xs)
