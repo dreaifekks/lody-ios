@@ -43,6 +43,9 @@ jobs:
         with:
           submodules: true
 
+      - name: Provide Lody mobile shared files
+        run: /bin/bash .github/scripts/link-lody-mobile.sh
+
       - name: Record Xcode and SDK versions
         run: |
           xcodebuild -version
