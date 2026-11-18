@@ -696,7 +696,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private let quotaNotice = UILabel()
   private let send = UIButton(type: .system)
   private let sendVisual = ChatComposerActionVisual()
-  private lazy var dictator = ComposerDictator(input: input) { [weak self] in self?.updateComposer() }
+  private lazy var dictator = ComposerDictator(input: input) { [weak self] in
+    self?.updateComposer()
+    self?.scheduleDraftSave()
+  }
   var dictation: ComposerDictating? {
     get { dictator.engine }
     set {

@@ -131,4 +131,14 @@ do {
   precondition(ComposerDictationLanguage.resolve(keyboard: "emoji", preferred: ["zh-Hans-CN"]) == "zh-Hans-CN")
   precondition(ComposerDictationLanguage.resolve(keyboard: nil, preferred: ["en-US"]) == "en-US")
 }
+do {
+  let (composer, _, engine, _) = makeDictatingComposer()
+  var saved: [String] = []
+  composer.onDraftChange = { saved.append($0) }
+  tapSend(on: composer)
+  engine.emit?(.listening)
+  engine.emit?(.text("Dictated draft survives", isFinal: true))
+  RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+  precondition(saved.last?.contains("Dictated draft survives") == true, "Dictated text must autosave like typing, got \(saved)")
+}
 print("Composer dictation: offer, volatile/final results, stop, typing, failure, lock, running, whitespace and language passed")
