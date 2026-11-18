@@ -24,7 +24,9 @@ struct SettingsCatalog: Decodable, Equatable, Sendable {
   var machineNames: [String: String] = [:]
 
   init(projects: [SettingsProject] = [], machineNames: [String: String] = [:]) {
-    self.projects = projects
+    // Machine catalog entries carry a root path. A session can reference a local project
+    // after its folder was removed, which supplies only an ID and a display label.
+    self.projects = projects.filter { $0.id.hasPrefix("\($0.machineId):local:") && !$0.rootPath.isEmpty }
     self.machineNames = machineNames
   }
 
@@ -37,8 +39,10 @@ struct SettingsCatalog: Decodable, Equatable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     _ = try container.decode([Opaque].self, forKey: .sessions)
     _ = try container.decode([Opaque].self, forKey: .machineIds)
-    projects = try container.decode([SettingsProject].self, forKey: .projects)
-    machineNames = (try? container.decodeIfPresent([String: String].self, forKey: .machineNames)) ?? [:]
+    self.init(
+      projects: try container.decode([SettingsProject].self, forKey: .projects),
+      machineNames: (try? container.decodeIfPresent([String: String].self, forKey: .machineNames)) ?? [:]
+    )
   }
 }
 

@@ -6,6 +6,7 @@ final class ProjectVisibilityPreviewController: ProjectVisibilityController {
     let fixture = ProjectVisibilityFixture()
     let catalog = SettingsCatalog(
       projects: [
+        SettingsProject(id: "m1:local:history", machineId: "m1", name: "Local project", rootPath: ""),
         SettingsProject(id: "m1:local:same", machineId: "m1", name: "Studio", rootPath: "/Users/owner/Studio"),
         SettingsProject(id: "m2:local:same", machineId: "m2", name: "Studio", rootPath: "/Users/teammate/Studio"),
         SettingsProject(id: "m1:local:unregistered", machineId: "m1", name: "Draft", rootPath: "/Users/owner/Draft"),

@@ -10,6 +10,19 @@ let catalog = SettingsCatalog(projects: [
   SettingsProject(id: "m1:local:unknown", machineId: "m1", name: "Unknown", rootPath: "/unknown"),
 ])
 
+let sessionOnly = SettingsProject(id: "m1:local:old", machineId: "m1", name: "Local project", rootPath: "")
+let sameName = SettingsProject(id: "m1:local:real", machineId: "m1", name: "Local project", rootPath: "/real")
+let historyCatalog = SettingsCatalog(projects: [sessionOnly, sameName])
+let pendingRows = ProjectVisibilitySections.make(nil, catalog: historyCatalog, enabled: false).flatMap(\.rows)
+precondition(pendingRows.map(\.id) == ["unknown:m1:local:real"], "Only machine-backed projects appear before registrations load")
+let registrations = VisibilitySnapshot(userId: "owner", rows: [], ownedMachineIds: ["m1"])
+precondition(registrations.effectiveRows(catalog: historyCatalog).map(\.localProjectId) == ["real"], "A session reference cannot become a sharing target")
+let registered = VisibilitySnapshot(userId: "owner", rows: [
+  VisibilityRow(machineId: "m1", localProjectId: "old", ownerUserId: "owner", sharedWithTeam: true, updatedAt: 1),
+], ownedMachineIds: ["m1"])
+let registeredRows = ProjectVisibilitySections.make(registered, catalog: historyCatalog, enabled: true).flatMap(\.rows)
+precondition(registeredRows.first?.title == "old" && registeredRows.first?.action == true, "Cloud registrations survive without machine metadata")
+
 let rows = ProjectVisibilitySections.make(snapshot, catalog: catalog, enabled: true).flatMap(\.rows)
 let own = rows.first { $0.id == "visibility:m1:same" }!
 let foreign = rows.first { $0.id == "visibility:m2:same" }!
@@ -51,10 +64,10 @@ precondition(request == ["page": "projects", "workspaceId": "w", "action": "list
 
 let workspace = SettingsWorkspace.decode(
   state: #"{"userId":"u","workspaceId":"w","connected":true,"presence":{"workspaceId":"w","presence":{"state":"live","onlineMachineIds":["m1"]}}}"#,
-  raw: #"{"catalog":{"projects":[{"id":"m1:local:p","machineId":"m1","name":"P","rootPath":"/p"}],"sessions":[],"machineIds":["m1"],"machineNames":{"m1":"Mac"}},"syncedAt":1}"#
+  raw: #"{"catalog":{"projects":[{"id":"m1:local:p","machineId":"m1","name":"P","rootPath":"/p"},{"id":"m1:local:old","machineId":"m1","name":"Local project","rootPath":""}],"sessions":[],"machineIds":["m1"],"machineNames":{"m1":"Mac"}},"syncedAt":1}"#
 )
 precondition(workspace.key == "u:w" && workspace.connected && workspace.presence.status(of: "m1") == "online")
-precondition(workspace.catalog.projects.count == 1 && workspace.catalog.machineNames == ["m1": "Mac"])
+precondition(workspace.catalog.projects.map(\.id) == ["m1:local:p"] && workspace.catalog.machineNames == ["m1": "Mac"])
 let stale = SettingsWorkspace.decode(
   state: #"{"userId":"u","workspaceId":"w","connected":false,"presence":{"workspaceId":"old","presence":{"state":"live","onlineMachineIds":["m1"]}}}"#,
   raw: "null"

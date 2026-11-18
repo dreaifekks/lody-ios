@@ -22,6 +22,7 @@ assert catalog.text('settings.projects.private') in spoken(ui.element(owner))
 assert catalog.text('settings.projects.othersOwner') in spoken(ui.element(foreign))
 no_header_refresh(ui)
 assert catalog.text('settings.projects.private') in spoken(ui.element('visibility:m1:unregistered')), 'An unregistered project on an owned machine reads as private, like desktop'
+assert not any(item.get('AXUniqueId') == 'visibility:m1:history' for item in ui.state()), 'A session-only project appeared in sharing settings'
 ui.capture('project-visibility-list')
 choose(owner,'settings.projects.shared')
 notice(ui,'settings.state.unconfirmed');assert catalog.text('settings.projects.private') in spoken(ui.element(owner))
