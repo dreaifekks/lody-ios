@@ -44,15 +44,21 @@ reset()
 ui.capture('reset')
 
 touch(ui.element('activity-demo'))
-text('Sample activity started')
+result = ui.wait(lambda items: next((i['AXLabel'] for i in items
+                 if i.get('AXLabel') in ('Sample activity started', 'Sample activity ended')), None),
+                 'Sample activity did not change state')
+if result == 'Sample activity ended':
+    touch(ui.element('activity-demo'))
+    text('Sample activity started')
+
+screen = next(i['frame'] for i in ui.state() if i.get('type') == 'Application')
 ui.axe('button', 'home')
-island = ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == 'regular.view'
-                                    and '1' in (i.get('AXLabel') or '')), None), 'Compact activity count missing')
-frame = island['frame']
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'Lody' and i.get('type') == 'Button' for i in items), 'Home screen missing')
 ui.screenshot('live-activity-compact')
-ui.axe('touch', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--down', '--up', '--delay', '1')
+ui.axe('touch', '-x', str(screen['width'] / 2), '-y', '33', '--down', '--up', '--delay', '1')
 text('Review the release notes')
 ui.screenshot('live-activity-expanded')
+ui.axe('button', 'home')
 subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'ai.lody.mobile'], check=True, timeout=30)
 touch(ui.element('activity-demo'))
 text('Sample activity ended')
