@@ -258,14 +258,14 @@ enum CreateSessionContext {
     if !capability.models.isEmpty {
       let current = capability.models.first { $0.id == page.choice.modelId }
       rows.append(CreatePicker(
-        id: "model", glyph: .symbol("cpu"), title: current?.name ?? text("model.default"), placeholder: current == nil,
+        id: "model", glyph: .symbol("cpu"), title: CreateModelOptions.modelTitle(capability, page.choice), placeholder: current == nil,
         options: capability.models.map { CreateOption(id: $0.id, title: $0.name, selected: $0.id == page.choice.modelId) },
         searchPlaceholder: text("create.context.searchModels")))
     }
     let efforts = CreateLogic.effortsFor(capability, modelId: page.choice.modelId)
     if !efforts.isEmpty {
       rows.append(CreatePicker(
-        id: "effort", glyph: .symbol("brain"), title: page.choice.effort ?? text("model.default"), placeholder: page.choice.effort == nil,
+        id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, page.choice), placeholder: page.choice.effort == nil,
         options: efforts.map { CreateOption(id: $0, title: $0, selected: $0 == page.choice.effort) }))
     }
     if let permission = CreateLogic.permissionMode(capability, page.choice), !permission.options.isEmpty {

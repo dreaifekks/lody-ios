@@ -36,8 +36,23 @@ enum CreateModelOptions {
       || !CreateLogic.effortsFor(capability).isEmpty || !CreateLogic.extraConfigOptions(capability).isEmpty
   }
 
+  static func modelTitle(_ capability: Capability, _ value: ModelChoice) -> String {
+    if let id = value.modelId, !id.isEmpty, id.lowercased() != "default" {
+      return capability.models.first { $0.id == id }?.name ?? id
+    }
+    guard let id = CreateLogic.resolvedModelId(capability) else { return text("model.unavailable") }
+    return String.localizedStringWithFormat(text("model.followAgent"), capability.models.first { $0.id == id }?.name ?? id)
+  }
+
+  static func effortTitle(_ capability: Capability, _ value: ModelChoice) -> String {
+    if let effort = value.effort, !effort.isEmpty, effort.lowercased() != "default" { return effort }
+    guard let effort = CreateLogic.resolvedEffort(capability, value) else { return text("model.effortUnavailable") }
+    return String.localizedStringWithFormat(text("model.followAgent"), effort)
+  }
+
   static func summary(_ capability: Capability, _ value: ModelChoice) -> String {
-    let model = capability.models.first { $0.id == value.modelId }
+    let modelId = CreateLogic.resolvedModelId(capability, modelId: value.modelId)
+    let model = modelId.map { id in capability.models.first { $0.id == id }?.name ?? id } ?? text("model.unavailable")
     let mode = capability.modes.first { $0.id == value.modeId }
     let extras = CreateLogic.extraConfigOptions(capability).compactMap { option -> String? in
       switch value.configOptionValues?[option.id] {
@@ -46,7 +61,7 @@ enum CreateModelOptions {
       case nil: nil
       }
     }
-    return ([model?.name ?? text("model.default"), value.effort, mode?.name] + extras)
+    return ([model, CreateLogic.resolvedEffort(capability, value), mode?.name] + extras)
       .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
   }
 

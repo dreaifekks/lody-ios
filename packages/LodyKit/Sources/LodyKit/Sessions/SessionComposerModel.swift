@@ -210,14 +210,14 @@ final class SessionComposerModel {
     if !capability.models.isEmpty {
       let current = capability.models.first { $0.id == value.modelId }
       rows.append(CreatePicker(
-        id: "model", glyph: .symbol("cpu"), title: current?.name ?? text("model.default"), placeholder: current == nil,
+        id: "model", glyph: .symbol("cpu"), title: CreateModelOptions.modelTitle(capability, value), placeholder: current == nil,
         options: capability.models.map { CreateOption(id: $0.id, title: $0.name, selected: $0.id == value.modelId) },
         searchPlaceholder: text("create.context.searchModels")))
     }
     let efforts = CreateLogic.effortsFor(capability, modelId: value.modelId)
     if !efforts.isEmpty {
       rows.append(CreatePicker(
-        id: "effort", glyph: .symbol("brain"), title: value.effort ?? text("model.default"), placeholder: value.effort == nil,
+        id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, value), placeholder: value.effort == nil,
         options: efforts.map { CreateOption(id: $0, title: $0, selected: $0 == value.effort) }))
     }
     if let permission = CreateLogic.permissionMode(capability, value), !permission.options.isEmpty {

@@ -31,6 +31,22 @@ public enum CreateLogic {
     return capability?.configOptions?.first(where: isThoughtLevel)?.options.map(\.id) ?? []
   }
 
+  // Display-only: an inherited Agent value must never be persisted or sent as an override.
+  public static func resolvedModelId(_ capability: Capability?, modelId: String? = nil) -> String? {
+    if let modelId, !modelId.isEmpty, modelId.lowercased() != "default" { return modelId }
+    if case .string(let current)? = capability?.configOptions?.first(where: { $0.type == "select" && $0.category == "model" })?.currentValue,
+       !current.isEmpty, current.lowercased() != "default" { return current }
+    return nil
+  }
+
+  public static func resolvedEffort(_ capability: Capability?, _ choice: ModelChoice) -> String? {
+    if let effort = choice.effort, !effort.isEmpty, effort.lowercased() != "default" { return effort }
+    guard case .string(let current)? = capability?.configOptions?.first(where: isThoughtLevel)?.currentValue,
+          current.lowercased() != "default",
+          effortsFor(capability, modelId: resolvedModelId(capability, modelId: choice.modelId)).contains(current) else { return nil }
+    return current
+  }
+
   public static func capabilityFor(_ options: CreationOptions?, _ agent: CreationAgent?) -> Capability? {
     guard let options, let agent else { return nil }
     return capability(in: options.capabilities, machineId: agent.machineId, configId: agent.id, cliType: agent.cliType, agentType: agent.agentType)
