@@ -31,7 +31,13 @@ const bundleOptions = {
   ],
 };
 const bundle = await build(bundleOptions);
-const { settingsRows, editSetting, remoteSettings } = await import(
+const {
+  settingsRows,
+  editSetting,
+  remoteSettings,
+  openSettings,
+  forgetSettings,
+} = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
 );
 
@@ -976,4 +982,118 @@ test('advanced overrides avoid background setup, and endpoint credentials never 
     }),
     /invalid_provider_endpoint/,
   );
+});
+
+test('cached settings select a compact newer snapshot without replaying the backlog', async () => {
+  forgetSettings();
+  const remote = new Flock('cached-settings');
+  remote.set(['name'], 'Before', 1);
+  const before = remote.exportFile();
+  const offset = 9007199254740993000n;
+  let fresh = false;
+  globalThis.__settingsClient = class {
+    async bootstrap() {
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: String(offset),
+          snapshot: { body: fresh ? remote.exportFile() : before },
+          updates: [],
+          nextOffset: String(offset),
+          upToDate: true,
+        },
+      };
+    }
+    async head() {
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: String(offset + 2n * 1024n * 1024n),
+          nextOffset: String(offset + 2n * 1024n * 1024n),
+        },
+      };
+    }
+    async readOnce() {
+      // A wrong incremental choice returns the old projection, not a bootstrap error.
+      return {
+        ok: true,
+        result: {
+          nextOffset: String(offset + 2n * 1024n * 1024n),
+          upToDate: true,
+        },
+      };
+    }
+  };
+  const grant = async () => ({
+    token: 'fixture',
+    gatewayBaseUrl: 'https://example.com',
+  });
+  const signal = new AbortController().signal;
+  const first = await openSettings('adaptive-settings', grant, signal, {
+    cached: true,
+  });
+  assert.equal(first.flock.get(['name']), 'Before');
+  remote.set(['name'], 'After', 2);
+  fresh = true;
+  const next = await openSettings('adaptive-settings', grant, signal, {
+    cached: true,
+  });
+  assert.equal(next.flock.get(['name']), 'After');
+});
+
+test('cached settings retain cheap incremental updates and reset each completed read budget', async () => {
+  forgetSettings();
+  const remote = new Flock('incremental-settings');
+  remote.set(['name'], 'Before', 1);
+  const snapshot = remote.exportFile();
+  let payload;
+  globalThis.__settingsClient = class {
+    async bootstrap() {
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '1',
+          snapshot: { body: snapshot },
+          updates: [],
+          nextOffset: '1',
+          upToDate: true,
+        },
+      };
+    }
+    async head() {
+      return {
+        ok: true,
+        result: { snapshotOffset: '1', nextOffset: '99999999' },
+      };
+    }
+    async readOnce() {
+      return {
+        ok: true,
+        result: { payload: { body: payload }, nextOffset: '2', upToDate: true },
+      };
+    }
+  };
+  const grant = async () => ({
+    token: 'fixture',
+    gatewayBaseUrl: 'https://example.com',
+  });
+  const signal = new AbortController().signal;
+  await openSettings('incremental-settings', grant, signal, { cached: true });
+  for (let i = 0; i < 9; i++) {
+    const version = remote.version();
+    const name = `Update ${i}`;
+    remote.set(['name'], name, i + 2);
+    remote.set(['padding'], String(i).repeat(1024 * 1024), i + 2);
+    const json = new TextEncoder().encode(
+      JSON.stringify(remote.exportJson(version)),
+    );
+    payload = new Uint8Array(json.length + 4);
+    new DataView(payload.buffer).setUint32(0, json.length, false);
+    payload.set(json, 4);
+    const next = await openSettings('incremental-settings', grant, signal, {
+      cached: true,
+    });
+    assert.equal(next.flock.get(['name']), name);
+    assert.equal(next.flock.get(['padding']).length, 1024 * 1024);
+  }
 });

@@ -23,6 +23,14 @@ test('persistent runtime applies live increments to the existing replica and adv
   flock.set(['m', 'session-s1'], { title: 'Before', machineId: 'm1' }, 2);
   const snapshot = flock.exportFile(),
     version = flock.version();
+  const machineFlock = new Flock('machine');
+  machineFlock.importFile(snapshot);
+  machineFlock.set(
+    ['localProject', 'p2'],
+    { name: 'Machine only', rootPath: '/b' },
+    3,
+  );
+  const machineSnapshot = machineFlock.exportFile();
   flock.set(['m', 'session-s1', 'title'], 'After', 3);
   flock.set(['m', 'session-s1', 'parentSessionId'], 'parent', 4);
   const update = new TextEncoder().encode(
@@ -51,7 +59,7 @@ test('persistent runtime applies live increments to the existing replica and adv
           snapshotOffset: '1',
           nextOffset: '1',
           upToDate: true,
-          snapshot: { body: snapshot },
+          snapshot: { body: this.isMeta ? snapshot : machineSnapshot },
           updates: [],
         },
       };
@@ -233,16 +241,22 @@ test('persistent runtime applies live increments to the existing replica and adv
   });
   assert.equal(started.kind, 'result');
   await pickerReady.promise;
+  const metaOnly = JSON.parse((await first).catalog);
+  assert.equal(metaOnly.sessions[0].title, 'Before');
   assert.equal(
-    envelopes.some(
-      (event) =>
-        event.kind === 'event' && ['catalog', 'synced'].includes(event.method),
-    ),
+    metaOnly.projects.length,
+    1,
+    'metadata projects remain available while machine sync is pending',
+  );
+  const machineReady = catalogEvent();
+  machineBootstrap.resolve();
+  const initial = JSON.parse((await machineReady).catalog);
+  assert.equal(
+    envelopes.some((e) => e.method === 'syncError'),
     false,
   );
-  machineBootstrap.resolve();
-  const initial = JSON.parse((await first).catalog);
   assert.equal(initial.sessions[0].title, 'Before');
+  assert.ok(initial.projects.some((p) => p.id === 'm1:local:p2'));
   assert.equal(
     initial.projects.find((p) => p.id === 'm1:local:p1').repoFullName,
     'Afilmory/afilmory',
@@ -252,7 +266,7 @@ test('persistent runtime applies live increments to the existing replica and adv
     runtimeEvents
       .filter((m) => m.method === 'catalog' || m.method === 'synced')
       .map((m) => m.method),
-    ['catalog', 'synced'],
+    ['catalog', 'synced', 'catalog', 'synced'],
   );
   assert.deepEqual(
     runtimeEvents.find(
@@ -297,7 +311,7 @@ test('persistent runtime applies live increments to the existing replica and adv
       .repoFullName,
     'Afilmory/afilmory',
   );
-  assert.equal(changed.revision, 2);
+  assert.equal(changed.revision, 3);
   assert.equal(
     JSON.parse(changed.catalog).sessions[0].parentSessionId,
     'parent',
@@ -337,8 +351,13 @@ test('persistent runtime applies live increments to the existing replica and adv
     workspaceId: 'synthetic-workspace',
   });
   assert.deepEqual(probe.payload, {
-    creationOptionsTrial: { 'm1:local:p1': 'ok agents=0 capabilities=0' },
-    machines: { m1: { otherKeys: ['e', 'm'], capabilities: [] } },
+    creationOptionsTrial: {
+      'm1:local:p1': 'ok agents=0 capabilities=0',
+      'm1:local:p2': 'ok agents=0 capabilities=0',
+    },
+    machines: {
+      m1: { otherKeys: ['e', 'localProject', 'm'], capabilities: [] },
+    },
   });
   const writes = {
     createSession: {
@@ -751,4 +770,109 @@ test('overlapping starts preserve the old scope until provider cleanup completes
     ).error.code,
     'workspace_changed',
   );
+});
+
+test('catalog frame import serves heartbeat macrotasks between slices and preserves real Flock updates', async (t) => {
+  const { catalogImportCheckpoint, importCatalogUpdates } =
+    await import('../../../../packages/cloud-runtime/src/runtime/catalog-sync.ts');
+  const { encodeFrame } =
+    await import('../../../../packages/cloud-runtime/src/frames.ts');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0,
+    imported = 0,
+    heartbeatAt;
+  t.mock.method(performance, 'now', () => now);
+  const server = new Flock('catalog-frames');
+  const target = new Flock('catalog-reader');
+  const frames = [];
+  for (let i = 0; i < 10; i++) {
+    const version = server.version();
+    server.set(['m', `session-${i}`], { title: `Session ${i}` }, i + 1);
+    frames.push(
+      encodeFrame(
+        new TextEncoder().encode(JSON.stringify(server.exportJson(version))),
+      ),
+    );
+  }
+  const bytes = new Uint8Array(
+    frames.reduce((sum, frame) => sum + frame.length, 0),
+  );
+  let offset = 0;
+  for (const frame of frames) {
+    bytes.set(frame, offset);
+    offset += frame.length;
+  }
+  const original = target.importJson.bind(target);
+  t.mock.method(target, 'importJson', (json) => {
+    original(json);
+    imported++;
+    now += 4;
+  });
+  setTimeout(() => {
+    heartbeatAt = imported;
+  }, 0);
+  const result = importCatalogUpdates(
+    target,
+    bytes,
+    catalogImportCheckpoint(new AbortController().signal),
+  );
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  await turn();
+  assert.equal(imported, 3, 'one slice imports only its 12 ms allowance');
+  t.mock.timers.tick(0);
+  await turn();
+  assert.equal(
+    heartbeatAt,
+    3,
+    'native ping can run before all catalog frames finish',
+  );
+  for (let i = 0; i < 3; i++) {
+    t.mock.timers.tick(0);
+    await turn();
+  }
+  await result;
+  for (let i = 0; i < 10; i++)
+    assert.equal(target.get(['m', `session-${i}`]).title, `Session ${i}`);
+});
+
+test('scope cancellation at a catalog import yield stops before the next frame', async (t) => {
+  const { catalogImportCheckpoint, importCatalogUpdates } =
+    await import('../../../../packages/cloud-runtime/src/runtime/catalog-sync.ts');
+  const { encodeFrame } =
+    await import('../../../../packages/cloud-runtime/src/frames.ts');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const server = new Flock('cancel-server'),
+    target = new Flock('cancel-reader');
+  server.set(['m', 'session-one'], { title: 'One' }, 1);
+  const first = encodeFrame(
+    new TextEncoder().encode(JSON.stringify(server.exportJson())),
+  );
+  const version = server.version();
+  server.set(['m', 'session-two'], { title: 'Two' }, 2);
+  const second = encodeFrame(
+    new TextEncoder().encode(JSON.stringify(server.exportJson(version))),
+  );
+  const bytes = new Uint8Array(first.length + second.length);
+  bytes.set(first);
+  bytes.set(second, first.length);
+  const controller = new AbortController();
+  const original = target.importJson.bind(target);
+  t.mock.method(target, 'importJson', (json) => {
+    original(json);
+    now += 12;
+  });
+  setTimeout(() => controller.abort(new Error('workspace_changed')), 0);
+  const result = importCatalogUpdates(
+    target,
+    bytes,
+    catalogImportCheckpoint(controller.signal),
+  );
+  const rejected = assert.rejects(result, /workspace_changed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(0);
+  await rejected;
+  assert.equal(target.get(['m', 'session-one']).title, 'One');
+  assert.equal(target.get(['m', 'session-two']), undefined);
 });
