@@ -55,6 +55,8 @@ public enum LodyRadius {
 }
 
 public enum LodyIconSize {
+    /// Beside footnote text in a row's detail line; the glyph stays under the text's cap height.
+    public static let xxs: CGFloat = 10
     public static let xs: CGFloat = 12
     /// Inline with footnote / caption text, in chips and small buttons.
     public static let sm: CGFloat = 16
@@ -66,6 +68,7 @@ public enum LodyIconSize {
     public static let xl: CGFloat = 28
 
     public static let all: [(name: String, value: CGFloat)] = [
+        ("xxs", xxs),
         ("xs", xs),
         ("sm", sm),
         ("md", md),

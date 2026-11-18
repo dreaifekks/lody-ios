@@ -35,7 +35,7 @@ struct SessionShareForm: View {
             VStack(alignment: .leading, spacing: 6) {
               Text(state.title).font(.headline)
               Label(state.text(state.active ? "shared" : "private"), systemImage: state.active ? "link" : "lock")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).imageScale(.small).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)

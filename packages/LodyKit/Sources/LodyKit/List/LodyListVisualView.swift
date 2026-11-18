@@ -277,7 +277,7 @@ private struct LodyListQuotaView: View {
 private struct QuotaDetailLabelStyle: LabelStyle {
   func makeBody(configuration: Configuration) -> some View {
     HStack(spacing: 5) {
-      configuration.icon
+      configuration.icon.imageScale(.small)
       configuration.title
     }
   }

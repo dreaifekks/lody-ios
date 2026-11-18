@@ -173,7 +173,7 @@ final class HomeOnboardingView: UIView {
 
   private func card(icon: LodyIcon, heading: String, control: UIView, hint: String) -> UIView {
     let title = UIStackView(arrangedSubviews: [
-      Self.icon(icon, size: LodyIconSize.sm, tint: LodyUIColor.iconSecondary),
+      Self.icon(icon, size: LodyIconSize.xs, tint: LodyUIColor.iconSecondary),
       Self.label(Self.text(heading), style: .subhead, color: LodyUIColor.textPrimary),
     ])
     title.spacing = LodySpacing.sm

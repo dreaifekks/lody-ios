@@ -790,14 +790,14 @@ private struct ChatRowContent: View {
     HStack(spacing: LodySpacing.xs) {
       if !project.isEmpty {
         if row.placeIsRepo {
-          RepositoryIcon(repository: row.repository)
+          RepositoryIcon(repository: row.repository, size: LodyIconSize.xxs)
         } else {
-          Glyph(icon: .folder, size: LodyIconSize.sm, color: LodyColor.iconSecondary)
+          Glyph(icon: .folder, size: LodyIconSize.xxs, color: LodyColor.iconSecondary)
         }
         Text(project).lodyTextStyle(.footnote).foregroundStyle(LodyColor.textSecondary).lineLimit(1)
       }
       if !branch.isEmpty {
-        Glyph(icon: .branch, size: LodyIconSize.sm, color: LodyColor.iconTertiary)
+        Glyph(icon: .branch, size: LodyIconSize.xxs, color: LodyColor.iconTertiary)
           .padding(.leading, project.isEmpty ? 0 : LodySpacing.xs)
         Text(branch).lodyTextStyle(.footnote).foregroundStyle(LodyColor.textTertiary).lineLimit(1).truncationMode(.middle)
       }

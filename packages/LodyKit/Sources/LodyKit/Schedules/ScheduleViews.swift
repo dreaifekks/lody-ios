@@ -159,7 +159,7 @@ struct ScheduleGlyph: View {
 
   var body: some View {
     icon.image.resizable().renderingMode(.template).foregroundStyle(color)
-      .frame(width: LodyIconSize.sm, height: LodyIconSize.sm)
+      .frame(width: LodyIconSize.xxs, height: LodyIconSize.xxs)
   }
 }
 
