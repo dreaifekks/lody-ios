@@ -22,9 +22,20 @@ private final class OnboardingFixture {
     OnboardingService(
       changes: [Self.changed],
       state: { [self] in state },
-      login: { [self] _ in move([.idle: .waiting, .waiting: .waiting, .error: .signedIn, .signedIn: .signedIn][phase] ?? phase) },
+      login: { [self] _ in login() },
       cancel: { [self] in move(.error) }
     )
+  }
+
+  private func login() {
+    let transitions: [Phase: Phase] = [.idle: .waiting, .waiting: .waiting, .error: .signedIn, .signedIn: .signedIn]
+    let next = transitions[phase] ?? phase
+    move(next)
+    guard next == .waiting else { return }
+    Task { [self] in
+      try? await Task.sleep(for: .seconds(1.5))
+      if phase == .waiting { move(.error) }
+    }
   }
 
   private var state: OnboardingState {

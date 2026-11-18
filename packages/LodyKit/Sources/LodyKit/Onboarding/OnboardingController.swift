@@ -46,7 +46,6 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
 
   private var providerButtons: [(NativeLastLoginMethod, LoginButton)] = []
   private var emailEntry: LoginButton!
-  private let cancelButton = LoginButton(.ghost, title: String(localized: "common.cancel", bundle: .lody), centered: true)
   private let nameRow = UIView()
   private let nameField = LoginField(label: String(localized: "auth.login.nameLabel", bundle: .lody))
   private let emailField = LoginField(label: String(localized: "auth.login.emailLabel", bundle: .lody))
@@ -286,11 +285,9 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
       button.setTrailing(LoginBadge(String(localized: "auth.login.lastUsed", bundle: .lody)))
       button.accessibilityLabel = "\(button.titleText), \(String(localized: "auth.login.lastUsed", bundle: .lody))"
     }
-    cancelButton.accessibilityIdentifier = "auth-cancel"
-    cancelButton.addAction(UIAction { [weak self] _ in self?.service.cancel() }, for: .touchUpInside)
     providersPanel.axis = .vertical
     providersPanel.spacing = 12
-    [group, entry, cancelButton].forEach(providersPanel.addArrangedSubview)
+    [group, entry].forEach(providersPanel.addArrangedSubview)
     install(providersPanel, for: .providers)
   }
 
@@ -736,7 +733,6 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
         ? String(localized: "auth.login.loading", bundle: .lody)
         : providerTitle(kind)
     }
-    cancelButton.isHidden = !state.busy || started == .email
     submit.setWorking(state.busy && started == .email)
     if state.busy, started == .email {
       submit.titleText = signUp ? String(localized: "auth.login.creatingAccount", bundle: .lody) : String(localized: "auth.login.loading", bundle: .lody)

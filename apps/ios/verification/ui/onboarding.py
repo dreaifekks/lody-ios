@@ -39,10 +39,15 @@ ui.capture('create-account')
 ui.axe('tap', '--id', 'auth-email-back')
 ui.element('auth.native.google')
 # Preview uses the production page with a deterministic service, no provider/network.
+provider_ids = ('auth.native.apple', 'auth.native.google', 'auth.native.github', 'auth.native.discord', 'auth-email-entry')
+resting = {i['AXUniqueId']: i['frame'] for i in ui.state() if i.get('AXUniqueId') in provider_ids}
 ui.axe('tap', '--id', 'auth.native.google')
-ui.element('auth-cancel')
+ui.wait(lambda items: any(item.get('AXUniqueId') == 'auth.native.google' and item.get('AXLabel') == catalog.text('auth.login.loading') for item in items), 'Provider did not show its waiting title')
 ui.capture('waiting')
-ui.axe('tap', '--id', 'auth-cancel')
+waiting = ui.state()
+assert not any(item.get('AXUniqueId') == 'auth-cancel' for item in waiting), 'Provider sign-in shows its own cancel; the page adds none'
+shifted = {i['AXUniqueId']: i['frame'] for i in waiting if i.get('AXUniqueId') in resting and i['frame'] != resting[i['AXUniqueId']]}
+assert not shifted, ('Provider panel moved while waiting', shifted, resting)
 ui.wait(lambda items: any(item.get('AXLabel') == catalog.text('auth.error.cancelledSignIn') for item in items), 'Missing cancellation error')
 ui.capture('error')
 ui.axe('tap', '--id', 'auth.native.google')
