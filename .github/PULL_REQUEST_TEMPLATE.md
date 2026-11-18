@@ -1,7 +1,7 @@
 <!--
 AGENT-INSTRUCTIONS — follow these. Keep them commented out. Do not copy them into the visible description. Delete them after you comply.
 
-You are the agent preparing this pull request for Lody iOS. Decide who wrote the change, then edit this body.
+You are the agent preparing this pull request for Innei/lody-ios. Decide who wrote the change, then edit this body.
 
 HUMAN — a person wrote the code. No agent produced the diff.
 - Fill the Human section.
@@ -10,10 +10,9 @@ HUMAN — a person wrote the code. No agent produced the diff.
 AI — an agent produced the diff.
 - Fill the Human section too: what changed, screenshots or recordings, how it was verified, acceptance, and the related issue.
 - Then decide if the AI section stays:
-  - Identify the pull request's base repository from the PR target, not from a fork's owner or the local `origin` remote.
-  - Check the authenticated account's permissions on that base repository with `gh api repos/{base-owner}/{base-repo} --jq '.permissions.admin == true or .permissions.maintain == true'`, replacing the placeholders with the actual base repository.
-  - If the check returns `true`, the author is a repository administrator or maintainer and may delete the entire AI section.
-  - For any other result — including missing permissions, a 404, an error, or a failed check — the AI section is mandatory. Do not delete it.
+  - Run `gh api user --jq .login`.
+  - `Innei` is the owner of `Innei/lody-ios`. Delete the entire AI section. Do not use `gh repo view` on a fork; a fork owner's login is not this repository's owner.
+  - Anything else — another login, a 404, an error, or a failed check — means an outside collaborator or an external contributor. The AI section is mandatory. Do not delete it.
 
 When the AI section is mandatory you MUST fill all four fields. Leaving a placeholder is not done.
 
@@ -32,12 +31,12 @@ Verification belongs in the Human section, against this repo:
 - `pnpm test` when presentation or session behavior changes.
 - `pnpm bundle` when the JS bundle can change.
 - A signed iOS simulator build when native code, pods, or signing changes. Leave normal Xcode signing enabled.
-- A UI change is anything a person sees or touches: layout, motion, navigation chrome, sheets, lists, composer, icons, color, or copy that changes layout. Add or update a behavior check in `verification/ui`, then run the affected cases in English (`en`, `en_US`) with no login, credentials, cloud, or connected machine. Omit `--appearance` so the run covers light and dark, and pass `--require-video`. `--suite core` is light-only and does not record video; it does not satisfy this.
+- A UI change is anything a person sees or touches: layout, motion, navigation chrome, sheets, lists, composer, icons, color, or copy that changes layout. Add or update a behavior check in `apps/ios/verification/ui`, then run the affected cases in English (`en`, `en_US`) with no login, credentials, cloud, or connected machine. Omit `--appearance` so the run covers light and dark, and pass `--require-video`. `--suite core` is light-only and does not record video; it does not satisfy this.
   - The run writes `<output>/<appearance>/<case>/*.png` and `<output>/<appearance>/<case>/run.mp4`. `--parallel` puts `pages`, `send`, or `chat` between `<output>` and the appearance.
   - This PR must contain every one of those PNGs and every `run.mp4`. In the body, reference each PNG as `![<appearance> <case> <name>](<path>)` and each video as `[<appearance> <case> run.mp4](<path>)`. Upload them with `gh` 2.99.0 or newer by repeating `--attach <path>` on `gh pr create` or `gh pr edit`. A path written in the body is rewritten to the uploaded asset. `gh` uploads at most 50 files per command; another `gh pr edit --attach` batch covers the rest, and the body still references every file.
   - Do not commit `.artifacts`. A local path, a CI log, or a prose description does not count. Skip `*.json`, logs, and accessibility trees. Attach `failure.png` only when that frame is the behavior under review.
-- App sources in iOS/ and shared extension sources in Shared/ are owned by XcodeGen; membership or shared-source changes include `pnpm prebuild`.
-- Native changes persist in project.yml, native app config, iOS/, Shared/, Libraries/ or the relevant Swift package. A generated `Lody.xcodeproj` edit is not the source of truth.
+- SwiftPM discovers LodyKit sources automatically; changes to app/extension membership or shared source references include `pnpm prebuild`.
+- Native changes persist in project.yml, native app config, or LodyKit. A generated `apps/ios/Lody.xcodeproj` edit is not the source of truth.
 - Delete a test checkbox that does not apply and say why that gate was skipped.
 -->
 
@@ -73,11 +72,11 @@ Required for a UI change. One group per case and appearance. Point each image an
 - [ ] `pnpm test`
 - [ ] `pnpm bundle`
 - [ ] Signed iOS simulator build
-- [ ] UI behavior check in `verification/ui` (English, light and dark, `--require-video`)
+- [ ] UI behavior check in `apps/ios/verification/ui` (English, light and dark, `--require-video`)
 - [ ] Every PNG and every `run.mp4` from those cases is attached to this PR
 - [ ] `pnpm prebuild`
 
-<!-- User-visible requirement alignment: an acceptance round from verification/ui/README.md, or why none is needed. -->
+<!-- User-visible requirement alignment: an acceptance round from apps/ios/verification/ui/README.md, or why none is needed. -->
 
 - Acceptance: ...
 
@@ -86,7 +85,7 @@ Required for a UI change. One group per case and appearance. Point each image an
 <!--
 Link the issue this PR addresses.
 Example: Closes #123, Refs #123
-Companion Lody PR, when this client depends on one: https://github.com/LodyAI/Lody/pull/NNNN
+Companion Cloud PR, when this client depends on one: https://github.com/loro-dev/lody/pull/NNNN
 -->
 
 ### AI
@@ -95,8 +94,8 @@ Delete this section if a person wrote the change.
 
 <!--
 AGENT-INSTRUCTIONS — keep this commented out.
-A person wrote the change, or the base-repository permission check above confirms the author is an administrator or maintainer: delete this entire AI section.
-An agent wrote the change and those permissions are not confirmed: do not delete this section. Fill every field below. Do not leave the placeholders.
+A person wrote the change, or `gh api user --jq .login` prints `Innei`: delete this entire AI section.
+An agent wrote the change and the author is an outside collaborator or an external contributor: do not delete this section. Fill every field below. Do not leave the placeholders.
 Harness: product and version.
 Model: the model id this session called.
 Thinking level: the level this session was set to, or `n/a` when this harness has none.

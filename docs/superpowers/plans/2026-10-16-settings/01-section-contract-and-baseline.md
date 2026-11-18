@@ -20,13 +20,13 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
-- [apps/mobile/modules/lody-kit/src/list/NativeList.ts](../../../../apps/mobile/modules/lody-kit/src/list/NativeList.ts)
-- [apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift](../../../../apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift)
-- [apps/mobile/src/screens/debug/HomePreviewScreen.tsx](../../../../apps/mobile/src/screens/debug/HomePreviewScreen.tsx)
-- [apps/mobile/src/screens/debug/SettingsPreviewScreen.tsx](../../../../apps/mobile/src/screens/debug/SettingsPreviewScreen.tsx)
-- [apps/mobile/verification/ui/home.py](../../../../apps/mobile/verification/ui/home.py)
-- [apps/mobile/verification/ui/appearance.py](../../../../apps/mobile/verification/ui/appearance.py)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
+- `apps/mobile/modules/lody-kit/src/list/NativeList.ts`
+- `apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift`
+- `apps/mobile/src/screens/debug/HomePreviewScreen.tsx`
+- `apps/mobile/src/screens/debug/SettingsPreviewScreen.tsx`
+- `apps/mobile/verification/ui/home.py`
+- `apps/mobile/verification/ui/appearance.py`
 
 ## 工作内容
 
@@ -143,7 +143,7 @@
 
 ## 离线场景与可复现命令
 
-新增 [settingsBaseline.tsx](../../../../apps/mobile/src/screens/debug/settingsBaseline.tsx)，只在 UI Verify 中为真实 SettingsScreen 和其 push 页面注入 Auth／Catalog context 与连接状态。退出场景恢复原 context／连接，覆盖六个可独立重复进入的场景：
+新增 `settingsBaseline.tsx`，只在 UI Verify 中为真实 SettingsScreen 和其 push 页面注入 Auth／Catalog context 与连接状态。退出场景恢复原 context／连接，覆盖六个可独立重复进入的场景：
 
 | verifyCase                       | 注入边界                                     | 基线关注点                                                   |
 | -------------------------------- | -------------------------------------------- | ------------------------------------------------------------ |

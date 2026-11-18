@@ -1,4 +1,17 @@
 import {
+  proposalOf,
+  type ProposalPresentation,
+} from '../protocol/proposals.ts';
+import {
+  operationPresentation,
+  type OperationPresentation,
+} from './operation-presentation.ts';
+import {
+  type SessionUsage,
+  projectSessionUsage,
+} from '../protocol/session-usage.ts';
+import { presentMessageText } from '../protocol/message-references.ts';
+import {
   readTurnMetadata,
   type TurnMetadata,
 } from '../protocol/turnMetadata.ts';
@@ -22,9 +35,20 @@ export type ItemSummary =
   | {
       itemId: string;
       rev: number;
+      type:
+        | 'operation_progress'
+        | 'operation_completion'
+        | 'operation_completion_batch';
+      operation: OperationPresentation;
+    }
+  | {
+      itemId: string;
+      rev: number;
       type: 'system_notice';
       name: string;
       meta?: SystemNoticeMeta;
+      /** `agent_role_proposal` / `schedule_proposal`, when well-formed. */
+      proposal?: ProposalPresentation;
     }
   | { itemId: string; rev: number; type: 'text'; text: string }
   | { itemId: string; rev: number; type: 'thought'; text: string }
@@ -48,12 +72,18 @@ export type ItemSummary =
       added?: number;
       removed?: number;
       hasDetail: boolean;
+      /** Plan text a `switch_mode` (plan-approval) card carries; see `planExitMarkdown`. */
+      plan?: string;
       permission?: {
         requestId: string;
         pending: boolean;
         options?: { optionId: string; name: string; kind?: string }[];
         kind?: 'permission' | 'ask_user_question';
         questionMeta?: QuestionMeta;
+        /** The option a settled request was answered with (history `outcome.optionId`). */
+        chosenOptionId?: string;
+        /** The request was withdrawn (history outcome `cancelled`), not answered. */
+        withdrawn?: boolean;
       };
     }
   | {
@@ -86,6 +116,7 @@ export type EntrySummary = TurnMetadata & {
   status: string;
   finished: boolean;
   userTurnId?: string;
+  userId?: string;
   executionId?: string;
   executionFinished?: boolean;
   steerCount?: number;
@@ -104,7 +135,12 @@ export type Envelope = {
   status: string;
   reason?: string;
   revision: number;
-  billableTurnCount: number;
+  billableTurnCount?: number;
+  usage?: SessionUsage;
+  historyHasMore?: boolean;
+  historyLoading?: boolean;
+  /** Locally persisted owner inputs whose delivery is still being reconciled. */
+  pendingRoostInputs?: readonly Record<string, unknown>[];
   awaitingUserSince?: number;
   preview?: { label: string; active: boolean };
   composer?: {
@@ -112,6 +148,8 @@ export type Envelope = {
     modeId?: string;
     effort?: string;
     configOptionValues?: Record<string, string | boolean>;
+    /** The Role the latest turn ran as; null after an explicit None (web). */
+    agentRoleId?: string | null;
   };
   entries: EntrySummary[];
 };
@@ -150,6 +188,26 @@ export function identityAt(list: LoroList, index: number) {
   return id ? `${id.peer}:${id.counter}` : `idx:${index}`;
 }
 
+
+/**
+ * Plan text carried by a plan-approval (`switch_mode`) card — web
+ * `resolvePlanExitMarkdown` (`packages/components/.../plan-surface.ts`).
+ * Claude puts it in `rawInput.plan` (its `content` can later be replaced by a
+ * status message), Kimi in the first `content` text block; Codex carries none
+ * here and renders a separate `proposed_plan` item instead.
+ */
+function planExitMarkdown(raw: any): string | undefined {
+  const rawPlan = raw.rawInput?.plan;
+  if (typeof rawPlan === 'string' && rawPlan.trim()) return rawPlan.trim();
+  const block = (Array.isArray(raw.content) ? raw.content : []).find(
+    (block: any) =>
+      block?.type === 'content' &&
+      block.content?.type === 'text' &&
+      typeof block.content.text === 'string' &&
+      block.content.text.trim(),
+  );
+  return block ? String(block.content.text).trim() : undefined;
+}
 function countDiff(content: unknown) {
   if (!Array.isArray(content)) return undefined;
   let added = 0,
@@ -187,6 +245,22 @@ function summarizeItem(
     : localId;
   const key = `${entryId}/${itemId}`;
 
+  if (
+    [
+      'operation_progress',
+      'operation_completion',
+      'operation_completion_batch',
+    ].includes(type)
+  ) {
+    const operation = operationPresentation(raw);
+    return {
+      itemId,
+      rev: bump(projection, key, JSON.stringify(operation)),
+      type,
+      operation,
+    } as ItemSummary;
+  }
+
   if (type === 'system_notice') {
     const name = typeof raw.name === 'string' ? raw.name : '';
     const meta = {
@@ -196,12 +270,14 @@ function summarizeItem(
       message:
         typeof raw.meta?.message === 'string' ? raw.meta.message : undefined,
     };
+    const proposal = proposalOf(name, raw.meta);
     return {
       itemId,
-      rev: bump(projection, key, JSON.stringify({ name, meta })),
+      rev: bump(projection, key, JSON.stringify({ name, meta, proposal })),
       type,
       name,
       meta,
+      ...(proposal ? { proposal } : {}),
     };
   }
 
@@ -212,6 +288,7 @@ function summarizeItem(
       rev: bump(projection, key, text),
       type,
       text,
+      ...(raw.references?.length ? { references: raw.references } : {}),
     } as ItemSummary;
   }
 
@@ -268,6 +345,10 @@ function summarizeItem(
     const file = {
       id: String(raw.fileId ?? ''),
       fileName: String(raw.fileName ?? '附件'),
+      mimeType:
+        typeof raw.mimeType === 'string' && raw.mimeType.length <= 255
+          ? raw.mimeType
+          : undefined,
       transport: typeof raw.transport === 'string' ? raw.transport : undefined,
       sizeBytes: Number.isSafeInteger(raw.sizeBytes)
         ? raw.sizeBytes
@@ -287,21 +368,30 @@ function summarizeItem(
 
   if (type === 'tool_call') {
     const diff = countDiff(raw.content);
+    const plan =
+      raw.kind === 'switch_mode' ? planExitMarkdown(raw) : undefined;
     const questionMeta = parseQuestionMeta(raw.permissionRequest?._meta);
     const isQuestion =
       !!questionMeta ||
       raw.permissionRequest?.kind === 'ask_user_question' ||
       raw.kind === 'ask_user_question';
+    // Only the decision itself: question answers (possibly secret) stay in `itemDetail`.
+    const outcome = raw.permissionRequest?.outcome;
     const permission =
       !parentItemId && raw.permissionRequest
         ? {
             requestId: String(raw.permissionRequest.requestId ?? ''),
-            pending: raw.permissionRequest.outcome == null,
+            pending: outcome == null,
             options: raw.permissionRequest.options,
             kind: isQuestion
               ? ('ask_user_question' as const)
               : ('permission' as const),
             questionMeta,
+            ...(outcome?.outcome === 'selected' &&
+            typeof outcome.optionId === 'string'
+              ? { chosenOptionId: outcome.optionId }
+              : {}),
+            ...(outcome?.outcome === 'cancelled' ? { withdrawn: true } : {}),
           }
         : undefined;
     const summary = {
@@ -318,6 +408,7 @@ function summarizeItem(
         (Array.isArray(raw.content) && raw.content.length > 0) ||
         raw.rawInput != null ||
         raw.rawOutput != null,
+      ...(plan ? { plan } : {}),
       permission,
     };
     summary.rev = bump(
@@ -367,6 +458,7 @@ function summarizeItem(
         raw.isBackgrounded == null ? undefined : Boolean(raw.isBackgrounded),
       skipTranscript:
         raw.skipTranscript == null ? undefined : Boolean(raw.skipTranscript),
+      group: taskGroup(raw),
       run: Array.isArray(raw.run?.items)
         ? {
             sessionId: String(raw.run.sessionId ?? raw.taskId ?? itemId),
@@ -398,14 +490,20 @@ function summarizeItem(
 
 function summarizeEntry(
   projection: Projection,
-  history: LoroList,
+  history: LoroList | undefined,
   entry: any,
   index: number,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
 ) {
-  const id = String(entry?.id ?? identityAt(history, index));
+  const id = String(
+    entry?.id ?? (history ? identityAt(history, index) : `idx:${index}`),
+  );
+  const fallbackItemId = (itemIndex: number) => {
+    if (history) return `idx:${index}:${itemIndex}`;
+    return `idx:${id}:${itemIndex}`;
+  };
   if (pendingOutcomes?.size && Array.isArray(entry?.items)) {
-    const container = history.get(index) as LoroMap | undefined;
+    const container = history?.get(index) as LoroMap | undefined;
     const items =
       container && typeof container.get === 'function'
         ? (container.get('items') as LoroList)
@@ -414,11 +512,19 @@ function summarizeEntry(
       ...entry,
       items: entry.items.map((item: any, i: number) => {
         const request = item?.permissionRequest;
-        let itemId = `idx:${index}:${i}`;
+        let itemId = fallbackItemId(i);
         if (items && typeof items.getIdAt === 'function')
           itemId = identityAt(items, i);
         if (item?.type === 'tool_call' && typeof item.toolCallId === 'string')
           itemId = item.toolCallId;
+        // A proposal decision whose upload is unconfirmed stays undecided, so it can be retried.
+        if (
+          item?.type === 'system_notice' &&
+          pendingOutcomes.has(`${id}/${itemId}/notice`)
+        ) {
+          const { outcome: _outcome, ...meta } = item.meta ?? {};
+          return { ...item, meta };
+        }
         const key = `${id}/${itemId}/${request?.requestId}`;
         if (
           !pendingOutcomes.has(key) ||
@@ -432,7 +538,7 @@ function summarizeEntry(
   const fingerprint = JSON.stringify(entry);
   const cached = projection.entries.get(id);
   if (cached && cached.fingerprint === fingerprint) return cached.value;
-  const container = history.get(index) as LoroMap | undefined;
+  const container = history?.get(index) as LoroMap | undefined;
   const items =
     container && typeof (container as any).get === 'function'
       ? ((container as any).get('items') as LoroList | undefined)
@@ -441,11 +547,13 @@ function summarizeEntry(
   const summarizedItems: ItemSummary[] = list.map((item: any, i: number) =>
     summarizeItem(
       projection,
-      item,
+      entry.role === 'user' && item?.type === 'text'
+        ? { ...item, ...presentMessageText(item.text ?? '', item.spans) }
+        : item,
       id,
       items && typeof items.getIdAt === 'function'
         ? identityAt(items, i)
-        : `idx:${index}:${i}`,
+        : fallbackItemId(i),
     ),
   );
   const fileDiffs = (Array.isArray(entry?.fileDiff) ? entry.fileDiff : [])
@@ -484,11 +592,23 @@ function summarizeEntry(
     permissionWaitMs: entry?.permissionWaitMs,
     modelInfo: modelInfo.name || modelInfo.modelId ? modelInfo : undefined,
     userTurnId: entry?.userTurnId,
+    // Who sent a user turn, for its avatar and name.
+    userId: typeof entry?.userId === 'string' ? entry.userId : undefined,
     items: summarizedItems,
     ...(fileDiffs.length ? { fileDiffs } : {}),
   };
   projection.entries.set(id, { fingerprint, value });
   return value;
+}
+
+/** Use the ordinary transcript projection for locally pending upstream inputs. */
+export function projectPendingInputs(
+  doc: LoroDoc,
+  entries: readonly unknown[],
+) {
+  return entries.map((entry, index) =>
+    summarizeEntry(projectionFor(doc), undefined, entry, index),
+  );
 }
 
 export function projectSession(
@@ -497,8 +617,17 @@ export function projectSession(
   reason?: string,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+  historyOverride?: readonly unknown[],
+  historyMetadata?: readonly Record<string, unknown>[],
+  /**
+   * First history index sent to the host. Earlier entries still feed usage,
+   * billing, execution and the composer; only the transcript is windowed.
+   */
+  historyStart = 0,
 ): Envelope {
-  const history = doc.getList('history') as LoroList;
+  const history = historyOverride
+    ? undefined
+    : (doc.getList('history') as LoroList);
   const links = doc.getMap('lodySteerLinks').toJSON() as Record<string, any>;
   const configFor = (id: string, input: any) => {
     const link = links[id];
@@ -515,11 +644,15 @@ export function projectSession(
       _lodySteerMode: link.mode,
     };
   };
-  const raw = (history.toJSON() as any[]).map((entry) => ({
-    ...entry,
-    inputConfig: configFor(entry.id, entry.inputConfig),
-  }));
-  const input = raw.findLast((entry) => entry?.role === 'user')?.inputConfig;
+  const raw = ((historyOverride ?? history!.toJSON()) as any[]).map(
+    (entry) => ({
+      ...entry,
+      inputConfig: configFor(entry.id, entry.inputConfig),
+    }),
+  );
+  const input =
+    raw.findLast((entry) => entry?.role === 'user')?.inputConfig ??
+    historyMetadata?.findLast((entry) => entry.role === 'user')?.inputConfig;
   const options =
     input?.configOptionValues && typeof input.configOptionValues === 'object'
       ? input.configOptionValues
@@ -535,15 +668,29 @@ export function projectSession(
   const effort = [options.reasoning_effort, options.effort].find(
     (value) => typeof value === 'string',
   );
-  const summarized = raw.map((entry, index) =>
-    summarizeEntry(projectionFor(doc), history, entry, index, pendingOutcomes),
-  );
+  const start = Math.min(Math.max(0, historyStart), raw.length);
+  const summarized = raw
+    .slice(start)
+    .map((entry, offset) =>
+      summarizeEntry(
+        projectionFor(doc),
+        history,
+        entry,
+        start + offset,
+        pendingOutcomes,
+      ),
+    );
 
   // A daemon history-sync timeout can place a concurrent reply before its input.
   // Use its explicit causal link; never sort streamed turns by arrival time.
   const userIds = new Set(
     summarized.filter((e) => e.role === 'user').map((e) => e.id),
   );
+  // Inputs before the window are still landed: they must not reappear as queued.
+  const landedUserIds = new Set(userIds);
+  for (const entry of raw.slice(0, start))
+    if (entry?.role === 'user' && typeof entry.id === 'string')
+      landedUserIds.add(entry.id);
   const replies = new Map<string, typeof summarized>();
   for (const entry of summarized)
     if (entry.role === 'assistant' && userIds.has(entry.userTurnId!)) {
@@ -568,7 +715,7 @@ export function projectSession(
     [
       ...raw,
       ...queued
-        .filter((item) => !userIds.has(item.userTurnId))
+        .filter((item) => !landedUserIds.has(item.userTurnId))
         .map((item) => ({
           id: item.userTurnId,
           role: 'user',
@@ -589,6 +736,7 @@ export function projectSession(
     status,
     reason,
     revision,
+    usage: projectSessionUsage(session, raw),
     billableTurnCount: billableTurnCount({ history: raw, mq: queued }),
     awaitingUserSince:
       typeof session?.awaitingUserSince === 'number'
@@ -608,6 +756,10 @@ export function projectSession(
             ...(Object.keys(composerValues).length
               ? { configOptionValues: composerValues }
               : {}),
+            ...(typeof input.agentRoleId === 'string' ||
+            input.agentRoleId === null
+              ? { agentRoleId: input.agentRoleId }
+              : {}),
           },
         }
       : {}),
@@ -617,7 +769,7 @@ export function projectSession(
         .filter(
           (item) =>
             typeof item.userTurnId === 'string' &&
-            !userIds.has(item.userTurnId),
+            !landedUserIds.has(item.userTurnId),
         )
         .map((item) => ({
           id: item.userTurnId,
@@ -637,7 +789,12 @@ export function projectSession(
           ).map((block: any, index: number) =>
             summarizeItem(
               projectionFor(doc),
-              block,
+              block?.type === 'text'
+                ? {
+                    ...block,
+                    ...presentMessageText(block.text ?? '', block.spans),
+                  }
+                : block,
               item.userTurnId,
               `queue:${index}`,
             ),
@@ -645,4 +802,19 @@ export function projectSession(
         })),
     ],
   };
+}
+
+/**
+ * Web `groupOf` (`subagent-task-state.tsx`): a scheduled wakeup is a task; anything with a
+ * subagent type or a run is a subagent; else a shell command, MCP task or monitor is a task and
+ * an unrecognised type stays with the subagents.
+ */
+const NON_AGENT_TASK_TYPES = new Set(['local_bash', 'mcp_task', 'monitor_mcp']);
+function taskGroup(raw: any): 'subagents' | 'tasks' {
+  if (raw?.taskKind === 'scheduled') return 'tasks';
+  if (raw?.subagentType || raw?.run) return 'subagents';
+  const type = raw?.taskType ?? raw?.actor;
+  return typeof type === 'string' && NON_AGENT_TASK_TYPES.has(type)
+    ? 'tasks'
+    : 'subagents';
 }

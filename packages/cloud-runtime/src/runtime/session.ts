@@ -1,21 +1,46 @@
-import type { SessionQueueRequest } from '../contract/queue.ts';
-import { mutateSessionQueue, readSessionQueue } from './session-queue.ts';
+import type { SessionUsage } from '../protocol/session-usage.ts';
+import type { MessageReference } from '../protocol/message-references.ts';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
 import { decodeFrames, encodeFrame } from '../frames';
-import { identityAt, itemRev, projectSession } from './project';
+import {
+  identityAt,
+  itemRev,
+  projectPendingInputs,
+  projectSession,
+} from './project';
 import type { SteerReceipt } from './execution';
 import { machineRpc, type RpcReply } from './machine-rpc';
+import type { RoostWindow } from './roost-history';
+import {
+  createUpstreamRoostHistory,
+  roostStorageAccount,
+} from './upstream-roost-history';
+import {
+  buildPendingUserHistoryEntry,
+  createWorkspaceAcceptedInputs,
+  createSessionOperationScope,
+  type MobileSendPorts,
+  type MobileSendStore,
+  type SendMetadata,
+  type AcceptedInput,
+  HistoryEntryWriteSchema,
+  parseHistoryWrite,
+} from './upstream-roost.js';
 import { retrySessionRead } from './session-read';
+import { resolveTurnRole, type TurnRole } from './agent-roles';
+import { record, roleRunConfigApplied } from '../protocol/agent-roles';
 import type {
   CheckTurnQuotaResult,
   ControlTurnResult,
   EditSessionResult,
   SendTurnResult,
+  RetryPendingInputResult,
   SessionRuntimeEvent,
   SessionTrace,
 } from '../contract/methods.ts';
+import { runtimeCalls } from '../contract/methods.ts';
 import {
   editableUserTurn,
   editAttachments,
@@ -34,25 +59,73 @@ import {
 export { projectSession } from './project';
 
 type Grant = { token: string; gatewayBaseUrl: string };
+export type SessionTarget =
+  | { backend: 'loro' }
+  | {
+      backend: 'roost';
+      accountId?: string | null;
+      machineId: string;
+      incremental: boolean;
+      watch: boolean;
+      acceptsInput: boolean;
+      dispatchesInput: boolean;
+      latestUserMsgId?: string;
+      isArchived?: boolean;
+      patches?: boolean;
+      coherentInspection?: boolean;
+      isCurrent?: () => boolean;
+    };
+type ResolveSessionTarget = (() => SessionTarget | undefined) & {
+  isCurrent?: () => boolean;
+  legacyFallbackAllowed?: () => boolean;
+};
 export const MAX_BACKGROUND_SESSION_SYNCS = 3;
+/**
+ * How long a queued Roost send may wait for earlier inputs, measured from the call.
+ * It leaves the host's sendTurn deadline room for the queue write itself.
+ */
+export const QUEUED_SEND_BUDGET_MS = runtimeCalls.sendTurn.timeoutMs - 15_000;
 type SessionState = {
   id: string;
   workspace: string;
   doc: LoroDoc;
+  target?: SessionTarget;
+  scopeIsCurrent?: () => boolean;
+  historyReady?: boolean;
+  streamReady?: boolean;
+  roostReader?: Awaited<ReturnType<typeof createUpstreamRoostHistory>>;
+  roostWindow?: RoostWindow;
+  roostMetadata?: Record<string, unknown>[];
+  roostTail?: Promise<void>;
+  roostLoading?: boolean;
+  /**
+   * Loro transcript window: the id of its first user entry, `null` for the
+   * whole history, unset until the first ready projection fixes it.
+   */
+  historyAnchor?: string | null;
+  /** The last projection dropped window turns to fit the host envelope budget. */
+  historyClipped?: boolean;
   client: StreamsClient;
   controller: AbortController;
   ready: boolean;
-  writeUncertain?: boolean;
   sending: boolean;
   working?: boolean;
   sendingId?: string;
+  /** A queued Roost send waiting for earlier inputs; it orders later sends only. */
+  queueWaitId?: string;
+  recovery?: {
+    inputId: string;
+    controller: AbortController;
+    promise: Promise<RetryPendingInputResult>;
+  };
   steerReceipts?: Map<string, SteerReceipt>;
-  backgroundWork?: { id: string; turnId: string };
+  backgroundWork?: { id: string; turnId: string; guide?: boolean };
   status: string;
   reason?: string;
   pending?: ReturnType<typeof setTimeout>;
   firstQueuedAt: number;
   lastSignal: string;
+  lastUsage?: string;
   unsent: Map<
     string,
     {
@@ -82,9 +155,567 @@ let active: SessionState | undefined;
 // Working sessions use visit order; idle visits never enter the background LRU.
 const sessions = new Map<string, SessionState>();
 const reserved = new Set<string>();
+let acceptedInputs:
+  ReturnType<typeof createWorkspaceAcceptedInputs> | undefined;
+
+/** Bind the shared workspace coordinator to the existing mobile Streams replica. */
+export function startAcceptedInputs(options: {
+  accountId: string;
+  workspaceId: string;
+  getGrant: () => Promise<Grant>;
+  emit: (event: SessionRuntimeEvent) => void;
+  markDispatch: SessionState['markDispatch'];
+  resolveTarget: (sessionId: string) => ResolveSessionTarget;
+  getDocMeta: (roomId: string) => Promise<SendMetadata | undefined>;
+}) {
+  const previous = acceptedInputs;
+  acceptedInputs = undefined;
+  void previous
+    ?.dispose()
+    .catch(() => console.warn('Roost input cleanup failed'));
+
+  const operations = createSessionOperationScope();
+  const withSessionStore: MobileSendPorts['sendResources']['withSessionStore'] =
+    (sessionId, work, signal) =>
+      operations.run(async (owned) => {
+        const resolveTarget = options.resolveTarget(sessionId);
+        const alreadyReserved = reserved.has(sessionId);
+        try {
+          await ensureSession(
+            sessionId,
+            options.workspaceId,
+            options.getGrant,
+            options.emit,
+            options.markDispatch,
+            resolveTarget,
+            owned,
+          );
+          const state = sessions.get(sessionId);
+          const target = resolveTarget();
+          if (
+            !state ||
+            !state.ready ||
+            !state.roostReader ||
+            !targetIsCurrent(state)
+          )
+            throw new Error('session_not_ready');
+          if (
+            target?.backend !== 'roost' ||
+            target.machineId !==
+              state.roostReader.sessionData.inputAcceptance.targetMachineId
+          )
+            throw new Error('session_owner_changed');
+          const signal = AbortSignal.any([owned, state.controller.signal]);
+          const sessionData = state.roostReader.sessionData;
+          const before = state.doc.version();
+          let staged: LoroDoc | undefined;
+          const store: MobileSendStore = {
+            sessionData,
+            waitUntilSynced: (signal = owned) =>
+              waitForSessionReady(state, signal),
+            getState: () => (staged ?? state.doc).toJSON(),
+            setState: (change) => {
+              const doc = (staged ??= state.doc.fork());
+              const receipts = doc.getMap('humanInputReceipts');
+              const draft = {
+                humanInputReceipts: receipts.toJSON() as Record<
+                  string,
+                  { userId: string }
+                >,
+              };
+              change(draft);
+              for (const [key, value] of Object.entries(
+                draft.humanInputReceipts ?? {},
+              ))
+                if (JSON.stringify(receipts.get(key)) !== JSON.stringify(value))
+                  receipts.set(key, value);
+              doc.commit();
+            },
+          };
+          try {
+            const value = await work(store, signal);
+            signal.throwIfAborted();
+            if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+            if (staged) {
+              // Only a successful Streams write updates the live control document.
+              const update = staged.export({ mode: 'update', from: before });
+              const saved = await state.client.append({
+                part: {
+                  contentType: 'application/octet-stream',
+                  body: encodeFrame(update),
+                },
+              });
+              if (!saved.ok) throw new Error(saved.result.code);
+              state.doc.import(update);
+            }
+            signal.throwIfAborted();
+            return value;
+          } finally {
+            staged?.free();
+          }
+        } finally {
+          if (!alreadyReserved && (resolveTarget.isCurrent?.() ?? true))
+            releaseReserve(sessionId);
+        }
+      }, signal);
+
+  const runtimeForDelivery = (
+    deliverySignal?: AbortSignal,
+  ): MobileSendPorts => {
+    const request = async (
+      machineId: string,
+      method: string,
+      params: Record<string, unknown>,
+    ) => {
+      const sessionId = params.sessionId;
+      if (typeof sessionId !== 'string') throw new Error('session_not_ready');
+      const resolve = options.resolveTarget(sessionId);
+      const checkTarget = () => {
+        const target = resolve();
+        if (target?.backend !== 'roost' || target.machineId !== machineId)
+          throw new Error('session_owner_changed');
+      };
+      const grant = async () => {
+        checkTarget();
+        const value = await options.getGrant();
+        checkTarget();
+        return value;
+      };
+      const deadline = AbortSignal.timeout(35000);
+      const reply = await machineRpc(
+        options.workspaceId,
+        machineId,
+        method,
+        params,
+        grant,
+        deliverySignal ? AbortSignal.any([deliverySignal, deadline]) : deadline,
+      );
+      return reply.error ? null : reply.result;
+    };
+    return {
+      repo: { getDocMeta: options.getDocMeta },
+      writer: {
+        async upsertDocMeta(roomId, patch) {
+          if (!roomId.startsWith('session-') || !patch.latestUserMsgId)
+            throw new Error('invalid_dispatch_metadata');
+          const sessionId = roomId.slice('session-'.length);
+          const resolve = options.resolveTarget(sessionId);
+          if (resolve()?.backend !== 'roost')
+            throw new Error('session_owner_changed');
+          await options.markDispatch(sessionId, patch.latestUserMsgId);
+        },
+      },
+      sendResources: {
+        run: operations.run,
+        withSessionStore: (id, work, signal) =>
+          withSessionStore(id, work, signal ?? deliverySignal),
+      },
+      requestSessionSteer: (id, params) => request(id, 'session/steer', params),
+      requestSessionDispatchTurn: (id, params) =>
+        request(id, 'session/dispatch-turn', params),
+    };
+  };
+  const input = createWorkspaceAcceptedInputs({
+    accountId: roostStorageAccount(options.accountId),
+    workspaceId: options.workspaceId,
+    runtime: runtimeForDelivery(),
+    runtimeForDelivery,
+    async validateLocalAttachments() {
+      throw new Error('local_attachment_unsupported');
+    },
+    async visible(send) {
+      return (
+        sessions
+          .get(send.sessionId)
+          ?.roostWindow?.turns.some((turn) => turn.id === send.id) === true
+      );
+    },
+    onGuideOutcome(sessionId, inputId, expectedTurnId, applied) {
+      const state = sessions.get(sessionId);
+      if (
+        !state ||
+        state.workspace !== options.workspaceId ||
+        !targetIsCurrent(state)
+      )
+        return;
+      state.steerReceipts ??= new Map();
+      state.steerReceipts.set(inputId, {
+        targetId: expectedTurnId,
+        state:
+          applied === undefined
+            ? 'confirming'
+            : applied
+              ? 'accepted'
+              : 'unknown',
+      });
+      const background = state.backgroundWork;
+      if (
+        applied !== undefined &&
+        background?.guide &&
+        background.turnId === inputId
+      ) {
+        state.backgroundWork = undefined;
+        state.emit({
+          type: 'sessionCache',
+          sessionId,
+          backgroundWork: {
+            id: background.id,
+            state: applied ? 'completed' : 'waiting',
+          },
+        });
+      }
+      scheduleEmit(state, state.status);
+    },
+  });
+  const owner = {
+    ...input,
+    async dispose() {
+      try {
+        await input.dispose();
+      } finally {
+        await operations.dispose();
+      }
+    },
+  };
+  owner.subscribe(() => {
+    for (const state of sessions.values())
+      if (state.workspace === options.workspaceId)
+        scheduleEmit(state, state.status);
+  });
+  acceptedInputs = owner;
+  void owner.resume().catch(() => {});
+}
+export function resumeAcceptedInputs() {
+  void acceptedInputs?.resume().catch(() => {});
+}
+export async function stopAcceptedInputs() {
+  const owner = acceptedInputs;
+  acceptedInputs = undefined;
+  await owner?.dispose();
+}
 export const retainedSessionIds = () => [...sessions.keys()];
 export const reservedSessionIds = () => [...reserved];
-export const sessionDoc = (id: string) => sessions.get(id)?.doc;
+const historyList = (state: SessionState) => {
+  if (!state.roostWindow) return state.doc.getList('history');
+  const turns = state.roostWindow.turns;
+  return {
+    length: turns.length,
+    get: (index: number) => turns[index],
+    toJSON: () => turns,
+  };
+};
+const targetIsCurrent = (state: SessionState) =>
+  (state.scopeIsCurrent?.() ?? true) &&
+  (state.target?.backend !== 'roost' ||
+    !state.target.isCurrent ||
+    state.target.isCurrent());
+const sessionGrant = async (state: SessionState) => {
+  if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+  const grant = await state.getGrant();
+  if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+  return grant;
+};
+export const sessionDoc = (id: string) => {
+  const state = sessions.get(id);
+  return state && targetIsCurrent(state) ? state.doc : undefined;
+};
+const snapshot = (state: SessionState) => ({
+  ...state.doc.toJSON(),
+  history: historyList(state).toJSON(),
+});
+export const sessionHistory = (id: string) => {
+  const state = sessions.get(id);
+  return state?.ready && targetIsCurrent(state)
+    ? historyList(state).toJSON()
+    : undefined;
+};
+
+/** Capture the full owner history for whole-conversation exports. */
+export async function readyHistory(
+  id: string,
+): Promise<Record<string, unknown>[]> {
+  const state = sessions.get(id);
+  if (!state?.ready || !targetIsCurrent(state))
+    throw new Error('session_not_ready');
+  if (state.target?.backend !== 'roost') return historyList(state).toJSON();
+  if (!state.roostReader) throw new Error('session_not_ready');
+  const { history } = await state.roostReader.sessionData.snapshots.capture();
+  if (sessions.get(id) !== state || !targetIsCurrent(state))
+    throw new Error('workspace_changed');
+  return history;
+}
+function installHistory(state: SessionState, window: RoostWindow) {
+  state.roostWindow = window;
+  void acceptedInputs
+    ?.acknowledgeLanded(window.turns.map((turn) => turn.id))
+    .catch(() => {});
+}
+
+export function canUseLegacyHistory(doc: LoroDoc, allowed: boolean) {
+  return (
+    allowed &&
+    doc.getList('history').length > 0 &&
+    doc.getByPath('roostHistoryCursor/cursor') === undefined
+  );
+}
+function queueRoostRead(state: SessionState, work: () => Promise<void>) {
+  const next = (state.roostTail ?? Promise.resolve()).then(work);
+  state.roostTail = next.catch(() => {});
+  return next;
+}
+
+async function waitForAcceptedInputSave(
+  owner: NonNullable<typeof acceptedInputs>,
+  sessionId: string,
+  inputId: string,
+) {
+  await owner.capturePredecessors(sessionId);
+  if (
+    owner !== acceptedInputs ||
+    !owner.getSnapshot().some((send) => send.id === inputId && send.persisted)
+  )
+    throw new Error('input_storage_unavailable');
+}
+
+export async function cancelRoostInputs(ids: readonly string[]) {
+  if (ids.length) await acceptedInputs?.cancelSessions(ids);
+}
+
+export async function actOnPendingInput(
+  sessionId: string,
+  inputId: string,
+  action: 'retry' | 'forget',
+  recoveryTarget?: () => { userId: string; machineId: string },
+) {
+  const state = sessions.get(sessionId);
+  if (state?.target?.backend === 'loro') {
+    if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+    if (action === 'retry') {
+      if (!recoveryTarget) throw new Error('session_not_ready');
+      if (state.sending || state.queueWaitId)
+        throw new Error('send_in_progress');
+      if (state.recovery) {
+        if (state.recovery.inputId !== inputId)
+          throw new Error('send_in_progress');
+        return state.recovery.promise;
+      }
+      const controller = new AbortController();
+      const promise = recoverLoroInput(
+        state,
+        inputId,
+        recoveryTarget,
+        controller.signal,
+      );
+      const recovery = { inputId, controller, promise };
+      state.recovery = recovery;
+      try {
+        return await promise;
+      } finally {
+        if (state.recovery === recovery) state.recovery = undefined;
+      }
+    }
+    if (state.recovery?.inputId === inputId) {
+      state.recovery.controller.abort();
+      state.recovery = undefined;
+    }
+    // Loro has no record in the Roost pending-input owner. The caller removes
+    // its native Outbox record; this never claims to cancel remote work.
+    return { state: 'pending' as const };
+  }
+  const owner = acceptedInputs;
+  if (!owner) throw new Error('session_not_ready');
+  await owner.refresh();
+  const input = owner
+    .getSnapshot()
+    .find((send) => send.sessionId === sessionId && send.id === inputId);
+  if (!input || owner !== acceptedInputs) throw new Error('session_not_ready');
+  if (action === 'forget') await owner.cancel(inputId);
+  else if (input.error) owner.retry(inputId);
+  return { state: 'pending' as const };
+}
+
+/** Reconcile an explicit user request; never replay the original history write. */
+async function recoverLoroInput(
+  state: SessionState,
+  inputId: string,
+  resolve: () => { userId: string; machineId: string },
+  cancelled: AbortSignal,
+): Promise<RetryPendingInputResult> {
+  const target = resolve();
+  const signal = AbortSignal.any([
+    state.controller.signal,
+    cancelled,
+    AbortSignal.timeout(25_000),
+  ]);
+  const check = () => {
+    signal.throwIfAborted();
+    if (sessions.get(state.id) !== state || !targetIsCurrent(state))
+      throw new Error('workspace_changed');
+    const current = resolve();
+    if (
+      current.machineId !== target.machineId ||
+      current.userId !== target.userId
+    )
+      throw new Error('workspace_changed');
+  };
+  // The session replica may contain the unacknowledged local write. Only a
+  // fresh server snapshot/catch-up proves that the original input was saved.
+  const remote = new LoroDoc();
+  try {
+    check();
+    const initial = await state.client.bootstrap({ signal });
+    check();
+    if (!initial.ok) throw new Error(initial.result.code);
+    let size = 0;
+    const consume = (bytes: Uint8Array, snapshot = false) => {
+      size += bytes.length;
+      if (size > 32 * 1024 * 1024) throw new Error('session_limit');
+      if (snapshot) remote.import(unpack(bytes));
+      else importUpdates(remote, bytes);
+    };
+    const data = initial.result;
+    if (data.snapshotOffset !== '-1' && data.snapshot)
+      consume(data.snapshot.body, true);
+    for (const part of data.updates) consume(part.body);
+    let { nextOffset: offset, cursor, upToDate } = data;
+    for (let pages = 0; !upToDate; pages++) {
+      if (pages >= 100) throw new Error('session_limit');
+      const next = await state.client.readOnce({ offset, cursor, signal });
+      check();
+      if (!next.ok) throw new Error(next.result.code);
+      if (next.result.closed) throw new Error('stream_closed');
+      if (next.result.payload) consume(next.result.payload.body);
+      if (next.result.nextOffset === offset && !next.result.upToDate)
+        throw new Error('stalled_cursor');
+      ({ nextOffset: offset, cursor, upToDate } = next.result);
+    }
+    const history = remote.getList('history').toJSON() as Record<string, any>[];
+    const entry = history.find(
+      (entry) => entry.id === inputId && entry.role === 'user',
+    );
+    if (!entry) throw new Error('input_not_confirmed');
+    if (entry.userId !== target.userId) throw new Error('input_owner_changed');
+    if (
+      ['handled', 'failed', 'canceled'].includes(entry.status) ||
+      history.some(
+        (entry) => entry.role === 'assistant' && entry.userTurnId === inputId,
+      )
+    )
+      return { state: 'settled' };
+    if (entry.status === 'processing') return { state: 'accepted' };
+    if (
+      !['pending', 'seen'].includes(entry.status) ||
+      entry.inputConfig?._lodyDeliveryKind === 'steer' ||
+      (remote.getMovableList('mq').toJSON() as Record<string, any>[]).some(
+        (item) => item.userTurnId === inputId,
+      )
+    )
+      throw new Error('input_not_recoverable');
+    if (!entry.inputConfig || typeof entry.timestamp !== 'string')
+      throw new Error('input_not_recoverable');
+    check();
+    const reply = await machineRpc(
+      state.workspace,
+      target.machineId,
+      'session/dispatch-turn',
+      {
+        sessionId: state.id,
+        userTurnId: inputId,
+        userId: target.userId,
+        timestamp: entry.timestamp,
+        inputConfig: entry.inputConfig,
+      },
+      async () => {
+        check();
+        const grant = await sessionGrant(state);
+        check();
+        return grant;
+      },
+      signal,
+    );
+    check();
+    const result = reply.result as
+      { accepted?: boolean; disposition?: string } | undefined;
+    if (!result?.accepted) throw new Error('dispatch_unconfirmed');
+    return {
+      state: result.disposition === 'already-terminal' ? 'settled' : 'accepted',
+    };
+  } finally {
+    remote.free();
+  }
+}
+
+/** User turns in a Loro transcript's first window and in each older page. */
+const HISTORY_PAGE_TURNS = 6;
+/** UTF-8 budget per envelope; the iOS host replaces envelopes above 12 MiB with an overflow marker. */
+const ENVELOPE_BUDGET_BYTES = 8 * 1024 * 1024;
+const entryField = (entry: unknown, key: string) =>
+  entry instanceof LoroMap ? entry.get(key) : (entry as any)?.[key];
+/** Index of the `turns`-th user entry before `end`, or 0 when fewer exist. */
+function pageStart(history: LoroList, end: number, turns: number) {
+  let seen = 0;
+  for (let i = end - 1; i > 0; i--)
+    if (entryField(history.get(i), 'role') === 'user' && ++seen === turns)
+      return i;
+  return 0;
+}
+function userTurnsFrom(history: LoroList, start: number) {
+  let count = 0;
+  for (let i = start; i < history.length; i++)
+    if (entryField(history.get(i), 'role') === 'user') count += 1;
+  return count;
+}
+/**
+ * Loro sessions keep the whole document locally, but only a window of the
+ * transcript crosses to the host. The window starts at a user entry, follows
+ * new entries and grows backwards only on an explicit older-history request.
+ */
+function loroWindowStart(state: SessionState, history: LoroList) {
+  if (state.historyAnchor === null) return 0;
+  if (state.historyAnchor !== undefined)
+    for (let i = history.length - 1; i >= 0; i--)
+      if (entryField(history.get(i), 'id') === state.historyAnchor) return i;
+  const start = pageStart(history, history.length, HISTORY_PAGE_TURNS);
+  const anchor = entryField(history.get(start), 'id');
+  // An empty or still-bootstrapping replica must not fix the window at 0.
+  if (state.ready && history.length)
+    state.historyAnchor =
+      start === 0 ? null : typeof anchor === 'string' ? anchor : undefined;
+  return start;
+}
+
+export async function loadOlderSession(sessionId: string) {
+  const state = sessions.get(sessionId);
+  if (!state || !targetIsCurrent(state)) throw new Error('session_not_ready');
+  if (state.target?.backend !== 'roost') {
+    const history = state.doc.getList('history');
+    const start = loroWindowStart(state, history);
+    if (start === 0 || state.historyClipped) return;
+    const next = pageStart(history, start, HISTORY_PAGE_TURNS);
+    const anchor = entryField(history.get(next), 'id');
+    state.historyAnchor =
+      next === 0 ? null : typeof anchor === 'string' ? anchor : null;
+    scheduleEmit(state, state.status);
+    return;
+  }
+  if (!state.roostReader || !state.roostWindow?.cursor || state.roostLoading)
+    return;
+  state.roostLoading = true;
+  scheduleEmit(state, state.status);
+  try {
+    await queueRoostRead(state, async () => {
+      if (!state.roostWindow?.cursor) return;
+      const next = await state.roostReader!.older(state.roostWindow);
+      if (sessions.get(sessionId) !== state || !targetIsCurrent(state)) return;
+      installHistory(state, next);
+      if (next.start === 0)
+        state.roostMetadata = next.turns.map((turn) => ({ ...turn }));
+    });
+  } finally {
+    state.roostLoading = false;
+    if (sessions.get(sessionId) === state) scheduleEmit(state, state.status);
+  }
+}
 function traceCode(value: unknown) {
   const pattern = /^[a-z][a-z0-9_]{0,47}$/;
   if (typeof value === 'string') return pattern.test(value) ? value : undefined;
@@ -155,11 +786,16 @@ export function traceSessionResume() {
   });
 }
 function signalOf(state: SessionState, status: string) {
-  const history = state.doc.getList('history');
+  const history = historyList(state);
   let finished = 0;
   for (let i = 0; i < history.length; i++) {
     const entry = history.get(i);
-    if (entry instanceof LoroMap && entry.get('finished') === true) finished++;
+    if (
+      (entry instanceof LoroMap
+        ? entry.get('finished')
+        : (entry as any)?.finished) === true
+    )
+      finished++;
   }
   const awaiting = state.doc.getMap('session').get('awaitingUserSince') != null;
   return `${status}|${awaiting}|${finished}`;
@@ -178,8 +814,8 @@ function backgroundStatus(
 }
 function backgroundProgress(state: SessionState) {
   const work = state.backgroundWork;
-  if (!work) return undefined;
-  const history = state.doc.getList('history').toJSON() as any[];
+  if (!work || work.guide) return undefined;
+  const history = historyList(state).toJSON() as any[];
   const reply = history.findLast(
     (entry) => entry?.role === 'assistant' && entry.userTurnId === work.turnId,
   );
@@ -188,29 +824,111 @@ function backgroundProgress(state: SessionState) {
     state.backgroundWork = undefined;
   return { id: work.id, state: status } as const;
 }
+type QuotaProjection = Pick<
+  SessionUsage,
+  'quota' | 'quotaEligible' | 'modelId' | 'modelLabel'
+>;
+let readUsage: (
+  sessionId: string,
+  modelId?: string,
+) => QuotaProjection = () => ({ quota: null, quotaEligible: false });
+export function setSessionUsageReader(read: typeof readUsage) {
+  readUsage = read;
+}
+/** Catalog updates reuse retained session owners; no new stream or timer. */
+export function refreshSessionUsage() {
+  for (const state of sessions.values()) {
+    const history = state.doc.getList('history').toJSON() as any[];
+    const modelId = history.findLast((e) => e?.role === 'user')?.inputConfig
+      ?.modelId;
+    const usage = JSON.stringify(readUsage(state.id, modelId));
+    if (usage !== state.lastUsage) flush(state);
+  }
+}
 function flush(state: SessionState) {
   clearTimeout(state.pending);
   state.pending = undefined;
   state.firstQueuedAt = 0;
-  if (sessions.get(state.id) !== state) return;
-  const snapshot = projectSession(
-    state.doc,
-    state.status,
-    state.reason,
-    new Map([...state.unsent].map(([key, pending]) => [key, pending.outcome])),
-    state.steerReceipts,
-  );
+  if (sessions.get(state.id) !== state || !targetIsCurrent(state)) return;
+  const loro = state.target?.backend !== 'roost';
+  const history = state.doc.getList('history');
+  let start = loro ? loroWindowStart(state, history) : 0;
+  const project = () =>
+    projectSession(
+      state.doc,
+      state.status,
+      state.reason,
+      new Map(
+        [...state.unsent].map(([key, pending]) => [key, pending.outcome]),
+      ),
+      state.steerReceipts,
+      state.roostWindow?.turns,
+      state.roostMetadata,
+      start,
+    );
+  state.historyClipped = false;
+  let snapshot = project();
+  // The composer comes from the whole history, so every window shares this quota.
+  const quota = readUsage(state.id, snapshot.composer?.modelId);
+  state.lastUsage = JSON.stringify(quota);
+  const finish = (next: typeof snapshot) => {
+    if (next.usage) next.usage = { ...next.usage, ...quota };
+    if (loro) next.historyHasMore = start > 0 && !state.historyClipped;
+    return next;
+  };
+  snapshot = finish(snapshot);
+  if (state.target?.backend === 'roost') {
+    snapshot.historyHasMore = !!state.roostWindow?.cursor;
+    snapshot.historyLoading = state.roostLoading === true;
+    const pending = (acceptedInputs?.getSnapshot() ?? []).filter(
+      (send) =>
+        send.sessionId === state.id &&
+        !snapshot.entries.some((entry) => entry.id === send.id),
+    );
+    snapshot.pendingRoostInputs = projectPendingInputs(
+      state.doc,
+      pending.map((send) => send.entry),
+    ).map((entry, index) => ({
+      ...entry,
+      inputState: pending[index].inputState,
+      inputRetryable: !!pending[index].error,
+    }));
+    if (state.roostMetadata)
+      snapshot.billableTurnCount = billableTurnCount({
+        history: state.roostMetadata,
+        mq: state.doc.getMovableList('mq').toJSON(),
+      });
+    else delete snapshot.billableTurnCount;
+  }
+  let session = JSON.stringify(snapshot);
+  // A window of long turns can still exceed the host limit: keep the newest
+  // half of its turns until it fits or one turn remains. Older history then
+  // stays unavailable, because loading it would exceed the limit again.
+  while (loro && envelopeBytes(session) > ENVELOPE_BUDGET_BYTES) {
+    const turns = userTurnsFrom(history, start);
+    if (turns <= 1) break;
+    start = pageStart(history, history.length, Math.ceil(turns / 2));
+    state.historyClipped = true;
+    snapshot = finish(project());
+    session = JSON.stringify(snapshot);
+  }
   state.emit({
     type: active === state ? 'session' : 'sessionCache',
     sessionId: state.id,
     synced: state.status === 'live',
     backgroundWork: backgroundProgress(state),
-    session: JSON.stringify(snapshot),
+    session,
   });
 }
+const encoder = new TextEncoder();
+/** A UTF-16 code unit encodes to at most three UTF-8 bytes. */
+const envelopeBytes = (json: string) =>
+  json.length * 3 <= ENVELOPE_BUDGET_BYTES
+    ? json.length
+    : encoder.encode(json).length;
 function isWorking(state: SessionState) {
   if (state.doc.getMovableList('mq').length) return true;
-  const history = state.doc.getList('history');
+  const history = historyList(state);
   let replied = false;
   let latestUser = true;
   for (let i = history.length - 1; i >= 0; i--) {
@@ -236,10 +954,6 @@ function isWorking(state: SessionState) {
   return false;
 }
 function scheduleEmit(state: SessionState, status: string, reason?: string) {
-  if (state.writeUncertain) {
-    status = 'failed';
-    reason = 'queue_write_unknown';
-  }
   if (status !== state.status && sessions.get(state.id) === state)
     trace(state, 'status', { status, code: traceCode(reason) });
   state.status = status;
@@ -335,6 +1049,7 @@ export function releaseReserve(id: string) {
 }
 export function stopSessions() {
   for (const state of sessions.values()) {
+    settleLive(state, new Error('session_not_ready'));
     clearTimeout(state.pending);
     state.controller.abort();
   }
@@ -372,6 +1087,8 @@ export async function ensureSession(
     turnId: string,
     queued?: boolean,
   ) => Promise<void>,
+  resolveTarget?: ResolveSessionTarget,
+  signal?: AbortSignal,
 ) {
   if ([...sessions.values()].some((state) => state.workspace !== workspace))
     stopSessions();
@@ -383,28 +1100,29 @@ export async function ensureSession(
     emit,
     markDispatch,
     false,
+    resolveTarget,
   );
   const state = sessions.get(id);
   if (!state) throw new Error('session_not_ready');
-  if (state.ready) return result;
+  await waitForSessionReady(state, signal);
+  return result;
+}
+
+async function waitForSessionReady(state: SessionState, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  state.controller.signal.throwIfAborted();
+  if (state.ready) return;
   await new Promise<void>((resolve, reject) => {
+    const abort = () => done(signal!.reason ?? new Error('cancelled'));
     const done = (error?: Error) => {
       state.liveWaiters = state.liveWaiters?.filter((item) => item !== done);
+      signal?.removeEventListener('abort', abort);
       if (error) reject(error);
       else resolve();
     };
     (state.liveWaiters ??= []).push(done);
-    if (state.controller.signal.aborted) {
-      done(new Error('session_not_ready'));
-      return;
-    }
-    state.controller.signal.addEventListener(
-      'abort',
-      () => done(new Error('session_not_ready')),
-      { once: true },
-    );
+    signal?.addEventListener('abort', abort, { once: true });
   });
-  return result;
 }
 export async function openSession(
   id: string,
@@ -417,6 +1135,7 @@ export async function openSession(
     queued?: boolean,
   ) => Promise<void>,
   activate = true,
+  resolveTarget?: ResolveSessionTarget,
 ) {
   if ([...sessions.values()].some((state) => state.workspace !== workspace))
     stopSessions();
@@ -429,7 +1148,7 @@ export async function openSession(
     !reserved.has(active.id)
   )
     evict(active);
-  if (existing && existing.status !== 'offline' && !existing.writeUncertain) {
+  if (existing && existing.status !== 'offline') {
     existing.emit = emit;
     if (activate) {
       active = existing;
@@ -445,6 +1164,7 @@ export async function openSession(
   const state: SessionState = {
     id,
     workspace,
+    scopeIsCurrent: resolveTarget?.isCurrent,
     doc: new LoroDoc(),
     client: undefined as unknown as StreamsClient,
     controller,
@@ -463,11 +1183,28 @@ export async function openSession(
   sessions.set(id, state);
   trimSessions();
   const event = (status: string, reason?: string) => {
+    // A terminal read failure still needs a reopen even if the other reader
+    // keeps receiving data or retrying.
+    if (status === 'syncing' && state.status === 'offline') return;
     scheduleEmit(state, status, reason);
   };
   const retrying = (error: unknown) => {
     state.ready = false;
     event('syncing', error instanceof Error ? error.message : 'sync_failed');
+  };
+  const retryStream = (error: unknown) => {
+    state.streamReady = false;
+    retrying(error);
+  };
+  const retryHistory = (error: unknown) => {
+    state.historyReady = false;
+    retrying(error);
+  };
+  const updateReadiness = () => {
+    state.ready =
+      state.streamReady === true &&
+      (state.target?.backend !== 'roost' || state.historyReady === true);
+    if (state.ready) settleLive(state);
   };
   event('syncing');
   void (async () => {
@@ -476,7 +1213,9 @@ export async function openSession(
         controller.signal,
         () =>
           readAttempt(state, 'bootstrap', async () => {
-            state.client = await clientFor(`${workspace}:s:${id}`, getGrant);
+            state.client = await clientFor(`${workspace}:s:${id}`, () =>
+              sessionGrant(state),
+            );
             controller.signal.throwIfAborted();
             const initial = await state.client.bootstrap({
               signal: controller.signal,
@@ -484,7 +1223,7 @@ export async function openSession(
             if (!initial.ok) throw new Error(initial.result.code);
             return initial.result;
           }),
-        retrying,
+        retryStream,
       );
       if (sessions.get(id) !== state) return;
       let size = 0;
@@ -493,20 +1232,176 @@ export async function openSession(
         if (size > 32 * 1024 * 1024) throw new Error('session_limit');
         if (snapshot) state.doc.import(unpack(bytes));
         else importUpdates(state.doc, bytes);
+        state.roostReader?.wake();
       };
       if (data.snapshotOffset !== '-1' && data.snapshot)
         consume(data.snapshot.body, true);
       for (const part of data.updates) consume(part.body);
-      let pages = 0;
-      let changed = true;
       let offset = data.nextOffset,
         cursor = data.cursor,
         upToDate = data.upToDate;
+      let pages = 0;
+      while (!upToDate && !controller.signal.aborted) {
+        if (++pages > 100) throw new Error('session_limit');
+        const next = await retrySessionRead(
+          controller.signal,
+          () =>
+            readAttempt(state, 'catchup', async () => {
+              const result = await state.client.readOnce({
+                offset,
+                cursor,
+                signal: controller.signal,
+              });
+              if (!result.ok) throw new Error(result.result.code);
+              return result;
+            }),
+          retryStream,
+        );
+        if (sessions.get(id) !== state) return;
+        if (next.result.payload) consume(next.result.payload.body);
+        if (next.result.nextOffset === offset && !next.result.upToDate)
+          throw new Error('stalled_cursor');
+        offset = next.result.nextOffset;
+        cursor = next.result.cursor;
+        upToDate = next.result.upToDate;
+        if (next.result.closed) throw new Error('stream_closed');
+      }
+      let target: SessionTarget | undefined = resolveTarget
+        ? undefined
+        : { backend: 'loro' };
+      if (resolveTarget) {
+        try {
+          target = resolveTarget();
+        } catch {
+          /* Wait for authoritative metadata. */
+        }
+        if (
+          !target &&
+          targetIsCurrent(state) &&
+          canUseLegacyHistory(
+            state.doc,
+            resolveTarget.legacyFallbackAllowed?.() ?? true,
+          )
+        )
+          target = { backend: 'loro' };
+        if (!target)
+          target = await retrySessionRead(
+            controller.signal,
+            async () => {
+              const value = resolveTarget();
+              if (!value) throw new Error('metadata_not_ready');
+              return value;
+            },
+            retrying,
+          );
+      }
+      if (!target) throw new Error('metadata_not_ready');
+      if (sessions.get(id) !== state) return;
+      state.target = target;
+      if (target.backend === 'roost') {
+        const reader = createUpstreamRoostHistory({
+          accountId: target.accountId,
+          workspaceId: workspace,
+          machineId: target.machineId,
+          sessionId: id,
+          getGrant,
+          signal: controller.signal,
+          isCurrent: target.isCurrent,
+          patches: target.patches,
+          coherentInspection: target.coherentInspection,
+          incremental: target.incremental,
+          watch: target.watch,
+        });
+        state.roostReader = reader;
+        let window = await retrySessionRead(
+          controller.signal,
+          () => reader.latest(),
+          retryHistory,
+        );
+        if (sessions.get(id) !== state) return;
+        installHistory(state, window);
+        let metadataRevision = 0;
+        let metadataController: AbortController | undefined;
+        const refreshMetadata = () => {
+          const revision = ++metadataRevision;
+          metadataController?.abort();
+          if (state.roostWindow?.start === 0) {
+            state.roostMetadata = state.roostWindow.turns.map((turn) => ({
+              ...turn,
+            }));
+            return;
+          }
+          state.roostMetadata = undefined;
+          metadataController = new AbortController();
+          const signal = AbortSignal.any([
+            controller.signal,
+            metadataController.signal,
+          ]);
+          void retrySessionRead(
+            signal,
+            () => reader.metadata(),
+            () => {},
+          )
+            .then((metadata) => {
+              if (sessions.get(id) !== state || revision !== metadataRevision)
+                return;
+              state.roostMetadata = metadata;
+              scheduleEmit(state, state.status);
+            })
+            .catch(() => {});
+        };
+        refreshMetadata();
+        reader.metadataChanged(state.roostMetadata);
+        state.historyReady = true;
+        void (async () => {
+          try {
+            while (!controller.signal.aborted) {
+              const next = await retrySessionRead(
+                controller.signal,
+                () => reader.waitForChange(window),
+                retryHistory,
+              );
+              if (sessions.get(id) !== state) return;
+              await retrySessionRead(
+                controller.signal,
+                () =>
+                  queueRoostRead(state, async () => {
+                    let retained = await reader.latest();
+                    const start = state.roostWindow?.start ?? next.start;
+                    while (retained.cursor && retained.start > start)
+                      retained = await reader.older(retained);
+                    if (sessions.get(id) !== state) return;
+                    installHistory(state, retained);
+                    window = retained;
+                  }),
+                retryHistory,
+              );
+              if (reader.metadataChanged(state.roostMetadata))
+                refreshMetadata();
+              state.historyReady = true;
+              updateReadiness();
+              if (state.ready) event('live');
+            }
+          } catch (error) {
+            if (!controller.signal.aborted && sessions.get(id) === state) {
+              state.historyReady = false;
+              state.ready = false;
+              event(
+                'offline',
+                error instanceof Error ? error.message : 'history_failed',
+              );
+            }
+          }
+        })();
+      }
+      pages = 0;
+      let changed = true;
       while (!controller.signal.aborted) {
-        state.ready = upToDate && !state.writeUncertain;
+        state.streamReady = upToDate;
+        updateReadiness();
         if (upToDate) {
-          if (!state.writeUncertain) settleLive(state);
-          if (changed || state.status !== 'live') event('live');
+          if (changed || state.status !== 'live')
+            event(state.ready ? 'live' : 'syncing');
           changed = false;
           pages = 0;
         } else {
@@ -526,7 +1421,7 @@ export async function openSession(
               if (!result.ok) throw new Error(result.result.code);
               return result;
             }),
-          retrying,
+          retryStream,
         );
         if (sessions.get(id) !== state) return;
         if (next.result.payload) {
@@ -546,6 +1441,7 @@ export async function openSession(
       const failed = error instanceof Error ? error : new Error('sync_failed');
       settleLive(state, failed);
       if (controller.signal.aborted || sessions.get(id) !== state) return;
+      state.streamReady = false;
       state.ready = false;
       event('offline', failed.message);
     }
@@ -594,11 +1490,16 @@ export function checkTurnQuota(args: {
 }): CheckTurnQuotaResult {
   const state = sessions.get(args.sessionId);
   if (!state?.ready) return { state: 'allowed' };
-  const reason = quotaReason(
-    'turn',
-    args.billingEntitlement,
-    billableTurnCount(state.doc.toJSON()),
-  );
+  let count: number | null = billableTurnCount(snapshot(state));
+  if (state.target?.backend === 'roost') {
+    count = state.roostMetadata
+      ? billableTurnCount({
+          history: state.roostMetadata,
+          mq: state.doc.getMovableList('mq').toJSON(),
+        })
+      : null;
+  }
+  const reason = quotaReason('turn', args.billingEntitlement, count);
   return reason ? { state: 'not_sent', reason } : { state: 'allowed' };
 }
 
@@ -621,14 +1522,29 @@ export async function sendTurn(
     reasoningEffort?: string | null;
     reasoningEffortConfigId?: string;
     configOptionValues?: Record<string, unknown>;
+    /**
+     * The Role this turn runs as (resolved here, see `resolveTurnRole`); null is an explicit
+     * None that ends the conversation's Role, and undefined inherits it.
+     */
+    agentRoleId?: string | null;
+    /** The session's own Agent Config, from trusted state (meta / the creator), never the wire. */
+    agentConfigId?: string;
     billingEntitlement?: BillingEntitlement | null;
   },
-  expand: (text: string) => Promise<string> = async (text) => text,
+  expand: (
+    text: string,
+  ) => Promise<string | { text: string; spans: MessageReference[] }> = async (
+    text,
+  ) => text,
   selectMcp: (persisted: unknown) => Promise<string[]> = async (ids) =>
     Array.isArray(ids) ? ids : [],
 ): Promise<SendTurnResult> {
   const state = sessions.get(args.sessionId);
   if (!state || !state.ready)
+    return { state: 'not_sent', reason: 'session_not_ready' };
+  if (!targetIsCurrent(state))
+    return { state: 'not_sent', reason: 'workspace_changed' };
+  if (state.target?.backend === 'roost' && !state.roostMetadata)
     return { state: 'not_sent', reason: 'session_not_ready' };
   if (
     args.id !== undefined &&
@@ -640,7 +1556,7 @@ export async function sendTurn(
     args.id &&
     (state.sendingId === args.id ||
       [
-        ...((state.doc.toJSON().history as any[]) ?? []),
+        ...((snapshot(state).history as any[]) ?? []),
         ...((state.doc.toJSON().mq as any[]) ?? []).map((item) => ({
           id: item.userTurnId,
         })),
@@ -648,7 +1564,8 @@ export async function sendTurn(
   )
     // The local entry may come from a lost append ACK. Never replay its write.
     return { id: args.id, state: 'unknown', reason: 'turn_already_exists' };
-  if (state.sending) return { state: 'not_sent', reason: 'session_not_ready' };
+  if (state.sending || state.queueWaitId || state.recovery)
+    return { state: 'not_sent', reason: 'session_not_ready' };
   const quota = checkTurnQuota(args);
   if (quota.state === 'not_sent') return quota;
   if (typeof args.text !== 'string')
@@ -719,20 +1636,27 @@ export async function sendTurn(
     return { state: 'not_sent', reason: 'invalid_message' };
   const id = args.id ?? crypto.randomUUID(),
     timestamp = new Date().toISOString();
+  const startedAt = Date.now();
   reserved.add(state.id);
   state.sending = true;
   state.sendingId = id;
+  let holdsSession = true;
   let uploaded = false;
   let writeStarted = false;
   try {
-    text = await expand(text);
+    const expanded = await expand(text);
+    text = typeof expanded === 'string' ? expanded : expanded.text;
+    const spans = typeof expanded === 'string' ? undefined : expanded.spans;
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
     const previous =
-      (state.doc.toJSON().history as any[] | undefined)?.findLast(
+      (snapshot(state).history as any[] | undefined)?.findLast(
         (entry) => entry.role === 'user',
-      )?.inputConfig ?? {};
+      )?.inputConfig ??
+      state.roostMetadata?.findLast((entry) => entry.role === 'user')
+        ?.inputConfig ??
+      {};
     const configOptionValues = {
       ...(previous.configOptionValues &&
       typeof previous.configOptionValues === 'object' &&
@@ -746,6 +1670,42 @@ export async function sendTurn(
       if (args.reasoningEffort === null) delete configOptionValues[id];
       else configOptionValues[id] = args.reasoningEffort;
     }
+    // A Role runs a turn only while every value it pins is what will run (web). Any turn
+    // may pick one, but its prompt prefix only ever starts the conversation.
+    let role: TurnRole | undefined;
+    const started = (
+      state.roostMetadata ??
+      (snapshot(state).history as any[] | undefined) ??
+      []
+    ).some((entry) => entry.role === 'user');
+    if (args.agentRoleId !== undefined && args.agentRoleId !== null) {
+      if (
+        typeof args.agentRoleId !== 'string' ||
+        !args.agentRoleId ||
+        !args.agentConfigId
+      )
+        throw new Error('role_unavailable');
+      role = await resolveTurnRole(
+        {
+          workspaceId: state.workspace,
+          roleId: args.agentRoleId,
+          userId: args.userId!,
+          machineId: args.machineId,
+          agentConfigId: args.agentConfigId,
+        },
+        () => sessionGrant(state),
+        AbortSignal.any([state.controller.signal, AbortSignal.timeout(30000)]),
+      );
+      if (sessions.get(state.id) !== state || !state.ready)
+        throw new Error('session_not_ready');
+      const applied = roleRunConfigApplied(role.runConfig, {
+        modelId:
+          args.modelId === null ? null : (args.modelId ?? previous.modelId),
+        modeId: args.modeId ?? previous.modeId,
+        configOptionValues,
+      });
+      if (!applied) throw new Error('role_changed');
+    }
     const pendingQueue = (state.doc.toJSON().mq ?? []) as any[];
     const mcpServerIds = await selectMcp(
       pendingQueue.findLast((item) =>
@@ -757,8 +1717,17 @@ export async function sendTurn(
     const inputConfig = {
       cliType: args.cliType,
       agentType: args.agentType,
-      prompt: text,
-      inputBlocks: [...(text ? [{ type: 'text', text }] : []), ...attachments],
+      // Web `buildAgentPrompt`: the Role's instruction, then the task. The visible
+      // input stays the user's own text.
+      prompt: [started ? '' : (role?.promptPrefix ?? ''), text]
+        .filter((part) => part.trim())
+        .join('\n\n'),
+      inputBlocks: [
+        ...(text
+          ? [{ type: 'text', text, ...(spans?.length ? { spans } : {}) }]
+          : []),
+        ...attachments,
+      ],
       // An explicit pick wins; otherwise the turn inherits what the session
       // already used, and an unset value leaves the machine on its default.
       modeId: args.modeId ?? previous.modeId,
@@ -769,11 +1738,26 @@ export async function sendTurn(
         : undefined,
       mcpServerIds,
       taskToolsEnabled: previous.taskToolsEnabled ?? false,
-      agentRoleId: previous.agentRoleId,
-      agentRoleRevision: previous.agentRoleRevision,
+      agentRoleId: role ? role.id : previous.agentRoleId,
+      agentRoleRevision: role ? role.revision : previous.agentRoleRevision,
+      ...(role?.runConfig.memory ? { memory: role.runConfig.memory } : {}),
+      ...(role
+        ? {
+            agentRoleSnapshot: {
+              id: role.id,
+              revision: role.revision,
+              name: role.name,
+              emoji: role.emoji,
+            },
+          }
+        : {}),
       resume: args.resume,
     };
-    if (previous.agentRoleId) {
+    if (args.agentRoleId === null) {
+      // An explicit None: the conversation no longer runs as its Role.
+      inputConfig.agentRoleId = null;
+      inputConfig.agentRoleRevision = undefined;
+    } else if (!role && previous.agentRoleId) {
       const previousOptions = previous.configOptionValues ?? {};
       const changed =
         ['cliType', 'agentType', 'modelId', 'modeId'].some(
@@ -793,7 +1777,7 @@ export async function sendTurn(
         inputConfig.agentRoleRevision = undefined;
       }
     }
-    const raw = state.doc.toJSON();
+    const raw = snapshot(state);
     const history = (raw.history ?? []) as any[];
     const lastUser = history.findLastIndex((entry) => entry.role === 'user');
     // Re-evaluate after attachment upload and mention expansion. A completed
@@ -816,6 +1800,134 @@ export async function sendTurn(
           !history
             .slice(lastUser + 1)
             .some((entry) => entry.role === 'assistant')));
+    if (!targetIsCurrent(state))
+      return { id, state: 'not_sent', reason: 'workspace_changed' };
+    if (state.target?.backend === 'roost') {
+      if (state.target.machineId !== args.machineId)
+        return { id, state: 'not_sent', reason: 'session_owner_changed' };
+      if (
+        !state.roostReader ||
+        (!queued &&
+          (!state.target.acceptsInput ||
+            (!guide && !state.target.dispatchesInput)))
+      )
+        return { id, state: 'not_sent', reason: 'roost_input_unsupported' };
+      if (!queued) {
+        const prepared = buildPendingUserHistoryEntry({
+          userId: args.userId,
+          inputBlocks: inputConfig.inputBlocks,
+          timestamp,
+          status: guide ? 'pending_apply' : 'pending',
+          inputConfig,
+        });
+        if (!prepared)
+          return { id, state: 'not_sent', reason: 'invalid_message' };
+        const entry = parseHistoryWrite(HistoryEntryWriteSchema, {
+          ...prepared,
+          id,
+        });
+        const owner = acceptedInputs;
+        if (!owner)
+          return { id, state: 'not_sent', reason: 'input_storage_unavailable' };
+        if (args.backgroundTaskId)
+          state.backgroundWork = {
+            id: args.backgroundTaskId,
+            turnId: id,
+            guide: !!guide,
+          };
+        owner.enqueue({
+          id,
+          sessionId: state.id,
+          workspaceId: state.workspace,
+          targetMachineId: args.machineId,
+          historyBackend: 'roost',
+          entry,
+          delivery: guide
+            ? { kind: 'guide', expectedTurnId: guide.id }
+            : { kind: 'dispatch' },
+          attachments: [],
+        });
+        writeStarted = true;
+        await waitForAcceptedInputSave(owner, state.id, id);
+        return guide
+          ? { id, state: 'uploaded', awaitingGuide: true }
+          : { id, state: 'uploaded' };
+      }
+    }
+    if (queued) {
+      const writeQueue = async (): Promise<SendTurnResult> => {
+        if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+        const before = state.doc.version();
+        writeStarted = true;
+        if (state.target?.backend === 'roost')
+          state.doc
+            .getMap('humanInputReceipts')
+            .set(id, { userId: args.userId!.trim() });
+        const item = state.doc
+          .getMovableList('mq')
+          .pushContainer(new LoroMap());
+        for (const [key, value] of Object.entries({
+          task: text,
+          userId: args.userId,
+          userTurnId: id,
+          timestamp,
+        }))
+          item.set(key, value);
+        const config = item.setContainer('acpSessionConfig', new LoroMap());
+        for (const [key, value] of Object.entries({
+          ...inputConfig,
+          chainDepth: 0,
+        }))
+          if (value !== undefined) config.set(key, value);
+        state.doc.commit();
+        const result = await state.client.append({
+          part: {
+            contentType: 'application/octet-stream',
+            body: encodeFrame(
+              state.doc.export({ mode: 'update', from: before }),
+            ),
+          },
+        });
+        if (!result.ok) throw new Error(result.result.code);
+        uploaded = true;
+        await state.markDispatch(state.id, id, true);
+        scheduleEmit(state, 'live');
+        return { id, state: 'queued' };
+      };
+      if (state.target?.backend === 'roost') {
+        const owner = acceptedInputs;
+        if (!owner)
+          return { id, state: 'not_sent', reason: 'input_storage_unavailable' };
+        const predecessors = await owner.capturePredecessors(state.id);
+        // Earlier inputs wait for their owner, which can be slow or offline. Stop,
+        // steer and edits must stay usable meanwhile, so only later sends of this
+        // session wait behind this one. The wait ends before the host's call
+        // deadline, so nothing is written after the host has given up on it.
+        holdsSession = false;
+        state.sending = false;
+        state.queueWaitId = id;
+        const waitEnded = new AbortController();
+        const timer = setTimeout(
+          () => waitEnded.abort(),
+          Math.max(0, QUEUED_SEND_BUDGET_MS - (Date.now() - startedAt)),
+        );
+        try {
+          return await owner.afterInputs(
+            state.id,
+            predecessors,
+            AbortSignal.any([state.controller.signal, waitEnded.signal]),
+            writeQueue,
+          );
+        } catch (error) {
+          if (!writeStarted && waitEnded.signal.aborted)
+            return { id, state: 'not_sent', reason: 'previous_input_pending' };
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      return await writeQueue();
+    }
     if (guide) {
       state.steerReceipts ??= new Map();
       state.steerReceipts.set(id, { targetId: guide.id, state: 'confirming' });
@@ -823,38 +1935,18 @@ export async function sendTurn(
     const before = state.doc.version();
     writeStarted = true;
     if (guide)
-      state.doc.getMap('lodySteerLinks').set(id, {
-        targetId: guide.id,
-        mode: 'native',
-      });
-    if (queued) {
-      // OSS consumes the shared movable queue, then creates its history turn.
-      const item = state.doc.getMovableList('mq').pushContainer(new LoroMap());
-      for (const [key, value] of Object.entries({
-        task: text,
-        userId: args.userId,
-        userTurnId: id,
-        timestamp,
-      }))
-        item.set(key, value);
-      const config = item.setContainer('acpSessionConfig', new LoroMap());
-      for (const [key, value] of Object.entries({
-        ...inputConfig,
-        chainDepth: 0,
-      }))
-        if (value !== undefined) config.set(key, value);
-      state.doc.commit();
-    } else {
-      appendUserTurn(
-        state.doc,
-        id,
-        text,
-        args.userId,
-        guide ? { ...inputConfig, _lodyDeliveryKind: 'steer' } : inputConfig,
-        timestamp,
-        guide ? 'pending_apply' : 'pending',
-      );
-    }
+      state.doc
+        .getMap('lodySteerLinks')
+        .set(id, { targetId: guide.id, mode: 'native' });
+    appendUserTurn(
+      state.doc,
+      id,
+      text,
+      args.userId,
+      guide ? { ...inputConfig, _lodyDeliveryKind: 'steer' } : inputConfig,
+      timestamp,
+      guide ? 'pending_apply' : 'pending',
+    );
     const result = await state.client.append({
       part: {
         contentType: 'application/octet-stream',
@@ -863,12 +1955,6 @@ export async function sendTurn(
     });
     if (!result.ok) throw new Error(result.result.code);
     uploaded = true;
-    if (queued) {
-      // The queue is durable before its catalog wake-up watermark is published.
-      await state.markDispatch(state.id, id, true);
-      scheduleEmit(state, 'live');
-      return { id, state: 'queued' };
-    }
     if (guide) {
       // History is durable; receipt tracking belongs to this message, not the
       // session-wide write lock. A later guide can be persisted while RPC waits.
@@ -908,7 +1994,7 @@ export async function sendTurn(
     if (sessions.get(state.id) !== state) throw new Error('runtime_replaced');
     scheduleEmit(state, 'live');
     const replyTo = `${state.workspace}:rpc:res:${args.machineId}:${crypto.randomUUID()}`;
-    const responseClient = await clientFor(replyTo, state.getGrant);
+    const responseClient = await clientFor(replyTo, () => sessionGrant(state));
     const created = await responseClient.create({
       contentType: 'application/json',
       ttlSeconds: 300,
@@ -918,7 +2004,7 @@ export async function sendTurn(
       now = Date.now();
     const requestClient = await clientFor(
       `${state.workspace}:rpc:req:${args.machineId}`,
-      state.getGrant,
+      () => sessionGrant(state),
     );
     const dispatched = await requestClient.append({
       part: {
@@ -975,9 +2061,12 @@ export async function sendTurn(
     }
     throw new Error('ack_timeout');
   } catch (error) {
-    // No automatic write replay: a lost HTTP ACK may still mean a durable write.
     let delivery: 'not_sent' | 'unknown' | 'uploaded' = 'not_sent';
-    if (writeStarted) delivery = 'unknown';
+    if (
+      writeStarted ||
+      (error instanceof Error && error.message === 'input_already_pending')
+    )
+      delivery = 'unknown';
     if (uploaded) delivery = 'uploaded';
     return {
       id,
@@ -985,8 +2074,10 @@ export async function sendTurn(
       reason: error instanceof Error ? error.message : 'send_failed',
     };
   } finally {
-    state.sending = false;
-    state.sendingId = undefined;
+    // A released session may already belong to a later control or edit.
+    if (holdsSession) state.sending = false;
+    if (state.sendingId === id) state.sendingId = undefined;
+    if (state.queueWaitId === id) state.queueWaitId = undefined;
   }
 }
 
@@ -1001,6 +2092,12 @@ export async function controlTurn(args: {
   const state = active;
   if (!state || state.id !== args.sessionId || !state.ready || state.sending)
     throw new Error('session_not_ready');
+  if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+  if (
+    state.target?.backend === 'roost' &&
+    state.target.machineId !== args.machineId
+  )
+    throw new Error('session_owner_changed');
   if (
     !['stop', 'steer'].includes(args.action) ||
     typeof args.machineId !== 'string' ||
@@ -1009,7 +2106,7 @@ export async function controlTurn(args: {
     !args.turnId.trim()
   )
     throw new Error('invalid_control');
-  const history = state.doc.getList('history');
+  const history = historyList(state);
   const entries = history.toJSON() as any[];
   if (
     !entries.some(
@@ -1066,6 +2163,64 @@ export async function controlTurn(args: {
         targetId: args.turnId,
         state: 'confirming',
       });
+      if (state.target?.backend === 'roost' && !args.interrupt) {
+        if (
+          !state.target.acceptsInput ||
+          !state.roostReader ||
+          entry ||
+          index < 0
+        )
+          throw new Error('message_not_queued');
+        const prepared = buildPendingUserHistoryEntry({
+          userId,
+          inputBlocks: config.inputBlocks ?? [
+            { type: 'text', text: item.task },
+          ],
+          timestamp,
+          status: 'pending_apply',
+          inputConfig: config,
+        });
+        if (!prepared) throw new Error('invalid_message');
+        const input = parseHistoryWrite(HistoryEntryWriteSchema, {
+          ...prepared,
+          id: args.messageId,
+        });
+        const owner = acceptedInputs;
+        if (!owner) throw new Error('input_storage_unavailable');
+        owner.enqueue({
+          id: args.messageId,
+          sessionId: state.id,
+          workspaceId: state.workspace,
+          targetMachineId: args.machineId,
+          historyBackend: 'roost',
+          entry: input,
+          delivery: { kind: 'guide', expectedTurnId: args.turnId },
+          attachments: [],
+        });
+        await waitForAcceptedInputSave(owner, state.id, args.messageId);
+        if (!targetIsCurrent(state)) throw new Error('workspace_changed');
+        const currentIndex = (queue.toJSON() as any[]).findIndex(
+          (queued) => queued.userTurnId === args.messageId,
+        );
+        if (currentIndex < 0) throw new Error('message_not_queued');
+        const beforeRemove = state.doc.version();
+        state.doc
+          .getMap('lodySteerLinks')
+          .set(args.messageId, { targetId: args.turnId, mode: 'native' });
+        queue.delete(currentIndex, 1);
+        state.doc.commit();
+        const removed = await state.client.append({
+          part: {
+            contentType: 'application/octet-stream',
+            body: encodeFrame(
+              state.doc.export({ mode: 'update', from: beforeRemove }),
+            ),
+          },
+        });
+        if (!removed.ok) throw new Error('steer_unconfirmed');
+        scheduleEmit(state, state.status);
+        return { state: 'not_applied', reason: 'steer_pending' };
+      }
       const before = state.doc.version();
       state.doc.getMap('lodySteerLinks').set(args.messageId, {
         targetId: args.turnId,
@@ -1098,7 +2253,7 @@ export async function controlTurn(args: {
           args.machineId,
           'session/cancel',
           { sessionId: state.id, turnId: args.turnId },
-          state.getGrant,
+          () => sessionGrant(state),
           AbortSignal.any([
             state.controller.signal,
             AbortSignal.timeout(35000),
@@ -1155,7 +2310,7 @@ export async function controlTurn(args: {
       args.machineId,
       'session/cancel',
       params,
-      state.getGrant,
+      () => sessionGrant(state),
       AbortSignal.any([state.controller.signal, AbortSignal.timeout(35000)]),
     );
     if (reply.error) throw new Error(reply.error.message ?? 'control_failed');
@@ -1201,7 +2356,7 @@ async function steerTurn(
     machineId,
     'session/steer',
     params,
-    state.getGrant,
+    () => sessionGrant(state),
     AbortSignal.any([state.controller.signal, AbortSignal.timeout(35000)]),
   ).catch((error: unknown): RpcReply => ({
     error: {
@@ -1213,7 +2368,8 @@ async function steerTurn(
     return { state: 'not_applied', reason: reply.error.message };
   }
   const result = reply.result as
-    { applied?: boolean; disposition?: string } | undefined;
+    | { applied?: boolean; disposition?: string; recoveryOwned?: boolean }
+    | undefined;
   if (result?.applied !== true) {
     record('unknown');
     return { state: 'not_applied', reason: result?.disposition ?? 'unknown' };
@@ -1247,7 +2403,7 @@ async function steerTurn(
 }
 
 export function docSnapshot() {
-  return active?.doc.toJSON();
+  return active && targetIsCurrent(active) ? snapshot(active) : undefined;
 }
 
 export async function editSession(
@@ -1269,10 +2425,9 @@ export async function editSession(
   const state = sessions.get(args.sessionId);
   if (!state?.ready || state.sending)
     return { state: 'not_sent', reason: 'session_not_ready' };
-  const history = state.doc.getList('history').toJSON() as Record<
-    string,
-    any
-  >[];
+  if (!targetIsCurrent(state))
+    return { state: 'not_sent', reason: 'workspace_changed' };
+  const history = historyList(state).toJSON() as Record<string, any>[];
   if (args.id && history.some((entry) => entry.id === args.id))
     return { state: 'accepted', id: args.id };
   const turn = editableUserTurn(history, meta, capability);
@@ -1322,7 +2477,7 @@ export async function editSession(
         timestamp: new Date().toISOString(),
         inputConfig,
       },
-      state.getGrant,
+      () => sessionGrant(state),
       AbortSignal.any([state.controller.signal, AbortSignal.timeout(120000)]),
     );
     if (response.error)
@@ -1353,9 +2508,29 @@ function scalar(value: unknown) {
 function locateItem(entryId: string, itemId: string) {
   const state = active;
   if (!state) return undefined;
-  const history = state.doc.getList('history');
+  const history = historyList(state);
   for (let i = 0; i < history.length; i++) {
     const entry = history.get(i);
+    if (!(entry instanceof LoroMap) && entry && typeof entry === 'object') {
+      const raw = entry as Record<string, any>;
+      if (raw.id !== entryId || !Array.isArray(raw.items)) continue;
+      for (let j = 0; j < raw.items.length; j++) {
+        const item = raw.items[j];
+        if (!item || typeof item !== 'object') continue;
+        let id = state.roostWindow ? `idx:${entryId}:${j}` : `idx:${i}:${j}`;
+        if (item.type === 'tool_call' && typeof item.toolCallId === 'string')
+          id = item.toolCallId;
+        if (id === itemId)
+          return {
+            get: (key: string) => item[key],
+            toJSON: () => item,
+            set: () => {
+              throw new Error('readonly_history');
+            },
+          };
+      }
+      return undefined;
+    }
     if (!(entry instanceof LoroMap) || entry.get('id') !== entryId) continue;
     const items = entry.get('items');
     if (!(items instanceof LoroList)) return undefined;
@@ -1407,6 +2582,7 @@ export async function itemDetail(args: {
 }) {
   if (!active || active.id !== args.sessionId || !active.ready)
     throw new Error('session_not_ready');
+  if (!targetIsCurrent(active)) throw new Error('workspace_changed');
   const raw: any =
     locateItem(args.entryId, args.itemId)?.toJSON() ??
     locateRunItem(args.entryId, args.itemId);
@@ -1449,6 +2625,7 @@ export async function respondPermission(args: {
   const state = active;
   if (!state || state.id !== args.sessionId || !state.ready)
     throw new Error('session_not_ready');
+  if (!targetIsCurrent(state)) throw new Error('workspace_changed');
   const item = locateItem(args.entryId, args.itemId);
   const request = item?.get('permissionRequest');
   const current: any =
@@ -1480,6 +2657,16 @@ export async function respondPermission(args: {
       return { state: 'conflict' as const };
     if (!state.unsent.has(key)) return { state: 'accepted' as const };
   }
+  if (state.target?.backend === 'roost') {
+    if (!state.roostReader) throw new Error('session_not_ready');
+    const accepted =
+      await state.roostReader.sessionData.commands.respondPermission(
+        args.requestId,
+        outcome,
+        { turnId: args.entryId },
+      );
+    return { state: accepted ? ('accepted' as const) : ('stale' as const) };
+  }
   const before = state.unsent.get(key)?.version ?? state.doc.version();
   if (current.outcome == null) {
     if (request instanceof LoroMap) request.set('outcome', outcome);
@@ -1504,44 +2691,124 @@ export async function respondPermission(args: {
   return { state: 'accepted' as const };
 }
 
-// Explicit queue writes share the owned session and its durable dispatch watermark.
-// A lost ACK blocks further queue changes until an authoritative reconnect.
-export async function sessionQueue(args: SessionQueueRequest) {
-  const state = active;
-  if (
-    !state ||
-    state.id !== args.sessionId ||
-    !state.ready ||
-    state.status !== 'live' ||
-    state.sending
-  )
+type NoticeTarget = {
+  sessionId: string;
+  entryId: string;
+  itemId: string;
+};
+
+async function readRoostNotice(state: SessionState, args: NoticeTarget) {
+  const data = state.roostReader?.sessionData;
+  if (!data || !targetIsCurrent(state)) throw new Error('session_not_ready');
+  const read = await data.history.readTurn(args.entryId);
+  if (active !== state || !targetIsCurrent(state))
     throw new Error('session_not_ready');
-  if (args.action === 'list')
-    return { state: 'ready' as const, items: readSessionQueue(state.doc) };
-  state.sending = true;
-  try {
-    const before = state.doc.version();
-    if (!mutateSessionQueue(state.doc, args))
-      return { state: 'stale' as const, items: readSessionQueue(state.doc) };
-    try {
-      const result = await state.client.append({
-        part: {
-          contentType: 'application/octet-stream',
-          body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
-        },
-      });
-      if (!result.ok) throw new Error('queue_write_unknown');
-      await state.markDispatch(state.id, '', true);
-      scheduleEmit(state, state.status);
-      return { state: 'ready' as const, items: readSessionQueue(state.doc) };
-    } catch {
-      state.writeUncertain = true;
-      state.ready = false;
-      settleLive(state, new Error('queue_write_unknown'));
-      scheduleEmit(state, 'failed', 'queue_write_unknown');
-      return { state: 'unknown' as const, items: [] };
-    }
-  } finally {
-    state.sending = false;
+  const turn = read.turn;
+  if (
+    read.state !== 'ready' ||
+    !record(turn) ||
+    turn.id !== args.entryId ||
+    !Array.isArray(turn.items)
+  )
+    return undefined;
+  const index = turn.items.findIndex(
+    (_, index) => args.itemId === `idx:${args.entryId}:${index}`,
+  );
+  const item: unknown = turn.items[index];
+  if (
+    !record(item) ||
+    item.type !== 'system_notice' ||
+    typeof item.name !== 'string'
+  )
+    return undefined;
+  return { data, turn, items: turn.items, index, item, name: item.name };
+}
+
+/** A `system_notice` in the open session, read for an action on it. */
+export async function noticeAt(args: NoticeTarget) {
+  const state = active;
+  if (!state || state.id !== args.sessionId || !state.ready)
+    throw new Error('session_not_ready');
+  if (state.target?.backend === 'roost') {
+    const notice = await readRoostNotice(state, args);
+    return notice && { name: notice.name, meta: notice.item.meta };
   }
+  const item = locateItem(args.entryId, args.itemId);
+  if (!item) return undefined;
+  const raw: any = item.toJSON();
+  if (raw?.type !== 'system_notice' || typeof raw.name !== 'string')
+    return undefined;
+  return { name: raw.name, meta: raw.meta };
+}
+
+/**
+ * Record a decision in a notice's meta (web writes the whole turn back with the
+ * changed item). Only the fields given change; the upload is never replayed: a
+ * failed append keeps the local version so an explicit retry re-exports it.
+ */
+export async function writeNoticeMeta(
+  args: NoticeTarget & {
+    name: string;
+    patch: Record<string, unknown>;
+  },
+) {
+  const state = active;
+  if (!state || state.id !== args.sessionId || !state.ready)
+    throw new Error('session_not_ready');
+  if (state.target?.backend === 'roost') {
+    const notice = await readRoostNotice(state, args);
+    if (!notice || notice.name !== args.name)
+      throw new Error('proposal_unavailable');
+    const current = record(notice.item.meta) ? notice.item.meta : {};
+    if (
+      Object.entries(args.patch).every(([key, value]) => current[key] === value)
+    )
+      return;
+    const items = [...notice.items];
+    items[notice.index] = {
+      ...notice.item,
+      meta: { ...current, ...args.patch },
+    };
+    await notice.data.commands.replaceTurn(args.entryId, {
+      ...notice.turn,
+      id: args.entryId,
+      items,
+    });
+    return;
+  }
+  const item = locateItem(args.entryId, args.itemId);
+  if (!item || scalar(item.get('type')) !== 'system_notice')
+    throw new Error('proposal_unavailable');
+  if (scalar(item.get('name')) !== args.name)
+    throw new Error('proposal_unavailable');
+  const key = `${args.entryId}/${args.itemId}/notice`;
+  const meta = item.get('meta');
+  const current: Record<string, unknown> =
+    meta instanceof LoroMap
+      ? (meta.toJSON() as Record<string, unknown>)
+      : meta && typeof meta === 'object'
+        ? (meta as Record<string, unknown>)
+        : {};
+  const applied = Object.entries(args.patch).every(
+    ([field, value]) => current[field] === value,
+  );
+  if (applied && !state.unsent.has(key)) return;
+  const before = state.unsent.get(key)?.version ?? state.doc.version();
+  if (!applied) {
+    if (meta instanceof LoroMap)
+      for (const [field, value] of Object.entries(args.patch))
+        meta.set(field, value);
+    else item.set('meta', { ...current, ...args.patch });
+    state.doc.commit();
+  }
+  state.unsent.set(key, { version: before, outcome: args.patch });
+  const result = await state.client.append({
+    part: {
+      contentType: 'application/octet-stream',
+      body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
+    },
+  });
+  if (!result.ok) throw new Error('upload_failed');
+  state.unsent.delete(key);
+  if (active === state) scheduleEmit(state, 'live');
 }

@@ -28,6 +28,7 @@ export function availableCreationOptions(
       (agent) => presence.state === 'live' && online.has(agent.machineId),
     ),
     availability,
+    onlineMachineIds: presence.state === 'live' ? [...online] : undefined,
   };
 }
 

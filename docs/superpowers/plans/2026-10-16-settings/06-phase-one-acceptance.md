@@ -20,15 +20,15 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/verification/ui/README.md](../../../../apps/mobile/verification/ui/README.md)
-- [apps/mobile/verification/ui/run.py](../../../../apps/mobile/verification/ui/run.py)
-- [apps/mobile/verification/ui/home.py](../../../../apps/mobile/verification/ui/home.py)
-- [apps/mobile/verification/ui/appearance.py](../../../../apps/mobile/verification/ui/appearance.py)
-- [apps/mobile/verification/ui/settings.py](../../../../apps/mobile/verification/ui/settings.py)
-- [apps/mobile/verification/ui/notifications.py](../../../../apps/mobile/verification/ui/notifications.py)
-- [apps/mobile/verification/ui/licenses.py](../../../../apps/mobile/verification/ui/licenses.py)
-- [apps/mobile/verification/ui/ipad.py](../../../../apps/mobile/verification/ui/ipad.py)
-- [apps/mobile/verification/ui/diagnostics.py](../../../../apps/mobile/verification/ui/diagnostics.py)
+- `apps/mobile/verification/ui/README.md`
+- `apps/mobile/verification/ui/run.py`
+- `apps/mobile/verification/ui/home.py`
+- `apps/mobile/verification/ui/appearance.py`
+- `apps/mobile/verification/ui/settings.py`
+- `apps/mobile/verification/ui/notifications.py`
+- `apps/mobile/verification/ui/licenses.py`
+- `apps/mobile/verification/ui/ipad.py`
+- `apps/mobile/verification/ui/diagnostics.py`
 
 ## 工作内容
 

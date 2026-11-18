@@ -20,14 +20,14 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/features/settings/remote-settings.ts](../../../../apps/mobile/src/features/settings/remote-settings.ts)
-- [apps/mobile/src/features/settings/agent-usage.ts](../../../../apps/mobile/src/features/settings/agent-usage.ts)
-- [apps/mobile/src/screens/RemoteSettingsScreen.tsx](../../../../apps/mobile/src/screens/RemoteSettingsScreen.tsx)
-- [apps/mobile/src/screens/RemoteSettingEditorScreen.tsx](../../../../apps/mobile/src/screens/RemoteSettingEditorScreen.tsx)
+- `apps/mobile/src/features/settings/remote-settings.ts`
+- `apps/mobile/src/features/settings/agent-usage.ts`
+- `apps/mobile/src/screens/RemoteSettingsScreen.tsx`
+- `apps/mobile/src/screens/RemoteSettingEditorScreen.tsx`
 - [packages/cloud-runtime/src/runtime/settings.ts](../../../../packages/cloud-runtime/src/runtime/settings.ts)
-- [apps/mobile/tests/native/settings.test.mjs](../../../../apps/mobile/tests/native/settings.test.mjs)
-- [apps/mobile/tests/cloud/agent-usage.test.mjs](../../../../apps/mobile/tests/cloud/agent-usage.test.mjs)
-- [apps/mobile/verification/ui/settings.py](../../../../apps/mobile/verification/ui/settings.py)
+- `apps/mobile/tests/native/settings.test.mjs`
+- `apps/mobile/tests/cloud/agent-usage.test.mjs`
+- `apps/mobile/verification/ui/settings.py`
 
 ## 工作内容
 

@@ -41,6 +41,8 @@ export const MentionCatalog = z
         subtitle: z.string(),
         insertText: z.string().optional(),
         roleName: z.string().optional(),
+        /** A Role's emoji, shown before its name (as the run-config Role row). */
+        emoji: z.string().optional(),
       }),
     ),
     truncated: z.boolean(),

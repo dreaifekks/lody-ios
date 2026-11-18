@@ -1,3 +1,5 @@
+import type { OperationPresentation } from '../runtime/operation-presentation.ts';
+import { type SessionUsage } from '../protocol/session-usage.ts';
 import { type TurnMetadata } from '../protocol/turnMetadata.ts';
 export type SystemNoticeMeta = {
   reason?: string;
@@ -6,6 +8,15 @@ export type SystemNoticeMeta = {
 };
 
 export type ItemSummary =
+  | {
+      itemId: string;
+      rev: number;
+      type:
+        | 'operation_progress'
+        | 'operation_completion'
+        | 'operation_completion_batch';
+      operation: OperationPresentation;
+    }
   | {
       itemId: string;
       rev: number;
@@ -62,6 +73,8 @@ export type ItemSummary =
       error?: string;
       isBackgrounded?: boolean;
       skipTranscript?: boolean;
+      /** Web `groupOf`: an agent run is a subagent; a command, MCP task, monitor or wakeup a task. */
+      group?: 'subagents' | 'tasks';
       run?: { sessionId: string; state: string; items: ItemSummary[] };
     }
   | { itemId: string; rev: number; type: string };
@@ -74,6 +87,7 @@ export type EntrySummary = TurnMetadata & {
   finished: boolean;
   canSteer?: boolean;
   userTurnId?: string;
+  userId?: string;
   executionId?: string;
   executionFinished?: boolean;
   steerCount?: number;
@@ -94,6 +108,7 @@ export type Envelope = {
   reason?: string;
   revision: number;
   billableTurnCount?: number;
+  usage?: SessionUsage;
   awaitingUserSince?: number;
   preview?: { label: string; active: boolean };
   composer?: {

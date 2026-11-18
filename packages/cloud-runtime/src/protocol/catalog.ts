@@ -1,5 +1,6 @@
 import { projectAgentUsage, legacyAgentQuotas } from './agent-usage.ts';
 import { pullRequestReferences } from './pull-request.ts';
+import { projectRunOf } from './project-run.ts';
 import type { Catalog, Project, Session } from '../models/catalog.ts';
 
 export type { Catalog, Project, Session } from '../models/catalog.ts';
@@ -46,6 +47,18 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const text = (value: unknown): string =>
   typeof value === 'string' ? value : '';
+/** A `projectRun`'s GitHub member repositories, in member order. */
+const runRepositories = (value: unknown): string[] => {
+  const members = Object.values(object(value))
+    .map(object)
+    .sort((a, b) => (stamp(a.o) ?? 0) - (stamp(b.o) ?? 0));
+  const repos = members.flatMap((member) => {
+    const src = object(member.src);
+    const repo = text(src.repoFullName).trim();
+    return src.kind === 'github' && repo ? [repo] : [];
+  });
+  return [...new Set(repos)];
+};
 const stamp = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 const modelOf = (value: unknown): Session['lastModel'] => {
@@ -61,7 +74,10 @@ const diffOf = (value: unknown) => {
   const change = object(object(value).allChange);
   const add = stamp(change.add) ?? 0,
     del = stamp(change.del) ?? 0;
-  return add || del ? { add, del } : undefined;
+  const files = stamp(change.files);
+  return files !== undefined || add || del
+    ? { add, del, ...(files === undefined ? {} : { files }) }
+    : undefined;
 };
 export function projectRows(
   rows: Row[],
@@ -77,7 +93,9 @@ export function projectRows(
     sessions: Session[] = [],
     machineIds = new Set<string>(),
     machineNames: Record<string, string> = {},
-    machineSimulators: NonNullable<Catalog['machineSimulators']> = {};
+    machineOs: Record<string, string> = {},
+    machineSimulators: NonNullable<Catalog['machineSimulators']> = {},
+    machineEmulators: NonNullable<Catalog['machineEmulators']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -125,11 +143,16 @@ export function projectRows(
       machineIds.add(machineId);
       const name = text(value.name);
       if (name) machineNames[machineId] = name;
+      const os = text(value.os);
+      if (os) machineOs[machineId] = os;
       if (value.os === 'darwin')
         machineSimulators[machineId] =
           Number(object(value.protocolCapabilities).iosSimulator) >= 1
             ? 'available'
             : 'upgrade-required';
+      // Android preview has no OS gate; an old CLI simply does not offer it.
+      if (Number(object(value.protocolCapabilities).androidEmulator) >= 1)
+        machineEmulators[machineId] = 'available';
       // Match the CLI's legacy metadata + machine Flock project merge.
       for (const [localId, item] of Object.entries(
         object(value.localProjects),
@@ -149,12 +172,22 @@ export function projectRows(
       project = object(value.project);
     const localId = text(project.localProjectId),
       repo = text(project.repoFullName) || text(value.repoFullName);
-    const projectId =
-      project.kind === 'local' && localId
+    // A multi-repository project's session lists under its group (web `projectRun.id`),
+    // ahead of the legacy `project` that names only its first member.
+    const run = object(value.projectRun),
+      runId = text(run.id);
+    const projectId = runId
+      ? `group:${runId}`
+      : project.kind === 'local' && localId
         ? `${machineId}:local:${localId}`
         : repo
           ? `github:${repo}`
           : `${machineId}:unassigned`;
+    const pullRequests = pullRequestReferences(
+      value.pullRequests,
+      value.pullRequestState,
+    );
+    const projectRun = runId ? projectRunOf(run, pullRequests) : undefined;
     sessions.push({
       lastModel: modelOf(value.lastModel),
       cliType: text(value.cliType),
@@ -165,12 +198,17 @@ export function projectRows(
       openedByRootSessionId:
         text(value.openedByRootSessionId).trim() || undefined,
       parentSessionId: text(value.parentSessionId).trim() || undefined,
+      childSessionPlacement:
+        text(value.childSessionPlacement).trim() || undefined,
       machineId,
       title: text(value.title) || labels.untitled,
       status:
         text(value.status) || text(object(value.status).type) || labels.unknown,
       archived: value.isArchived === true,
+      isTabClosed: value.isTabClosed === true,
       pinned: value.isPinned === true,
+      userId: text(value.userId) || undefined,
+      agentConfigId: text(value.agentConfigId) || undefined,
       projectId,
       createdAt: text(value.createdAt),
       latestUserMsgId: text(value.latestUserMsgId) || undefined,
@@ -178,16 +216,33 @@ export function projectRows(
       lastReadAt: stamp(value.lastReadAt),
       lastRunningSeen: stamp(value.lastRunningSeen),
       awaitingUserSince: stamp(value.awaitingUserSince),
+      lastHandledUserMsgId: text(value.lastHandledUserMsgId) || undefined,
+      lastFailedUserMsgId: text(value.lastFailedUserMsgId) || undefined,
       branchName: text(value.branchName) || undefined,
+      baseBranch:
+        text(value.baseBranch).trim() ||
+        text(project.branch).trim() ||
+        undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
-      pullRequests: pullRequestReferences(
-        value.pullRequests,
-        value.pullRequestState,
-      ),
+      androidEmulatorPreviewRequestId:
+        text(value.androidEmulatorPreviewRequestId) || undefined,
+      pullRequests,
       diff: diffOf(value.diffStats),
+      workspaceDirty: value.workspaceDirty === true || undefined,
+      workspaceUnpushed: value.workspaceUnpushed === true || undefined,
+      ...(projectRun ? { projectRun } : {}),
     });
-    if (localId || repo) {
+    if (runId) {
+      const repositories = runRepositories(run.members);
+      projects.push({
+        id: projectId,
+        machineId,
+        name: text(run.name) || labels.local,
+        rootPath: '',
+        ...(repositories.length ? { repositories } : {}),
+      });
+    } else if (localId || repo) {
       const githubRepo = repo || text(project.githubRepoFullName);
       projects.push({
         id: projectId,
@@ -202,15 +257,28 @@ export function projectRows(
   for (const p of projects) {
     const first = unique.get(p.id);
     if (!first) unique.set(p.id, p);
-    else if (!first.repoFullName && p.repoFullName)
-      unique.set(p.id, { ...first, repoFullName: p.repoFullName });
+    else {
+      // Group sessions may freeze different member sets; the project knows them all.
+      const repositories = [
+        ...new Set([...(first.repositories ?? []), ...(p.repositories ?? [])]),
+      ];
+      unique.set(p.id, {
+        ...first,
+        ...(!first.repoFullName && p.repoFullName
+          ? { repoFullName: p.repoFullName }
+          : {}),
+        ...(repositories.length ? { repositories } : {}),
+      });
+    }
   }
   return {
     projects: [...unique.values()],
     sessions,
     machineIds: [...machineIds],
     machineNames,
+    machineOs,
     machineSimulators,
+    machineEmulators,
     agentUsage,
   };
 }

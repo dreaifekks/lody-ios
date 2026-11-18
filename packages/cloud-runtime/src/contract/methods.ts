@@ -1,4 +1,15 @@
-import { SessionQueueParams, SessionQueueResult } from './queue.ts';
+import {
+  AgentProviderOperationParams,
+  AgentProviderOperationResult,
+  AgentProviderOperationProgress,
+  AgentProviderRefreshProgress,
+  AgentProviderDetailParams,
+  AgentProviderDetail,
+  AgentProviderProbeParams,
+  AgentProviderProbeResult,
+  AgentProviderAuthParams,
+  AgentProviderAuthState,
+} from './provider-details.ts';
 import { z } from 'zod/v4';
 import {
   CatalogEvent,
@@ -12,6 +23,8 @@ import { ProbeSchemaParams, ProbeSchemaReport } from './debug.ts';
 import { GitHubMentionsParams, GitHubMentionsResult } from './github.ts';
 import { MentionCatalog, MentionCatalogParams } from './mentions.ts';
 import {
+  AndroidEmulatorControlParams,
+  AndroidEmulatorControlResult,
   IosSimulatorControlParams,
   IosSimulatorControlResult,
   SessionPreviewParams,
@@ -22,7 +35,17 @@ import {
   CreationOptionsParams,
   LocalProjectsParams,
   LocalProjectsResult,
+  ProjectGroupsParams,
+  ProjectGroupsResult,
 } from './projects.ts';
+import {
+  ScheduleCommandParams,
+  ScheduleCommandResult,
+  ScheduleDetail,
+  ScheduleDetailParams,
+  SchedulesParams,
+  SchedulesResult,
+} from './schedules.ts';
 import {
   OpenSessionParams,
   ReleaseReserveParams,
@@ -31,16 +54,14 @@ import {
   StartParams,
 } from './lifecycle.ts';
 import {
+  AgentProvidersParams,
+  AgentProvidersResult,
   AgentRoleSnapshot,
   AgentRolesParams,
-  MemorySettingsParams,
-  MemorySnapshot,
   RemoteSettingsParams,
   RemoteSettingsResult,
 } from './settings.ts';
 import {
-  PublishedSharesParams,
-  PublishedSharesResult,
   SessionSharingParams,
   SessionSharingResult,
   ShareProgressEvent,
@@ -79,11 +100,17 @@ import {
 import { ItemDetail, ItemDetailParams } from './item-detail.ts';
 import {
   ArchiveSessionParams,
+  SetTabClosedParams,
   CheckTurnQuotaParams,
   CheckTurnQuotaResult,
   ControlTurnParams,
   ControlTurnResult,
   CreateSessionParams,
+  CreateTabParams,
+  ForkSessionParams,
+  ForkSessionResult,
+  ForgetPendingInputParams,
+  RetryPendingInputResult,
   CreateSessionResult,
   DeleteSessionParams,
   DeleteSessionResult,
@@ -92,7 +119,14 @@ import {
   MarkSessionReadParams,
   PinSessionParams,
   RenameSessionParams,
+  SetSessionOwnerParams,
+  SessionWorkspacePathParams,
+  SessionWorkspacePathResult,
+  ConversationMarkdownParams,
+  ConversationMarkdownResult,
   RespondPermissionParams,
+  DecideProposalParams,
+  DecideProposalResult,
   RespondPermissionResult,
   SendTurnParams,
   SendTurnResult,
@@ -105,6 +139,7 @@ export type {
   CreateSessionResult,
   EditSessionResult,
   SendTurnResult,
+  RetryPendingInputResult,
 } from './sessions.ts';
 export type { CreationOptions } from './projects.ts';
 export type { SessionRuntimeEvent, SessionTrace } from './session-events.ts';
@@ -118,11 +153,6 @@ export type CallSpec = {
 };
 
 export const runtimeCalls = {
-  sessionQueue: {
-    params: SessionQueueParams,
-    result: SessionQueueResult,
-    timeoutMs: 45_000,
-  },
   hello: { params: HelloParams, result: HelloResult, timeoutMs: 10_000 },
   ensureSession: {
     params: EnsureSessionParams,
@@ -141,6 +171,11 @@ export const runtimeCalls = {
     result: Empty,
     timeoutMs: 10_000,
   },
+  loadOlderSession: {
+    params: OpenSessionParams,
+    result: Empty,
+    timeoutMs: 45_000,
+  },
   closeSession: { params: Empty, result: Empty, timeoutMs: 10_000 },
   releaseReserve: {
     params: ReleaseReserveParams,
@@ -158,20 +193,37 @@ export const runtimeCalls = {
     result: RemoteSettingsResult,
     timeoutMs: 45_000,
   },
-  memorySettings: {
-    params: MemorySettingsParams,
-    result: MemorySnapshot,
-    timeoutMs: 45_000,
+  agentProviderOperation: {
+    params: AgentProviderOperationParams,
+    result: AgentProviderOperationResult,
+    timeoutMs: 350000,
+  },
+  agentProviderDetail: {
+    params: AgentProviderDetailParams,
+    result: AgentProviderDetail,
+    timeoutMs: 45000,
+  },
+  agentProviderProbe: {
+    params: AgentProviderProbeParams,
+    result: AgentProviderProbeResult,
+    // Backstop for a refresh that reads every model; a plain probe answers
+    // within the runtime's own 125 s budget.
+    timeoutMs: 1_215_000,
+  },
+  agentProviderAuth: {
+    params: AgentProviderAuthParams,
+    result: AgentProviderAuthState,
+    timeoutMs: 60000,
+  },
+  agentProviders: {
+    params: AgentProvidersParams,
+    result: AgentProvidersResult,
+    timeoutMs: 135_000,
   },
   agentRoles: {
     params: AgentRolesParams,
     result: AgentRoleSnapshot,
     timeoutMs: 45_000,
-  },
-  publishedShares: {
-    params: PublishedSharesParams,
-    result: PublishedSharesResult,
-    timeoutMs: 70_000,
   },
   mentionCatalog: {
     params: MentionCatalogParams,
@@ -182,6 +234,26 @@ export const runtimeCalls = {
     params: CreationOptionsParams,
     result: CreationOptions,
     timeoutMs: 45_000,
+  },
+  projectGroups: {
+    params: ProjectGroupsParams,
+    result: ProjectGroupsResult,
+    timeoutMs: 45_000,
+  },
+  schedules: {
+    params: SchedulesParams,
+    result: SchedulesResult,
+    timeoutMs: 45_000,
+  },
+  scheduleDetail: {
+    params: ScheduleDetailParams,
+    result: ScheduleDetail,
+    timeoutMs: 45_000,
+  },
+  scheduleCommand: {
+    params: ScheduleCommandParams,
+    result: ScheduleCommandResult,
+    timeoutMs: 70_000,
   },
   localProjects: {
     params: LocalProjectsParams,
@@ -203,6 +275,11 @@ export const runtimeCalls = {
     result: IosSimulatorControlResult,
     timeoutMs: 100_000,
   },
+  androidEmulatorControl: {
+    params: AndroidEmulatorControlParams,
+    result: AndroidEmulatorControlResult,
+    timeoutMs: 100_000,
+  },
   itemDetail: {
     params: ItemDetailParams,
     result: ItemDetail,
@@ -221,6 +298,11 @@ export const runtimeCalls = {
     result: DirectoryListing,
     timeoutMs: 45_000,
   },
+  createTab: {
+    params: CreateTabParams,
+    result: CreateSessionResult,
+    timeoutMs: 45_000,
+  },
   createSession: {
     params: CreateSessionParams,
     result: CreateSessionResult,
@@ -236,6 +318,11 @@ export const runtimeCalls = {
     result: Empty,
     timeoutMs: 45_000,
   },
+  setTabClosed: {
+    params: SetTabClosedParams,
+    result: Empty,
+    timeoutMs: 45_000,
+  },
   pinSession: { params: PinSessionParams, result: Empty, timeoutMs: 45_000 },
   markSessionRead: {
     params: MarkSessionReadParams,
@@ -247,6 +334,21 @@ export const runtimeCalls = {
     result: Empty,
     timeoutMs: 45_000,
   },
+  setSessionOwner: {
+    params: SetSessionOwnerParams,
+    result: Empty,
+    timeoutMs: 45_000,
+  },
+  sessionWorkspacePath: {
+    params: SessionWorkspacePathParams,
+    result: SessionWorkspacePathResult,
+    timeoutMs: 15_000,
+  },
+  conversationMarkdown: {
+    params: ConversationMarkdownParams,
+    result: ConversationMarkdownResult,
+    timeoutMs: 15_000,
+  },
   checkTurnQuota: {
     params: CheckTurnQuotaParams,
     result: CheckTurnQuotaResult,
@@ -257,10 +359,25 @@ export const runtimeCalls = {
     result: SendTurnResult,
     timeoutMs: 45_000,
   },
+  forkSession: {
+    params: ForkSessionParams,
+    result: ForkSessionResult,
+    timeoutMs: 130_000,
+  },
   editSession: {
     params: EditSessionParams,
     result: EditSessionResult,
     timeoutMs: 130_000,
+  },
+  retryPendingInput: {
+    params: ForgetPendingInputParams,
+    result: RetryPendingInputResult,
+    timeoutMs: 30_000,
+  },
+  forgetPendingInput: {
+    params: ForgetPendingInputParams,
+    result: Empty,
+    timeoutMs: 30_000,
   },
   controlTurn: {
     params: ControlTurnParams,
@@ -271,6 +388,11 @@ export const runtimeCalls = {
     params: RespondPermissionParams,
     result: RespondPermissionResult,
     timeoutMs: 45_000,
+  },
+  decideProposal: {
+    params: DecideProposalParams,
+    result: DecideProposalResult,
+    timeoutMs: 75_000,
   },
   probeSchema: {
     params: ProbeSchemaParams,
@@ -299,8 +421,15 @@ export const hostCalls = {
 } satisfies Record<string, CallSpec>;
 
 export const runtimeEvents = {
+  agentProviderAuthChanged: AgentProviderAuthState,
+  agentProviderOperationProgress: AgentProviderOperationProgress,
+  agentProviderRefreshProgress: AgentProviderRefreshProgress,
+  agentProvidersChanged: z
+    .object({ machineId: z.string() })
+    .meta({ id: 'AgentProvidersChangedEvent' }),
   catalog: CatalogEvent,
   shareProgress: ShareProgressEvent,
+  creationOptionsChanged: Empty,
   machinePresence: MachinePresence,
   synced: SyncedEvent,
   syncError: SyncErrorEvent,

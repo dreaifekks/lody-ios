@@ -20,10 +20,10 @@
 
 实现复用设置入口、现有 Flock／Streams 读写和原生凭据边界，公开协议与实际生效链路见下文。
 
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
 - [packages/cloud-runtime/src/models/settings.ts](../../../../packages/cloud-runtime/src/models/settings.ts)
 - [packages/cloud-runtime/src/runtime/settings.ts](../../../../packages/cloud-runtime/src/runtime/settings.ts)
-- [apps/mobile/src/cloud/settings.ts](../../../../apps/mobile/src/cloud/settings.ts)
+- `apps/mobile/src/cloud/settings.ts`
 
 ## 工作内容
 

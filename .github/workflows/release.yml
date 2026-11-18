@@ -22,9 +22,9 @@ permissions:
   contents: read
 
 env:
-  IOS_DIR: .
-  APPLE_TEAM_ID: KAMM5N88X3
-  LODY_BUNDLE_ID: app.innei.lody
+  IOS_DIR: apps/ios
+  APPLE_TEAM_ID: YTRMX32C99
+  LODY_BUNDLE_ID: ai.lody.mobile
   ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
   ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
   ASC_BYPASS_KEYCHAIN: '1'
@@ -191,7 +191,7 @@ jobs:
           jq -e \
             --arg team "$APPLE_TEAM_ID" \
             --argjson profiles "$IOS_PROFILE_MAP" \
-            -f .github/scripts/verify-signing-settings.jq \
+            -f ../../.github/scripts/verify-signing-settings.jq \
             "$RUNNER_TEMP/signing-settings.json"
 
       - name: Archive
