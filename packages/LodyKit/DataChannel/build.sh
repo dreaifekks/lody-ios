@@ -64,7 +64,7 @@ framework module LodyDataChannel {
 }
 MAP
   plutil -create xml1 "$framework/Info.plist"
-  for pair in CFBundleIdentifier=app.innei.LodyDataChannel CFBundleName=LodyDataChannel \
+  for pair in CFBundleIdentifier=ai.lody.mobile.LodyDataChannel CFBundleName=LodyDataChannel \
     CFBundleExecutable=LodyDataChannel CFBundlePackageType=FMWK CFBundleShortVersionString=1.0 \
     CFBundleVersion=1 MinimumOSVersion="$DEPLOYMENT_TARGET"; do
     plutil -insert "${pair%%=*}" -string "${pair#*=}" "$framework/Info.plist"

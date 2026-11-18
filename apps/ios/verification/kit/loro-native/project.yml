@@ -1,6 +1,6 @@
 name: LodyNativeProbe
 options:
-  bundleIdPrefix: app.innei
+  bundleIdPrefix: ai.lody
 packages:
   Loro:
     path: .work/loro-swift

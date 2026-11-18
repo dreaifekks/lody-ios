@@ -20,13 +20,19 @@ https://github.com/user-attachments/assets/0bc0ab48-6f12-44e9-ae13-07af9c6b780d
 
 ## Origin and maintenance
 
-This is Lody’s integrated iOS client, derived from
-**[Innei/lody-ios](https://github.com/Innei/lody-ios)** by
-[Innei](https://github.com/Innei) and contributors. Their native application,
-LodyKit architecture, chat UI, and protocol runtime form the foundation of this
-client. See the [mobile credits](../README.md#credits-and-origins) for import
-provenance and the [upstream project](https://github.com/Innei/lody-ios) for its
-independent development history. Please report integration issues to Lody.
+This repository, **[LodyAI/lody-ios](https://github.com/LodyAI/lody-ios)**, is
+Lody’s iOS client. It began as Innei’s lody-ios, created by
+[Innei](https://github.com/Innei) and contributors, whose native application,
+LodyKit architecture, chat UI and protocol runtime form its foundation. The copy
+Lody developed in its monorepo has been merged back here with its history; see
+the [mobile credits](../README.md#credits-and-origins) for provenance.
+
+The [Lody monorepo](https://github.com/LodyAI/Lody) checks this repository out
+as the `apps/mobile/ios` submodule. Develop and build it from there: the build
+reads the shared `apps/mobile/backend-config.mjs` and
+`apps/mobile/shared/markdown-repair`, and Android snapshots
+`packages/cloud-runtime` from it. Commit iOS changes here, then update the
+submodule pointer in Lody.
 
 The source is under active development. Upstream TestFlight links and workflows
 refer to the upstream distribution, not a release of this repository.
@@ -425,7 +431,7 @@ Bundled third-party libraries and assets keep their own licenses. The full list 
 
 Lody iOS is made possible thanks to these open-source projects and creators:
 
-- **[Innei/lody-ios](https://github.com/Innei/lody-ios)**: Created by [Innei](https://github.com/Innei) and contributors; the original native client and protocol runtime on which this integration is directly based.
+- **[lody-ios](https://github.com/LodyAI/lody-ios)**: Created by [Innei](https://github.com/Innei) and contributors; the original native client and protocol runtime on which this integration is directly based.
 
 - **[FlowDown](https://github.com/Lakr233/FlowDown)**: Thanks to [Lakr233](https://github.com/Lakr233) and contributors. Lody's native message collection view, stream batching mechanism, and dynamic measurement cache architecture drew significant inspiration from FlowDown.
 - **[unixzii](https://github.com/unixzii)**: Original author of Litext, the CoreText rich-text engine underneath MarkdownView and Lody's native chat rendering. Also a generous teacher — a great deal of this project's iOS knowledge came from him.
