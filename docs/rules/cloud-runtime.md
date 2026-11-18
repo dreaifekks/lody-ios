@@ -21,3 +21,6 @@ Read before changing login, the data runtime, the offscreen WebView and watchdog
 - Session envelopes stay below the host's 12 MiB limit. Loro sessions keep the whole document in the runtime but send only a transcript window that starts at a user turn, follows new entries and grows by pages on `loadOlderSession`; usage, billing, execution and composer state still read the whole history. A window over the 8 MiB budget keeps its newest turns and stops offering older history. An envelope still over the limit becomes an overflow marker and records one `session_overflow` diagnostic with its size.
 
 - Catalog and cached-settings recovery compare exact decimal byte offsets and the last snapshot size before preferring a newer snapshot. Failed size hints or oversized/incomplete optional replacements preserve incremental recovery. Frame import yields between 12 ms slices and checks scope cancellation. At most two machine replicas initialize concurrently; metadata and live reads bypass that queue. Catalog publication coalesces bursts over 16 ms and reads the current scope when it flushes.
+- The trusted DataRuntime HTML permits `https:` and `wss:` connections; its other
+  CSP directives remain restrictive. CSP permission alone does not enable the
+  Streams WebSocket transport.

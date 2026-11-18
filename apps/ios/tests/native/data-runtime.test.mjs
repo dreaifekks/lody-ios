@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { buildDataRuntime } from '../../../../packages/cloud-runtime/scripts/build.mjs';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
@@ -875,4 +878,30 @@ test('scope cancellation at a catalog import yield stops before the next frame',
   await rejected;
   assert.equal(target.get(['m', 'session-one']).title, 'One');
   assert.equal(target.get(['m', 'session-two']), undefined);
+});
+
+test('bundled DataRuntime permits secure WS and retains the script and default CSP boundaries', async () => {
+  const directory = await mkdtemp(
+    path.join(tmpdir(), 'lody-data-runtime-csp-'),
+  );
+  try {
+    await buildDataRuntime(directory);
+    const html = await readFile(
+      path.join(directory, 'DataRuntime.html'),
+      'utf8',
+    );
+    const policy = html.match(
+      /http-equiv="Content-Security-Policy" content="([^"]+)"/,
+    )[1];
+    assert.deepEqual(
+      policy.split(';').map((part) => part.trim()),
+      [
+        "default-src 'none'",
+        'connect-src https: wss:',
+        "script-src 'unsafe-inline' 'wasm-unsafe-eval'",
+      ],
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
