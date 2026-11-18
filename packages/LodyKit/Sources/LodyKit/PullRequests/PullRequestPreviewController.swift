@@ -26,6 +26,14 @@ private final class PullRequestFixture {
   init(mode: String, state: String, reference: SessionPullRequest? = nil) {
     self.mode = mode
     var object = try! JSONSerialization.jsonObject(with: Data(Self.json.utf8)) as! [String: Any]
+    object["body"] = """
+    ## Automatic reconnect
+
+    Session reads reconnect after **temporary interruptions**.
+
+    - Keep existing messages and read positions.
+    - Cancel the wait when leaving a session.
+    """
     if let reference {
       object["repository"] = reference.repository
       object["number"] = reference.number
@@ -56,6 +64,6 @@ private final class PullRequestFixture {
     })
   }
   private static let json = #"""
-  {"state": "open", "author": "Innei", "comments": [], "repository": "Innei/lody-ios", "number": 31, "title": "fix: automatically reconnect session stream reads", "body": "Session reads reconnect after temporary interruptions. Existing messages and read positions are retained with bounded backoff. Leaving a session cancels the wait. Writes and machine commands are never replayed.", "headRef": "fix/session-auto-reconnect", "baseRef": "main", "headSha": "ed40e8079", "additions": 229, "deletions": 16, "changedFiles": 4, "commits": 1, "checks": [{"id": 1, "name": "Checks", "status": "completed", "conclusion": "failure", "appName": "GitHub Actions", "htmlUrl": null}, {"id": 2, "name": "Native behavior", "status": "completed", "conclusion": "success", "appName": "GitHub Actions", "htmlUrl": null}, {"id": 3, "name": "Build iOS Simulator", "status": "completed", "conclusion": "success", "appName": "GitHub Actions", "htmlUrl": null}, {"id": 4, "name": "Offline iOS UI \u00b7 Pages", "status": "in_progress", "conclusion": null, "appName": "GitHub Actions", "htmlUrl": null}, {"id": 5, "name": "Offline iOS UI \u00b7 Chat", "status": "queued", "conclusion": null, "appName": "GitHub Actions", "htmlUrl": null}]}
+  {"state": "open", "author": "Innei", "comments": [], "repository": "Innei/lody-ios", "number": 31, "title": "fix: automatically reconnect session stream reads", "headRef": "fix/session-auto-reconnect", "baseRef": "main", "headSha": "ed40e8079", "additions": 229, "deletions": 16, "changedFiles": 4, "commits": 1, "checks": [{"id": 1, "name": "Checks", "status": "completed", "conclusion": "failure", "appName": "GitHub Actions", "htmlUrl": null}, {"id": 2, "name": "Native behavior", "status": "completed", "conclusion": "success", "appName": "GitHub Actions", "htmlUrl": null}, {"id": 3, "name": "Build iOS Simulator", "status": "completed", "conclusion": "success", "appName": "GitHub Actions", "htmlUrl": null}, {"id": 4, "name": "Offline iOS UI \u00b7 Pages", "status": "in_progress", "conclusion": null, "appName": "GitHub Actions", "htmlUrl": null}, {"id": 5, "name": "Offline iOS UI \u00b7 Chat", "status": "queued", "conclusion": null, "appName": "GitHub Actions", "htmlUrl": null}]}
   """#
 }

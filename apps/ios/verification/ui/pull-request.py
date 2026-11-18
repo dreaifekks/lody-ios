@@ -29,6 +29,11 @@ assert abs(left['y'] - right['y']) < 12, 'Bottom actions must share a baseline'
 assert 43.99 <= left['width'] <= 64 and left['height'] >= 43.99, 'GitHub must be an accessible icon-only button'
 files = ui.element('pr-files')
 assert '4 · +229 −16' in str(files), 'Changed-file totals must remain available to VoiceOver'
+body = ui.element('pr-body')['AXLabel']
+assert body.splitlines() == [
+    'Automatic reconnect', 'Session reads reconnect after temporary interruptions.',
+    'Keep existing messages and read positions.', 'Cancel the wait when leaving a session.',
+], f'PR description should expose the rendered Markdown text: {body!r}'
 ui.capture('pull-request')
 ui.axe('tap', '--label', catalog.text('pr.github'), '--element-type', 'Button', '--post-delay', '.4')
 ui.wait(lambda items: any(item.get('AXLabel') == catalog.text('pr.previewAction') for item in items), 'GitHub icon must invoke the existing open action')
@@ -100,18 +105,19 @@ ui.element('pr-title')
 button('pr.comment')
 ui.axe('tap', '--label', catalog.text('pr.comment'), '--post-delay', '.5')
 ui.element('pr-comment-input')
-ui.axe('type', '67890')
-ui.wait(lambda items: any(item.get('AXUniqueId') == 'pr-comment-input' and item.get('AXValue') == '67890' for item in items), 'Comment was not entered')
+comment_source = '**67890**'
+ui.axe('type', comment_source)
+ui.wait(lambda items: any(item.get('AXUniqueId') == 'pr-comment-input' and item.get('AXValue') == comment_source for item in items), 'Comment was not entered')
 ui.axe('tap', '--label', catalog.text('pr.send'), '--post-delay', '.5')
 ui.wait(lambda items: any(item.get('AXLabel') == catalog.text('pr.error.forbidden') for item in items), 'Failed comment must remain actionable')
 ui.capture('comment-failed')
 ui.axe('tap', '--label', catalog.text('common.ok'), '--post-delay', '.4')
-assert ui.element('pr-comment-input').get('AXValue') == '67890'
+assert ui.element('pr-comment-input').get('AXValue') == comment_source
 ui.axe('tap', '--label', catalog.text('pr.send'), '--post-delay', '.5')
 ui.element('pr-title')
 # The refreshed comment may be below the fold, so scroll the native list.
 ui.axe('drag', '--start-x', '210', '--start-y', '650', '--end-x', '210', '--end-y', '280', '--duration', '.4', '--post-delay', '.5')
-assert '67890' in str(ui.element('pr-comment-1'))
+assert ui.element('pr-comment-1')['AXLabel'] == '67890', 'Refreshed comment should render Markdown'
 ui.capture('comment-posted')
 back()
 ui.element('session-input')
@@ -130,4 +136,4 @@ ui.element('pr-title')
 back()
 assert ui.element('session-input').get('AXValue') == '2468\n\nInvestigate PR #31', 'Investigation must preserve existing draft'
 ui.capture('investigation-draft')
-print(json.dumps({'nativeReturn': True, 'offlineActionsDisclosed': True, 'authorizationRetry': True, 'emptyChecks': True, 'commentFailureRetainsDraft': True, 'commentSuccessRefreshes': True, 'investigationPreservesDraft': True}))
+print(json.dumps({'nativeReturn': True, 'offlineActionsDisclosed': True, 'authorizationRetry': True, 'emptyChecks': True, 'commentFailureRetainsDraft': True, 'commentSuccessRefreshes': True, 'descriptionMarkdown': True, 'commentMarkdown': True, 'investigationPreservesDraft': True}))

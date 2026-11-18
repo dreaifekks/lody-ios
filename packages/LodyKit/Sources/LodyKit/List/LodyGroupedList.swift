@@ -1242,10 +1242,11 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     forwarded?("refresh", [:])
   }
 
-  private enum RowKind { case system, session, project, visual }
+  private enum RowKind { case system, session, project, custom, visual }
 
   private func kind(of row: LodyListRow) -> RowKind {
     if row.id == Self.visualRowID { return .visual }
+    if row.customCell != nil { return .custom }
     guard contentStyle else { return .system }
     if row.parent { return .project }
     return row.value.isEmpty && row.badge.isEmpty ? .system : .session
@@ -1254,7 +1255,9 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
   private func cell(in collectionView: UICollectionView, at indexPath: IndexPath, row: LodyListRow) -> UICollectionViewListCell {
     let cell: UICollectionViewListCell
     switch kind(of: row) {
-    case .system: cell = collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: row)
+    case .system, .custom:
+      cell = row.customCell?(collectionView, indexPath)
+        ?? collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: row)
     case .session: cell = collectionView.dequeueConfiguredReusableCell(using: sessionRegistration, for: indexPath, item: row)
     case .project: cell = collectionView.dequeueConfiguredReusableCell(using: projectRegistration, for: indexPath, item: row)
     case .visual:
@@ -1276,7 +1279,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     case .system: if let cell = cell as? SettingsListCell { configureSettingsCell(cell, row) }
     case .session: if let cell = cell as? LodyIndentedCell { configureSession(cell, row) }
     case .project: configureProject(cell, row)
-    case .visual: break
+    case .custom, .visual: break
     }
     decorate(cell, row: row)
   }

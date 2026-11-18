@@ -18,6 +18,7 @@ struct LodyListRow {
   var id: String = ""
   var title: String = ""
   var subtitle: String = ""
+  var customCell: (@MainActor (UICollectionView, IndexPath) -> UICollectionViewListCell)?
   var modelName: String = ""
   var value: String = ""
   var progress: Double? = nil

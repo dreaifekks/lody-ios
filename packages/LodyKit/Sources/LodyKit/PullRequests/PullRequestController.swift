@@ -9,6 +9,9 @@ class PullRequestController: UIViewController {
   var investigate: ((String) async throws -> Void)?
   var external: (() -> Void)?
   private weak var mergeItem: UIBarButtonItem?
+  private let markdownRegistration = UICollectionView.CellRegistration<LodyMarkdownListCell, LodyMarkdownListCell.Content> { cell, _, content in
+    cell.configure(content)
+  }
 
   init(store: PullRequestStore, page: Page = .overview) {
     self.store = store
@@ -79,14 +82,30 @@ class PullRequestController: UIViewController {
       var segment = LodyListValueSegment(); segment.text = value; segment.tint = tint; return segment
     }
     var commits = row("pr-commits", text("commits"), value: String(data.commits)); commits.imageAsset = "lody-git-commit"
-    let comments = data.comments.map { row("pr-comment-\($0.id)", $0.body.isEmpty ? "—" : $0.body, subtitle: $0.author) }
+    let comments = data.comments.map { comment in
+      markdownRow("pr-comment-\(comment.id)", body: comment.body, empty: "—", author: comment.author)
+    }
     return [
       section("identity", [identity], header: data.repository, footer: "\(data.headRef) → \(data.baseRef)"),
       section("summary", [checks, files, commits], footer: String.localizedStringWithFormat(String(localized: "pr.head", bundle: .lody), String(describing: String(data.headSha.prefix(7))))),
-      section("description", [row("pr-body", data.body.isEmpty ? text("noDescription") : data.body)], header: text("description")),
+      section("description", [markdownRow("pr-body", body: data.body, empty: text("noDescription"))], header: text("description")),
       section("activity", comments.isEmpty ? [row("pr-empty-comments", data.commentsError.map(PullRequestStore.errorText) ?? text("noComments"))] : comments,
               header: text("activity"), footer: text(data.commentsTruncated == true ? "moreComments" : "commentsScope")),
     ]
+  }
+
+  private func markdownRow(_ id: String, body: String, empty: String, author: String = "") -> LodyListRow {
+    guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return row(id, empty, subtitle: author)
+    }
+    let markdown = LodyMarkdownListCell.Content(id: id, source: body, author: author, baseURL: store.url)
+    var item = row(id, "")
+    item.customCell = { [markdownRegistration] collection, index in
+      let cell = collection.dequeueConfiguredReusableCell(using: markdownRegistration, for: index, item: markdown)
+      cell.trackSelection(in: collection)
+      return cell
+    }
+    return item
   }
 
   private func checks(_ data: PullRequestSnapshot) -> [LodyListSection] {
