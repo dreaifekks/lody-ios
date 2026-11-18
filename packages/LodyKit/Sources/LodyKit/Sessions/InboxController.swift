@@ -22,6 +22,7 @@ final class InboxController: UIViewController {
   private var renderedInput: (userId: String, workspaceId: String, catalog: SessionCatalog)?
   /// Account/workspace whose catalog has loaded empty once; later resyncs or reconnects keep the guide.
   private var onboardingSettledKey: String?
+  private var leaving = false
 
   init(source: SessionSource = .live) {
     self.source = source
@@ -62,6 +63,17 @@ final class InboxController: UIViewController {
       }
     }
     registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in self.render() }
+  }
+
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    leaving = false
+    list.deselectOnReturn(animated: animated, coordinator: transitionCoordinator)
+  }
+
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated)
+    leaving = true
   }
 
   override func viewDidLayoutSubviews() {
@@ -279,6 +291,11 @@ final class InboxController: UIViewController {
       if consume(id) { return }
       let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
       actions.open(id, findQuery: term.isEmpty ? nil : term, from: self)
+      // A row stays selected only while its page covers the list; split columns and refusals clear it.
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !self.leaving else { return }
+        self.list.clearSelection()
+      }
     case "rowAction":
       guard let action = body["actionId"] as? String else { return }
       actions.perform(action, row: id, from: self)

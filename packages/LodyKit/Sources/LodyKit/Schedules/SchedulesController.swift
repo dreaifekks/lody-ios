@@ -30,6 +30,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     }
   }
   private var list: UICollectionView!
+  private var leaving = false
   private var data: UICollectionViewDiffableDataSource<Section, String>!
   private let refresh = UIRefreshControl()
   private let topBackdrop = LodyPinnedLabelBackdrop()
@@ -135,7 +136,14 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
 
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
+    leaving = false
+    list.deselectOnReturn(animated: animated, coordinator: transitionCoordinator)
     reload()
+  }
+
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated)
+    leaving = true
   }
 
   override func viewDidLayoutSubviews() {
@@ -524,9 +532,16 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   // MARK: Collection view
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-    collectionView.deselectItem(at: indexPath, animated: true)
-    guard let id = data.itemIdentifier(for: indexPath), let item = items[id] else { return }
+    guard let id = data.itemIdentifier(for: indexPath), let item = items[id] else {
+      collectionView.deselectItem(at: indexPath, animated: true)
+      return
+    }
     open(item)
+    // A row stays selected only while its pushed editor covers the list; the iPad sheet clears it.
+    DispatchQueue.main.async { [weak self] in
+      guard let self, !self.leaving else { return }
+      self.list.clearSelection(animated: true)
+    }
   }
 
   func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemsAt indexPaths: [IndexPath], point: CGPoint)

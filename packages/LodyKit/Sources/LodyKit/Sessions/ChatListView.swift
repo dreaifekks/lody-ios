@@ -400,7 +400,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
         ChatRowContent(
           row: entry.row, details: details, owner: owners[entry.row.id], muted: muted,
           expanded: entry.canToggle ? entry.expanded : nil,
-          onOpen: { [weak self] in self?.forwarded?("rowPress", ["id": entry.row.id]) },
+          onOpen: { [weak self] in self?.openSelecting(item, id: entry.row.id) },
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) }
         )
         .accessibilityAddTraits(current ? .isSelected : [])
@@ -426,13 +426,21 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   // MARK: Interaction
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-    collectionView.deselectItem(at: indexPath, animated: true)
-    guard let item = dataSource.itemIdentifier(for: indexPath), let entry = entries[item] else { return }
+    guard let item = dataSource.itemIdentifier(for: indexPath), let entry = entries[item] else {
+      collectionView.deselectItem(at: indexPath, animated: true)
+      return
+    }
+    if entry.kind != .session { collectionView.deselectItem(at: indexPath, animated: true) }
     if entry.kind == .header, entry.canToggle, let expanded = entry.expanded {
       forwarded?("rowPress", ["id": entry.row.id, "expanded": !expanded])
     } else {
       forwarded?("rowPress", ["id": entry.row.id])
     }
+  }
+
+  private func openSelecting(_ item: Item, id: String) {
+    if let path = dataSource.indexPath(for: item) { collection.selectItem(at: path, animated: false, scrollPosition: []) }
+    forwarded?("rowPress", ["id": id])
   }
 
   private func swipe(_ path: IndexPath, leading: Bool) -> UISwipeActionsConfiguration? {

@@ -62,6 +62,10 @@ final class SessionListView: UIView {
     retry.isHidden = action == nil || hasRows
   }
   func setOwners(_ value: [String: WorkspaceMember]) { list.owners = value }
+  func deselectOnReturn(animated: Bool, coordinator: UIViewControllerTransitionCoordinator?) {
+    list.collection.deselectOnReturn(animated: animated, coordinator: coordinator)
+  }
+  func clearSelection() { list.collection.clearSelection(animated: true) }
   /// Archived mode: darker, greyer page and grey rows.
   func setArchivedStyle(_ value: Bool) { list.archivedStyle = value }
   func setProjectIndexEnabled(_ value: Bool) { list.projectIndexEnabled = value }
