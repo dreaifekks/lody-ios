@@ -22,27 +22,20 @@
     },
     {
       "name": "@loro-dev/flock-wasm",
-      "version": "0.4.3",
+      "version": "0.5.0",
       "license": "AGPL-3.0-only",
       "text": 3
     },
     {
-      "name": "@loro-dev/streams-client@0.7.0",
-      "version": "0.7.0",
-      "license": "MIT",
-      "url": "https://github.com/loro-dev/loro-streams",
-      "text": 4
-    },
-    {
-      "name": "@loro-dev/streams-client@0.8.0",
-      "version": "0.8.0",
+      "name": "@loro-dev/streams-client",
+      "version": "0.13.1",
       "license": "MIT",
       "url": "https://github.com/loro-dev/loro-streams",
       "text": 4
     },
     {
       "name": "@loro-dev/streams-crdt",
-      "version": "0.16.1",
+      "version": "0.21.1",
       "license": "MIT",
       "url": "https://github.com/loro-dev/loro-streams",
       "text": 4
@@ -340,7 +333,7 @@
     },
     {
       "name": "loro-crdt",
-      "version": "1.15.1",
+      "version": "1.17.0",
       "license": "MIT",
       "url": "https://github.com/loro-dev/loro",
       "text": 31

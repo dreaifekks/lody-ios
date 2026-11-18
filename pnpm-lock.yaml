@@ -27,14 +27,14 @@ importers:
         specifier: workspace:*
         version: link:../../packages/cloud-runtime
       '@loro-dev/flock-wasm':
-        specifier: 0.4.3
-        version: 0.4.3
+        specifier: 0.5.0
+        version: 0.5.0
       '@loro-dev/streams-client':
-        specifier: 0.7.0
-        version: 0.7.0
+        specifier: 0.13.1
+        version: 0.13.1(effect@4.0.2)
       '@loro-dev/streams-crdt':
-        specifier: 0.16.1
-        version: 0.16.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
+        specifier: 0.21.1
+        version: 0.21.1(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)
       '@pierre/diffs':
         specifier: 1.4.1
         version: 1.4.1(@shikijs/themes@4.4.3)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -51,8 +51,8 @@ importers:
         specifier: 0.1.1
         version: 0.1.1
       loro-crdt:
-        specifier: 1.15.1
-        version: 1.15.1
+        specifier: 1.17.0
+        version: 1.17.0
       punycode:
         specifier: 2.3.1
         version: 2.3.1
@@ -76,14 +76,14 @@ importers:
   packages/cloud-runtime:
     dependencies:
       '@loro-dev/flock-wasm':
-        specifier: 0.4.3
-        version: 0.4.3
+        specifier: 0.5.0
+        version: 0.5.0
       '@loro-dev/streams-client':
-        specifier: 0.7.0
-        version: 0.7.0
+        specifier: 0.13.1
+        version: 0.13.1(effect@4.0.2)
       '@loro-dev/streams-crdt':
-        specifier: 0.16.1
-        version: 0.16.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
+        specifier: 0.21.1
+        version: 0.21.1(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)
       acp-extension-core:
         specifier: 0.3.0
         version: 0.3.0(zod@4.6.7)
@@ -100,11 +100,11 @@ importers:
         specifier: 25.8.4
         version: 25.8.4(typescript@6.0.3)
       loro-crdt:
-        specifier: 1.15.1
-        version: 1.15.1
+        specifier: 1.17.0
+        version: 1.17.0
       loro-mirror:
         specifier: 2.3.2
-        version: 2.3.2(loro-crdt@1.15.1)
+        version: 2.3.2(loro-crdt@1.17.0)
       uuid:
         specifier: 11.1.1
         version: 11.1.1
@@ -456,6 +456,19 @@ packages:
     resolution: {integrity: sha512-Vy81NnCPLazxLzIaTQvL4C3cgYmn9I13NQALVEJHNmTQGaz4z/+4kgC/fdcESMVMCfK0kT1PrJJ0WPxZwRwD9Q==}
     engines: {node: '>=18'}
 
+  '@loro-dev/flock-wasm@0.5.0':
+    resolution: {integrity: sha512-gfjAXSd/OewCCH1wVnOhmFdXD40p0ZPGHfGW/tIxBvqO+qcvtdH37QTYWi4PQdKXMHHH7jfGXX4Oitguf+0pkg==}
+    engines: {node: '>=18'}
+
+  '@loro-dev/streams-client@0.13.1':
+    resolution: {integrity: sha512-qOyKNzKpXcOI4DcXJQX7Vzrf4T175ji//qosHyfVXkLY2X0M0qOD0VfaKFwTdlwEeUw5UmgohiNn2Os4AVx4BQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      effect: 4.0.2
+    peerDependenciesMeta:
+      effect:
+        optional: true
+
   '@loro-dev/streams-client@0.7.0':
     resolution: {integrity: sha512-O+LphfngoJe0g0QmRV2OIQKsiytZuvHoSsQeYxiRK00UYHcpqjiZw2OmcXCU4Q5reuxI5kZJz6du24iAamBVtQ==}
     engines: {node: '>=18'}
@@ -469,6 +482,18 @@ packages:
     peerDependencies:
       '@loro-dev/flock-wasm': ^0.4.0
       loro-crdt: ^1.10.3
+    peerDependenciesMeta:
+      '@loro-dev/flock-wasm':
+        optional: true
+      loro-crdt:
+        optional: true
+
+  '@loro-dev/streams-crdt@0.21.1':
+    resolution: {integrity: sha512-4ATQh1/2cLVzTkSS4D1tbhrtaY3Nbd+RSqp90IvTCU6Up4CWtiGmiDxD/YJMSV1O3fOfQ9nLGbvy8Ijb+33DHA==}
+    peerDependencies:
+      '@loro-dev/flock-wasm': ^0.4.0 || ^0.5.0
+      effect: 4.0.2
+      loro-crdt: ^1.17.0
     peerDependenciesMeta:
       '@loro-dev/flock-wasm':
         optional: true
@@ -772,6 +797,9 @@ packages:
 
   loro-crdt@1.15.1:
     resolution: {integrity: sha512-J3568cXG75MNotTJg2XVhlIEW8POjAZRFhK+3yXYBaQVB1LHn/Ksk3DIqoTOBUf+cgE4yVeqPbh7VUTX2QLV2g==}
+
+  loro-crdt@1.17.0:
+    resolution: {integrity: sha512-5YU7arT1jZv+mGowByjJuMT/5Viw4s/en/NLClPP9zUpyMhrUyVzOf8lbIg1bFEfb8ICMIB6Cz97/l+amk3XfA==}
 
   loro-mirror@2.3.2:
     resolution: {integrity: sha512-qTCZ37FEgWHnepnRQwqOZWLE8QxG2E+Qzx1gw9SE5187H6Yow3tkWXZ6BCSmjX5BoSJf4kEblS6aGJxgDnV29g==}
@@ -1202,6 +1230,12 @@ snapshots:
 
   '@loro-dev/flock-wasm@0.4.3': {}
 
+  '@loro-dev/flock-wasm@0.5.0': {}
+
+  '@loro-dev/streams-client@0.13.1(effect@4.0.2)':
+    optionalDependencies:
+      effect: 4.0.2
+
   '@loro-dev/streams-client@0.7.0': {}
 
   '@loro-dev/streams-client@0.8.0': {}
@@ -1212,6 +1246,14 @@ snapshots:
     optionalDependencies:
       '@loro-dev/flock-wasm': 0.4.3
       loro-crdt: 1.15.1
+
+  '@loro-dev/streams-crdt@0.21.1(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)':
+    dependencies:
+      '@loro-dev/streams-client': 0.13.1(effect@4.0.2)
+      effect: 4.0.2
+    optionalDependencies:
+      '@loro-dev/flock-wasm': 0.5.0
+      loro-crdt: 1.17.0
 
   '@noble/curves@1.9.7':
     dependencies:
@@ -1573,10 +1615,12 @@ snapshots:
 
   loro-crdt@1.15.1: {}
 
-  loro-mirror@2.3.2(loro-crdt@1.15.1):
+  loro-crdt@1.17.0: {}
+
+  loro-mirror@2.3.2(loro-crdt@1.17.0):
     dependencies:
       immer: 10.2.0
-      loro-crdt: 1.15.1
+      loro-crdt: 1.17.0
 
   lru_map@0.4.1: {}
 

@@ -1074,7 +1074,12 @@ export async function clientFor(id: string, getGrant: () => Promise<Grant>) {
     url: `${grant.gatewayBaseUrl.replace(/\/$/, '')}/ds/lody/${encodeURIComponent(id)}`,
     auth: async () => (await getGrant()).token,
     retry: { maxAttempts: 1 },
-    timeout: { connectTimeoutMs: 15000, pollTimeoutMs: 35000 },
+    // Keep writes within the native command budget; SDK 0.12+ defaults uploads to 60s.
+    timeout: {
+      connectTimeoutMs: 15000,
+      uploadTimeoutMs: 15000,
+      pollTimeoutMs: 35000,
+    },
   });
 }
 export async function ensureSession(

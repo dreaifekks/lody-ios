@@ -14,6 +14,13 @@ Mobile attachment drafts and the durable send scheduler remain mobile-owned.
 HTML document with the existing CSP and inline WASM and copies dependency license
 text alongside it. Platform builders supply their own output directory.
 
+The runtime and native decoder pin Flock 0.5.0, Streams Client 0.13.1,
+Streams CRDT 0.21.1 and Loro 1.17.0, matching the Lody workspace.
+Control reads and durable uploads retain separate 15-second budgets; long-poll
+uses a 35-second poll budget. Uploads explicitly set `uploadTimeoutMs` because
+Streams Client 0.12+ otherwise defaults to 60 seconds, beyond native command
+budgets. An unconfirmed append remains an unknown outcome and is not replayed.
+
 Run `pnpm --filter @lody/cloud-runtime typecheck`. Existing behavioral fixtures
 under `apps/ios/tests` now load these shared production sources, retaining
 protocol, write ordering, uncertain delivery and recovery checks.

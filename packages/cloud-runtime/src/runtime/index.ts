@@ -317,7 +317,12 @@ function watch(mode: string) {
           url: `${authorization.gatewayBaseUrl.replace(/\/$/, '')}/ds/lody/${encodeURIComponent(stream)}`,
           auth: async () => (await getGrant()).token,
           retry: { maxAttempts: 1 },
-          timeout: { connectTimeoutMs: 15000, pollTimeoutMs: 35000 },
+          // Keep writes within the native command budget; SDK 0.12+ defaults uploads to 60s.
+          timeout: {
+            connectTimeoutMs: 15000,
+            uploadTimeoutMs: 15000,
+            pollTimeoutMs: 35000,
+          },
         });
         channel.emit('diagnostic', { stage: 'bootstrap', stream: mode });
         const initial = await client.bootstrap({ signal });

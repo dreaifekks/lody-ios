@@ -6,6 +6,8 @@ allowBuilds:
 nodeLinker: hoisted
 minimumReleaseAgeExclude:
   - '@rien7/anchored-overlay-kit@0.3.0'
+  - '@loro-dev/streams-client@0.13.1'
+  - '@loro-dev/streams-crdt@0.21.1'
 
 overrides:
   happy-dom: 21.0.4
