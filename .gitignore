@@ -2,8 +2,15 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
-.env
-.env.*.local
+.env*
+!.env.example
+.dev.vars
+.claude/settings.local.json
+.claude/*.local.md
+.claude/projects/
+.claude/scheduled_tasks.lock
+.idea/
+logs/
 apps/ios/Lody.xcodeproj/
 apps/ios/.generated/
 packages/LodyKit/Vendor/
