@@ -7,6 +7,7 @@ import UIKit
 public final class LodyApplication {
   public static let shared = LodyApplication()
   private let accent = LodyAccentLifecycle()
+  private let activities = ConversationActivities()
   private let push = PushLifecycle()
 
   public func launch(_ application: UIApplication, options: [UIApplication.LaunchOptionsKey: Any]?) {
@@ -78,6 +79,7 @@ public final class LodyApplication {
     guard !LodyUIVerify.enabled else { return }
     let auth = AuthSession.shared.snapshot
     guard auth.localReady, !auth.busy else { return }
+    activities.refresh()
     if auth.account == nil {
       shares.stop()
       guard onboarding == nil else { return }

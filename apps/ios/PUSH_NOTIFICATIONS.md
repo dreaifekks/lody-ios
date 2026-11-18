@@ -16,14 +16,16 @@ SDK version and App Group `group.ai.lody.mobile`.
 2. Keep automatic signing and choose your Apple team. Register Push Notifications
    and the App Group for the app, and the same group for the NSE identifier
    `ai.lody.mobile.notification-service`.
-3. Run `pnpm prebuild`. XcodeGen creates the app, LodyKit, NSE and Share targets.
+3. Run `pnpm prebuild`. XcodeGen creates the app, LodyKit, NSE, Share and Live Activity targets.
 4. Open the project with `pnpm ios` and Run in Xcode, or use `xcodebuild` with normal signing.
-   The app embeds `LodyNotificationService.appex` and `LodyShare.appex`. Changing the OneSignal App ID or
+   The app embeds `LodyNotificationService.appex`, `LodyShare.appex` and `LodyLiveActivityWidget.appex`. Changing the OneSignal App ID or
    native configuration requires a new native build, not an OTA update.
 5. Configure Convex's generic `ONE_SIGNAL_APPS` inventory and the new app's secret
    API key as documented in that backend's `PUSH_NOTIFICATIONS.md`.
 
 ## Runtime behavior
+
+The conversation Live Activity shows the signed-in user’s sessions from the selected plaintext workspace. The Dynamic Island uses the Web shell’s compact count, minimal mark and expanded session list or permission card. A permission push can supply the request ID and command. The app handles Allow and Deny with its Keychain credential. Manage Live Activities from the app’s notification settings link to iOS Settings.
 
 The app requests system notification permission at launch, independently of the
 provider. Login never prompts. Auth restoration supplies the raw account ID and
@@ -40,7 +42,7 @@ recipients use that same ID.
 Direct APNs registration sends platform `ios`, purpose `notification`, the token,
 language, a persistent random installation ID, and the running app's actual Bundle
 ID. The backend owns APNs environment selection and requires a live auth session.
-No APNs key, JWT, token or installation ID is logged. There is no ActivityKit path.
+No APNs key, JWT, token or installation ID is logged. Live Activities register separate push-to-start and per-activity tokens for direct APNs. OneSignal manages these tokens for its provider.
 
 Registration, provider retirement and logout cleanup use a serial process-owned
 queue with the captured login credential. Each HTTP operation has a 15-second

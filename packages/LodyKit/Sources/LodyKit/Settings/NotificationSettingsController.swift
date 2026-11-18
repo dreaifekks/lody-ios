@@ -95,6 +95,11 @@ final class NotificationSettingsController: UIViewController {
     guard let id = body["id"] as? String else { return }
     switch (name, id) {
     case ("rowPress", "notification-permission"): Task { await press() }
+    case ("rowPress", "live-activities"):
+      Task {
+        do { try await service.settings() }
+        catch { LodyToastOverlay.shared.show(message: text("notifications.changeFailed"), kind: .error) }
+      }
     default: break
     }
   }
@@ -128,6 +133,7 @@ final class NotificationSettingsController: UIViewController {
     list.setSections([
       .group("notifications", header: text("notifications.section.header"), footer: text("notifications.section.footer"), [
         permission,
+        .item("live-activities", text("notifications.liveActivities"), image: "dot.radiowaves.left.and.right", action: true, disclosure: true),
       ]),
     ])
   }

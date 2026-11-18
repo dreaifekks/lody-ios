@@ -1,4 +1,5 @@
 """Exercise the production notification settings with resettable service outcomes."""
+import subprocess
 import sys
 
 import catalog
@@ -19,11 +20,7 @@ def tap(value):
 
 
 def reset():
-    back = [i for i in ui.state() if i.get('AXUniqueId') == 'BackButton'][-1]
-    touch(back)
-    ui.wait(lambda items: not any(i.get('AXUniqueId') == 'notification-preview-ready' for i in items), 'Notification fixture did not close')
-    ui.open_case('notification-preview')
-    ui.element('notification-preview-ready')
+    touch(ui.element('notification-reset'))
     text(catalog.text('notifications.hint.default'))
 
 text(catalog.text('notifications.hint.default'))
@@ -45,3 +42,17 @@ text(catalog.text('notifications.hint.authorized'))
 ui.capture('permission-authorized')
 reset()
 ui.capture('reset')
+
+touch(ui.element('activity-demo'))
+text('Sample activity started')
+ui.axe('button', 'home')
+island = ui.wait(lambda items: next((i for i in items if i.get('AXUniqueId') == 'regular.view'
+                                    and '1' in (i.get('AXLabel') or '')), None), 'Compact activity count missing')
+frame = island['frame']
+ui.screenshot('live-activity-compact')
+ui.axe('touch', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--down', '--up', '--delay', '1')
+text('Review the release notes')
+ui.screenshot('live-activity-expanded')
+subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'ai.lody.mobile'], check=True, timeout=30)
+touch(ui.element('activity-demo'))
+text('Sample activity ended')

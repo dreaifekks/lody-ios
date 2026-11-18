@@ -11,6 +11,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   private var clicks = PushClickBuffer()
   var onClickAvailable: (() -> Void)?
   var visibleRoute = ""
+  private let activityTokens = ActivityPushTokens()
   private var registered = false
   private var sdkStarted = false
   private var sdkDelegate: (any UNUserNotificationCenterDelegate)?
@@ -35,6 +36,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
   }, changed: { [weak self] provider, registered in
     guard let self else { return }
     let previous = self.selectedProvider
+    self.activityTokens.configure(provider == .apns && self.registration.authorized ? self.registration.session : nil)
     self.selectedProvider = provider
     self.configured = provider != nil
     self.registered = registered
@@ -84,6 +86,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     sdkStarted = true
     OneSignal.Debug.setLogLevel(.LL_NONE)
     OneSignal.initialize(appId, withLaunchOptions: launchOptions)
+    OneSignal.LiveActivities.setup(LodyConversationLiveActivityAttributes.self)
     OneSignal.User.pushSubscription.addObserver(self)
     evaluateSubscription(OneSignal.User.pushSubscription.id)
     OneSignal.Notifications.addClickListener(self)

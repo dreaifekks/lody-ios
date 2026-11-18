@@ -18,4 +18,4 @@ Read before changing push registration, the Notification Service Extension or no
 - Debug's offline notification fixture never initializes OneSignal or requests real
   permission. See `apps/ios/PUSH_NOTIFICATIONS.md` for setup and verification limits.
 
-- Live Activities are removed: do not restore ActivityKit registration, widget targets, notification toggles or verification hosts.
+- The conversation Live Activity uses the signed-in user and selected plaintext workspace. Keep permission actions bound to the displayed request and use the app Keychain when the intent executes.

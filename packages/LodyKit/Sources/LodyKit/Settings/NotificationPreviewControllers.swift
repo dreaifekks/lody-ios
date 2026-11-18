@@ -1,3 +1,4 @@
+@preconcurrency import ActivityKit
 import UIKit
 
 @MainActor
@@ -102,11 +103,35 @@ final class NotificationPreviewController: NotificationPreviewHost {
     for view in [
       Self.label("notification-preview-ready", "Notification permission fixture"),
       opened,
+      Self.button("activity-demo", "Toggle sample Live Activity") { [weak self] in self?.toggleActivity() },
+
       Self.button("notification-reset", "Reset") { [weak self] in self?.reset() },
     ] as [UIView] {
       header.addArrangedSubview(view)
     }
     super.viewDidLoad()
+  }
+
+  private func toggleActivity() {
+    let attributes = LodyConversationLiveActivityAttributes(activityId: "preview", workspaceId: "preview",
+      workspaceName: "Preview", onesignal: .create(activityId: "preview"))
+    var list = SessionListState(userId: "preview", workspaceId: "preview")
+    list.catalog.sessions = [SessionItem(id: "sample", title: "Review the release notes", status: "running",
+                                        userId: "preview", agentType: "codex")]
+    let summary = ConversationActivities.summary(list)
+    do {
+      if let activity = Activity<LodyConversationLiveActivityAttributes>.activities.first(where: { $0.attributes.activityId == "preview" }) {
+        Task {
+          await activity.end(nil, dismissalPolicy: .immediate)
+          opened.text = "Sample activity ended"
+        }
+        return
+      }
+      _ = try Activity.request(attributes: attributes, content: ActivityContent(state: summary, staleDate: nil), pushType: nil)
+      opened.text = "Sample activity started"
+    } catch {
+      opened.text = error.localizedDescription
+    }
   }
 
   private func setOpened(_ value: Bool) {
@@ -115,6 +140,9 @@ final class NotificationPreviewController: NotificationPreviewHost {
   }
 
   private func reset() {
+    fixture.permission = "notDetermined"
+    fixture.requests = 0
+    fixture.settingsAttempts = 0
     setOpened(false)
     mount()
   }

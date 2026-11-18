@@ -72,6 +72,16 @@ targets:
           - Info.plist
           - Lody.entitlements
           - '**/*.md'
+      - path: ../../packages/LodyKit/Sources/LodyKit
+        group: Shared Extension Sources
+        createIntermediateGroups: false
+        includes:
+          - Notifications/LodyConversationLiveActivityAttributes.swift
+          - Auth/AuthKeychain.swift
+          - Cloud/BackendEnvironment.swift
+      - Extensions/LiveActivity/LodyLiveActivityPermissionResponseIntent.swift
+      - Extensions/LiveActivity/LiveActivity.xcstrings
+      - Extensions/LiveActivity/LodyLiveActivityLocalization.swift
       - path: .generated/Resources
       - Resources/AgentIcons.xcassets
       - path: scripts
@@ -116,6 +126,37 @@ targets:
       - package: LodyKit
       - target: LodyShare
       - target: LodyNotificationService
+      - target: LodyLiveActivityWidget
+  LodyLiveActivityWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/LiveActivity
+      - path: ../../packages/LodyKit/Sources/LodyKit
+        group: Shared Extension Sources
+        createIntermediateGroups: false
+        includes:
+          - Notifications/LodyConversationLiveActivityAttributes.swift
+          - Auth/AuthKeychain.swift
+          - Cloud/BackendEnvironment.swift
+    info:
+      path: '.generated/LodyLiveActivityWidget/Info.plist'
+      properties:
+        CFBundleDisplayName: Lody
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.lody.mobile.LodyLiveActivityWidget
+        APPLICATION_EXTENSION_API_ONLY: 'YES'
+        SKIP_INSTALL: 'YES'
+        SWIFT_VERSION: '5.0'
+        TARGETED_DEVICE_FAMILY: '1,2'
+    dependencies:
+      - package: OneSignal
+        product: OneSignalFramework
   LodyShare:
     type: app-extension
     platform: iOS

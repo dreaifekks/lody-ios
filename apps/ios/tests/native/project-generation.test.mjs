@@ -39,7 +39,12 @@ async function fixture() {
   );
   await writeFile(join(root, 'App/Main.swift'), 'struct App {}');
   const targets = {};
-  for (const name of ['Lody', 'LodyShare', 'LodyNotificationService']) {
+  for (const name of [
+    'Lody',
+    'LodyShare',
+    'LodyNotificationService',
+    'LodyLiveActivityWidget',
+  ]) {
     targets[name] = {
       type: 'application',
       platform: 'iOS',
@@ -130,6 +135,7 @@ test(
         'ai.lody.mobile': 'app-profile',
         'ai.lody.mobile.share': 'share-profile',
         'ai.lody.mobile.notification-service': 'push-profile',
+        'ai.lody.mobile.LodyLiveActivityWidget': 'activity-profile',
       };
       let result = generate(root, {
         IOS_PROFILE_MAP: JSON.stringify({ 'ai.lody.mobile': 'app-profile' }),
@@ -149,7 +155,7 @@ test(
       const signed = configurations.filter(
         (value) => value.buildSettings.PROVISIONING_PROFILE_SPECIFIER,
       );
-      assert.equal(signed.length, 3);
+      assert.equal(signed.length, 4);
       assert.deepEqual(
         signed
           .map((value) => value.buildSettings.PROVISIONING_PROFILE_SPECIFIER)
