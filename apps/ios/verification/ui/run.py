@@ -21,7 +21,7 @@ CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
-    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content'],
+    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'dictation'],
     'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'],
 }
 SUITES = {
@@ -43,6 +43,7 @@ PREVIEW = {
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
     'session-native': 'session-preview-live',
+    'dictation': 'session-preview-live',
     'proposal-cards': 'session-preview-cards-role-create',
     'session-simulator': 'session-preview-live',
     'permission-native': 'permission-native-preview',
@@ -187,6 +188,7 @@ READY = {
     'session-share': 'open-session-share',
     'reply-haptics': 'reply-haptics-start',
     'scroll-edge': 'session-input',
+    'dictation': 'session-input',
     'scroll-edge-pages': 'create-session-input',
     'scroll-edge-diff': 'scroll-edge-diff-toolbar',
     'proposed-plan': 'plan-preview:document',
@@ -453,6 +455,8 @@ try:
                         launch.append('--ui-verify-scroll')
                     if case == 'navigation-toolbar':
                         launch.append('--ui-verify-opening')
+                    if case == 'dictation':
+                        launch.append('--ui-verify-dictation')
                     if trace_throw:
                         launch.append('--ui-verify-throw')
                     launch += [
@@ -528,7 +532,7 @@ try:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
-                if case in {'home-settings', 'home-workspace', 'ipad-create', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity'}:
+                if case in {'home-settings', 'home-workspace', 'ipad-create', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'dictation'}:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case in ['session-tree', 'session-tree-pad']:
                     script = Path(__file__).with_name('session-tree.py')
