@@ -401,9 +401,11 @@ function watch(mode: string) {
                 const error = result.result;
                 const aborted =
                   error.code === 'unknown' &&
-                  (error.cause instanceof Error || error.cause instanceof DOMException) &&
+                  (error.cause instanceof Error ||
+                    error.cause instanceof DOMException) &&
                   error.cause.name === 'AbortError';
-                const suspended = aborted && error.cause.message === 'runtime_suspended';
+                const suspended =
+                  aborted && error.cause.message === 'runtime_suspended';
                 if (
                   [
                     'network_error',
@@ -426,9 +428,11 @@ function watch(mode: string) {
                 reason: 'network_or_auth',
                 stream: mode,
               });
-              if (!(error instanceof Error && error.message === 'runtime_suspended'))
+              if (!(
+                error instanceof Error && error.message === 'runtime_suspended'
+              ))
                 grant = undefined;
-            }
+            },
           );
           if (!response.ok) throw new Error(response.result.code);
           const next = response.result;

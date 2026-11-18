@@ -188,7 +188,6 @@ export function identityAt(list: LoroList, index: number) {
   return id ? `${id.peer}:${id.counter}` : `idx:${index}`;
 }
 
-
 /**
  * Plan text carried by a plan-approval (`switch_mode`) card — web
  * `resolvePlanExitMarkdown` (`packages/components/.../plan-surface.ts`).
@@ -368,8 +367,7 @@ function summarizeItem(
 
   if (type === 'tool_call') {
     const diff = countDiff(raw.content);
-    const plan =
-      raw.kind === 'switch_mode' ? planExitMarkdown(raw) : undefined;
+    const plan = raw.kind === 'switch_mode' ? planExitMarkdown(raw) : undefined;
     const questionMeta = parseQuestionMeta(raw.permissionRequest?._meta);
     const isQuestion =
       !!questionMeta ||
