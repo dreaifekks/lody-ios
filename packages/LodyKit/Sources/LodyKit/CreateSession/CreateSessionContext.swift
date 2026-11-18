@@ -398,15 +398,17 @@ struct CreateContextPanel: View {
       HStack(spacing: LodySpacing.md) {
         if let worktree = state.panel.worktree {
           Button { state.onWorktree(!worktree) } label: {
-            HStack(spacing: LodySpacing.sm) {
+            HStack(spacing: LodySpacing.md) {
               Image(systemName: worktree ? "checkmark.square.fill" : "square")
+                .font(.system(size: LodyIconSize.md))
+                .frame(width: LodyIconSize.md, height: LodyIconSize.md)
                 .foregroundStyle(worktree ? LodyColor.accentDefault : LodyColor.iconTertiary)
               Text(String(localized: "create.context.worktree", bundle: .lody))
                 .lodyTextStyle(.subhead)
                 .foregroundStyle(LodyColor.textSecondary)
             }
             .padding(.horizontal, LodySpacing.xs)
-            .frame(minHeight: LodySize.controlMd)
+            .frame(minHeight: LodySize.touchTarget)
             .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
