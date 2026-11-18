@@ -15420,6 +15420,40 @@
         }
       }
     },
+    "simulator.action.toggleKeyboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示／隐藏模拟器键盘"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show/hide simulator keyboard"
+          }
+        }
+      }
+    },
+    "simulator.keyboardUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模拟器键盘控制不可用。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Simulator keyboard control unavailable."
+          }
+        }
+      }
+    },
     "simulator.action.lock": {
       "extractionState": "manual",
       "localizations": {

@@ -36,7 +36,8 @@ import UIKit.UIGestureRecognizerSubclass
   }
 
   private static let buttons = ["home": "home", "app-switcher": "app-switcher", "lock": "lock",
-                                "volume-up": "volume-up", "volume-down": "volume-down", "action": "action"]
+                                "volume-up": "volume-up", "volume-down": "volume-down", "action": "action",
+                                "software-keyboard": "software-keyboard"]
   private static let androidButtons = ["back": "back", "home": "home", "app-switcher": "app-switcher"]
 
   private var source: Source?
@@ -386,10 +387,18 @@ import UIKit.UIGestureRecognizerSubclass
     setNeedsLayout()
   }
 
+  private func showKeyboardUnavailable() {
+    LodyToastOverlay.shared.show(message: String(localized: "simulator.keyboardUnavailable", bundle: .lody), kind: .error)
+  }
+
   /// Fixed typed controls only. Android takes Back/Home/Recents, rotation, appearance and
   /// pasted text; iOS keeps its hardware buttons and shake.
   func perform(_ action: String, text: String? = nil) {
-    guard let transport, let source, let operationId = source.operationId, !controlBusy else { return }
+    guard let source, let operationId = source.operationId, !controlBusy else { return }
+    guard let transport else {
+      if action == "software-keyboard" { showKeyboardUnavailable() }
+      return
+    }
     let control: [String: String]
     if let button = (source.android ? Self.androidButtons : Self.buttons)[action] {
       control = ["kind": "button", "button": button]
@@ -407,8 +416,10 @@ import UIKit.UIGestureRecognizerSubclass
     lift()
     controlBusy = true
     Task { [weak self] in
-      _ = await transport.perform(operationId: operationId, control: control)
-      if self?.transport === transport { self?.controlBusy = false }
+      let success = await transport.perform(operationId: operationId, control: control)
+      guard let self, self.transport === transport else { return }
+      self.controlBusy = false
+      if action == "software-keyboard", !success { self.showKeyboardUnavailable() }
     }
   }
 

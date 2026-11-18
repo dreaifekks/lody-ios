@@ -29,13 +29,15 @@ def stream():
 
 
 ui.element('session-preview-probe')
-ui.axe('tap', '--label', catalog.text('common.more'), '--post-delay', '.5')
-item = ui.wait(lambda items: next((i for i in items
-    if (i.get('AXLabel') or '').startswith(catalog.text('simulator.menu'))), None), 'No simulator action')
-f = item['frame']
-ui.axe('tap', '-x', str(f['x'] + f['width'] / 2), '-y', str(f['y'] + f['height'] / 2), '--post-delay', '.5')
+open_label = catalog.text('simulator.chip.open', target=catalog.text('simulator.menu'))
+ui.axe('tap', '--label', open_label, '--post-delay', '.5')
 identity = stream()
 ui.capture('fullscreen')
+ui.axe('tap', '--label', catalog.text('common.more'))
+label = catalog.text('simulator.action.toggleKeyboard')
+ui.wait(lambda items: any(i.get('AXLabel') == label for i in items), 'Missing simulator keyboard control')
+ui.axe('tap', '--label', label)
+assert stream() == identity, 'Keyboard control replaced the current preview'
 for index in range(2):
     before = set(traces.glob('lody-simulator-motion-land-*.json'))
     ui.axe('tap', '--id', 'BackButton', '--post-delay', '.8')

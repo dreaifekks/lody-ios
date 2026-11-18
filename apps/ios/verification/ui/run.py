@@ -45,7 +45,7 @@ PREVIEW = {
     'session-native': 'session-preview-live',
     'dictation': 'session-preview-live',
     'proposal-cards': 'session-preview-cards-role-create',
-    'session-simulator': 'session-preview-live',
+    'session-simulator': 'session-preview-simulator',
     'permission-native': 'permission-native-preview',
     'native-diff': 'file-diff-preview',
     'native-workspace-changes': 'workspace-changes-preview',

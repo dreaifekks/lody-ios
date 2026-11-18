@@ -51,6 +51,14 @@ final class SimulatorController: UIViewController {
         UIAction(title: String(localized: String.LocalizationValue("simulator.action." + key), bundle: .lody), image: UIImage(systemName: symbol), attributes: source.isEmpty ? .disabled : []) { [weak self] _ in self?.run(id) }
       })
     }
+    if store.deviceType.localizedCaseInsensitiveContains("iPhone") || store.deviceType.localizedCaseInsensitiveContains("iPad") {
+      let operation = store.preview?.operationId
+      menus.append(UIAction(title: String(localized: "simulator.action.toggleKeyboard", bundle: .lody),
+        image: UIImage(systemName: "keyboard"), attributes: source.isEmpty ? .disabled : []) { [weak self] _ in
+        guard let self, operation != nil, store.preview?.operationId == operation else { return }
+        run("software-keyboard")
+      })
+    }
     menus.append(lifecycleMenu())
     let menu = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: menus))
     menu.accessibilityLabel = String(localized: "common.more", bundle: .lody)

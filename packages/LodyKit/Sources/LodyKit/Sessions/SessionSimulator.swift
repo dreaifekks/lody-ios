@@ -113,6 +113,7 @@ final class SessionSimulator {
   let sessionId: String
   let service: SimulatorService
   var platform: DevicePlatform { service.platform }
+  private(set) var deviceType = ""
   private(set) var name = ""
   private(set) var phase = "closed"
   private(set) var message = ""
@@ -165,7 +166,9 @@ final class SessionSimulator {
       }
       let devices = try await devices()
       guard token == version else { return false }
-      name = devices.first { $0.id == preview.deviceId }?.name ?? preview.deviceId
+      let current = devices.first { $0.id == preview.deviceId }
+      name = current?.name ?? preview.deviceId
+      deviceType = current?.deviceType ?? ""
       apply(reply)
       poll(token: token)
       return true
@@ -174,7 +177,10 @@ final class SessionSimulator {
       throw error
     }
   }
-  func start(_ device: Device) { start(id: device.id, name: device.name) }
+  func start(_ device: Device) {
+    deviceType = device.deviceType
+    start(id: device.id, name: device.name)
+  }
   /// Android: starts the running AVD again at another tier, replacing the capture operation.
   func setQuality(_ next: DevicePreviewQuality) {
     guard platform == .android, let preview, next != quality else { return }

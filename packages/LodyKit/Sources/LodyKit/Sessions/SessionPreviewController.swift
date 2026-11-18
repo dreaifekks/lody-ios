@@ -197,6 +197,7 @@ private final class SessionPreviewFixture {
       ],
       machineIds: ["preview-mac"], machineNames: ["preview-mac": "Preview Mac"], machineSimulators: ["preview-mac": "available"]
     )
+    if bar == "simulator" { catalog.sessions[0].iosSimulatorPreviewRequestId = "native-fixture" }
     if bar == "archived" { catalog.sessions[0].archived = true }
     if bar == "bar-tabs", let root = catalog.sessions.first {
       var tab = root
