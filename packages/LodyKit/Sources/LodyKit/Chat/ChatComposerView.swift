@@ -1969,8 +1969,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       if (value as? UIColor) == UIColor.label { quiet.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: range) }
     }
     named.append(quiet)
-    // The chip shares the bottom row with + and Send (44 pt each) and its own insets.
-    let room = input.bounds.width - 44 * 2 - 24
+    // The chip shares the bottom row with +, the usage ring and Send (44 pt each) and its own insets.
+    let room = input.bounds.width - 44 * 2 - 24 - usageWidth.constant
     return room > 0 && named.size().width <= room ? named : compact
   }
 

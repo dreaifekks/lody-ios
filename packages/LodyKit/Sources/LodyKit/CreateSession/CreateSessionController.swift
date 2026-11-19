@@ -43,9 +43,15 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   private var optionsTask: Task<Void, Never>?
   private var composingConstraints: [NSLayoutConstraint] = []
   private var searchingConstraints: [NSLayoutConstraint] = []
+#if !LODY_SHARE_EXTENSION
+  private var catalogObserver: NSObjectProtocol?
+#endif
   isolated deinit {
     branchTask?.cancel()
     optionsTask?.cancel()
+#if !LODY_SHARE_EXTENSION
+    if let catalogObserver { NotificationCenter.default.removeObserver(catalogObserver) }
+#endif
   }
 
   init(composer: ChatComposerView, host: UIView) {
@@ -131,6 +137,12 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     NSLayoutConstraint.activate(composingConstraints)
     composer.setInputIdentifier("create-session-input")
     composer.setComposerState(CreateJSON.encode(["placeholder": String(localized: "create.composer.placeholder", bundle: .lody)]))
+#if !LODY_SHARE_EXTENSION
+    // Subscription windows arrive with the catalog's machine meta; follow it while the page is open.
+    catalogObserver = NotificationCenter.default.addObserver(forName: .lodyCatalogDidChange, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.renderComposer() }
+    }
+#endif
     render()
     // One workspace-wide snapshot; cached options render before the complete runtime response.
     load()
@@ -281,11 +293,37 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       options["roleName"] = role.role.name
     }
     composer.setComposerOptions(Self.json(options))
-    composer.setComposerState(Self.json([
+    var state: [String: Any] = [
       "editable": true, "canSend": form.canSend, "sending": sending, "notice": form.notice,
       "reconnect": false, "placeholder": placeholder,
-    ]))
+    ]
+#if !LODY_SHARE_EXTENSION
+    if let usage = usage { state["usage"] = usage }
+#endif
+    composer.setComposerState(Self.json(state))
   }
+
+#if !LODY_SHARE_EXTENSION
+  /// Web's landing composer: the selected agent's subscription windows beside Send, resolved
+  /// against the exact computer, agent config and model (no context occupancy before a turn).
+  private var usage: [String: Any]? {
+    let page = form.current
+    guard let agent = page.agent,
+          let quota = SessionUsageSelection.quota(RemoteSettingsContext.current().agentUsage[agent.machineId],
+                                                  configId: agent.id, provider: agent.agentType, model: page.choice.modelId)
+    else { return nil }
+    let model = page.choice.modelId
+    var usage = ChatSessionUsage()
+    usage.quota = .init(name: quota.name, windows: quota.windows.map {
+      .init(label: $0.label, usedPercent: $0.usedPercent, duration: $0.duration, resetsAt: $0.resetsAt)
+    })
+    usage.quotaEligible = true
+    usage.modelId = model
+    usage.modelLabel = page.capability?.models.first { $0.id == model }?.name ?? model
+    guard usage.visible, let data = try? JSONEncoder().encode(usage) else { return nil }
+    return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+  }
+#endif
 
   /// Web's landing prompt: "Work with <assistant>" once one is chosen — the Agent Role when one is.
   private var placeholder: String {
