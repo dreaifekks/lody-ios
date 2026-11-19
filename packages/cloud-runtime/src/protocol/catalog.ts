@@ -70,6 +70,12 @@ const modelOf = (value: unknown): Session['lastModel'] => {
     name: text(model.name).trim() || undefined,
   };
 };
+const contextWindowOf = (value: unknown): Session['contextWindowUsage'] => {
+  const usage = object(value);
+  const size = stamp(usage.size);
+  if (size === undefined || size <= 0) return;
+  return { size, used: Math.max(0, stamp(usage.used) ?? 0) };
+};
 const diffOf = (value: unknown) => {
   const change = object(object(value).allChange);
   const add = stamp(change.add) ?? 0,
@@ -190,6 +196,7 @@ export function projectRows(
     const projectRun = runId ? projectRunOf(run, pullRequests) : undefined;
     sessions.push({
       lastModel: modelOf(value.lastModel),
+      contextWindowUsage: contextWindowOf(value.contextWindowUsage),
       cliType: text(value.cliType),
       agentType: text(value.agentType),
       resume: text(value.acpSessionId),

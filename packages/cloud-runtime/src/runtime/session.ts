@@ -826,16 +826,20 @@ function backgroundProgress(state: SessionState) {
 }
 type QuotaProjection = Pick<
   SessionUsage,
-  'quota' | 'quotaEligible' | 'modelId' | 'modelLabel'
+  'context' | 'quota' | 'quotaEligible' | 'modelId' | 'modelLabel'
 >;
 let readUsage: (
   sessionId: string,
   modelId?: string,
-) => QuotaProjection = () => ({ quota: null, quotaEligible: false });
+) => QuotaProjection = () => ({
+  context: null,
+  quota: null,
+  quotaEligible: false,
+});
 export function setSessionUsageReader(read: typeof readUsage) {
   readUsage = read;
 }
-/** Catalog updates reuse retained session owners; no new stream or timer. */
+/** Catalog updates (quota and context occupancy) reuse retained session owners; no new stream or timer. */
 export function refreshSessionUsage() {
   for (const state of sessions.values()) {
     const history = state.doc.getList('history').toJSON() as any[];
@@ -868,7 +872,7 @@ function flush(state: SessionState) {
     );
   state.historyClipped = false;
   let snapshot = project();
-  // The composer comes from the whole history, so every window shares this quota.
+  // The composer comes from the whole history, so every window shares this catalog usage.
   const quota = readUsage(state.id, snapshot.composer?.modelId);
   state.lastUsage = JSON.stringify(quota);
   const finish = (next: typeof snapshot) => {
