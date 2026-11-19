@@ -9,11 +9,19 @@ enum LodyPreferences {
   private static let queuedKey = "queuedMessageBehavior"
   private static let developerKey = "developerModeEnabled"
   private static let roostKey = "roostHistoryExperimentEnabled"
+  private static let liveActivitiesKey = "liveActivitiesEnabled"
 
   static var developerModeEnabled: Bool { UserDefaults.standard.bool(forKey: developerKey) }
   static var roostHistoryEnabled: Bool { developerModeEnabled && UserDefaults.standard.bool(forKey: roostKey) }
   static var roostHistoryExperimentEnabled: Bool { UserDefaults.standard.bool(forKey: roostKey) }
 
+  /// Lody's own Live Activity switch; on until the user turns it off. iOS Settings still has the final say.
+  static var liveActivitiesEnabled: Bool { UserDefaults.standard.object(forKey: liveActivitiesKey) as? Bool ?? true }
+
+  static func saveLiveActivities(_ enabled: Bool) {
+    guard enabled != liveActivitiesEnabled else { return }
+    UserDefaults.standard.set(enabled, forKey: liveActivitiesKey); changed()
+  }
   static func saveDeveloperMode(_ enabled: Bool) {
     UserDefaults.standard.set(enabled, forKey: developerKey); changed()
   }

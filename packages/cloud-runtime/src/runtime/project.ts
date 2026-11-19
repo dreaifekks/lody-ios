@@ -734,7 +734,7 @@ export function projectSession(
     status,
     reason,
     revision,
-    usage: projectSessionUsage(session, raw),
+    usage: projectSessionUsage(raw),
     billableTurnCount: billableTurnCount({ history: raw, mq: queued }),
     awaitingUserSince:
       typeof session?.awaitingUserSince === 'number'

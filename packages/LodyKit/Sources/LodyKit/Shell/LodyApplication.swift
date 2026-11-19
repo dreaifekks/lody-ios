@@ -43,6 +43,13 @@ public final class LodyApplication {
         MainActor.assumeIsolated { self?.reconcile() }
       })
     }
+    // The in-app switch only starts or ends the conversation Live Activity.
+    observers.append(NotificationCenter.default.addObserver(forName: .lodyPreferencesDidChange, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard !LodyUIVerify.enabled else { return }
+        self?.activities.refresh()
+      }
+    })
     PushNotifications.shared.onClickAvailable = { [weak self] in self?.reconcile() }
     if LodyUIVerify.enabled {
       NativeDebug.start(in: window)

@@ -9,18 +9,11 @@ export type SessionUsage = {
   modelId?: string;
   modelLabel?: string;
 };
-export function projectSessionUsage(
-  session: any,
-  history: readonly any[],
-): SessionUsage {
-  const raw = session?.contextWindowUsage;
-  const contextWindow =
-    raw && Number.isFinite(raw.size) && raw.size > 0
-      ? {
-          size: raw.size,
-          used: Number.isFinite(raw.used) ? Math.max(0, raw.used) : 0,
-        }
-      : null;
+/**
+ * Compaction comes from history. Context occupancy lives in session meta (the
+ * catalog), not the session document, so `sessionQuotaProjection` supplies it.
+ */
+export function projectSessionUsage(history: readonly any[]): SessionUsage {
   for (let entry = history.length - 1; entry >= 0; entry--) {
     const items = history[entry]?.items ?? [];
     for (let index = items.length - 1; index >= 0; index--) {
@@ -31,7 +24,7 @@ export function projectSessionUsage(
       )
         continue;
       return {
-        context: contextWindow,
+        context: null,
         quotaEligible: false,
         quota: null,
         isContextCompacting:
@@ -40,7 +33,7 @@ export function projectSessionUsage(
     }
   }
   return {
-    context: contextWindow,
+    context: null,
     quotaEligible: false,
     quota: null,
     isContextCompacting: false,
@@ -91,7 +84,10 @@ export function sessionQuotaProjection(
   session: Session | undefined,
   usage: AgentUsage | undefined,
   selectedModel?: string,
-): Pick<SessionUsage, 'quota' | 'quotaEligible' | 'modelId' | 'modelLabel'> {
+): Pick<
+  SessionUsage,
+  'context' | 'quota' | 'quotaEligible' | 'modelId' | 'modelLabel'
+> {
   const config = usage?.configs.find(
     (c) => c.id === session?.agentConfigId && c.provider === session?.agentType,
   );
@@ -107,7 +103,12 @@ export function sessionQuotaProjection(
           modelId,
         )
       : null;
+  const context = session?.contextWindowUsage;
   return {
+    context:
+      context && Number.isFinite(context.size) && context.size > 0
+        ? { size: context.size, used: Math.max(0, context.used) }
+        : null,
     quotaEligible,
     quota,
     modelId,

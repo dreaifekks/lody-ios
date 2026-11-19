@@ -24,7 +24,8 @@ final class ConversationActivities {
   private func reconcile() async {
     let list = SessionPublished.state()
     let workspace = list.workspace
-    let enabled = workspace?.resolvedMode == .plaintext && !list.userId.isEmpty && ActivityAuthorizationInfo().areActivitiesEnabled
+    let enabled = LodyPreferences.liveActivitiesEnabled && workspace?.resolvedMode == .plaintext && !list.userId.isEmpty
+      && ActivityAuthorizationInfo().areActivitiesEnabled
     let id = "lody-conversations:v5:\(list.workspaceId):\(list.userId)"
     var existing: Activity<Attributes>?
     for activity in Activity<Attributes>.activities {

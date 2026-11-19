@@ -35,6 +35,8 @@ export type ProjectRun = {
 };
 export type Session = {
   lastModel?: { modelId?: string; name?: string } | null;
+  /** Session meta `contextWindowUsage`, written by the owner CLI (web composer usage). */
+  contextWindowUsage?: { size: number; used: number };
   cliType?: string;
   agentType?: string;
   resume?: string;
