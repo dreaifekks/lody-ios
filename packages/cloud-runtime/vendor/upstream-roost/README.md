@@ -1,7 +1,7 @@
 # Upstream Roost reader snapshot
 
 Source is from public Lody commit
-[`bc9044ecc8f59ff7b36fe649b30e11e220fcb232`](https://github.com/LodyAI/Lody/commit/bc9044ecc8f59ff7b36fe649b30e11e220fcb232).
+[`5724451caeaca55035b6a44be065dbea407b8795`](https://github.com/LodyAI/Lody/commit/5724451caeaca55035b6a44be065dbea407b8795).
 Every file under `packages/components/` and `packages/shared/` is copied verbatim
 from the same repository-relative path at that commit.
 `packages/acp-extension-dsh/src/capabilities.ts` is from its upstream submodule

@@ -226,6 +226,116 @@ test(
   },
 );
 
+test(
+  'Roost history loss clears live until the resumed checkpoint reaches the transcript',
+  { timeout: 8000 },
+  async (t) => {
+    const loseHistory = Promise.withResolvers();
+    const catchUpStarted = Promise.withResolvers();
+    const allowCatchUp = Promise.withResolvers();
+    const caughtUp = Promise.withResolvers();
+    const events = [];
+    let openings = 0;
+    const turn = (finished) => ({
+      id: 'assistant-1',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      finished,
+      items: [{ type: 'text', text: finished ? 'Finished' : 'Working' }],
+    });
+    const fixture = await openTestSession({
+      target: { backend: 'roost', machineId: 'm1' },
+      onEvent(event) {
+        if (event.type !== 'session') return;
+        const session = JSON.parse(event.session);
+        events.push({ synced: event.synced, session });
+        if (event.synced && session.entries[0]?.finished) caughtUp.resolve();
+      },
+      async *onSubscription(request, runtime, signal) {
+        const { subscription } = await runtime.openPayload(request.params);
+        assert.equal(subscription.checkpoint, 'c1');
+        const revision = ++openings;
+        yield {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-subscription_response',
+            sessionId: 's1',
+            subscriptionId: subscription.id,
+            event: 'publication',
+            publication: { checkpoint: 'c' + revision, revision },
+          }),
+        };
+        if (revision === 1) {
+          await loseHistory.promise;
+          throw new Error('network_error');
+        }
+        await new Promise((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', resolve, { once: true });
+        });
+      },
+      async onRpc(request, runtime) {
+        const { query } = await runtime.openPayload(request.params);
+        const read = {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyCount: 1,
+        };
+        if (query.kind === 'readChanges') {
+          assert.equal(query.checkpoint, 'c1');
+          catchUpStarted.resolve();
+          await allowCatchUp.promise;
+          return {
+            result: await runtime.sealPayload('s1', {
+              ...read,
+              historyRevision: 2,
+              result: {
+                state: 'ready',
+                checkpoint: 'c2',
+                ids: ['assistant-1'],
+                bodies: { changed: [turn(true)], suffix: [] },
+              },
+            }),
+          };
+        }
+        assert.equal(query.kind, 'readLatestPage');
+        return {
+          result: await runtime.sealPayload('s1', {
+            ...read,
+            historyRevision: 1,
+            result: {
+              checkpoint: 'c1',
+              startPosition: 0,
+              totalCount: 1,
+              rows: [{ position: 0, state: 'ready', turnId: 'assistant-1' }],
+              hasMoreOlder: false,
+              cursor: null,
+            },
+            pageTurns: [turn(false)],
+          }),
+        };
+      },
+    });
+    t.after(() => {
+      allowCatchUp.resolve();
+      fixture.close();
+    });
+    assert.equal(events.at(-1).synced, true);
+    assert.equal(events.at(-1).session.entries[0].finished, false);
+    const beforeLoss = events.length;
+    loseHistory.resolve();
+    await catchUpStarted.promise;
+    await fixture.reopen();
+    assert.equal(events.at(-1).synced, false);
+    assert.equal(events.at(-1).session.status, 'syncing');
+    assert.equal(events.at(-1).session.reason, 'network_error');
+    assert.ok(events.slice(beforeLoss).every(({ synced }) => !synced));
+    allowCatchUp.resolve();
+    await caughtUp.promise;
+    assert.equal(events.at(-1).session.entries[0].finished, true);
+  },
+);
+
 test('Roost sessions read, observe and send through the owning machine', async () => {
   const turn = (text) => ({
     id: 'old',

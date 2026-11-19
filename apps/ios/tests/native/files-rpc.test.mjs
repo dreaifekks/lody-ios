@@ -75,7 +75,7 @@ function machine(handler, onSubscription) {
       this.replyTo = decodeURIComponent(url).split('/ds/lody/')[1];
     }
     async *live({ signal, mode }) {
-      assert.equal(mode, 'sse');
+      assert.equal(mode, 'long-poll');
       const { envelope, params } = subscriptions.get(this.replyTo);
       for await (const value of onSubscription(params, signal))
         yield {

@@ -44,7 +44,8 @@ permission responses through the encrypted owner RPC. The control document
 carries the shared queue and human-input receipts.
 
 The owner publishes committed checkpoints over the reply stream for
-`session/history-subscribe`. The upstream reader applies inline deltas at their
+`session/history-subscribe`. The native runtime consumes that stream using
+Streams long-poll. The upstream reader applies inline deltas at their
 exact cached base and requests missing intervals from its last applied checkpoint.
 A renewed lease resumes from that same durable checkpoint. The runtime obtains
 scoped read and intent-bound write proofs through the native `historyToken`
@@ -52,7 +53,8 @@ broker. The account credential stays native.
 
 Both the control stream and owner history must be ready before the runtime
 reports a Roost session as live. A failed read clears that reader's readiness
-until it recovers, while the other reader can continue.
+while the other reader continues. After a history subscription failure, live
+readiness requires a fresh owner checkpoint that the transcript has loaded.
 
 The iOS runtime package holds the authoring source in `vendor/upstream-roost`.
 The iOS asset build verifies the generated `src/runtime/upstream-roost.js` against

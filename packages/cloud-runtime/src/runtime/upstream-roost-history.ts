@@ -20,6 +20,7 @@ type RoostSessionOptions = Parameters<typeof createRoostHistoryTransport>[0] & {
   coherentInspection?: boolean;
   incremental?: boolean;
   live?: boolean;
+  onSubscription?: (state: { checkpoint: string } | { reason: string }) => void;
 };
 
 export function createMobileRoostSessionData(
@@ -34,8 +35,31 @@ export function createMobileRoostSessionData(
       : options.accountId,
     active: () => !options.signal.aborted && (options.isCurrent?.() ?? true),
     subscribeWake,
-    subscribeHistory: (_machineId, _sessionId, open, publish, signal) =>
-      transport.subscribe(open, publish, signal),
+    subscribeHistory: async (_machineId, _sessionId, open, publish, signal) => {
+      let published = false;
+      try {
+        await transport.subscribe(
+          open,
+          (publication) => {
+            published = true;
+            publish(publication);
+            options.onSubscription?.({ checkpoint: publication.checkpoint });
+          },
+          signal,
+        );
+        if (!published && !signal.aborted)
+          throw new Error('history_subscription_unavailable');
+      } catch (error) {
+        if (!signal.aborted && !options.signal.aborted)
+          options.onSubscription?.({
+            reason:
+              error instanceof Error && error.message
+                ? error.message
+                : 'history_subscription_unavailable',
+          });
+        throw error;
+      }
+    },
     requestHistoryRead: (_machineId, _sessionId, query) =>
       transport.read(query),
     requestHistoryWrite: ({ operation, payload }) =>

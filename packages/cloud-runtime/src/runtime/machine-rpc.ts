@@ -179,11 +179,13 @@ export async function subscribeMachineHistory(options: {
     });
     for await (const event of response.live({
       offset: '-1',
-      mode: 'sse',
+      mode: 'long-poll',
       signal,
     })) {
       signal.throwIfAborted();
-      if (event.type === 'error') throw new Error(event.error.code);
+      // Reopen from an owner-confirmed checkpoint after a broken reply stream.
+      if (event.type === 'error' || event.type === 'reconnecting')
+        throw new Error(event.error.code);
       if (event.type !== 'data') continue;
       for (const reply of decodeReplies(event.payload.body)) {
         if (reply.id === id && (await options.onReply(reply))) {

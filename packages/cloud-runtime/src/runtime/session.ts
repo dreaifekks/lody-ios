@@ -93,6 +93,7 @@ type SessionState = {
   target?: SessionTarget;
   scopeIsCurrent?: () => boolean;
   historyReady?: boolean;
+  historySubscriptionFailure?: string;
   streamReady?: boolean;
   roostReader?: Awaited<ReturnType<typeof createUpstreamRoostHistory>>;
   roostWindow?: RoostWindow;
@@ -959,6 +960,7 @@ function isWorking(state: SessionState) {
   return false;
 }
 function scheduleEmit(state: SessionState, status: string, reason?: string) {
+  if (status === 'syncing') reason ??= state.historySubscriptionFailure;
   if (status !== state.status && sessions.get(state.id) === state)
     trace(state, 'status', { status, code: traceCode(reason) });
   state.status = status;
@@ -1309,6 +1311,20 @@ export async function openSession(
       if (sessions.get(id) !== state) return;
       state.target = target;
       if (target.backend === 'roost') {
+        const liveHistory = target.live;
+        let ownerCheckpoint: string | undefined;
+        const confirmHistory = () => {
+          if (
+            !liveHistory ||
+            (ownerCheckpoint &&
+              ownerCheckpoint === state.roostWindow?.checkpoint)
+          ) {
+            state.historyReady = true;
+            state.historySubscriptionFailure = undefined;
+          }
+          updateReadiness();
+          if (state.ready) event('live');
+        };
         const reader = createUpstreamRoostHistory({
           accountId: target.accountId,
           workspaceId: workspace,
@@ -1322,6 +1338,17 @@ export async function openSession(
           incremental: target.incremental,
           live: target.live,
           getHistoryProof: target.getHistoryProof,
+          onSubscription: (observation) => {
+            if (controller.signal.aborted || sessions.get(id) !== state) return;
+            if ('reason' in observation) {
+              ownerCheckpoint = undefined;
+              state.historySubscriptionFailure = observation.reason;
+              retryHistory(new Error(observation.reason));
+            } else {
+              ownerCheckpoint = observation.checkpoint;
+              if (!state.historyReady) confirmHistory();
+            }
+          },
         });
         state.roostReader = reader;
         let window = await retrySessionRead(
@@ -1363,7 +1390,7 @@ export async function openSession(
         };
         refreshMetadata();
         reader.metadataChanged(state.roostMetadata);
-        state.historyReady = true;
+        confirmHistory();
         void (async () => {
           try {
             while (!controller.signal.aborted) {
@@ -1389,9 +1416,7 @@ export async function openSession(
               );
               if (reader.metadataChanged(state.roostMetadata))
                 refreshMetadata();
-              state.historyReady = true;
-              updateReadiness();
-              if (state.ready) event('live');
+              confirmHistory();
             }
           } catch (error) {
             if (!controller.signal.aborted && sessions.get(id) === state) {

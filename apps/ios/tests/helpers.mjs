@@ -236,7 +236,7 @@ export async function openTestSession({
     async *live({ signal, mode }) {
       const request = replies.get(this.url.split('/ds/lody/')[1]);
       if (
-        mode !== 'sse' ||
+        mode !== 'long-poll' ||
         !onSubscription ||
         request?.method !== 'session/history-subscribe'
       )
