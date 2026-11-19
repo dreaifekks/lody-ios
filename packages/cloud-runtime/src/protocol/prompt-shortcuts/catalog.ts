@@ -3,14 +3,15 @@
 import { z } from 'zod';
 import {
   PROMPT_SHORTCUT_LIMITS,
-  PromptShortcutSchema,
+  PromptShortcutObjectSchema,
   PromptShortcutTargetSchema,
   PromptShortcutError,
   shortcutByteLength,
+  stripLegacyShortcutVisibility,
   type PromptShortcut,
 } from './model.ts';
 
-export const PromptShortcutIndexSchema = PromptShortcutSchema.omit({
+export const PromptShortcutIndexObjectSchema = PromptShortcutObjectSchema.omit({
   prompt: true,
   mentions: true,
 })
@@ -22,8 +23,13 @@ export const PromptShortcutIndexSchema = PromptShortcutSchema.omit({
   })
   .strict();
 
+export const PromptShortcutIndexSchema = z.preprocess(
+  stripLegacyShortcutVisibility,
+  PromptShortcutIndexObjectSchema,
+);
+
 export type PromptShortcutIndexEntry = z.infer<
-  typeof PromptShortcutIndexSchema
+  typeof PromptShortcutIndexObjectSchema
 >;
 export type PromptShortcutCatalogRecord =
   | { kind: 'active'; entry: PromptShortcutIndexEntry }
@@ -124,6 +130,26 @@ export class PromptShortcutCatalog {
       if (record?.kind === 'active') entries.push(record.entry);
     }
     return entries;
+  }
+
+  deletedIds(): Set<string> {
+    const deleted = new Set<string>();
+    for (const row of this.flock.scan({ prefix: ['deletedPromptShortcut'] })) {
+      if (
+        row.key.length === 2 &&
+        typeof row.key[1] === 'string' &&
+        typeof row.value === 'string' &&
+        row.value.length > 0
+      ) {
+        deleted.add(row.key[1]);
+      }
+    }
+    for (const row of this.flock.scan({ prefix: ['promptShortcut'] })) {
+      if (row.key.length !== 2 || typeof row.key[1] !== 'string') continue;
+      const record = this.get(row.key[1]);
+      if (record?.kind === 'deleted') deleted.add(record.id);
+    }
+    return deleted;
   }
 
   put(entry: PromptShortcutIndexEntry): void {

@@ -30,6 +30,14 @@ export const normalizeShortcutEmoji = (value: unknown): string | undefined => {
   return capped || undefined;
 };
 
+/** Strip legacy `visibility` field when reading pre-migration records under `.strict()`. */
+export const stripLegacyShortcutVisibility = (value: unknown): unknown => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (!('visibility' in value)) return value;
+  const { visibility: _visibility, ...rest } = value as Record<string, unknown>;
+  return rest;
+};
+
 const utf8 = new TextEncoder();
 export const shortcutByteLength = (value: string): number =>
   utf8.encode(value).byteLength;
@@ -99,13 +107,12 @@ export const PromptShortcutMentionSchema = z
   })
   .strict();
 
-export const PromptShortcutSchema = z
+export const PromptShortcutObjectSchema = z
   .object({
     v: z.literal(1),
     id: identifier,
     workspaceId: identifier,
     ownerUserId: identifier,
-    visibility: z.enum(['private', 'workspace']),
     name: z.string().trim().min(1).max(PROMPT_SHORTCUT_LIMITS.name),
     // Stored normalized: a synced row from another client is rejected rather
     // than silently repaired, so every reader sees the same glyph.
@@ -132,7 +139,12 @@ export const PromptShortcutSchema = z
   })
   .strict();
 
-export type PromptShortcut = z.infer<typeof PromptShortcutSchema>;
+export const PromptShortcutSchema = z.preprocess(
+  stripLegacyShortcutVisibility,
+  PromptShortcutObjectSchema,
+);
+
+export type PromptShortcut = z.infer<typeof PromptShortcutObjectSchema>;
 
 export type PromptShortcutScope = z.infer<typeof PromptShortcutScopeSchema>;
 export type PromptShortcutProject = z.infer<typeof projectSchema>;

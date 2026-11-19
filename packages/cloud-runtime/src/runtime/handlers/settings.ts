@@ -15,7 +15,11 @@ import {
 } from '../provider-detail';
 import { createProviderRpc } from '../provider-rpc';
 import { projectRows } from '../../protocol/catalog';
-import { scopedShortcutCloud, type RuntimeContext } from './context.ts';
+import {
+  scopedShortcutCloud,
+  scopedWorkspaceGrant,
+  type RuntimeContext,
+} from './context.ts';
 
 export function registerSettings(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
@@ -25,6 +29,7 @@ export function registerSettings(ctx: RuntimeContext) {
     const value = await promptShortcuts(
       args as ShortcutRequest,
       args.userId,
+      scopedWorkspaceGrant(ctx, args.workspaceId, args.userId),
       scopedShortcutCloud(ctx, args.workspaceId, args.userId),
       AbortSignal.timeout(120000),
     );

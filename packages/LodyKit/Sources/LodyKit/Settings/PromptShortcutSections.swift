@@ -38,27 +38,24 @@ enum PromptShortcutSections {
 
   static func make(_ items: [PromptShortcutEntry], userId: String) -> [LodyListSection] {
     guard !items.isEmpty else { return [] }
-    return ["private", "workspace"].map { visibility in
-      var section = LodyListSection()
-      section.id = visibility
-      section.header = text(visibility)
-      section.footer = visibility == "workspace" ? text("hintShort") : ""
-      section.rows = items.filter { $0.visibility.rawValue == visibility }.map { item in
-        var row = LodyListRow()
-        row.id = item.id
-        row.title = item.name
-        row.subtitle = "/\(item.slug)"
-        row.subtitleMono = true
-        row.action = true
-        row.disclosure = true
-        if viewOnly(item, userId: userId) {
-          row.trailingSymbol = "eye"
-          row.trailingSymbolLabel = text("viewOnly")
-        }
-        return row
+    var section = LodyListSection()
+    section.id = "shortcuts"
+    section.footer = text("hintShort")
+    section.rows = items.map { item in
+      var row = LodyListRow()
+      row.id = item.id
+      row.title = item.name
+      row.subtitle = "/\(item.slug)"
+      row.subtitleMono = true
+      row.action = true
+      row.disclosure = true
+      if viewOnly(item, userId: userId) {
+        row.trailingSymbol = "eye"
+        row.trailingSymbolLabel = text("viewOnly")
       }
-      return section
+      return row
     }
+    return [section]
   }
 
   static func text(_ key: String) -> String { String(localized: String.LocalizationValue("settings.shortcuts." + key), bundle: .lody) }
