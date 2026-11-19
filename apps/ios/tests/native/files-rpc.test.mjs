@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { build } from 'esbuild';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
@@ -59,15 +60,37 @@ const ctx = () => ({
     token: 'synthetic',
     gatewayBaseUrl: 'https://example.invalid',
   }),
+  getHistoryProof: async () => 'synthetic-proof',
   signal: AbortSignal.timeout(1000),
 });
 
 // Replies are produced by a fake machine that unseals the request with the
 // same owner-session key and seals its answer back, like machine-rpc-server.
-function machine(handler) {
+function machine(handler, onSubscription) {
   const calls = [];
   let pending;
+  const subscriptions = new Map();
   globalThis.__projectClient = class {
+    constructor({ url }) {
+      this.replyTo = decodeURIComponent(url).split('/ds/lody/')[1];
+    }
+    async *live({ signal, mode }) {
+      assert.equal(mode, 'sse');
+      const { envelope, params } = subscriptions.get(this.replyTo);
+      for await (const value of onSubscription(params, signal))
+        yield {
+          type: 'data',
+          mode,
+          payload: {
+            body: new TextEncoder().encode(
+              JSON.stringify({
+                id: envelope.id,
+                result: await runtime.sealPayload(params.sessionId, value),
+              }),
+            ),
+          },
+        };
+    }
     async create() {
       return { ok: true };
     }
@@ -76,7 +99,13 @@ function machine(handler) {
       const params = runtime.isEnvelope(envelope.params)
         ? await runtime.openPayload(envelope.params)
         : envelope.params;
+      if (envelope.method === 'session/history-unsubscribe')
+        return { ok: true };
       calls.push({ method: envelope.method, params, id: envelope.id });
+      if (envelope.method === 'session/history-subscribe') {
+        subscriptions.set(envelope.replyTo, { envelope, params });
+        return { ok: true };
+      }
       const reply = await handler(envelope.method, params, envelope);
       pending = {
         id: envelope.id,
@@ -119,7 +148,7 @@ test('sealed payloads round-trip and reject a foreign key id', async () => {
   );
 });
 
-test('Roost history uses encrypted owner RPC for reads, watches and writes', async () => {
+test('Roost sends scoped read proofs and binds editing proofs to the exact RPC operation', async () => {
   const calls = machine(async (method, params) => ({
     result: {
       type:
@@ -132,30 +161,52 @@ test('Roost history uses encrypted owner RPC for reads, watches and writes', asy
       result: { accepted: true },
     },
   }));
+  const minted = [];
   const history = runtime.createRoostHistoryTransport({
     ...ctx(),
     sessionId: 's1',
+    getHistoryProof: async (intent) => {
+      minted.push(intent);
+      return intent.requestId
+        ? 'synthetic-write-proof'
+        : 'synthetic-read-proof';
+    },
   });
   await history.read({
     kind: 'readLatestPage',
     limit: 40,
     withCheckpoint: true,
   });
-  await history.read({
-    kind: 'watchChanges',
-    checkpoint: 'c1',
-    waitMs: 15000,
-    includeBodiesFrom: 0,
-  });
-  await history.write('accept_input_and_dispatch', { entry: { id: 'turn' } });
-  assert.deepEqual(
-    calls.map((call) => call.method),
-    ['session/history-read', 'session/history-watch', 'session/history-write'],
-  );
-  assert.deepEqual(calls[2].params, {
+  const operation = 'accept_input_and_dispatch';
+  const payload = { entry: { id: 'turn' } };
+  await history.write(operation, payload);
+  const [read, write] = calls;
+  assert.equal(read.method, 'session/history-read');
+  assert.equal(read.params.readProof, 'synthetic-read-proof');
+  const scope = { workspaceId: 'w', machineId: 'm', sessionId: 's1' };
+  assert.deepEqual(minted, [
+    scope,
+    {
+      ...scope,
+      requestId: write.id,
+      intentDigest: createHash('sha256')
+        .update(
+          JSON.stringify([
+            'lody-session-history-edit-v1',
+            write.id,
+            operation,
+            payload,
+          ]),
+        )
+        .digest('hex'),
+    },
+  ]);
+  assert.equal(write.method, 'session/history-write');
+  assert.deepEqual(write.params, {
     sessionId: 's1',
-    operation: 'accept_input_and_dispatch',
-    payload: { entry: { id: 'turn' } },
+    operation,
+    payload,
+    writeProof: 'synthetic-write-proof',
   });
 });
 
@@ -284,6 +335,10 @@ test('sharing a Roost session reads an authoritative owner snapshot', async () =
     },
     channel: { handle: (name, fn) => handlers.set(name, fn), emit() {} },
     getGrant: ctx().getGrant,
+    broker: (operation, { intent }) => {
+      assert.equal(operation, 'historyToken');
+      return ctx().getHistoryProof(intent);
+    },
   });
   const result = await handlers.get('sessionSharing')({
     workspaceId: 'w',
@@ -386,46 +441,46 @@ test(
     });
     let online = true;
     const calls = [];
-    machine(async (method, { query }) => {
-      assert.notEqual(method, 'session/history-write');
-      calls.push(query);
-      if (query.kind === 'watchChanges') {
-        watchStarted(query);
-        return new Promise((_resolve, reject) =>
-          secondController.signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
-      }
-      if (!online) throw new Error('owner_offline');
-      return {
-        result: {
-          type: 'session/history-read_response',
-          sessionId: 's1',
-          success: true,
-          historyRevision: 1,
-          historyCount: 1,
+    machine(
+      async (method, { query }) => {
+        assert.notEqual(method, 'session/history-write');
+        calls.push(query);
+        if (!online) throw new Error('owner_offline');
+        return {
           result: {
-            checkpoint: 'c1',
-            startPosition: 0,
-            totalCount: 1,
-            rows: [{ position: 0, state: 'ready', turnId: 'turn' }],
-            hasMoreOlder: false,
-            cursor: null,
-          },
-          pageTurns: [
-            {
-              id: 'turn',
-              role: 'user',
-              timestamp: '2026-01-01',
-              items: [{ type: 'text', text: 'cached' }],
+            type: 'session/history-read_response',
+            sessionId: 's1',
+            success: true,
+            historyRevision: 1,
+            historyCount: 1,
+            result: {
+              checkpoint: 'c1',
+              startPosition: 0,
+              totalCount: 1,
+              rows: [{ position: 0, state: 'ready', turnId: 'turn' }],
+              hasMoreOlder: false,
+              cursor: null,
             },
-          ],
-        },
-      };
-    });
+            pageTurns: [
+              {
+                id: 'turn',
+                role: 'user',
+                timestamp: '2026-01-01',
+                items: [{ type: 'text', text: 'cached' }],
+              },
+            ],
+          },
+        };
+      },
+      async function* ({ readProof, subscription }, signal) {
+        assert.equal(readProof, 'synthetic-proof');
+        if (!online) watchStarted(subscription);
+        await new Promise((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', resolve, { once: true });
+        });
+      },
+    );
     const options = {
       accountId: 'account-a',
       workspaceId: 'w',
@@ -433,7 +488,8 @@ test(
       sessionId: 's1',
       getGrant: ctx().getGrant,
       incremental: true,
-      watch: true,
+      live: true,
+      getHistoryProof: ctx().getHistoryProof,
     };
     try {
       const first = await runtime.createUpstreamRoostHistory({
@@ -455,12 +511,7 @@ test(
         signal: foreignController.signal,
       });
       await assert.rejects(foreign.latest(), /owner_offline/);
-      assert.equal(
-        calls.some(
-          (query) => query.kind === 'watchChanges' && query.checkpoint === 'c1',
-        ),
-        true,
-      );
+      assert.ok(calls.every((query) => query.kind === 'readLatestPage'));
     } finally {
       firstController.abort();
       secondController.abort();

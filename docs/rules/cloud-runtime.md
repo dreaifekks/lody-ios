@@ -10,7 +10,7 @@ Read before changing login, the data runtime, the offscreen WebView and watchdog
 
 - The host↔runtime boundary is the versioned contract in `packages/cloud-runtime/src/contract`, with generated Swift in `packages/lody-core` (`pnpm contract`). Add methods there: the runtime exposes only `dataRuntime.receive` and posts only `ready` / `envelope`; do not add `callAsyncJavaScript` commands.
 
-- Only short-lived workspace Streams grants enter the bundled WebView; long-lived Better Auth credentials stay in Keychain. Never load remote scripts or expose tokens in diagnostics. Logout and unsubscribe must stop the owned runtime.
+- Only short-lived Streams grants and scoped machine request proofs enter the bundled WebView; long-lived Better Auth credentials stay in Keychain. Never load remote scripts or expose tokens in diagnostics. Logout and unsubscribe must stop the owned runtime.
 
 - Explicit removal of a Loro pending message clears only its native Outbox record and does not require Roost accepted-input state. Preserve account/workspace and exact-input guards; local removal never claims to cancel remote execution. Roost removal continues through its pending-input owner.
 

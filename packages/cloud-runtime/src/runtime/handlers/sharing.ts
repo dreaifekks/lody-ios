@@ -44,6 +44,7 @@ export function registerSharing(ctx: RuntimeContext) {
         machineId: meta.machineId,
         sessionId: id,
         getGrant,
+        getHistoryProof: (intent) => ctx.broker('historyToken', { intent }),
         signal,
         isCurrent: () => state.workspace === workspace && state.userId === user,
       });

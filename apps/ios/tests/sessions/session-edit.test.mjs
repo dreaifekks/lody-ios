@@ -208,19 +208,11 @@ test('editing a Roost session uses its owner history and the edit RPC', async ()
       acceptsInput: true,
       dispatchesInput: true,
     },
-    async onRpc(request, runtime, signal) {
+    async onRpc(request, runtime) {
       if (request.method === 'session/edit-and-resend') {
         requests.push(request);
         return { result: { success: true } };
       }
-      if (request.method === 'session/history-watch')
-        return new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
       return {
         result: await runtime.sealPayload('s1', {
           type: 'session/history-read_response',

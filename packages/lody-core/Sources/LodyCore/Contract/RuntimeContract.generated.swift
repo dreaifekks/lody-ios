@@ -8040,6 +8040,71 @@ extension RuntimeContract {
     }
   }
 
+  public struct ShareRequestParamsHistoryTokenArgsIntent: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var machineId: String
+    public var sessionId: String
+    public var requestId: String?
+    public var intentDigest: String?
+    public init(workspaceId: String, machineId: String, sessionId: String, requestId: String? = nil, intentDigest: String? = nil) {
+      self.workspaceId = workspaceId
+      self.machineId = machineId
+      self.sessionId = sessionId
+      self.requestId = requestId
+      self.intentDigest = intentDigest
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.machineId = try c.decode(String.self, forKey: Key("machineId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.requestId = try c.decodeIfPresent(String.self, forKey: Key("requestId"))
+      self.intentDigest = try c.decodeIfPresent(String.self, forKey: Key("intentDigest"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.machineId, forKey: Key("machineId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encodeIfPresent(self.requestId, forKey: Key("requestId"))
+      try c.encodeIfPresent(self.intentDigest, forKey: Key("intentDigest"))
+    }
+  }
+
+  public struct ShareRequestParamsHistoryTokenArgs: Codable, Sendable, Equatable {
+    public var intent: ShareRequestParamsHistoryTokenArgsIntent
+    public init(intent: ShareRequestParamsHistoryTokenArgsIntent) {
+      self.intent = intent
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.intent = try c.decode(ShareRequestParamsHistoryTokenArgsIntent.self, forKey: Key("intent"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.intent, forKey: Key("intent"))
+    }
+  }
+
+  public struct ShareRequestParamsHistoryToken: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var args: ShareRequestParamsHistoryTokenArgs
+    public init(workspaceId: String, args: ShareRequestParamsHistoryTokenArgs) {
+      self.workspaceId = workspaceId
+      self.args = args
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.args = try c.decode(ShareRequestParamsHistoryTokenArgs.self, forKey: Key("args"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.args, forKey: Key("args"))
+    }
+  }
+
   public struct ShareRequestParamsPreviewTokenArgsIntent: Codable, Sendable, Equatable {
     public var workspaceId: String
     public var machineId: String
@@ -8114,6 +8179,7 @@ extension RuntimeContract {
     case saveSecret(ShareRequestParamsSaveSecret)
     case readSecret(ShareRequestParamsReadSecret)
     case image(ShareRequestParamsImage)
+    case historyToken(ShareRequestParamsHistoryToken)
     case previewToken(ShareRequestParamsPreviewToken)
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -8123,6 +8189,7 @@ extension RuntimeContract {
       case "saveSecret": self = .saveSecret(try ShareRequestParamsSaveSecret(from: decoder))
       case "readSecret": self = .readSecret(try ShareRequestParamsReadSecret(from: decoder))
       case "image": self = .image(try ShareRequestParamsImage(from: decoder))
+      case "historyToken": self = .historyToken(try ShareRequestParamsHistoryToken(from: decoder))
       case "previewToken": self = .previewToken(try ShareRequestParamsPreviewToken(from: decoder))
       default: throw DecodingError.dataCorruptedError(forKey: Key("operation"), in: c, debugDescription: "Unknown operation \(tag)")
       }
@@ -8141,6 +8208,9 @@ extension RuntimeContract {
         try value.encode(to: encoder)
       case .image(let value):
         try c.encode("image", forKey: Key("operation"))
+        try value.encode(to: encoder)
+      case .historyToken(let value):
+        try c.encode("historyToken", forKey: Key("operation"))
         try value.encode(to: encoder)
       case .previewToken(let value):
         try c.encode("previewToken", forKey: Key("operation"))

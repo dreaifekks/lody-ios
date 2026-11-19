@@ -56,6 +56,49 @@ export function frame(bytes) {
   return result;
 }
 
+export async function* historyPublications(request, runtime, signal, next) {
+  const { sessionId, readProof, subscription } = await runtime.openPayload(
+    request.params,
+  );
+  if (readProof !== 'synthetic-read-proof' || subscription.action !== 'open')
+    throw new Error('Invalid subscription intent');
+  const frame = (publication) => ({
+    type: 'session/history-subscription_response',
+    sessionId,
+    subscriptionId: subscription.id,
+    event: 'publication',
+    publication,
+  });
+  const response = next(subscription, signal);
+  // A matching initial publication leaves the persisted projection unchanged.
+  yield {
+    result: await runtime.sealPayload(
+      sessionId,
+      frame({ checkpoint: subscription.checkpoint, revision: 1 }),
+    ),
+  };
+  const delta = await response;
+  yield {
+    result: await runtime.sealPayload(
+      sessionId,
+      frame({
+        checkpoint: delta.result.checkpoint,
+        revision: delta.historyRevision,
+        delta: {
+          baseCheckpoint: subscription.checkpoint,
+          includeBodiesFrom: subscription.includeBodiesFrom,
+          withPatches: subscription.withPatches,
+          response: delta,
+        },
+      }),
+    ),
+  };
+  await new Promise((resolve) => {
+    if (signal.aborted) resolve();
+    else signal.addEventListener('abort', resolve, { once: true });
+  });
+}
+
 export async function openTestSession({
   failAppend = () => false,
   afterAppend,
@@ -63,6 +106,7 @@ export async function openTestSession({
   readSession,
   markDispatch = async () => {},
   onRpc,
+  onSubscription,
   onEvent = () => {},
   target,
   resolveTarget,
@@ -189,6 +233,27 @@ export async function openTestSession({
         sessionRead = resolve;
       });
     }
+    async *live({ signal, mode }) {
+      const request = replies.get(this.url.split('/ds/lody/')[1]);
+      if (
+        mode !== 'sse' ||
+        !onSubscription ||
+        request?.method !== 'session/history-subscribe'
+      )
+        throw new Error('Unexpected live stream');
+      for await (const result of onSubscription(request, runtime, signal)) {
+        yield {
+          type: 'data',
+          mode,
+          nextOffset: String(++offset),
+          payload: {
+            body: new TextEncoder().encode(
+              JSON.stringify({ id: request.id, ...result }),
+            ),
+          },
+        };
+      }
+    }
     async create() {
       return ok({});
     }
@@ -198,7 +263,8 @@ export async function openTestSession({
         return { ok: false, result: { code: 'timeout' } };
       if (this.url.includes(':rpc:req:')) {
         const request = JSON.parse(part.body);
-        replies.set(request.replyTo, request);
+        if (request.method !== 'session/history-unsubscribe')
+          replies.set(request.replyTo, request);
       } else if (!this.url.includes(':rpc:'))
         server.import(part.body.subarray(4));
       if (afterAppend) await afterAppend(this.url, part);
@@ -226,11 +292,20 @@ export async function openTestSession({
     events.push(value);
     if (value.status === 'live') resolveEmit?.(value);
   };
+  const targetResolver = resolveTarget ?? (target ? () => target : undefined);
   const resolver =
-    resolveTarget ??
-    (target
-      ? () => ({ incremental: true, watch: true, ...target })
-      : undefined);
+    targetResolver &&
+    Object.assign(() => {
+      const value = targetResolver();
+      if (value?.backend !== 'roost') return value;
+      return {
+        incremental: true,
+        live: !!onSubscription,
+        getHistoryProof: async (intent) =>
+          intent.requestId ? 'synthetic-write-proof' : 'synthetic-read-proof',
+        ...value,
+      };
+    }, targetResolver);
   const reopen = () =>
     runtime.openSession(
       's1',

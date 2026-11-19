@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 /// Authenticated sharing operations stay native. The WebView receives only
-/// per-share capabilities, never the Better Auth credential or Convex JWT.
+/// narrow capabilities, never the Better Auth credential or Convex JWT.
 @MainActor enum SessionSharing {
   private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -66,6 +66,19 @@ import Security
       let bytes = try Data(contentsOf: file)
       return ["base64": bytes.base64EncodedString(), "mediaType": response.mimeType ?? "application/octet-stream"]
     }
+    if operation == "historyToken" {
+      guard let intent = args["intent"] as? [String: Any],
+        intent["workspaceId"] as? String == workspace else { throw failure() }
+      let edit = intent["requestId"] != nil
+      guard edit == (intent["intentDigest"] != nil) else { throw failure() }
+      let endpoint = edit ? "request-edit-token" : "request-token"
+      let response = try await request("\(BackendEnvironment.site)/api/session-history/\(endpoint)",
+        credential: credential, body: intent, transport: transport, timeout: 10)
+      try check()
+      guard response.count == 1, let token = response["requestToken"] as? String,
+        !token.isEmpty, token.utf8.count <= 8192 else { throw failure() }
+      return token
+    }
     if operation == "previewToken" {
       guard let intent = args["intent"] as? [String: Any], intent["workspaceId"] as? String == workspace else { throw failure() }
       let response: [String: Any]
@@ -97,6 +110,7 @@ import Security
   }
   private static func request(_ address: String, credential: String, body: [String: Any]? = nil, transport: URLSession, timeout: TimeInterval = 30) async throws -> [String: Any] {
     var request = URLRequest(url: URL(string: address)!, timeoutInterval: timeout)
+    request.httpShouldHandleCookies = false
     request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
     if let body {
       request.httpMethod = "POST"

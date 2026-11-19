@@ -19,7 +19,7 @@ type RoostSessionOptions = Parameters<typeof createRoostHistoryTransport>[0] & {
   patches?: boolean;
   coherentInspection?: boolean;
   incremental?: boolean;
-  watch?: boolean;
+  live?: boolean;
 };
 
 export function createMobileRoostSessionData(
@@ -34,6 +34,8 @@ export function createMobileRoostSessionData(
       : options.accountId,
     active: () => !options.signal.aborted && (options.isCurrent?.() ?? true),
     subscribeWake,
+    subscribeHistory: (_machineId, _sessionId, open, publish, signal) =>
+      transport.subscribe(open, publish, signal),
     requestHistoryRead: (_machineId, _sessionId, query) =>
       transport.read(query),
     requestHistoryWrite: ({ operation, payload }) =>

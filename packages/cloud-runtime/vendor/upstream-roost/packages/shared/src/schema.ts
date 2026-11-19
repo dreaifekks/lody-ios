@@ -157,8 +157,7 @@ export type AgentConfigMeta = {
    * each machine has its own binaries, auth state, env, and rate-limit context.
    *
    * Legacy configs written before this field existed are normalized by the one-time
-   * migration tracked in docs/backward-compatibility.md (BC-AGENT-CONFIG-MACHINE-
-   * ASSOCIATION); see also plans/20260420-machine-agent-settings.md. Consumers should filter
+   * `useAgentConfigMigration` hook in `@lody/components`. Consumers should filter
    * out configs without a resolved machineId while the migration is running.
    */
   machineId: MachineId;
@@ -639,15 +638,6 @@ export const resolveSessionHistoryStatus = (
   return undefined;
 };
 
-export const getLegacyReadForSessionHistoryStatus = (
-  status: SessionHistoryStatus | undefined
-): boolean | undefined => {
-  if (!status) {
-    return undefined;
-  }
-  return status !== 'pending' && status !== 'pending_apply';
-};
-
 export const isSessionHistoryDelivered = (
   entry: SessionHistoryStatusReadable | null | undefined
 ): boolean => {
@@ -717,7 +707,7 @@ export const sessionHistorySchema = schema.LoroMap({
   /** Encrypted only: the signed execution intent record, written in the same commit
    * as the content it covers. See `e2ee-execution-intent.ts`. */
   e2eeIntent: schema.String({ required: false }),
-  cancellationReason: schema.String<'user_stop'>({ required: false }),
+  cancellationReason: schema.String<'user_stop' | 'machine_update'>({ required: false }),
   inputConfig: acpSessionConfigSchema,
   /**
    * @deprecated Use `status` instead.
@@ -839,11 +829,20 @@ export function deriveSessionPullRequestReadiness(
 export type LineChange = {
   add: number;
   del: number;
+  /** Changed paths in the complete workspace comparison; absent on older writers. */
+  files?: number;
 };
 
 export type SessionDiffStats = {
+  /** Workspace base versus current files, including committed and uncommitted changes. */
   allChange: LineChange;
 };
+
+/** Explicit path counts own presence; old daemons only published text line totals. */
+export function hasWorkspaceChanges(change: LineChange | null | undefined): boolean {
+  if (!change) return false;
+  return change.files === undefined ? change.add + change.del > 0 : change.files > 0;
+}
 
 export type SessionContextWindowUsage = {
   size: number;
@@ -865,60 +864,6 @@ export const deriveDraftSessionTitle = (prompt: string): string | undefined =>
     .map((line) => line.trim())
     .find((line) => line.length > 0)
     ?.slice(0, DRAFT_SESSION_TITLE_MAX_CHARS);
-
-/**
- * Sidebar title of a root Session's conversation group (all of its tabs). It is
- * independent of the root tab's own `title`; absent means the group still shows
- * the root title (Sessions created before group titles, or not yet named).
- */
-export const getSessionGroupTitle = (
-  meta: Pick<SessionMeta, 'title' | 'groupTitle'> | null | undefined
-): string | undefined => meta?.groupTitle?.trim() || meta?.title?.trim() || undefined;
-
-/**
- * Root-Session meta fields that copy a newly generated root title into the group
- * title exactly once: while the group has no title of its own, or only a draft.
- * Returns undefined for child Sessions and for groups that are already named.
- * `rootTitleApplied` says whether the root tab title itself accepted the write,
- * which is what keeps an absent group showing the root title until then.
- */
-export const resolveGeneratedGroupTitleUpdate = (
-  meta: Pick<SessionMeta, 'parentSessionId' | 'groupTitle' | 'groupTitleSource'> | null | undefined,
-  title: string,
-  rootTitleApplied: boolean
-): Pick<SessionMeta, 'groupTitle' | 'groupTitleSource'> | undefined => {
-  if (!meta || meta.parentSessionId) return undefined;
-  const hasGroupTitle = Boolean(meta.groupTitle?.trim());
-  const eligible = hasGroupTitle ? meta.groupTitleSource === 'draft' : rootTitleApplied;
-  return eligible ? { groupTitle: title, groupTitleSource: 'generated' } : undefined;
-};
-
-/**
- * Meta patch for a user rename of one tab. Renaming a root tab whose group has no
- * title of its own first freezes the group at the root's current title, so the
- * sidebar keeps its name instead of following the tab.
- */
-export const buildSessionTabRenamePatch = (
-  meta:
-    | Pick<SessionMeta, 'parentSessionId' | 'title' | 'titleSource' | 'groupTitle'>
-    | null
-    | undefined,
-  title: string
-): Partial<SessionMeta> => {
-  const patch: Partial<SessionMeta> = { title, titleSource: 'user' };
-  const currentTitle = meta?.title?.trim();
-  if (meta && !meta.parentSessionId && !meta.groupTitle?.trim() && currentTitle) {
-    patch.groupTitle = currentTitle;
-    patch.groupTitleSource = meta.titleSource ?? 'user';
-  }
-  return patch;
-};
-
-/** Meta patch for a user rename of a conversation group's sidebar title. */
-export const buildSessionGroupRenamePatch = (title: string): Partial<SessionMeta> => ({
-  groupTitle: title,
-  groupTitleSource: 'user',
-});
 
 export type ExternalAcpHistorySyncMeta = {
   provider: LocalProjectHistoryProvider;
@@ -1080,6 +1025,45 @@ export type SessionPullRequestLifecycleFields = {
   [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
 };
 
+export type SessionImportFence = {
+  workspaceId: string;
+  turnIds: string[];
+  queueItemIds: string[];
+  /** Provenance only. */
+  importedBy?: string;
+};
+
+/** On a schedule document's metadata: the activation an import carried in. */
+export type ScheduleImportFence = { workspaceId: string; activationId: string };
+
+const EMPTY_FENCE: { turnIds: readonly string[]; queueItemIds: readonly string[] } = {
+  turnIds: [],
+  queueItemIds: [],
+};
+
+/** Turn and queue ids an import fenced off in this workspace; empty elsewhere. */
+export function getImportFence(
+  meta: Pick<SessionMeta, 'importFence'> | undefined,
+  workspaceId: string | undefined
+): { turnIds: readonly string[]; queueItemIds: readonly string[] } {
+  const fence = meta?.importFence;
+  if (!workspaceId || !fence || fence.workspaceId !== workspaceId) return EMPTY_FENCE;
+  return {
+    turnIds: Array.isArray(fence.turnIds) ? fence.turnIds : [],
+    queueItemIds: Array.isArray(fence.queueItemIds) ? fence.queueItemIds : [],
+  };
+}
+
+/** True when this schedule activation came from an import into `workspaceId`. */
+export function isScheduleImportFenced(
+  meta: { importFence?: unknown } | undefined,
+  workspaceId: string,
+  activationId: string
+): boolean {
+  const fence = meta?.importFence as Partial<ScheduleImportFence> | undefined;
+  return fence?.workspaceId === workspaceId && fence.activationId === activationId;
+}
+
 export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -1101,18 +1085,13 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   title?: string;
   /** Indicates whether the current title was entered by a user, generated by the agent, or copied from a draft tab prompt. */
   titleSource?: SessionTitleSource;
-  /**
-   * Root Sessions only: the conversation group's sidebar title, independent of
-   * the root tab's `title`. Read through `getSessionGroupTitle`.
-   */
-  groupTitle?: string;
-  /** Provenance of `groupTitle`; a generated title is copied into it at most once. */
-  groupTitleSource?: SessionTitleSource;
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
   /** User-owned tree execution barrier; inherited through containment and precise opener links. */
   collaborationStopped?: boolean;
+  /** Turns and queued items from a bundle import that never run in `workspaceId`. */
+  importFence?: SessionImportFence;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';
@@ -1183,6 +1162,13 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
   lastHandledUserMsgId?: string;
+  /**
+   * Latest user history entry id whose turn ended in failure, written together with
+   * `lastHandledUserMsgId`. It stays set; read it only through
+   * {@link hasFailedLatestTurn}, so a later handled or canceled turn retires it without
+   * another write.
+   */
+  lastFailedUserMsgId?: string;
   /** User history entry id currently being processed by the machine. */
   processingUserMsgId?: string;
   /**
@@ -1270,6 +1256,21 @@ export function isMissingHistoryUserTurn(
     !!turnId &&
     (meta?.lastMissingHistoryUserMsgId === turnId ||
       meta?.missingHistoryUserMsgIds?.[turnId] === true)
+  );
+}
+
+/**
+ * Whether the conversation's latest finished turn ended in failure: the failed marker still
+ * names the turn the machine handled last. Lets lists show a failed conversation from
+ * metadata alone, without opening its history.
+ */
+export function hasFailedLatestTurn(
+  meta: Pick<SessionMeta, 'lastFailedUserMsgId' | 'lastHandledUserMsgId'>
+): boolean {
+  return (
+    typeof meta.lastFailedUserMsgId === 'string' &&
+    meta.lastFailedUserMsgId.length > 0 &&
+    meta.lastFailedUserMsgId === meta.lastHandledUserMsgId
   );
 }
 

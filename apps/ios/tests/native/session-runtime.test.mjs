@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
 import { Flock } from '@loro-dev/flock-wasm/base64';
-import { openTestSession, loadRuntime, frame } from '../helpers.mjs';
+import {
+  openTestSession,
+  loadRuntime,
+  frame,
+  historyPublications,
+} from '../helpers.mjs';
 
 test('an existing legacy Loro history opens while session metadata is unavailable', async () => {
   const resolveTarget = () => undefined;
@@ -47,7 +52,6 @@ test('control stream catchup happens before choosing a legacy history backend', 
           backend: 'roost',
           machineId: 'm1',
           incremental: true,
-          watch: true,
           acceptsInput: true,
           dispatchesInput: true,
         }
@@ -70,15 +74,7 @@ test('control stream catchup happens before choosing a legacy history backend', 
       doc.commit();
       caughtUp = true;
     },
-    async onRpc(request, runtime, signal) {
-      if (request.method === 'session/history-watch')
-        return new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
+    async onRpc(request, runtime) {
       const params = await runtime.openPayload(request.params);
       reads.push(params.query.kind);
       return {
@@ -116,7 +112,7 @@ test(
     const controlRead = Promise.withResolvers();
     const controlRetry = Promise.withResolvers();
     const controlFailed = Promise.withResolvers();
-    const historyWatch = Promise.withResolvers();
+    const nextHistory = Promise.withResolvers();
     const liveAfterRecovery = Promise.withResolvers();
     const eventsWhileControlUnavailable = [];
     let revision = 1;
@@ -154,29 +150,24 @@ test(
           liveAfterRecovery.resolve();
         }
       },
-      async onRpc(request, runtime, signal) {
-        const { query } = await runtime.openPayload(request.params);
-        let result, pageTurns;
-        if (query.kind === 'watchChanges') {
-          const response = Promise.withResolvers();
-          signal.addEventListener(
-            'abort',
-            () => response.reject(signal.reason),
-            { once: true },
-          );
-          if (query.checkpoint === 'c1') historyWatch.resolve(response.resolve);
-          result = await response.promise;
-        } else {
-          result = {
-            checkpoint: `c${revision}`,
-            startPosition: 0,
-            totalCount: 1,
-            rows: [{ position: 0, state: 'ready', turnId: 'assistant-1' }],
-            hasMoreOlder: false,
-            cursor: null,
-          };
-          pageTurns = [turn()];
-        }
+      onSubscription(request, runtime, signal) {
+        return historyPublications(
+          request,
+          runtime,
+          signal,
+          () => nextHistory.promise,
+        );
+      },
+      async onRpc(request, runtime) {
+        const result = {
+          checkpoint: `c${revision}`,
+          startPosition: 0,
+          totalCount: 1,
+          rows: [{ position: 0, state: 'ready', turnId: 'assistant-1' }],
+          hasMoreOlder: false,
+          cursor: null,
+        };
+        const pageTurns = [turn()];
         return {
           result: await runtime.sealPayload('s1', {
             type: 'session/history-read_response',
@@ -200,11 +191,18 @@ test(
     await controlFailed.promise;
 
     revision = 2;
-    (await historyWatch.promise)({
-      state: 'ready',
-      checkpoint: 'c2',
-      ids: ['assistant-1'],
-      bodies: { changed: [turn()], suffix: [] },
+    nextHistory.resolve({
+      type: 'session/history-read_response',
+      sessionId: 's1',
+      success: true,
+      historyRevision: 2,
+      historyCount: 1,
+      result: {
+        state: 'ready',
+        checkpoint: 'c2',
+        ids: ['assistant-1'],
+        bodies: { changed: [turn()], suffix: [] },
+      },
     });
     // A retained session open flushes its current projection. Advance the test
     // only after that projection contains the owner's new history.
@@ -237,7 +235,8 @@ test('Roost sessions read, observe and send through the owning machine', async (
     items: [{ type: 'text', text }],
   });
   const requests = [];
-  let wakeWatch;
+  const next = Promise.withResolvers();
+  const subscribed = Promise.withResolvers();
   let receiptAtAcceptance;
   let accepted;
   const acceptance = new Promise((resolve) => {
@@ -261,20 +260,18 @@ test('Roost sessions read, observe and send through the owning machine', async (
       acceptsInput: true,
       dispatchesInput: true,
     },
-    async onRpc(request, runtime, signal) {
+    onSubscription(request, runtime, signal) {
+      return historyPublications(request, runtime, signal, (open) => {
+        assert.equal(open.checkpoint, 'c1');
+        subscribed.resolve();
+        return next.promise;
+      });
+    },
+    async onRpc(request, runtime) {
       const params = await runtime.openPayload(request.params);
       requests.push({ method: request.method, params });
       let response;
-      if (request.method === 'session/history-watch') {
-        response = await new Promise((resolve, reject) => {
-          wakeWatch = resolve;
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          );
-        });
-      } else if (request.method === 'session/history-read') {
+      if (request.method === 'session/history-read') {
         response = {
           type: 'session/history-read_response',
           sessionId: 's1',
@@ -358,7 +355,8 @@ test('Roost sessions read, observe and send through the owning machine', async (
       1,
     );
     assert.deepEqual(fixture.server.toJSON().history ?? [], []);
-    wakeWatch({
+    await subscribed.promise;
+    next.resolve({
       type: 'session/history-read_response',
       sessionId: 's1',
       success: true,
@@ -399,7 +397,7 @@ for (const [indexedDBAvailable, incremental] of [
           backend: 'roost',
           machineId: 'm1',
           incremental,
-          watch: false,
+          live: false,
           acceptsInput: true,
           dispatchesInput: true,
         },
@@ -447,7 +445,7 @@ for (const [indexedDBAvailable, incremental] of [
         fixture.server.commit();
         await fixture.pushUpdate();
         await updated;
-        assert.equal(requests.includes('watchChanges'), false);
+        assert.equal(requests.includes('readLatestPage'), true);
       } finally {
         fixture.close();
       }
@@ -490,15 +488,7 @@ test('Roost retries the failed receipt upload before handing the same input to i
       }
       return false;
     },
-    async onRpc(request, runtime, signal) {
-      if (request.method === 'session/history-watch')
-        return new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
+    async onRpc(request, runtime) {
       const params = await runtime.openPayload(request.params);
       if (request.method === 'session/history-write') {
         writes.push({
@@ -984,13 +974,7 @@ test(
         acceptsInput: true,
         dispatchesInput: true,
       },
-      async onRpc(request, runtime, signal) {
-        if (request.method === 'session/history-watch')
-          return new Promise((_resolve, reject) =>
-            signal.addEventListener('abort', () => reject(signal.reason), {
-              once: true,
-            }),
-          );
+      async onRpc(request, runtime) {
         if (request.method === 'session/history-write') {
           handoffStarted();
           throw new Error('lost_ack');
@@ -1074,15 +1058,7 @@ for (const steerResult of [
           calls.push({ kind: 'activate', args });
           finish();
         },
-        async onRpc(request, runtime, signal) {
-          if (request.method === 'session/history-watch')
-            return new Promise((_resolve, reject) =>
-              signal.addEventListener(
-                'abort',
-                () => reject(new Error('cancelled')),
-                { once: true },
-              ),
-            );
+        async onRpc(request, runtime) {
           if (request.method === 'session/steer') {
             calls.push({ kind: 'steer', params: request.params });
             return { result: steerResult };
@@ -1215,15 +1191,7 @@ test(
       markDispatch: async () => {
         calls.push('activate');
       },
-      async onRpc(request, runtime, signal) {
-        if (request.method === 'session/history-watch')
-          return new Promise((_resolve, reject) =>
-            signal.addEventListener(
-              'abort',
-              () => reject(new Error('cancelled')),
-              { once: true },
-            ),
-          );
+      async onRpc(request, runtime) {
         if (request.method === 'session/steer') {
           calls.push('steer');
           return { error: { code: 'timeout' } };
@@ -1313,17 +1281,9 @@ test('Roost permission decisions use the owner, and a lost send acknowledgement 
       acceptsInput: true,
       dispatchesInput: true,
     },
-    async onRpc(request, runtime, signal) {
+    async onRpc(request, runtime) {
       const params = await runtime.openPayload(request.params);
       requests.push({ method: request.method, params });
-      if (request.method === 'session/history-watch')
-        return new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
       if (params.operation === 'accept_input_and_dispatch') {
         handedOff();
         throw new Error('lost_ack');
@@ -1524,17 +1484,9 @@ test('Roost exports the full history before paging and leaves the shared queue o
       dispatchesInput: true,
     },
     markDispatch: async (...args) => dispatches.push(args),
-    async onRpc(request, runtime, signal) {
+    async onRpc(request, runtime) {
       const params = await runtime.openPayload(request.params);
       requests.push({ method: request.method, params });
-      if (request.method === 'session/history-watch')
-        return new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
       const latest = params.query.kind === 'readLatestPage';
       const position = latest ? 1 : 0;
       const turn = latest ? running : first;
@@ -1615,10 +1567,8 @@ for (const invalidPatch of [false, true]) {
     { timeout: 5000 },
     async () => {
       const reads = [];
-      let watchReady, resolveWatch;
-      const watching = new Promise((resolve) => {
-        watchReady = resolve;
-      });
+      const openReady = Promise.withResolvers();
+      const next = Promise.withResolvers();
       const turn = (text) => ({
         id: 'turn',
         role: 'assistant',
@@ -1633,22 +1583,16 @@ for (const invalidPatch of [false, true]) {
           dispatchesInput: true,
           patches: true,
         },
-        async onRpc(request, runtime, signal) {
+        onSubscription(request, runtime, signal) {
+          return historyPublications(request, runtime, signal, (open) => {
+            openReady.resolve(open);
+            return next.promise;
+          });
+        },
+        async onRpc(request, runtime) {
           const params = await runtime.openPayload(request.params);
           const query = params.query;
           reads.push(query);
-          if (request.method === 'session/history-watch') {
-            const response = await new Promise((resolve, reject) => {
-              resolveWatch = resolve;
-              watchReady();
-              signal.addEventListener(
-                'abort',
-                () => reject(new Error('cancelled')),
-                { once: true },
-              );
-            });
-            return { result: await runtime.sealPayload('s1', response) };
-          }
           const response =
             query.kind === 'readTurn'
               ? {
@@ -1680,9 +1624,9 @@ for (const invalidPatch of [false, true]) {
         },
       });
       try {
-        await watching;
+        const open = await openReady.promise;
         const updated = fixture.nextEmit();
-        resolveWatch({
+        next.resolve({
           type: 'session/history-read_response',
           sessionId: 's1',
           success: true,
@@ -1718,9 +1662,10 @@ for (const invalidPatch of [false, true]) {
         });
         const event = await updated;
         assert.equal(event.entries[0].items[0].text, 'ACB');
+        assert.equal(open.withPatches, true);
         assert.equal(
-          reads.find((query) => query.kind === 'watchChanges').withPatches,
-          true,
+          reads.some((query) => query.kind === 'readChanges'),
+          false,
         );
         const repair = reads.find((query) => query.kind === 'readTurn');
         if (invalidPatch) assert.equal(repair.atCheckpoint, 'c2');
@@ -1764,17 +1709,9 @@ test(
         acceptsInput: true,
         dispatchesInput: true,
       },
-      async onRpc(request, runtime, signal) {
+      async onRpc(request, runtime) {
         const params = await runtime.openPayload(request.params);
         requests.push({ method: request.method, params });
-        if (request.method === 'session/history-watch')
-          return new Promise((_resolve, reject) =>
-            signal.addEventListener(
-              'abort',
-              () => reject(new Error('cancelled')),
-              { once: true },
-            ),
-          );
         let result, pageTurns;
         if (params.operation) {
           handedOff();
@@ -1899,15 +1836,7 @@ for (const accepted of [true, false, 'inactive', 'storage-failed']) {
           acceptsInput: true,
           dispatchesInput: true,
         },
-        async onRpc(request, runtime, signal) {
-          if (request.method === 'session/history-watch')
-            return new Promise((_resolve, reject) =>
-              signal.addEventListener(
-                'abort',
-                () => reject(new Error('cancelled')),
-                { once: true },
-              ),
-            );
+        async onRpc(request, runtime) {
           if (request.method === 'session/steer') {
             calls.push({ kind: 'steer', queue: fixture.server.toJSON().mq });
             return { result: { applied: true } };
@@ -2073,15 +2002,7 @@ test(
         acceptsInput: true,
         dispatchesInput: true,
       },
-      async onRpc(request, runtime, signal) {
-        if (request.method === 'session/history-watch')
-          return new Promise((_resolve, reject) =>
-            signal.addEventListener(
-              'abort',
-              () => reject(new Error('cancelled')),
-              { once: true },
-            ),
-          );
+      async onRpc(request, runtime) {
         if (request.method === 'session/cancel') {
           cancels.push(request.params.turnId);
           return { result: { success: true } };
@@ -2216,16 +2137,8 @@ test('Roost input is refused before writes when the owner lacks dispatch capabil
       dispatchesInput: false,
       isCurrent: () => current,
     },
-    async onRpc(request, runtime, signal) {
+    async onRpc(request, runtime) {
       requests.push(request.method);
-      if (request.method === 'session/history-watch')
-        return new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new Error('cancelled')),
-            { once: true },
-          ),
-        );
       return {
         result: await runtime.sealPayload('s1', {
           type: 'session/history-read_response',
@@ -2297,17 +2210,9 @@ for (const observed of [true, false]) {
         acceptsInput: true,
         dispatchesInput: true,
       },
-      async onRpc(request, runtime, signal) {
+      async onRpc(request, runtime) {
         const params = await runtime.openPayload(request.params);
         calls.push({ method: request.method, params });
-        if (request.method === 'session/history-watch')
-          return new Promise((_resolve, reject) =>
-            signal.addEventListener(
-              'abort',
-              () => reject(new Error('cancelled')),
-              { once: true },
-            ),
-          );
         if (request.method === 'session/history-write') {
           if (
             calls.filter((call) => call.method === 'session/history-write')
@@ -4714,15 +4619,7 @@ test(
         acceptsInput: true,
         dispatchesInput: true,
       },
-      async onRpc(request, runtime, signal) {
-        if (request.method === 'session/history-watch')
-          return new Promise((_resolve, reject) =>
-            signal.addEventListener(
-              'abort',
-              () => reject(new Error('cancelled')),
-              { once: true },
-            ),
-          );
+      async onRpc(request, runtime) {
         const params = await runtime.openPayload(request.params);
         if (params.operation === 'accept_input_and_dispatch') {
           writes.push(structuredClone(params.payload.entry));

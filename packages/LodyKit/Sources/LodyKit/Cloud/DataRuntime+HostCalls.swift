@@ -54,6 +54,7 @@ extension DataRuntime {
     guard let channel, shareTasks[id] == nil else { return }
     guard let workspace, let body = try? RuntimeJSON.object(params), body["workspaceId"] as? String == workspace,
           let operation = body["operation"] as? String, let args = body["args"] as? [String: Any],
+          operation != "historyToken" || WorkspaceModePins.shared.mode(workspace) == .plaintext,
           shareTasks.count < 4 else {
       channel.fail(id: id, method: Call.method, code: "share_request_failed"); return
     }

@@ -4000,6 +4000,52 @@
           "type": "object",
           "properties": {
             "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "historyToken" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "intent": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "machineId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": ["workspaceId", "machineId", "sessionId"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["intent"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
             "operation": { "type": "string", "const": "previewToken" },
             "args": {
               "type": "object",

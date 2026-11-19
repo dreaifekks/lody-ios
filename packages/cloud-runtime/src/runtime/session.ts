@@ -12,7 +12,7 @@ import {
 } from './project';
 import type { SteerReceipt } from './execution';
 import { machineRpc, type RpcReply } from './machine-rpc';
-import type { RoostWindow } from './roost-history';
+import type { HistoryProofBroker, RoostWindow } from './roost-history';
 import {
   createUpstreamRoostHistory,
   roostStorageAccount,
@@ -66,7 +66,8 @@ export type SessionTarget =
       accountId?: string | null;
       machineId: string;
       incremental: boolean;
-      watch: boolean;
+      live: boolean;
+      getHistoryProof: HistoryProofBroker;
       acceptsInput: boolean;
       dispatchesInput: boolean;
       latestUserMsgId?: string;
@@ -1315,7 +1316,8 @@ export async function openSession(
           patches: target.patches,
           coherentInspection: target.coherentInspection,
           incremental: target.incremental,
-          watch: target.watch,
+          live: target.live,
+          getHistoryProof: target.getHistoryProof,
         });
         state.roostReader = reader;
         let window = await retrySessionRead(

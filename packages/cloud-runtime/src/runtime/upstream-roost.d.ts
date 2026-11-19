@@ -19,6 +19,37 @@ type OwnerResponse = {
   retryReason?: 'superseded';
 };
 
+export type HistorySubscriptionOpen = {
+  action: 'open';
+  id: string;
+  checkpoint?: string;
+  includeBodiesFrom?: number;
+  withPatches?: true;
+};
+export type HistoryPublication = {
+  revision: number;
+  checkpoint: string;
+  delta?: {
+    baseCheckpoint: string;
+    includeBodiesFrom: number;
+    withPatches?: true;
+    response: OwnerResponse;
+  };
+};
+export const SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS: number;
+export function parseHistorySubscriptionResponse(value: unknown): {
+  sessionId: string;
+  subscriptionId: string;
+} & (
+  | { event: 'publication'; publication: HistoryPublication }
+  | { event: 'closed'; error?: string }
+);
+export function sessionHistoryWriteIntentDigest(
+  requestId: string,
+  operation: string,
+  payload: Record<string, unknown>,
+): Promise<string>;
+
 export function buildPendingUserHistoryEntry(args: {
   userId: string | undefined;
   inputBlocks: readonly Record<string, unknown>[];
@@ -54,11 +85,18 @@ export function createRemoteRoostSessionDataFactory(options: {
   workspaceId: string;
   machineId: string;
   incremental?: boolean;
-  watch?: boolean;
+  live?: boolean;
   coherentInspection?: boolean;
   patches?: boolean;
   active?: () => boolean;
   subscribeWake?: (wake: () => void) => () => void;
+  subscribeHistory?: (
+    machineId: string,
+    sessionId: string,
+    open: HistorySubscriptionOpen,
+    publish: (publication: HistoryPublication) => void,
+    signal: AbortSignal,
+  ) => Promise<void>;
   requestHistoryRead: (
     machineId: string,
     sessionId: string,
@@ -141,7 +179,7 @@ export function machineSupportsSessionHistoryProtocol(
 export function machineSupportsSessionHistoryIncremental(
   machine: CapabilityCarrier,
 ): boolean;
-export function machineSupportsSessionHistoryWatch(
+export function machineSupportsSessionHistorySubscription(
   machine: CapabilityCarrier,
 ): boolean;
 export function machineSupportsSessionHistoryPatches(

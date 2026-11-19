@@ -131,7 +131,7 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
       protocolCapabilities: {
         sessionHistory: SESSION_HISTORY_PROTOCOL_VERSION,
         sessionHistoryIncremental: 1,
-        sessionHistoryWatch: 1,
+        sessionHistorySubscription: 1,
         sessionHistoryInspection: 2,
         sessionInputAcceptance: 1,
         sessionInputDispatch: 1,
@@ -141,13 +141,14 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     const target = globalThis.__target();
     assert.equal(globalThis.__target.legacyFallbackAllowed(), false);
     assert.equal(target.isCurrent(), true);
-    const { isCurrent, ...capabilities } = target;
+    const { isCurrent, getHistoryProof, ...capabilities } = target;
+    assert.equal(typeof getHistoryProof, 'function');
     assert.deepEqual(capabilities, {
       backend: 'roost',
       accountId: 'u',
       machineId: 'm',
       incremental: true,
-      watch: true,
+      live: true,
       acceptsInput: true,
       dispatchesInput: true,
       isArchived: false,
@@ -162,7 +163,7 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     flock.set(['m', 'machine-m', 'protocolCapabilities'], {
       sessionHistory: String(SESSION_HISTORY_PROTOCOL_VERSION),
       sessionHistoryIncremental: 1,
-      sessionHistoryWatch: 1,
+      sessionHistorySubscription: 1,
     });
     flock.commit();
     assert.throws(() => globalThis.__target(), /roost_history_unsupported/);
@@ -173,7 +174,7 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     const compatible = globalThis.__target();
     assert.equal(compatible.backend, 'roost');
     assert.equal(compatible.incremental, false);
-    assert.equal(compatible.watch, false);
+    assert.equal(compatible.live, false);
     flock.set(['m', 'session-s', 'historyBackend'], 'loro');
     flock.set(['m', 'session-s', 'machineId'], undefined);
     flock.commit();
