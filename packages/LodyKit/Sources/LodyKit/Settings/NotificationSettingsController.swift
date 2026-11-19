@@ -95,6 +95,10 @@ final class NotificationSettingsController: UIViewController {
     guard let id = body["id"] as? String else { return }
     switch (name, id) {
     case ("rowPress", "notification-permission"): Task { await press() }
+    case ("rowToggle", "live-activities-enabled"):
+      guard let value = body["value"] as? Bool else { return }
+      LodyPreferences.saveLiveActivities(value)
+      render()
     case ("rowPress", "live-activities"):
       Task {
         do { try await service.settings() }
@@ -130,10 +134,15 @@ final class NotificationSettingsController: UIViewController {
       "notification-permission", permissionTitle, subtitle: permissionHint(signedIn: signedIn), image: "bell",
       action: signedIn && configured && !busy, disclosure: signedIn && configured
     )
+    var liveActivities = LodyListRow.item(
+      "live-activities-enabled", text("notifications.liveActivities.toggle"), image: "dot.radiowaves.left.and.right"
+    )
+    liveActivities.toggle = LodyPreferences.liveActivitiesEnabled
     list.setSections([
       .group("notifications", header: text("notifications.section.header"), footer: text("notifications.section.footer"), [
         permission,
-        .item("live-activities", text("notifications.liveActivities"), image: "dot.radiowaves.left.and.right", action: true, disclosure: true),
+        liveActivities,
+        .item("live-activities", text("notifications.liveActivities"), image: "gearshape", action: true, disclosure: true),
       ]),
     ])
   }

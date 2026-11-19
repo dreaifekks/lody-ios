@@ -25,7 +25,7 @@ SDK version and App Group `group.ai.lody.mobile`.
 
 ## Runtime behavior
 
-The conversation Live Activity shows the signed-in user’s sessions from the selected plaintext workspace. The Dynamic Island uses the Web shell’s compact count, minimal mark and expanded session list or permission card. A permission push can supply the request ID and command. The app handles Allow and Deny with its Keychain credential. Manage Live Activities from the app’s notification settings link to iOS Settings.
+The conversation Live Activity shows the signed-in user’s sessions from the selected plaintext workspace. The Dynamic Island uses the Web shell’s compact count, minimal mark and expanded session list or permission card. A permission push can supply the request ID and command. The app handles Allow and Deny with its Keychain credential. Turn the conversation Live Activity on or off with the Live Activities switch in Settings › Preferences › Notifications (on by default); the row below it opens the iOS Settings permission.
 
 The app requests system notification permission at launch, independently of the
 provider. Login never prompts. Auth restoration supplies the raw account ID and
