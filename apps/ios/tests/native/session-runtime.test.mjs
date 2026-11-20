@@ -189,6 +189,8 @@ test(
     controlUnavailable = true;
     controlRead.resolve({ ok: false, result: { code: 'network_error' } });
     await controlFailed.promise;
+    assert.equal(fixture.events.at(-1).controlReady, false);
+    assert.equal(fixture.events.at(-1).sendReady, false);
 
     revision = 2;
     nextHistory.resolve({
@@ -227,14 +229,17 @@ test(
 );
 
 test(
-  'Roost history loss clears live until the resumed checkpoint reaches the transcript',
+  'Roost subscription loss clears live but keeps commands on the installed transcript',
   { timeout: 8000 },
   async (t) => {
     const loseHistory = Promise.withResolvers();
     const catchUpStarted = Promise.withResolvers();
     const allowCatchUp = Promise.withResolvers();
     const caughtUp = Promise.withResolvers();
+    const firstPublication = Promise.withResolvers();
+    const firstSync = Promise.withResolvers();
     const events = [];
+    const stopped = [];
     let openings = 0;
     const turn = (finished) => ({
       id: 'assistant-1',
@@ -245,16 +250,19 @@ test(
     });
     const fixture = await openTestSession({
       target: { backend: 'roost', machineId: 'm1' },
+      readyWhen: (snapshot) => snapshot.sendReady === true,
       onEvent(event) {
         if (event.type !== 'session') return;
         const session = JSON.parse(event.session);
         events.push({ synced: event.synced, session });
+        if (event.synced) firstSync.resolve();
         if (event.synced && session.entries[0]?.finished) caughtUp.resolve();
       },
       async *onSubscription(request, runtime, signal) {
         const { subscription } = await runtime.openPayload(request.params);
         assert.equal(subscription.checkpoint, 'c1');
         const revision = ++openings;
+        if (revision === 1) await firstPublication.promise;
         yield {
           result: await runtime.sealPayload('s1', {
             type: 'session/history-subscription_response',
@@ -274,6 +282,10 @@ test(
         });
       },
       async onRpc(request, runtime) {
+        if (request.method === 'session/cancel') {
+          stopped.push(request.params.turnId);
+          return { result: { success: true } };
+        }
         const { query } = await runtime.openPayload(request.params);
         const read = {
           type: 'session/history-read_response',
@@ -317,11 +329,27 @@ test(
       },
     });
     t.after(() => {
+      firstPublication.resolve();
       allowCatchUp.resolve();
       fixture.close();
     });
-    assert.equal(events.at(-1).synced, true);
+    assert.equal(events.at(-1).synced, false);
     assert.equal(events.at(-1).session.entries[0].finished, false);
+    assert.equal(events.at(-1).session.controlReady, true);
+    assert.equal(events.at(-1).session.sendReady, true);
+    const sent = await fixture.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Queue while the subscription opens',
+    });
+    assert.equal(sent.state, 'queued');
+    assert.equal(fixture.server.toJSON().mq[0].userTurnId, sent.id);
+    assert.ok(events.every(({ synced }) => !synced));
+    firstPublication.resolve();
+    await firstSync.promise;
     const beforeLoss = events.length;
     loseHistory.resolve();
     await catchUpStarted.promise;
@@ -329,12 +357,122 @@ test(
     assert.equal(events.at(-1).synced, false);
     assert.equal(events.at(-1).session.status, 'syncing');
     assert.equal(events.at(-1).session.reason, 'network_error');
+    assert.equal(events.at(-1).session.sendReady, true);
+    assert.equal(events.at(-1).session.controlReady, true);
+    const stop = (turnId) =>
+      fixture.runtime.controlTurn({
+        action: 'stop',
+        sessionId: 's1',
+        machineId: 'm1',
+        turnId,
+      });
+    await assert.rejects(stop('unobserved-turn'), /stale_turn/);
+    assert.deepEqual(await stop('assistant-1'), { state: 'stopped' });
+    assert.deepEqual(stopped, ['assistant-1']);
     assert.ok(events.slice(beforeLoss).every(({ synced }) => !synced));
     allowCatchUp.resolve();
     await caughtUp.promise;
     assert.equal(events.at(-1).session.entries[0].finished, true);
   },
 );
+
+test('paged Roost reads share their scoped proof and renew it once on owner denial', async () => {
+  const proofs = [];
+  const received = [];
+  let revoked = false;
+  let current = true;
+  let minimumProof = 1;
+  const fixture = await openTestSession({
+    async onRpc(request, runtime) {
+      const params = await runtime.openPayload(request.params);
+      received.push(params);
+      if (request.method === 'session/history-write') {
+        assert.equal(request.id, proofs.at(-1).requestId);
+        return {
+          result: await runtime.sealPayload('s1', {
+            type: 'session/history-write_response',
+            sessionId: 's1',
+            success: true,
+            operation: params.operation,
+            result: true,
+          }),
+        };
+      }
+      if (revoked || Number(params.readProof.split('-').at(-1)) < minimumProof)
+        return { error: { code: 'session_history_read_denied' } };
+      return {
+        result: await runtime.sealPayload('s1', {
+          type: 'session/history-read_response',
+          sessionId: 's1',
+          success: true,
+          historyRevision: 1,
+          historyCount: 1500,
+          result: [params.query.from, params.query.to],
+        }),
+      };
+    },
+  });
+  try {
+    const transport = fixture.runtime.createRoostHistoryTransport({
+      workspaceId: 'w1',
+      machineId: 'm1',
+      sessionId: 's1',
+      signal: new AbortController().signal,
+      isCurrent: () => current,
+      getGrant: async () => ({
+        token: 'synthetic',
+        gatewayBaseUrl: 'https://x.invalid',
+      }),
+      async getHistoryProof(intent) {
+        assert.deepEqual(
+          [intent.workspaceId, intent.machineId, intent.sessionId],
+          ['w1', 'm1', 's1'],
+        );
+        proofs.push(intent);
+        return intent.requestId ? 'scoped-write' : 'read-' + proofs.length;
+      },
+    });
+    const page = (from) =>
+      transport.read({
+        kind: 'readRange',
+        from,
+        to: from + 500,
+        atCheckpoint: 'checkpoint-1',
+      });
+    assert.deepEqual((await page(0)).result, [0, 500]);
+    assert.deepEqual((await page(500)).result, [500, 1000]);
+    assert.deepEqual(
+      received.map((p) => p.readProof),
+      ['read-1', 'read-1'],
+    );
+    minimumProof = 2;
+    assert.deepEqual((await page(1000)).result, [1000, 1500]);
+    assert.deepEqual(
+      received.slice(2).map((p) => p.readProof),
+      ['read-1', 'read-2'],
+    );
+    assert.equal(
+      received[2].query.atCheckpoint,
+      received[3].query.atCheckpoint,
+    );
+    await transport.write('respond_permission', {
+      requestId: 'synthetic-permission',
+    });
+    assert.equal(received.at(-1).writeProof, 'scoped-write');
+    assert.equal(typeof proofs.at(-1).intentDigest, 'string');
+    revoked = true;
+    await assert.rejects(page(0), /session_history_read_denied/);
+    assert.deepEqual(
+      received.slice(-2).map((p) => p.readProof),
+      ['read-2', 'read-4'],
+    );
+    current = false;
+    await assert.rejects(page(0), /workspace_changed/);
+    assert.equal(proofs.length, 4);
+  } finally {
+    fixture.close();
+  }
+});
 
 test('Roost sessions read, observe and send through the owning machine', async () => {
   const turn = (text) => ({

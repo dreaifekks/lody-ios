@@ -135,6 +135,8 @@ export type Envelope = {
   status: string;
   reason?: string;
   revision: number;
+  sendReady?: boolean;
+  controlReady?: boolean;
   billableTurnCount?: number;
   usage?: SessionUsage;
   historyHasMore?: boolean;

@@ -9,7 +9,7 @@ export async function loadRuntime(storageSuffix = '') {
     define: { LODY_MOBILE_STORAGE_SUFFIX: JSON.stringify(storageSuffix) },
     stdin: {
       contents:
-        "export * from './session.ts'; export { sealPayload, openPayload } from './machine-rpc.ts'; export { registerSessions } from './handlers/sessions.ts';",
+        "export * from './session.ts'; export { createRoostHistoryTransport } from './roost-history.ts'; export { sealPayload, openPayload } from './machine-rpc.ts'; export { registerSessions } from './handlers/sessions.ts';",
       resolveDir: new URL(
         '../../../packages/cloud-runtime/src/runtime/',
         import.meta.url,
@@ -108,6 +108,7 @@ export async function openTestSession({
   onRpc,
   onSubscription,
   onEvent = () => {},
+  readyWhen = (snapshot) => snapshot.status === 'live',
   target,
   resolveTarget,
   indexedDBAvailable = true,
@@ -283,13 +284,14 @@ export async function openTestSession({
         resolve(value);
       };
     });
-  const ready = nextEmit();
+  const ready = Promise.withResolvers();
   const emit = (e) => {
     onEvent(e);
     if (e.backgroundWork) background.push(e.backgroundWork);
     if (!e.session) return;
     const value = JSON.parse(e.session);
     events.push(value);
+    if (readyWhen(value)) ready.resolve();
     if (value.status === 'live') resolveEmit?.(value);
   };
   const targetResolver = resolveTarget ?? (target ? () => target : undefined);
@@ -317,7 +319,7 @@ export async function openTestSession({
       resolver,
     );
   await reopen();
-  await ready;
+  await ready.promise;
   if (target?.backend === 'roost' || resolveTarget?.()?.backend === 'roost') {
     runtime.startAcceptedInputs({
       accountId: 'u1',

@@ -157,7 +157,7 @@ extension SessionController {
   private func controlTurn(_ action: String, messageId: String? = nil) {
     guard let session = source.state.catalog.session(sessionId), let state = feed?.state else { return }
     control.act(
-      action, messageId: messageId, session: session, transcript: state.transcript, live: state.status == "live",
+      action, messageId: messageId, session: session, transcript: state.transcript, live: state.controlReady,
       overflow: state.overflow, steerable: composerModel.steerable
     )
   }
@@ -178,14 +178,14 @@ extension SessionController {
     // A multi-repository project's session reads workspace-wide options, as a plain chat.
     let optionsProject = project?.id.hasPrefix(CreateSessionSelection.groupPrefix) == true ? nil : project?.id
     composerModel.load(workspaceId: state.workspaceId, projectId: optionsProject, session: session)
-    let billable = live ? feed.billableTurnCount : nil
+    let billable = feed.sendReady ? feed.billableTurnCount : nil
     composerModel.watchTier(workspaceId: state.workspaceId, userId: state.userId, watch: (billable ?? 0) >= 25)
     let locked = SessionQuota.locked(count: billable, tier: composerModel.tier)
     announceQuota(live: live, locked: locked)
     let steerable = composerModel.steerable
     let behavior = queuedMessageBehavior
     let context = OutboxForeground(
-      live: live, overflow: feed.overflow, serverCreated: environment.serverCreated(sessionId), steerable: steerable,
+      live: feed.sendReady, overflow: feed.overflow, serverCreated: environment.serverCreated(sessionId), steerable: steerable,
       promptBusy: OutboxDispatcher.busy.contains(session.status), queuedMessageBehavior: behavior, transcript: feed.transcript
     )
     let inputs = SessionSender.Inputs(
@@ -193,7 +193,7 @@ extension SessionController {
     )
     if let sender, sender.inputs != inputs { sender.update(inputs) }
     let control = self.control.state(
-      session: session, transcript: feed.transcript, live: live, overflow: feed.overflow, steerable: steerable
+      session: session, transcript: feed.transcript, live: feed.controlReady, overflow: feed.overflow, steerable: steerable
     )
     let deleting = SessionActions.isDeleting(state.workspaceId, sessionId)
     var composer: [String: Any] = [

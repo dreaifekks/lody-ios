@@ -19,6 +19,11 @@ export type HistoryProofBroker = (
   intent: HistoryTokenIntent,
 ) => Promise<unknown>;
 
+const HISTORY_RPC_TIMEOUT_MS = 30_000;
+const READ_PROOF_REUSE_MS = 30_000;
+const readProofDenied = (error: unknown) =>
+  error instanceof Error && error.message === 'session_history_read_denied';
+
 type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
 type OwnerResponse = {
   type: string;
@@ -86,6 +91,23 @@ export function createRoostHistoryTransport(options: {
       throw new Error('history_authorization_unavailable');
     return proof;
   };
+  type ReadProof = { value: Promise<string>; reuseUntil: number };
+  let retainedReadProof: ReadProof | undefined;
+  const getReadProof = (): ReadProof => {
+    signal.throwIfAborted();
+    checkScope();
+    if (retainedReadProof && retainedReadProof.reuseUntil > Date.now())
+      return retainedReadProof;
+    const proof = {
+      reuseUntil: Date.now() + READ_PROOF_REUSE_MS,
+      value: getProof(signal),
+    };
+    retainedReadProof = proof;
+    void proof.value.catch(() => {
+      if (retainedReadProof === proof) retainedReadProof = undefined;
+    });
+    return proof;
+  };
   const decode = async (reply: RpcReply, requestSignal: AbortSignal) => {
     requestSignal.throwIfAborted();
     checkScope();
@@ -102,9 +124,11 @@ export function createRoostHistoryTransport(options: {
   const request = async (
     method: 'session/history-read' | 'session/history-write',
     payload: Record<string, unknown>,
+    proof: string,
     edit?: { requestId: string; intentDigest: string },
   ): Promise<OwnerResponse> => {
-    const proof = await getProof(signal, edit);
+    signal.throwIfAborted();
+    checkScope();
     const params = await sealPayload(sessionId, {
       sessionId,
       ...payload,
@@ -112,18 +136,28 @@ export function createRoostHistoryTransport(options: {
     });
     signal.throwIfAborted();
     checkScope();
+    const requestSignal = AbortSignal.any([
+      signal,
+      AbortSignal.timeout(HISTORY_RPC_TIMEOUT_MS),
+    ]);
     const reply = await machineRpc(
       workspaceId,
       machineId,
       method,
       params,
       getGrant,
-      AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+      requestSignal,
       undefined,
-      30_000,
+      HISTORY_RPC_TIMEOUT_MS,
       edit?.requestId,
-    );
-    const result = (await decode(reply, signal)) as OwnerResponse;
+    ).catch((error) => {
+      if (method === 'session/history-read') requestSignal.throwIfAborted();
+      throw error;
+    });
+    const result = (await decode(
+      reply,
+      method === 'session/history-read' ? requestSignal : signal,
+    )) as OwnerResponse;
     const expected =
       method === 'session/history-write'
         ? 'session/history-write_response'
@@ -140,9 +174,33 @@ export function createRoostHistoryTransport(options: {
       throw new Error('invalid_history_response');
     return result;
   };
+  const read = async (query: { kind: string; [key: string]: unknown }) => {
+    const requestRead = async (proof: ReadProof) => {
+      try {
+        return await request(
+          'session/history-read',
+          { query },
+          await proof.value,
+        );
+      } catch (error) {
+        if (retainedReadProof === proof && readProofDenied(error))
+          retainedReadProof = undefined;
+        throw error;
+      }
+    };
+    const previous = retainedReadProof;
+    const proof = getReadProof();
+    try {
+      return await requestRead(proof);
+    } catch (error) {
+      // The owner still checks current read access before sending any bodies.
+      // Only a reused proof gets one renewal after a denial.
+      if (proof !== previous || !readProofDenied(error)) throw error;
+      return requestRead(getReadProof());
+    }
+  };
   return {
-    read: (query: { kind: string; [key: string]: unknown }) =>
-      request('session/history-read', { query }),
+    read,
     write: async (operation: string, payload: Record<string, unknown>) => {
       const requestId = crypto.randomUUID();
       const intentDigest = await sessionHistoryWriteIntentDigest(
@@ -150,10 +208,13 @@ export function createRoostHistoryTransport(options: {
         operation,
         payload,
       );
+      const edit = { requestId, intentDigest };
+      const proof = await getProof(signal, edit);
       return request(
         'session/history-write',
         { operation, payload },
-        { requestId, intentDigest },
+        proof,
+        edit,
       );
     },
     subscribe: async (

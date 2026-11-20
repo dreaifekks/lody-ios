@@ -49,12 +49,19 @@ Streams long-poll. The upstream reader applies inline deltas at their
 exact cached base and requests missing intervals from its last applied checkpoint.
 A renewed lease resumes from that same durable checkpoint. The runtime obtains
 scoped read and intent-bound write proofs through the native `historyToken`
-broker. The account credential stays native.
+broker. Reads of the same session reuse a proof for up to 30 seconds and renew a
+reused proof once if the owner denies it. The owner checks current access on every
+read. Subscription leases and writes request their own proofs. The account
+credential stays native.
 
 Both the control stream and owner history must be ready before the runtime
 reports a Roost session as live. A failed read clears that reader's readiness
 while the other reader continues. After a history subscription failure, live
 readiness requires a fresh owner checkpoint that the transcript has loaded.
+With the control stream caught up and a readable history window installed, Stop
+and Steer can target the known turn while the subscription reconnects. Sending
+also requires the session's history metadata. These commands keep their existing
+owner checks. The host displays the sync status independently of command readiness.
 
 The iOS runtime package holds the authoring source in `vendor/upstream-roost`.
 The iOS asset build verifies the generated `src/runtime/upstream-roost.js` against

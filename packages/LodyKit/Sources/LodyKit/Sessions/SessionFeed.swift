@@ -22,6 +22,8 @@ struct SessionFeedState: Equatable, Sendable {
   var status = "syncing"
   var revision = -1
   var overflow = false
+  var sendReady = false
+  var controlReady = false
   var entriesJSON = "[]"
   var billableTurnCount: Int?
   var historyHasMore = false
@@ -122,6 +124,9 @@ final class SessionFeed {
   func reconnect() {
     guard unwatch != nil else { return }
     awaitingSnapshot = true
+    state.sendReady = false
+    state.controlReady = false
+    changed?()
     service.reconnect(sessionId)
   }
 
@@ -140,6 +145,8 @@ final class SessionFeed {
             self.apply(envelope, generation: generation)
           } else if ["starting", "background", "failed", "stopped"].contains(phase) {
             self.state.status = phase
+            self.state.sendReady = false
+            self.state.controlReady = false
             self.state.isLiveUpdate = false
             self.awaitingSnapshot = true
             self.changed?()
@@ -161,6 +168,8 @@ final class SessionFeed {
   private func apply(_ envelope: SessionEnvelope?, generation: Int) {
     guard let envelope else {
       state.status = "offline"
+      state.sendReady = false
+      state.controlReady = false
       state.isLiveUpdate = false
       awaitingSnapshot = true
       changed?()
@@ -168,20 +177,25 @@ final class SessionFeed {
     }
     if envelope.overflow, envelope.version == 1 {
       state.overflow = true
+      state.sendReady = false
+      state.controlReady = false
       state.isLiveUpdate = false
       awaitingSnapshot = true
       changed?()
       return
     }
     guard envelope.accepted(generation: generation, after: cursor), let revision = envelope.revision else { return }
-    let isLiveUpdate = !awaitingSnapshot && state.status == "live" && cursor.generation == generation
+    let live = envelope.status == "live"
+    let sendReady = envelope.sendReady ?? live
+    let controlReady = envelope.controlReady ?? live
+    let isLiveUpdate = live && !awaitingSnapshot && state.status == "live" && cursor.generation == generation
     cursor = (generation, revision)
     state.overflow = false
-    if envelope.status == "live" {
+    if live || controlReady {
       received = true
-      awaitingSnapshot = false
+      awaitingSnapshot = !live
       state = SessionFeedState(
-        status: "live", revision: revision, entriesJSON: envelope.entriesJSON,
+        status: envelope.status, revision: revision, sendReady: sendReady, controlReady: controlReady, entriesJSON: envelope.entriesJSON,
         billableTurnCount: envelope.billableTurnCount, historyHasMore: envelope.historyHasMore,
         historyLoading: envelope.historyLoading, composerJSON: envelope.composerJSON, usageJSON: envelope.usageJSON, preview: envelope.preview, transcript: envelope.transcript
       )
@@ -190,6 +204,8 @@ final class SessionFeed {
       state.isLiveUpdate = false
       awaitingSnapshot = true
       state.status = envelope.status
+      state.sendReady = false
+      state.controlReady = false
     }
     changed?()
   }

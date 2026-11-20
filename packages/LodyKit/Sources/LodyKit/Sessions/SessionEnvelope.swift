@@ -10,6 +10,8 @@ struct SessionEnvelope: Sendable {
   var revision: Int?
   var status = ""
   var overflow = false
+  var sendReady: Bool?
+  var controlReady: Bool?
   var entriesJSON = "[]"
   var billableTurnCount: Int?
   var historyHasMore = false
@@ -25,6 +27,8 @@ struct SessionEnvelope: Sendable {
       version: (object["v"] as? NSNumber)?.intValue, revision: (object["revision"] as? NSNumber)?.intValue,
       status: object["status"] as? String ?? "", overflow: object["overflow"] as? Bool == true
     )
+    envelope.sendReady = object["sendReady"] as? Bool
+    envelope.controlReady = object["controlReady"] as? Bool
     if let preview = object["preview"] as? [String: Any], let label = preview["label"] as? String {
       envelope.preview = SessionBrowserPreview(label: label, active: preview["active"] as? Bool == true)
     }

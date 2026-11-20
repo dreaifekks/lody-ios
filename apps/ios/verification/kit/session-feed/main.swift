@@ -22,15 +22,16 @@ final class LocalStore: @unchecked Sendable {
   var watched = 0
   var unwatched = 0
   var reconnects = 0
-  nonisolated static func envelope(_ revision: Int, _ text: String) -> String {
-    #"{"v":1,"status":"live","revision":\#(revision),"usage":{"context":{"used":84000,"size":200000},"isContextCompacting":false},"preview":{"label":"localhost:5173","active":true},"entries":[{"id":"reply","role":"assistant","finished":true,"items":[{"type":"text","text":"\#(text)"}]}]}"#
+  nonisolated static func envelope(_ revision: Int, _ text: String, syncing: Bool = false) -> String {
+    let state = syncing ? #""status":"syncing","controlReady":true,"sendReady":false"# : #""status":"live""#
+    return #"{"v":1,\#(state),"revision":\#(revision),"usage":{"context":{"used":84000,"size":200000},"isContextCompacting":false},"preview":{"label":"localhost:5173","active":true},"entries":[{"id":"reply","role":"assistant","finished":true,"items":[{"type":"text","text":"\#(text)"}]}]}"#
   }
   var service: SessionFeedService {
     .init(watch: { _, receive in self.watched += 1; self.receive = receive; return { self.unwatched += 1 } },
       reconnect: { _ in self.reconnects += 1 }, cached: { _, _, _ in Self.envelope(0, "cached") })
   }
-  func send(_ generation: Int, _ revision: Int, _ text: String) {
-    receive?(.init(generation: generation, state: "live", sessionId: "session", session: Self.envelope(revision, text)))
+  func send(_ generation: Int, _ revision: Int, _ text: String, syncing: Bool = false) {
+    receive?(.init(generation: generation, state: "live", sessionId: "session", session: Self.envelope(revision, text, syncing: syncing)))
   }
 }
 @main struct FeedCheck {
@@ -47,6 +48,7 @@ final class LocalStore: @unchecked Sendable {
     feed.start(); feed.start()
     try await wait { feed.state.entriesJSON.contains("cached") }
     precondition(fixture.watched == 1 && feed.state.status == "syncing")
+    precondition(!feed.state.sendReady && !feed.state.controlReady)
     precondition(!feed.state.isLiveUpdate, "Cached content must establish a static baseline")
     fixture.send(1, 3, "live")
     try await wait { feed.state.status == "live" }
@@ -76,7 +78,14 @@ final class LocalStore: @unchecked Sendable {
     fixture.send(2, 3, "foreground")
     try await wait { feed.state.revision == 3 }
     precondition(!feed.state.isLiveUpdate, "Foreground restoration must not replay suspended content")
-    fixture.send(2, 4, "after-close")
+    fixture.send(2, 4, "readable-history", syncing: true)
+    try await wait { feed.state.revision == 4 }
+    precondition(feed.state.status == "syncing" && feed.state.controlReady && !feed.state.sendReady)
+    precondition(feed.state.entriesJSON.contains("readable-history") && !feed.state.isLiveUpdate)
+    fixture.receive?(.init(generation: 2, state: "background"))
+    try await wait { feed.state.status == "background" }
+    precondition(!feed.state.controlReady && !feed.state.sendReady)
+    fixture.send(2, 5, "after-close")
     feed.finish(); feed.finish(); feed.reconnect()
     try await Task.sleep(for: .milliseconds(50))
     precondition(fixture.unwatched == 1 && fixture.reconnects == 1 && !feed.watching)
