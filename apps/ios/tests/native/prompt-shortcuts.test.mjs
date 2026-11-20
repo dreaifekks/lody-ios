@@ -46,7 +46,6 @@ const value = {
   id: 'review',
   workspaceId: 'w',
   ownerUserId: 'owner',
-  visibility: 'private',
   name: 'Review',
   slug: 'review',
   prompt: 'Review $literal /review',
@@ -60,8 +59,16 @@ const entry = (() => {
   const { prompt, mentions, ...rest } = value;
   return { ...rest, bodyDocId: 'body', dependencySummary: [] };
 })();
+const workspaceGrant = async () => ({
+  token: 'workspace-token',
+  gatewayBaseUrl: 'https://example.com',
+});
 
-test('validates byte limits, UTF-16 mention ranges and immutable coherent revisions', () => {
+test('validates byte limits, UTF-16 mention ranges, legacy visibility stripping and immutable coherent revisions', () => {
+  assert.deepEqual(
+    parsePromptShortcut({ ...value, visibility: 'private' }),
+    value,
+  );
   assert.throws(() =>
     parsePromptShortcut({ ...value, prompt: '中'.repeat(90000) }),
   );
@@ -95,6 +102,7 @@ test('validates byte limits, UTF-16 mention ranges and immutable coherent revisi
   );
   assert.equal(doc.read().prompt, 'Next');
 });
+
 test('slash expansion reads fresh bodies once and never interprets inserted text', async () => {
   const result = await expandShortcuts(
     'Before /shortcut:review after',
@@ -150,10 +158,12 @@ test('slash expansion reads fresh bodies once and never interprets inserted text
     /unavailable/,
   );
 });
-test('publication readback, owner fences, revoked access and explicit repair after lost index acknowledgement', async () => {
+
+test('workspace-scoped publication, in-place body updates, owner fences and explicit index repair', async () => {
+  forgetShortcuts();
+  forgetSettings();
   const streams = new Map();
-  let directory = [],
-    writes = 0,
+  let writes = 0,
     failIndex = false;
   globalThis.__shortcutClient = class {
     constructor({ url }) {
@@ -171,53 +181,29 @@ test('publication readback, owner fences, revoked access and explicit repair aft
         result: {
           snapshotOffset: '-1',
           updates: data.updates.map((body) => ({ body })),
-          nextOffset: '1',
+          nextOffset: String(data.updates.length),
           upToDate: true,
         },
       };
     }
+    async readOnce() {
+      return { ok: true, result: { nextOffset: '1', upToDate: true } };
+    }
     async append({ part }) {
       writes++;
-      streams.get(this.id).updates.push(part.body);
-      if (failIndex && this.id.startsWith('shortcut-index')) {
+      if (failIndex && this.id === 'w:shortcut-index') {
         failIndex = false;
         return { ok: false, result: { code: 'network' } };
       }
+      streams.get(this.id).updates.push(part.body);
       return { ok: true, result: {} };
     }
   };
   const calls = [];
   const cloud = async (op, args) => {
     calls.push({ op, args });
-    if (op === 'listAccessibleDocuments') return directory;
-    if (op === 'getStreamToken') {
-      const t = args.target;
-      return {
-        token: 'fixture-only',
-        expiresIn: 60,
-        gatewayBaseUrl: 'https://example.com',
-        streamId:
-          t.kind === 'body'
-            ? `shortcut-body:${t.bodyDocId}`
-            : `shortcut-index:w:${t.ownerUserId}:${t.visibility}`,
-      };
-    }
-    if (op === 'stageDocument')
-      return { bodyDocId: args.bodyDocId, status: 'staged' };
-    if (op === 'activateDocument') {
-      assert.equal(args.previousRevision, directory[0]?.revision ?? null);
-      directory = [
-        {
-          shortcutId: 'review',
-          bodyDocId: args.bodyDocId,
-          ownerUserId: 'owner',
-          visibility: 'private',
-          revision: args.revision,
-        },
-      ];
-      return null;
-    }
-    throw new Error(op);
+    if (op === 'listAccessibleDocuments') return [];
+    throw new Error(`unexpected cloud op: ${op}`);
   };
   const req = {
     workspaceId: 'w',
@@ -228,28 +214,67 @@ test('publication readback, owner fences, revoked access and explicit repair aft
   };
   failIndex = true;
   await assert.rejects(
-    promptShortcuts(req, 'owner', cloud, AbortSignal.timeout(5000)),
+    promptShortcuts(
+      req,
+      'owner',
+      workspaceGrant,
+      cloud,
+      AbortSignal.timeout(5000),
+    ),
     /unknown/,
   );
+  assert.ok(streams.has('w:shortcut:body'), 'body written to workspace stream');
   const previous = writes;
   const saved = await promptShortcuts(
     req,
     'owner',
+    workspaceGrant,
     cloud,
     AbortSignal.timeout(5000),
   );
   assert.equal(writes, previous + 1, 'explicit retry repairs only the index');
   assert.equal(
-    calls.filter((call) => call.op === 'activateDocument').length,
-    1,
+    calls.filter(
+      (call) => call.op === 'stageDocument' || call.op === 'activateDocument',
+    ).length,
+    0,
+    'new saves never stage or activate via Convex',
   );
-  const access = shortcutAccess('w', 'owner', cloud, AbortSignal.timeout(5000));
+  const access = shortcutAccess(
+    'w',
+    'owner',
+    workspaceGrant,
+    cloud,
+    AbortSignal.timeout(5000),
+  );
   assert.equal((await access.list()).length, 1);
   assert.equal((await access.read(saved)).prompt, value.prompt);
   await assert.rejects(
     promptShortcuts(
       { ...req, value: { ...value, ownerUserId: 'another' } },
       'owner',
+      workspaceGrant,
+      cloud,
+      AbortSignal.timeout(5000),
+    ),
+    /invalid/,
+  );
+  // Rotating bodyDocId on edit is rejected; edits update `{workspaceId}:shortcut:{bodyDocId}` in place.
+  await assert.rejects(
+    promptShortcuts(
+      {
+        ...req,
+        entry: saved,
+        bodyDocId: 'body-rotated',
+        value: {
+          ...value,
+          revision: 'r2',
+          prompt: 'Updated review',
+          updatedAt: 2,
+        },
+      },
+      'owner',
+      workspaceGrant,
       cloud,
       AbortSignal.timeout(5000),
     ),
@@ -259,7 +284,7 @@ test('publication readback, owner fences, revoked access and explicit repair aft
     {
       ...req,
       entry: saved,
-      bodyDocId: 'body-next',
+      bodyDocId: 'body',
       value: {
         ...value,
         revision: 'r2',
@@ -268,60 +293,43 @@ test('publication readback, owner fences, revoked access and explicit repair aft
       },
     },
     'owner',
+    workspaceGrant,
     cloud,
     AbortSignal.timeout(5000),
   );
+  assert.equal(edited.bodyDocId, 'body');
   assert.equal((await access.read(edited)).prompt, 'Updated review');
-  await assert.rejects(access.read(saved), /changed/);
-  directory = [];
-  await assert.rejects(access.read(saved), /changed/);
-  // Grants are remembered per runtime scope; a fetched grant must still name its stream.
-  forgetShortcuts();
-  const mismatch = shortcutAccess(
-    'w',
-    'owner',
-    async () => ({
-      token: 'fixture',
-      expiresIn: 60,
-      gatewayBaseUrl: 'https://example.com',
-      streamId: 'wrong',
-    }),
-    AbortSignal.timeout(5000),
-  );
-  await assert.rejects(
-    mismatch.grant(
-      'shortcut-body:body',
-      { kind: 'body', bodyDocId: 'body' },
-      false,
-    )(),
-  );
+  await assert.rejects(access.read(saved, true), /changed/);
 });
 
-test('opening a listed shortcut reuses the directory, grants and prefetched body', async () => {
+test('Phase 1 dual-read falls back to legacy streams only for unmigrated shortcuts and honors workspace tombstones', async () => {
   forgetShortcuts();
   forgetSettings();
   const body = new LoroDoc();
   new PromptShortcutDocument(body).save(value, []);
-  const catalog = new Flock('fixture-index');
-  new PromptShortcutCatalog(catalog).put(entry);
-  const parts = {
-    'shortcut-body:body': [body.export({ mode: 'snapshot' })],
-    'shortcut-index:w:owner:private': [
-      new TextEncoder().encode(JSON.stringify(catalog.exportJson())),
+  const legacyCatalog = new Flock('fixture-legacy-index');
+  new PromptShortcutCatalog(legacyCatalog).put(entry);
+  const parts = new Map([
+    ['shortcut-body:body', [body.export({ mode: 'snapshot' })]],
+    [
+      'shortcut-index:w:owner:private',
+      [new TextEncoder().encode(JSON.stringify(legacyCatalog.exportJson()))],
     ],
-  };
+  ]);
   let bootstraps = 0;
   globalThis.__shortcutClient = class {
     constructor({ url }) {
       this.id = decodeURIComponent(url.split('/').at(-1));
     }
     async bootstrap() {
+      const streamParts = parts.get(this.id);
+      if (!streamParts) return { ok: false, result: { code: 'not_found' } };
       bootstraps++;
       return {
         ok: true,
         result: {
           snapshotOffset: '-1',
-          updates: (parts[this.id] ?? []).map((bytes) => ({
+          updates: streamParts.map((bytes) => ({
             body: encodeFrame(bytes),
           })),
           nextOffset: '1',
@@ -360,38 +368,54 @@ test('opening a listed shortcut reuses the directory, grants and prefetched body
     promptShortcuts(
       { workspaceId: 'w', ...request },
       'owner',
+      workspaceGrant,
       cloud,
       AbortSignal.timeout(5000),
     );
   const [listed] = await run({ action: 'list', fresh: true });
   assert.deepEqual(listed, entry);
-  // The listing prefetches the body; the open joins that download instead of starting one.
   assert.equal(
     (await run({ action: 'read', entry: listed })).prompt,
     value.prompt,
   );
-  assert.equal(bootstraps, 2, 'one index and one body bootstrap');
+  assert.equal(bootstraps, 2, 'one legacy index and one legacy body bootstrap');
   const before = calls.length;
   assert.equal(
     (await run({ action: 'read', entry: listed })).prompt,
     value.prompt,
   );
   assert.equal(calls.length, before, 'a second open makes no cloud call');
-  assert.equal(bootstraps, 2, 'a second open downloads nothing');
-  // A recent directory is reused, so a revocation shows on the next fresh listing.
-  directory = [];
-  assert.equal(
-    (await run({ action: 'read', entry: listed })).prompt,
-    value.prompt,
-  );
+
+  // Tombstoning the shortcut in `{workspaceId}:shortcut-index` suppresses the legacy fallback.
+  const wsFlock = new Flock('fixture-ws-index');
+  wsFlock.set(['deletedPromptShortcut', entry.id], 'r1');
+  wsFlock.delete(['promptShortcut', entry.id]);
+  wsFlock.commit();
+  parts.set('w:shortcut-index', [
+    new TextEncoder().encode(JSON.stringify(wsFlock.exportJson())),
+  ]);
   assert.deepEqual(await run({ action: 'list', fresh: true }), []);
   await assert.rejects(run({ action: 'read', entry: listed }), /changed/);
-  // A new scope starts empty.
+
+  // Grants are remembered per runtime scope; a fetched legacy grant must still name its stream.
   forgetShortcuts();
-  directory = [row];
-  assert.equal(
-    (await run({ action: 'read', entry: listed })).prompt,
-    value.prompt,
+  const mismatch = shortcutAccess(
+    'w',
+    'owner',
+    workspaceGrant,
+    async () => ({
+      token: 'fixture',
+      expiresIn: 60,
+      gatewayBaseUrl: 'https://example.com',
+      streamId: 'wrong',
+    }),
+    AbortSignal.timeout(5000),
   );
-  assert.equal(bootstraps, 3);
+  await assert.rejects(
+    mismatch.grant(
+      'shortcut-body:body',
+      { kind: 'body', bodyDocId: 'body' },
+      false,
+    )(),
+  );
 });

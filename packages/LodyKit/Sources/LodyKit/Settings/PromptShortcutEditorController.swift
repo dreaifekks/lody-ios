@@ -23,9 +23,6 @@ final class PromptShortcutEditorController: LodyFormController {
     id: "shortcut-prompt", label: String(localized: "settings.remote.prompt", bundle: .lody), text: value?.prompt,
     limit: PromptShortcutSections.promptLimit, minHeight: 160
   )
-  private lazy var shared = LodyFormToggle(
-    id: "shortcut-shared", title: text("workspace"), isOn: (value?.visibility.rawValue ?? entry?.visibility.rawValue) == "workspace"
-  )
   private lazy var hintGroup = LodyFormGroup(footer: hints, name, slug)
   private lazy var promptGroup = LodyFormGroup(header: String(localized: "settings.remote.prompt", bundle: .lody), prompt)
   private lazy var cancelItem = Self.barButton(symbol: "xmark", label: String(localized: "common.cancel", bundle: .lody)) { [weak self] in
@@ -56,7 +53,6 @@ final class PromptShortcutEditorController: LodyFormController {
     prompt.changed = { [weak self] in self?.render() }
     stack.addArrangedSubview(hintGroup)
     stack.addArrangedSubview(promptGroup)
-    stack.addArrangedSubview(LodyFormGroup(footer: text("visibilityHint"), shared))
     render()
   }
 
@@ -74,7 +70,6 @@ final class PromptShortcutEditorController: LodyFormController {
     name.text = value.name
     slug.text = value.slug
     prompt.replaceText(value.prompt)
-    shared.toggle.isOn = value.visibility == .workspace
     render()
   }
 
@@ -92,7 +87,6 @@ final class PromptShortcutEditorController: LodyFormController {
     let editable = !readOnly && !busy && !pending && attempt == nil
     for field in [name, slug] { field.isEnabled = editable }
     prompt.isEditable = editable
-    shared.toggle.isEnabled = editable && entry == nil
     hintGroup.footer = hints
     promptGroup.footer = pending ? String(localized: "common.loading", bundle: .lody) : attempt == nil ? nil : text("uncertain")
     let trailing = readOnly ? [] : [saveItem]
@@ -130,19 +124,20 @@ final class PromptShortcutEditorController: LodyFormController {
 
   private func makeRequest() -> PromptShortcutRequest {
     let now = Int(LodyRelativeTime.now())
+    let id = value?.id ?? entry?.id ?? Self.uuid()
     let next = PromptShortcutValue(
-      v: 1, id: value?.id ?? Self.uuid(), workspaceId: workspace.workspaceId, ownerUserId: workspace.userId,
-      visibility: shared.toggle.isOn ? .workspace : .private, name: name.trimmed, emoji: value?.emoji,
+      v: 1, id: id, workspaceId: workspace.workspaceId, ownerUserId: workspace.userId,
+      name: name.trimmed, emoji: value?.emoji,
       slug: slug.text ?? "", description: value?.description, scope: RuntimeContract.PromptShortcutScope(),
-      revision: Self.uuid(), createdAt: value?.createdAt ?? now, updatedAt: now, prompt: prompt.text, mentions: []
+      revision: Self.uuid(), createdAt: value?.createdAt ?? entry?.createdAt ?? now, updatedAt: now, prompt: prompt.text, mentions: []
     )
-    return .save(entry: entry, value: next, bodyDocId: Self.uuid())
+    return .save(entry: entry, value: next, bodyDocId: entry?.bodyDocId ?? id)
   }
 
   static func entry(_ value: PromptShortcutValue, bodyDocId: String) -> PromptShortcutEntry {
     PromptShortcutEntry(
       v: 1, id: value.id, workspaceId: value.workspaceId, ownerUserId: value.ownerUserId,
-      visibility: value.visibility == .workspace ? .workspace : .private, name: value.name, emoji: value.emoji,
+      name: value.name, emoji: value.emoji,
       slug: value.slug, description: value.description, scope: value.scope, revision: value.revision,
       createdAt: value.createdAt, updatedAt: value.updatedAt, bodyDocId: bodyDocId, dependencySummary: []
     )

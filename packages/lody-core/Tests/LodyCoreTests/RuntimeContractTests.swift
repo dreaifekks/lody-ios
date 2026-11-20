@@ -46,10 +46,10 @@ final class RuntimeContractTests: XCTestCase {
     let github = Contract.PromptShortcutProject.github(.init(repository: "lody/app"))
     let readme = Contract.PromptShortcutTarget.file(.init(project: github, path: "README.md"))
     let entry = Contract.PromptShortcutIndexEntry(v: 1, id: "shortcut-1", workspaceId: "workspace-1", ownerUserId: "user-1",
-      visibility: .workspace, name: "Summarize", slug: "summarize", scope: .init(), revision: "rev-1",
+      name: "Summarize", slug: "summarize", scope: .init(), revision: "rev-1",
       createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, bodyDocId: "body-1", dependencySummary: [])
     let saved = Contract.PromptShortcutIndexEntry(v: 1, id: "shortcut-2", workspaceId: "workspace-1", ownerUserId: "user-1",
-      visibility: .workspace, name: "Review", slug: "review", scope: .init(project: github), revision: "rev-2",
+      name: "Review", slug: "review", scope: .init(project: github), revision: "rev-2",
       createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, bodyDocId: "body-2", dependencySummary: [readme])
     let role = Contract.AgentRoleItem(id: "role-1", ownerUserId: "user-1", visibility: .workspace, name: "Reviewer",
       description: "", promptPrefix: "Review carefully", revision: 1, updatedAt: 1_700_000_000_000,
@@ -269,7 +269,7 @@ final class RuntimeContractTests: XCTestCase {
     let github = Contract.PromptShortcutProject.github(.init(repository: "lody/app"))
     let readme = Contract.PromptShortcutTarget.file(.init(project: github, path: "README.md"))
     let shortcut = Contract.PromptShortcut(v: 1, id: "shortcut-2", workspaceId: "workspace-1", ownerUserId: "user-1",
-      visibility: .workspace, name: "Review", slug: "review", scope: .init(project: github), revision: "rev-2",
+      name: "Review", slug: "review", scope: .init(project: github), revision: "rev-2",
       createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, prompt: "Review @README.md",
       mentions: [.init(start: 7, end: 17, label: "@README.md", target: readme)])
     try await roundTrip(Contract.Calls.PromptShortcuts.self, .list(.init(workspaceId: "workspace-1", userId: "user-1")), reply: 26)

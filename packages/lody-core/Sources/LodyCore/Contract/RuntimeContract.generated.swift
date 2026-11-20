@@ -5010,17 +5010,11 @@ extension RuntimeContract {
     }
   }
 
-  public enum PromptShortcutVisibility: String, Codable, Sendable, Equatable, CaseIterable {
-    case `private` = "private"
-    case workspace = "workspace"
-  }
-
   public struct PromptShortcut: Codable, Sendable, Equatable {
     public var v: Int
     public var id: String
     public var workspaceId: String
     public var ownerUserId: String
-    public var visibility: PromptShortcutVisibility
     public var name: String
     public var emoji: String?
     public var slug: String
@@ -5031,12 +5025,11 @@ extension RuntimeContract {
     public var updatedAt: Int
     public var prompt: String
     public var mentions: [PromptShortcutMention]
-    public init(v: Int, id: String, workspaceId: String, ownerUserId: String, visibility: PromptShortcutVisibility, name: String, emoji: String? = nil, slug: String, description: String? = nil, scope: PromptShortcutScope, revision: String, createdAt: Int, updatedAt: Int, prompt: String, mentions: [PromptShortcutMention]) {
+    public init(v: Int, id: String, workspaceId: String, ownerUserId: String, name: String, emoji: String? = nil, slug: String, description: String? = nil, scope: PromptShortcutScope, revision: String, createdAt: Int, updatedAt: Int, prompt: String, mentions: [PromptShortcutMention]) {
       self.v = v
       self.id = id
       self.workspaceId = workspaceId
       self.ownerUserId = ownerUserId
-      self.visibility = visibility
       self.name = name
       self.emoji = emoji
       self.slug = slug
@@ -5054,7 +5047,6 @@ extension RuntimeContract {
       self.id = try c.decode(String.self, forKey: Key("id"))
       self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
       self.ownerUserId = try c.decode(String.self, forKey: Key("ownerUserId"))
-      self.visibility = try c.decode(PromptShortcutVisibility.self, forKey: Key("visibility"))
       self.name = try c.decode(String.self, forKey: Key("name"))
       self.emoji = try c.decodeIfPresent(String.self, forKey: Key("emoji"))
       self.slug = try c.decode(String.self, forKey: Key("slug"))
@@ -5072,7 +5064,6 @@ extension RuntimeContract {
       try c.encode(self.id, forKey: Key("id"))
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encode(self.ownerUserId, forKey: Key("ownerUserId"))
-      try c.encode(self.visibility, forKey: Key("visibility"))
       try c.encode(self.name, forKey: Key("name"))
       try c.encodeIfPresent(self.emoji, forKey: Key("emoji"))
       try c.encode(self.slug, forKey: Key("slug"))
@@ -5086,17 +5077,11 @@ extension RuntimeContract {
     }
   }
 
-  public enum PromptShortcutIndexEntryVisibility: String, Codable, Sendable, Equatable, CaseIterable {
-    case `private` = "private"
-    case workspace = "workspace"
-  }
-
   public struct PromptShortcutIndexEntry: Codable, Sendable, Equatable {
     public var v: Int
     public var id: String
     public var workspaceId: String
     public var ownerUserId: String
-    public var visibility: PromptShortcutIndexEntryVisibility
     public var name: String
     public var emoji: String?
     public var slug: String
@@ -5107,12 +5092,11 @@ extension RuntimeContract {
     public var updatedAt: Int
     public var bodyDocId: String
     public var dependencySummary: [PromptShortcutTarget]
-    public init(v: Int, id: String, workspaceId: String, ownerUserId: String, visibility: PromptShortcutIndexEntryVisibility, name: String, emoji: String? = nil, slug: String, description: String? = nil, scope: PromptShortcutScope, revision: String, createdAt: Int, updatedAt: Int, bodyDocId: String, dependencySummary: [PromptShortcutTarget]) {
+    public init(v: Int, id: String, workspaceId: String, ownerUserId: String, name: String, emoji: String? = nil, slug: String, description: String? = nil, scope: PromptShortcutScope, revision: String, createdAt: Int, updatedAt: Int, bodyDocId: String, dependencySummary: [PromptShortcutTarget]) {
       self.v = v
       self.id = id
       self.workspaceId = workspaceId
       self.ownerUserId = ownerUserId
-      self.visibility = visibility
       self.name = name
       self.emoji = emoji
       self.slug = slug
@@ -5130,7 +5114,6 @@ extension RuntimeContract {
       self.id = try c.decode(String.self, forKey: Key("id"))
       self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
       self.ownerUserId = try c.decode(String.self, forKey: Key("ownerUserId"))
-      self.visibility = try c.decode(PromptShortcutIndexEntryVisibility.self, forKey: Key("visibility"))
       self.name = try c.decode(String.self, forKey: Key("name"))
       self.emoji = try c.decodeIfPresent(String.self, forKey: Key("emoji"))
       self.slug = try c.decode(String.self, forKey: Key("slug"))
@@ -5148,7 +5131,6 @@ extension RuntimeContract {
       try c.encode(self.id, forKey: Key("id"))
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encode(self.ownerUserId, forKey: Key("ownerUserId"))
-      try c.encode(self.visibility, forKey: Key("visibility"))
       try c.encode(self.name, forKey: Key("name"))
       try c.encodeIfPresent(self.emoji, forKey: Key("emoji"))
       try c.encode(self.slug, forKey: Key("slug"))

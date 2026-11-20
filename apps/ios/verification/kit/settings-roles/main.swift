@@ -2,11 +2,11 @@ import Foundation
 import LodyCore
 
 func entry(
-  _ id: String, visibility: RuntimeContract.PromptShortcutIndexEntryVisibility = .private, owner: String = "me",
+  _ id: String, owner: String = "me",
   scope: RuntimeContract.PromptShortcutScope = .init()
 ) -> PromptShortcutEntry {
   PromptShortcutEntry(
-    v: 1, id: id, workspaceId: "w", ownerUserId: owner, visibility: visibility, name: id.uppercased(), slug: id,
+    v: 1, id: id, workspaceId: "w", ownerUserId: owner, name: id.uppercased(), slug: id,
     scope: scope, revision: "r1", createdAt: 1, updatedAt: 1, bodyDocId: "body-\(id)", dependencySummary: []
   )
 }
@@ -17,15 +17,15 @@ precondition(row.subtitle == "/review-pr" && row.subtitleMono, "Rows show only t
 precondition(row.trailingSymbol.isEmpty, "An owned plain shortcut is editable")
 
 let marked = PromptShortcutSections.make(
-  [entry("mine"), entry("theirs", visibility: .workspace, owner: "other"), entry("context", scope: .init(machineId: "m"))],
+  [entry("mine"), entry("theirs", owner: "other"), entry("context", scope: .init(machineId: "m"))],
   userId: "me"
 ).flatMap(\.rows).filter { $0.trailingSymbol == "eye" }
-precondition(marked.map(\.id) == ["context", "theirs"], "Templates another member owns or that need context are view only")
+precondition(marked.map(\.id) == ["theirs", "context"], "Templates another member owns or that need context are view only")
 precondition(marked.allSatisfy { $0.trailingSymbolLabel == "settings.shortcuts.viewOnly" })
 
-let sections = PromptShortcutSections.make([entry("a", visibility: .workspace), entry("b")], userId: "me")
-precondition(sections.map(\.id) == ["private", "workspace"], "Private and shared sections keep their order")
-precondition(sections[0].footer.isEmpty && sections[1].footer == "settings.shortcuts.hintShort")
+let sections = PromptShortcutSections.make([entry("a"), entry("b")], userId: "me")
+precondition(sections.map(\.id) == ["shortcuts"], "Workspace shortcuts render in a single section")
+precondition(sections[0].footer == "settings.shortcuts.hintShort")
 precondition(PromptShortcutSections.make([], userId: "me").isEmpty)
 
 precondition(PromptShortcutSections.validSlug("review-pr") && PromptShortcutSections.validSlug("a"))
@@ -34,7 +34,7 @@ for slug in ["", "-review", "Review", "review pr", "review\n", String(repeating:
 }
 
 let value = PromptShortcutValue(
-  v: 1, id: "review", workspaceId: "w", ownerUserId: "me", visibility: .private, name: "Review", slug: "review",
+  v: 1, id: "review", workspaceId: "w", ownerUserId: "me", name: "Review", slug: "review",
   scope: .init(), revision: "r1", createdAt: 1, updatedAt: 1, prompt: "Review", mentions: []
 )
 precondition(!PromptShortcutSections.readOnly(value, userId: "me"))

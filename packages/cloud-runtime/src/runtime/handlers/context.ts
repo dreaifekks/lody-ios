@@ -43,6 +43,23 @@ export type RuntimeContext = {
   disposeProviderOperations?: () => Promise<{ unconfirmedFlowIds: string[] }>;
 };
 
+export function scopedWorkspaceGrant(
+  { state, getGrant }: RuntimeContext,
+  workspaceId: string,
+  userId: string,
+) {
+  return async () => {
+    const check = () => {
+      if (state.workspace !== workspaceId || state.userId !== userId)
+        throw new Error('workspace_changed');
+    };
+    check();
+    const value = await getGrant();
+    check();
+    return value;
+  };
+}
+
 export function scopedShortcutCloud(
   { channel, state }: RuntimeContext,
   workspaceId: string,

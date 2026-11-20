@@ -285,7 +285,6 @@
           "id": "shortcut-1",
           "workspaceId": "workspace-1",
           "ownerUserId": "user-1",
-          "visibility": "workspace",
           "name": "Summarize",
           "slug": "summarize",
           "scope": {},
@@ -388,7 +387,6 @@
         "id": "shortcut-2",
         "workspaceId": "workspace-1",
         "ownerUserId": "user-1",
-        "visibility": "workspace",
         "name": "Review",
         "slug": "review",
         "scope": {

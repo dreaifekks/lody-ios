@@ -30,9 +30,10 @@ type Cached = {
 const replicas = new Map<string, Cached>();
 const SETTINGS_LIMIT = 8 * 1024 * 1024;
 
-/** Drops every cached settings read (a new account or workspace). */
-export function forgetSettings() {
-  replicas.clear();
+/** Drops cached settings reads (all streams on account/workspace switch, or one stream after write). */
+export function forgetSettings(stream?: string) {
+  if (stream) replicas.delete(stream);
+  else replicas.clear();
 }
 
 function copy(flock: Flock) {
