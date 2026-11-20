@@ -86,7 +86,7 @@ final class LodySymbolButton: UIView {
     var configuration = prominent
       ? UIButton.Configuration.filled()
       : UIButton.Configuration.plain()
-    if glass { configuration = .glass() }
+    if glass { configuration = .lodyGlass() }
     if imageAsset.isEmpty {
       configuration.image = UIImage(systemName: symbol)
     } else {
@@ -99,7 +99,7 @@ final class LodySymbolButton: UIView {
     configuration.contentInsets = .zero
     if !imageAsset.isEmpty { configuration.baseForegroundColor = foreground }
     if prominent || glass { configuration.cornerStyle = .capsule }
-    if imageAsset.isEmpty, button.configuration?.image != nil {
+    if #available(iOS 26.0, *), imageAsset.isEmpty, button.configuration?.image != nil {
       configuration.symbolContentTransition = .init(byLayer ? .replace.byLayer : .replace)
     }
     configuration.showsActivityIndicator = loading

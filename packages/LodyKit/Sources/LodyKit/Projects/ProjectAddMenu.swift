@@ -49,7 +49,7 @@ final class ProjectAddMenu: UIView {
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   private static func option(title: String, icon: UIImage?, id: String, action: @escaping () -> Void) -> UIView {
-    var configuration = UIButton.Configuration.glass()
+    var configuration = UIButton.Configuration.lodyGlass()
     configuration.title = title
     configuration.image = icon?.withRenderingMode(.alwaysTemplate)
     configuration.imagePadding = LodySpacing.sm

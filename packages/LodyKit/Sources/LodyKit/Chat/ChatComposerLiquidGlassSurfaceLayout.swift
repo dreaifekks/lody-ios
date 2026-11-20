@@ -16,12 +16,8 @@ final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
 
   init(container: UIVisualEffectView, inputSurface: UIVisualEffectView) {
     self.inputSurface = inputSurface
-    let containerEffect = UIGlassContainerEffect()
-    containerEffect.spacing = 8
-    container.effect = containerEffect
-    let glass = UIGlassEffect(style: .regular)
-    glass.isInteractive = true
-    inputSurface.effect = glass
+    container.effect = LodyGlass.containerEffect(spacing: 8)
+    inputSurface.effect = LodyGlass.effect(interactive: true)
     let host = container.contentView
     pill = [
       inputSurface.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 20),
@@ -78,12 +74,11 @@ final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
 
   private func applyCorners() {
     if card {
-      inputSurface.cornerConfiguration = .capsule(maximumRadius: 24)
+      inputSurface.lodySetCorners(.capsule(maximum: 24))
     } else if isFocused {
-      let top = UICornerRadius.fixed(Self.sheetCornerRadius)
-      inputSurface.cornerConfiguration = .corners(topLeftRadius: top, topRightRadius: top, bottomLeftRadius: .fixed(0), bottomRightRadius: .fixed(0))
+      inputSurface.lodySetCorners(.top(Self.sheetCornerRadius))
     } else {
-      inputSurface.cornerConfiguration = .capsule(maximumRadius: 24)
+      inputSurface.lodySetCorners(.capsule(maximum: 24))
     }
   }
 }

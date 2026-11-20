@@ -45,7 +45,7 @@ final class LodyPinnedLabelBackdrop: UIView {
       header.layer.zPosition = pinsLabels && header.frame.minY < top - 1 ? 0 : 2
     }
     // A second system edge would introduce a seam in the middle of the gradient.
-    collection.topEdgeEffect.isHidden = active != nil
+    LodyScrollEdges.setEdgesHidden(collection, top: active != nil)
     isHidden = active == nil
     if let header = active {
       frame = CGRect(x: collection.bounds.minX, y: collection.bounds.minY,

@@ -71,7 +71,7 @@ private final class ChatQueueView: CKGlassSurface {
       self.panelHeight = 0
       self.onHeightChange?()
     }
-    cornerConfiguration = .corners(radius: .fixed(20))
+    lodySetCorners(.fixed(20))
     stack.axis = .vertical
     scroll.addSubview(stack)
     contentView.addSubview(scroll)
@@ -867,12 +867,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
 
   func attachScrollEdge(to scrollView: UIScrollView?) {
     if let scrollView { LodyScrollEdges.floatingControls(scrollView) }
-    let existing = interactions.compactMap { $0 as? UIScrollEdgeElementContainerInteraction }.first
-    guard scrollView != nil || existing != nil else { return }
-    let edge = existing ?? UIScrollEdgeElementContainerInteraction()
-    edge.scrollView = scrollView
-    edge.edge = .bottom
-    if edge.view == nil { addInteraction(edge) }
+    LodyScrollEdges.shape(self, around: scrollView, edge: .bottom)
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

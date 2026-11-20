@@ -4,6 +4,8 @@ Read before any change under `apps/mobile/ios`. These rules bind every caller of
 
 - This is an independent iOS-only UIKit client. pnpm builds the bundled cloud protocol assets; XcodeGen generates app, extension and verification targets; Swift Package Manager builds LodyKit and its native dependencies.
 
+- The deployment target is iOS 18.0 for the app, extensions and every local package. Guard iOS 26 and later APIs with `#available` and keep a working iOS 18 path. Glass, corner, glass button and prominent bar-item styling go through `Chrome/LodyGlass.swift` (`LodyGlass`, `lodySetCorners`, `lodyGlass`), and soft scroll edges go through `LodyScrollEdges`; iOS 18 draws the system thin material and has no soft edges. iOS 18 hides composer dictation because `SpeechAnalyzer` is iOS 26 only, and the iPad split has no inspector column, so `LodyShell.presentDetail` opens pages or sheets there as on compact widths.
+
 - First-party UI and state live in the Swift package `packages/LodyKit/Sources/LodyKit`; the application entry point is `App`, and extensions are in `Extensions`. Use Swift/UIKit or SwiftUI; do not add bridge packages. SwiftPM discovers LodyKit sources automatically. Run `pnpm prebuild` after changing app/extension source membership or shared extension references in `project.yml`; never edit the generated Xcode project by hand.
 
 - Do not add Android implementations, fallback stubs, or Android build scripts.

@@ -129,7 +129,7 @@ struct ChatTabsPanel: View {
 /// this always opens under it and drops in from the header.
 @MainActor
 final class ChatTabsOverlay: UIView {
-  private let card = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+  private let card = UIVisualEffectView(effect: LodyGlass.effect())
   private let content: UIHostingController<ChatTabsPanel>
   private var heightConstraint: NSLayoutConstraint?
   let state: ChatTabsState
@@ -158,7 +158,7 @@ final class ChatTabsOverlay: UIView {
     let dismiss = UITapGestureRecognizer(target: self, action: #selector(backgroundTapped(_:)))
     dismiss.cancelsTouchesInView = false
     addGestureRecognizer(dismiss)
-    card.cornerConfiguration = .corners(radius: .fixed(22))
+    card.lodySetCorners(.fixed(22))
     card.clipsToBounds = true
     content.view.backgroundColor = .clear
     content.view.translatesAutoresizingMaskIntoConstraints = false

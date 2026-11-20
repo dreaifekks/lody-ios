@@ -97,7 +97,7 @@ struct GitHubRepositoryPicker: View {
       case .failed:
         message(String(localized: "projects.github.loadFailed", bundle: .lody)) {
           Button(String(localized: "common.retry", bundle: .lody)) { model.load() }
-            .buttonStyle(.glass)
+            .lodyGlassButtonStyle()
         }
       case .ready:
         if model.settings?.repositories?.isEmpty != false {
@@ -215,7 +215,7 @@ struct GitHubRepositoryPicker: View {
       Label(String(localized: "projects.github.install", bundle: .lody), systemImage: "arrow.up.forward.app")
         .lodyTextStyle(.subhead)
     }
-    .buttonStyle(.glass)
+    .lodyGlassButtonStyle()
     .accessibilityIdentifier("github-install")
   }
 

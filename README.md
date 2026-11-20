@@ -350,6 +350,7 @@ packages/lexical-swift/              # Native editor
 ### Prerequisites
 
 - **macOS**: Sequoia or later — GitHub iOS verification and TestFlight use the macOS 27 preview image
+- **Deployment target**: iOS 18.0; iOS 26 Liquid Glass, soft scroll edges, the iPad inspector column and dictation degrade on iOS 18 (see [general rules](docs/rules/general.md))
 - **Xcode**: 26.5 or later with Command Line Tools — local offline Simulator baselines default to iOS 26.5; GitHub iOS jobs use the Xcode 27 preview image and iOS 27.0
 - **Node.js**: Node 22 LTS, version 22.13 or later
 - **pnpm**: `11.10.0` (`corepack enable`)

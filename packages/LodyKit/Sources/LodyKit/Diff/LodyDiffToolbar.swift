@@ -83,7 +83,7 @@ final class LodyDiffToolbar: UIView {
   private let edgeFade = LodyEdgeFade()
 
   func attachScrollEdge(to scrollView: UIScrollView?) {
-    scrollView?.bottomEdgeEffect.isHidden = true
+    LodyScrollEdges.setEdgesHidden(scrollView, bottom: true)
     edgeFade.isHidden = scrollView == nil
   }
 
@@ -99,8 +99,8 @@ final class LodyDiffToolbar: UIView {
   required init?(coder: NSCoder) { fatalError() }
 
   override init(frame: CGRect) {
-    statsGlass = UIVisualEffectView(effect: UIGlassEffect())
-    statsGlass.cornerConfiguration = .capsule()
+    statsGlass = UIVisualEffectView(effect: LodyGlass.effect())
+    statsGlass.lodySetCorners(.capsule())
     super.init(frame: frame)
     edgeFade.isHidden = true
     addSubview(edgeFade)

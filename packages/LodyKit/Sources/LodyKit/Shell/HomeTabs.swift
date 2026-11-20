@@ -28,18 +28,62 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   var onSelect: (HomeTab) -> Void = { _ in }
   var onCreate: () -> Void = {}
   var onDebug: () -> Void = {}
-  var canCreate = false { didSet { tab(forIdentifier: Self.createID)?.isEnabled = canCreate } }
+  var canCreate = false {
+    didSet {
+      floatingCreate?.isEnabled = canCreate
+      if #available(iOS 18.4, *) { tab(forIdentifier: Self.createID)?.isEnabled = canCreate }
+    }
+  }
   private static let createID = "home-new-session"
   private var homeTabs: [UITab] = []
+  /// Before iOS 26 the create action floats above the tab bar's trailing edge instead of taking a tab.
+  private lazy var floatingCreate: UIButton? = Self.makeFloatingCreate()
+  private static let floatingSize: CGFloat = 56
+  private static let floatingMargin: CGFloat = 16
+
+  private static func makeFloatingCreate() -> UIButton? {
+    if #available(iOS 26.0, *) { return nil }
+    var configuration = UIButton.Configuration.lodyProminent()
+    configuration.image = LodyIcon.compose.uiImage?.withRenderingMode(.alwaysTemplate)
+    configuration.cornerStyle = .capsule
+    let button = UIButton(configuration: configuration)
+    button.accessibilityIdentifier = createID
+    button.isEnabled = false
+    button.layer.shadowColor = UIColor.black.cgColor
+    button.layer.shadowOpacity = 0.18
+    button.layer.shadowRadius = 8
+    button.layer.shadowOffset = CGSize(width: 0, height: 3)
+    return button
+  }
 
   override func viewDidLoad() {
     super.viewDidLoad()
     delegate = self
     mode = .tabBar
-    tabBarMinimizeBehavior = .onScrollDown
+    if #available(iOS 26.0, *) { tabBarMinimizeBehavior = .onScrollDown }
     tabBar.tintColor = LodyUIColor.accentFg
     tabBar.unselectedItemTintColor = LodyUIColor.iconSecondary
     tabBar.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:))))
+    if let floatingCreate {
+      floatingCreate.addAction(UIAction { [weak self] _ in
+        guard let self, self.canCreate else { return }
+        self.onCreate()
+      }, for: .primaryActionTriggered)
+      floatingCreate.translatesAutoresizingMaskIntoConstraints = false
+      view.addSubview(floatingCreate)
+      NSLayoutConstraint.activate([
+        floatingCreate.widthAnchor.constraint(equalToConstant: Self.floatingSize),
+        floatingCreate.heightAnchor.constraint(equalToConstant: Self.floatingSize),
+        floatingCreate.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -Self.floatingMargin),
+        floatingCreate.bottomAnchor.constraint(equalTo: tabBar.topAnchor, constant: -Self.floatingMargin),
+      ])
+    }
+  }
+
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    // UIKit inserts the selected tab's view on each switch; keep the action above it.
+    if let floatingCreate { view.bringSubviewToFront(floatingCreate) }
   }
 
   func install(navigation: @escaping (HomeTab) -> UINavigationController) {
@@ -52,9 +96,19 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
           identifier: "home-tab-\(destination)") { _ in controller }
         tab.accessibilityIdentifier = tab.identifier
         return tab
-      } + [UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
-        identifier: Self.createID) { _ in UIViewController() }]
-      homeTabs.last?.accessibilityIdentifier = Self.createID
+      }
+      if floatingCreate == nil {
+        let create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
+          identifier: Self.createID) { _ in UIViewController() }
+        create.accessibilityIdentifier = Self.createID
+        homeTabs.append(create)
+      }
+    }
+    // Lists keep their last rows clear of the floating create action.
+    if floatingCreate != nil {
+      for (destination, controller) in navigations {
+        controller.additionalSafeAreaInsets.bottom = destination == .settings ? 0 : Self.floatingSize + Self.floatingMargin
+      }
     }
     tabs = homeTabs
     // iOS 27 supports a separate prominent action without misrepresenting it as Search.
@@ -63,15 +117,16 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
 
   func show(_ destination: HomeTab) {
     selectedTab = tab(forIdentifier: "home-tab-\(destination)")
-    tabBarMinimizeBehavior = destination == .chats ? .onScrollDown : .never
+    if #available(iOS 26.0, *) { tabBarMinimizeBehavior = destination == .chats ? .onScrollDown : .never }
     updateCreate(destination)
   }
 
   /// The create action keeps the compose glyph; on Schedules it adds a schedule, elsewhere it starts a chat.
   private func updateCreate(_ destination: HomeTab) {
-    guard let create = tab(forIdentifier: Self.createID) else { return }
-    let schedules = destination == .schedules
-    create.title = String(localized: String.LocalizationValue(schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
+    let title = String(localized: String.LocalizationValue(destination == .schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
+    tab(forIdentifier: Self.createID)?.title = title
+    floatingCreate?.accessibilityLabel = title
+    floatingCreate?.isHidden = destination == .settings
   }
 
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
@@ -81,7 +136,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
 
   func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
     guard let destination = HomeTab.allCases.first(where: { selectedTab.identifier == "home-tab-\($0)" }) else { return }
-    tabBarMinimizeBehavior = destination == .chats ? .onScrollDown : .never
+    if #available(iOS 26.0, *) { tabBarMinimizeBehavior = destination == .chats ? .onScrollDown : .never }
     updateCreate(destination)
     onSelect(destination)
   }

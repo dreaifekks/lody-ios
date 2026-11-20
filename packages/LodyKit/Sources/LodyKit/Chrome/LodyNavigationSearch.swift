@@ -34,6 +34,13 @@ final class LodyNavigationSearch: NSObject, UISearchBarDelegate, UISearchResults
   }
 
   var placement: UINavigationItem.SearchBarPlacement {
+    guard #available(iOS 26.0, *) else {
+      // Before iOS 26 an integrated field sits inline and its collapsed button stacks under the title.
+      let placements: [String: UINavigationItem.SearchBarPlacement] = [
+        "stacked": .stacked, "inline": .inline, "integrated": .inline, "integratedButton": .stacked, "integratedCentered": .inline,
+      ]
+      return placements[config.placement ?? ""] ?? .automatic
+    }
     let placements: [String: UINavigationItem.SearchBarPlacement] = [
       "stacked": .stacked,
       "inline": .integrated,

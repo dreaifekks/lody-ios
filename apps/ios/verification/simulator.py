@@ -13,6 +13,8 @@ import sys
 
 DEVICE_TYPES = {
     'iphone': 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro',
+    # iOS 18 runtimes, used to check the deployment-target floor, predate the iPhone 17.
+    'iphone-16': 'com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro',
     'watch': 'com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-9-45mm',
     'watch-small': 'com.apple.CoreSimulator.SimDeviceType.Apple-Watch-SE-3-40mm',
     'ipad': 'com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M2',

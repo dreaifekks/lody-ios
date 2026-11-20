@@ -48,10 +48,8 @@ final class LodySessionBannerView: UIVisualEffectView {
   init(title: String, kind: LodySessionBannerKind) {
     drawsCheckmark = kind == .completed
     super.init(effect: nil)
-    let glass = UIGlassEffect(style: .regular)
-    glass.isInteractive = true
-    effect = glass
-    cornerConfiguration = .corners(radius: .fixed(18))
+    effect = LodyGlass.effect(interactive: true)
+    lodySetCorners(.fixed(18))
 
     glyph.image = UIImage(systemName: kind.symbolName)
     glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
@@ -170,6 +168,7 @@ final class LodySessionBannerView: UIVisualEffectView {
 extension UIImageView {
   func playDrawOnSymbol() {
     guard !UIAccessibility.isReduceMotionEnabled else { return }
-    addSymbolEffect(.drawOn, options: .nonRepeating)
+    if #available(iOS 26.0, *) { addSymbolEffect(.drawOn, options: .nonRepeating) }
+    else { addSymbolEffect(.bounce, options: .nonRepeating) }
   }
 }

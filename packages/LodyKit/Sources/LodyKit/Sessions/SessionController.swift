@@ -484,7 +484,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     pageHeader.spacing = 8
     pageHeader.accessibilityIdentifier = "chat-page-header"
     for (button, symbol) in [(backButton, "chevron.backward"), (moreButton, "ellipsis")] {
-      var configuration = UIButton.Configuration.glass()
+      var configuration = UIButton.Configuration.lodyGlass()
       configuration.image = UIImage(systemName: symbol)
       configuration.baseForegroundColor = .label
       configuration.cornerStyle = .capsule
@@ -496,7 +496,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     backButton.addAction(UIAction { [weak self] _ in self?.goBack() }, for: .touchUpInside)
     moreButton.accessibilityIdentifier = "chat-more"
     moreButton.showsMenuAsPrimaryAction = true
-    var tabsConfiguration = UIButton.Configuration.glass()
+    var tabsConfiguration = UIButton.Configuration.lodyGlass()
     tabsConfiguration.image = tabsButton.image(for: .normal)
     tabsConfiguration.baseForegroundColor = .label
     tabsConfiguration.cornerStyle = .capsule
@@ -507,10 +507,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     chat.titleButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
     chat.titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     // Let UIKit shape the existing soft scroll edge around the page-owned controls.
-    let edge = UIScrollEdgeElementContainerInteraction()
-    edge.scrollView = chat.collection
-    edge.edge = .top
-    pageHeader.addInteraction(edge)
+    LodyScrollEdges.shape(pageHeader, around: chat.collection, edge: .top)
     let tint = SessionHeaderTint()
     tint.isUserInteractionEnabled = false
     tint.backgroundColor = UIColor.lodyBackground.withAlphaComponent(0.55)
@@ -529,7 +526,9 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     // iPad app itself: the plain safe area does not include them, a navigation bar's layout does.
     // The corner-adapted guide also insets for an iPhone's rounded display corners, so it is only a
     // floor; the 16 pt margin stays measured from the plain safe area.
-    let headerArea = view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal))
+    let headerArea: UILayoutGuide
+    if #available(iOS 26.0, *) { headerArea = view.layoutGuide(for: .safeArea(cornerAdaptation: .horizontal)) }
+    else { headerArea = view.safeAreaLayoutGuide }
     let preferredLeading = pageHeader.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16)
     let preferredTrailing = pageHeader.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16)
     preferredLeading.priority = .defaultHigh
@@ -554,7 +553,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     if let sidebarAction { sidebarButton.removeAction(sidebarAction, for: .touchUpInside) }
     sidebarAction = item?.primaryAction
     if let sidebarAction { sidebarButton.addAction(sidebarAction, for: .touchUpInside) }
-    var configuration = UIButton.Configuration.glass()
+    var configuration = UIButton.Configuration.lodyGlass()
     configuration.image = item?.image
     configuration.baseForegroundColor = .label
     configuration.cornerStyle = .capsule

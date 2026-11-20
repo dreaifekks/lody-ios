@@ -6,7 +6,7 @@ Read before changing the conversation composer, its action bar, merge, the nativ
 
 - Return on a hardware keyboard sends from every composer (`ChatComposerInput.keyCommands`), as on web; Shift-Return inserts a line break and the software keyboard's Return still types one. Return is not handled while an input method has marked text, so it commits the candidate, and with nothing to send it does nothing: only a tap on Stop stops a turn.
 
-- The action bar's browser preview opens the tunnel URL in `BrowserPreviewController` through `LodyShell.presentDetail`, so iPad shows it in the inspector column beside the conversation and compact widths get a sheet. It uses a non-persistent website data store and no script message handlers, keeping the user's site apart from the trusted cloud data runtime; reload and Open in Safari sit in its bar.
+- The action bar's browser preview opens the tunnel URL in `BrowserPreviewController` through `LodyShell.presentDetail`, so iPad on iOS 26 shows it in the inspector column beside the conversation, and iOS 18 and compact widths get a sheet. It uses a non-persistent website data store and no script message handlers, keeping the user's site apart from the trusted cloud data runtime; reload and Open in Safari sit in its bar.
 
 - The conversation composer's agent mark travels from its trailing collapsed button to the leading run-config button on the same expansion curve, reversing on collapse. Keep one visible mark during the transition, preserve button hit targets, and respect Reduce Motion.
 

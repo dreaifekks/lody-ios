@@ -51,7 +51,20 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   private var wide: Bool { layout.sideBySide }
   private var interactivelyResizing: Bool {
-    viewIfLoaded?.window?.windowScene?.effectiveGeometry.isInteractivelyResizing == true
+    guard #available(iOS 26.0, *) else { return false }
+    return viewIfLoaded?.window?.windowScene?.effectiveGeometry.isInteractivelyResizing == true
+  }
+  /// The inspector column is iOS 26 only; earlier systems open panels as pages or sheets, as on iPhone.
+  private var splitColumns: [(UIViewController, UISplitViewController.Column)] {
+    guard #available(iOS 26.0, *) else { return [(primary, .primary), (secondary, .secondary)] }
+    return [(primary, .primary), (secondary, .secondary), (inspector, .inspector)]
+  }
+  private func setInspectorColumn(_ controller: UIViewController?) {
+    if #available(iOS 26.0, *) { split.setViewController(controller, for: .inspector) }
+  }
+  private func showInspector(_ visible: Bool) {
+    guard #available(iOS 26.0, *) else { return }
+    if visible { split.show(.inspector) } else { split.hide(.inspector) }
   }
 
   func geometryChanged(in scene: UIWindowScene) {
@@ -80,17 +93,17 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     split.showsSecondaryOnlyButton = true
     split.displayModeButtonVisibility = .never
     split.preferredPrimaryColumnWidth = 320
-    split.preferredInspectorColumnWidthFraction = 0.45
-    split.maximumInspectorColumnWidth = .greatestFiniteMagnitude
+    if #available(iOS 26.0, *) {
+      split.preferredInspectorColumnWidthFraction = 0.45
+      split.maximumInspectorColumnWidth = .greatestFiniteMagnitude
+    }
     primary.setViewControllers([tabPage(.chats)], animated: false)
     secondary.setViewControllers([placeholder()], animated: false)
     primary.view.accessibilityIdentifier = "ipad-panel"
     secondary.view.accessibilityIdentifier = "ipad-detail"
     inspector.view.accessibilityIdentifier = "ipad-inspector"
-    for (controller, column) in zip([primary, secondary, inspector], [UISplitViewController.Column.primary, .secondary, .inspector]) {
-      LodyShell.shared.configureNavigation(controller)
-      split.setViewController(controller, for: column)
-    }
+    for controller in [primary, secondary, inspector] { LodyShell.shared.configureNavigation(controller) }
+    for (controller, column) in splitColumns { split.setViewController(controller, for: column) }
     configureTabs()
     adopt(split)
     addChild(parking); parking.view.isHidden = true; view.addSubview(parking.view); parking.didMove(toParent: self)
@@ -193,6 +206,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     return false
   }
   func showPanel(_ content: UIViewController, title: String, from: UIViewController, push: Bool, detents: [Double], onClose: (() -> Void)? = nil) -> Bool {
+    guard #available(iOS 26.0, *) else { return false }
     guard contains(from) || from.navigationController === inspector, session != nil else { return false }
     if layout == .compact, !push, !panelOpen { return false }
     let next = page(content, title: title)
@@ -226,14 +240,14 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     inspector.setViewControllers([], animated: false)
   }
   func splitViewController(_ svc: UISplitViewController, topColumnForCollapsingToProposedTopColumn proposed: UISplitViewController.Column) -> UISplitViewController.Column {
-    if panelOpen { return .inspector }
+    if #available(iOS 26.0, *), panelOpen { return .inspector }
     return session == nil ? .primary : .secondary
   }
   func splitViewController(_ svc: UISplitViewController, willChangeTo displayMode: UISplitViewController.DisplayMode) {
     updateBookSidebar(sidebarShown: displayMode != .secondaryOnly)
   }
   func splitViewController(_ svc: UISplitViewController, didHide column: UISplitViewController.Column) {
-    guard column == .inspector, layout == .compact, svc.isCollapsed, panelOpen,
+    guard #available(iOS 26.0, *), column == .inspector, layout == .compact, svc.isCollapsed, panelOpen,
           !inspectorInSheet, !adaptingInspector, !updatingLayout, !updatingTabContainer, !svc.isShowing(.inspector) else { return }
     panelOpen = false
     clearInspector()
@@ -246,7 +260,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     inspectorSheet = nil
     panelOpen = false
     clearInspector()
-    split.setViewController(inspector, for: .inspector)
+    setInspectorColumn(inspector)
     invalidateLayout()
   }
   func popoverPresentationControllerDidDismissPopover(_ popoverPresentationController: UIPopoverPresentationController) {
@@ -458,21 +472,21 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     }
     split.preferredSplitBehavior = wide ? .tile : .overlay
     if panelOpen, mode == .tall {
-      split.hide(.inspector)
+      showInspector(false)
       split.hide(.primary)
       if !inspectorInSheet {
-        split.setViewController(nil, for: .inspector)
+        setInspectorColumn(nil)
         if let modal = LodyShell.shared.presentNavigation(inspector, detents: detailDetents) {
           inspectorSheet = modal
           modal.presentationController?.delegate = self
-        } else { split.setViewController(inspector, for: .inspector) }
+        } else { setInspectorColumn(inspector) }
       }
     } else if panelOpen {
-      split.show(.inspector)
+      showInspector(true)
       if wide { split.hide(.primary) }
     }
     else {
-      split.hide(.inspector)
+      showInspector(false)
       if wide { split.show(.primary) }
       else if !split.isCollapsed { split.hide(.primary) }
     }
@@ -581,7 +595,7 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       self.inspectorSheet = nil
       self.adaptingInspector = false
       if !self.panelOpen { self.clearInspector() }
-      self.split.setViewController(self.inspector, for: .inspector)
+      self.setInspectorColumn(self.inspector)
       self.invalidateLayout()
     }
     if modal.presentingViewController == nil { reattach() }
@@ -632,11 +646,11 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     guard value != folded, let foldHost else { return }
     release(folded ? foldHost.controller : split)
     if value {
-      for column in [UISplitViewController.Column.primary, .secondary, .inspector] { split.setViewController(nil, for: column) }
+      for (_, column) in splitColumns { split.setViewController(nil, for: column) }
     } else {
       foldHost.show(leading: nil, trailing: nil); foldPanes = []
       for column in [primary, secondary, inspector] where column.parent === parking { release(column) }
-      for (controller, column) in zip([primary, secondary, inspector], [UISplitViewController.Column.primary, .secondary, .inspector]) where controller !== inspector || !inspectorInSheet {
+      for (controller, column) in splitColumns where controller !== inspector || !inspectorInSheet {
         split.setViewController(controller, for: column)
       }
     }

@@ -264,7 +264,7 @@ enum ChatNavigationTitle {
   }
 
   static func clearNativeSubtitle(_ item: UINavigationItem) {
-    item.subtitle = nil
+    if #available(iOS 26.0, *) { item.subtitle = nil }
   }
 
   static func detach(button: UIButton, from item: UINavigationItem) {

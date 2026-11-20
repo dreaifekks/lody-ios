@@ -3,6 +3,8 @@ import OSLog
 import Speech
 import UIKit
 
+/// iOS 18 offers no dictation: `SpeechAnalyzer` is iOS 26 only.
+@available(iOS 26.0, *)
 @MainActor
 final class SpeechDictation: ComposerDictating {
   static let shared: SpeechDictation? = SpeechTranscriber.isAvailable ? SpeechDictation() : nil
@@ -97,6 +99,7 @@ final class SpeechDictation: ComposerDictating {
   }
 }
 
+@available(iOS 26.0, *)
 private final class DictationCapture: @unchecked Sendable {
   private let engine = AVAudioEngine()
   private let continuation: AsyncStream<AnalyzerInput>.Continuation

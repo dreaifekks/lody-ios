@@ -2,6 +2,7 @@ import ChatKit
 import UIKit
 
 /// Compare direct UIKit animation with the reversible production surface.
+@available(iOS 26.0, *)
 @MainActor final class GlassTransitionSpike: UIViewController {
   private static var spikeWindow: UIWindow?
   private let phase = UILabel()

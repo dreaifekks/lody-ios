@@ -28,7 +28,7 @@ struct HomeSyncPill: View {
         .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, LodySpacing.lg)
         .frame(height: LodySize.touchTarget)
-        .glassEffect(.regular, in: .capsule)
+        .lodyGlass(in: .capsule)
         .transition(.scale(scale: 0.9).combined(with: .opacity).combined(with: .offset(y: -6)))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.updatesFrequently)

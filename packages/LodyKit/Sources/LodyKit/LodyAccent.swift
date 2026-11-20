@@ -13,6 +13,6 @@ final class LodyAccentLifecycle {
 
   func applicationDidBecomeActive(_ application: UIApplication) {
     lodyApplyWindowAccent()
-    GlassTransitionSpike.openIfRequested()
+    if #available(iOS 26.0, *) { GlassTransitionSpike.openIfRequested() }
   }
 }

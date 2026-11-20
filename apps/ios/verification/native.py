@@ -68,13 +68,13 @@ checks = {
     'watchdog': [],
     'local-store': ['Cloud/LocalStore.swift', 'Cloud/SessionProse.swift', 'Text/MarkdownPlainText.swift', 'Text/MarkdownRuby.swift', 'Text/TextSearch.swift', 'LodyLocalization.swift'],
     'content-store': ['Cloud/ContentStore.swift'],
-    'chat-render': ['List/ConversationTabStrip.swift', 'List/ConversationTreeRow.swift', 'Chat/ChatOperationCell.swift', 'Chat/ChatMessageActionsCell.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatImageGallery.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatReferenceNode.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatAuthorHeader.swift', 'Chat/ChatUserMentions.swift'],
+    'chat-render': ['Chrome/LodyGlass.swift', 'List/ConversationTabStrip.swift', 'List/ConversationTreeRow.swift', 'Chat/ChatOperationCell.swift', 'Chat/ChatMessageActionsCell.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatImageGallery.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatReferenceNode.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatAuthorHeader.swift', 'Chat/ChatUserMentions.swift'],
     'chat-subagent': ['LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift', 'Chat/ChatSubagentCell.swift'],
     'chat-files': ['LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Appearance/LodyDesign.swift', 'List/LodyStatusGlyph.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatThrowCurve.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatCell.swift', 'Chat/ChatUserMentions.swift', 'Chat/ChatFileCell.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift'],
-    'chat-chrome': ['LodyLocalization.swift', 'Chat/ChatOverlay.swift'],
+    'chat-chrome': ['Chrome/LodyGlass.swift', 'LodyLocalization.swift', 'Chat/ChatOverlay.swift'],
     'model-panel': ['LodyLocalization.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Chat/ChatComposerModelPanel.swift'],
-    'composer': ['Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyLocalization.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatComposerAttachmentStack.swift', 'Chat/ChatComposerGrabber.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatSessionUsage.swift', 'Chat/ChatUsagePanel.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift'],
-    'composer-dictation': ['Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyLocalization.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatComposerAttachmentStack.swift', 'Chat/ChatComposerGrabber.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatComposerDictation.swift', 'Chat/ChatImageGallery.swift', 'Chat/ChatSessionUsage.swift', 'Chat/ChatUsagePanel.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift', 'Auth/AuthAPI.swift', 'Sessions/ChatListView.swift', 'Cloud/GitHubMentions.swift', 'Sessions/InboxProjectIndex.swift', 'List/LodyListModels.swift', 'Chrome/LodyPinnedLabelBackdrop.swift', 'Sessions/SessionCatalog.swift', 'Sessions/HomeGrouping.swift', 'Sessions/ChatListCollectionView.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionRows.swift', 'Auth/AuthKeychain.swift', 'Settings/LodyListState.swift'],
+    'composer': ['Chrome/LodyGlass.swift', 'Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyLocalization.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatComposerAttachmentStack.swift', 'Chat/ChatComposerGrabber.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatSessionUsage.swift', 'Chat/ChatUsagePanel.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift'],
+    'composer-dictation': ['Chrome/LodyGlass.swift', 'Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'LodyLocalization.swift', 'UIFont+Dynamic.swift', 'Chat/ChatAttachments.swift', 'Chat/ChatRecentPhotosView.swift', 'Chat/ChatAttachmentMenu.swift', 'Chat/ChatCameraCapture.swift', 'Chat/ChatAttachmentOverlayCameraView.swift', 'Chat/ChatCameraPage.swift', 'Chat/ChatComposerSurfaceLayout.swift', 'Chat/ChatComposerLiquidGlassSurfaceLayout.swift', 'Chat/ChatComposerAttachmentStack.swift', 'Chat/ChatComposerGrabber.swift', 'Chat/ChatMentionPanel.swift', 'Chat/ChatComposerModelPanel.swift', 'Chat/ChatComposerView.swift', 'Chat/ChatComposerDictation.swift', 'Chat/ChatImageGallery.swift', 'Chat/ChatSessionUsage.swift', 'Chat/ChatUsagePanel.swift', 'Chat/ChatReferenceNode.swift', 'Chat/LodyAgentIcon.swift', 'Chat/ChatTranscript.swift', 'Chat/ChatSendHandoff.swift', 'Chat/ChatNumericText.swift', 'Chat/ChatThrowCurve.swift', 'LodyTint.swift', 'Toast/LodyToastOverlay.swift', 'Toast/LodyToastPillView.swift', 'Toast/LodySessionBannerView.swift', 'Auth/AuthAPI.swift', 'Sessions/ChatListView.swift', 'Cloud/GitHubMentions.swift', 'Sessions/InboxProjectIndex.swift', 'List/LodyListModels.swift', 'Chrome/LodyPinnedLabelBackdrop.swift', 'Sessions/SessionCatalog.swift', 'Sessions/HomeGrouping.swift', 'Sessions/ChatListCollectionView.swift', 'Sessions/InboxSections.swift', 'Sessions/SessionRows.swift', 'Auth/AuthKeychain.swift', 'Settings/LodyListState.swift'],
     'throw-frame-rate': ['Chat/ChatThrowCurve.swift'],
     'attachments': ['LodyLocalization.swift', 'Diagnostics/DiagnosticsStore.swift', 'Cloud/SessionAttachments.swift', 'Auth/WorkspaceModePins.swift'],
     'inline-diff': ['UIFont+Dynamic.swift', 'Diff/InlineDiffModel.swift', 'Diff/InlineDiffRenderer.swift', 'Diff/DiffDocumentModel.swift', 'Diff/DiffDocumentLayout.swift'],
@@ -98,10 +98,11 @@ checks = {
     'list-snapshots': ['List/LodyListModels.swift'],
     'chat-list-scroll': ['Sessions/ChatListCollectionView.swift', 'Sessions/InboxProjectIndex.swift', 'Projects/RepositoryIcon.swift', 'List/LodyListPhoto.swift', 'List/PhotoDiskCache.swift', 'LodyTint.swift'],
     'banner': [
+        'Chrome/LodyGlass.swift',
         'LodyLocalization.swift',
         'Toast/LodySessionBannerView.swift',
     ],
-    'chat-title': ['LodyLocalization.swift', 'LodyUIVerify.swift', 'LodyTint.swift', 'Chrome/LodyNavigationHeader.swift', 'Chrome/LodyNavigationSearch.swift', 'Chat/ChatNavigationTitle.swift'],
+    'chat-title': ['Chrome/LodyGlass.swift', 'LodyLocalization.swift', 'LodyUIVerify.swift', 'LodyTint.swift', 'Chrome/LodyNavigationHeader.swift', 'Chrome/LodyNavigationSearch.swift', 'Chat/ChatNavigationTitle.swift'],
     'page-progress': ['List/LodyPageProgress.swift'],
     'create-session': ['LodyLocalization.swift', 'CreateSession/CreateSessionForm.swift'],
     'session-info-bar': ['LodyLocalization.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionInfoBar.swift', 'Sessions/SessionArchive.swift'],
@@ -113,7 +114,7 @@ checks = {
         'Shell/NativeShareCoordinator.swift', 'Auth/WorkspaceModePins.swift', 'CreateSession/CreateDraftRecord.swift', 'Outbox/OutboxRecord.swift', 'Sessions/SessionCatalog.swift', 'Sessions/SessionRows.swift',
         'Sessions/InboxSections.swift', 'Sessions/HomeGrouping.swift', 'List/LodyListModels.swift', 'Settings/LodyListState.swift'],
     'design': ['LodyTint.swift'],
-    'form': ['LodyTint.swift', 'UIFont+Dynamic.swift', 'Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'Settings/LodyForm.swift'],
+    'form': ['Chrome/LodyGlass.swift', 'LodyTint.swift', 'UIFont+Dynamic.swift', 'Chrome/LodyScrollEdges.swift', 'Chrome/LodyEdgeFade.swift', 'Settings/LodyForm.swift'],
 }
 if args.case:
     if args.case not in checks:
@@ -143,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
     shader_bundle = Path(output) / 'LodyKitShaders.bundle'
     shader_bundle.mkdir()
     air = str(Path(output) / 'ChatEffortHeat.air')
-    subprocess.run(['xcrun', '--sdk', 'iphonesimulator', 'metal', '-c', '-target', 'air64-apple-ios26.0-simulator', '-isysroot', sdk, str(kit / 'Sources/LodyKit/Chat/Shaders/ChatEffortHeat.metal'), '-o', air], check=True, timeout=120)
+    subprocess.run(['xcrun', '--sdk', 'iphonesimulator', 'metal', '-c', '-target', 'air64-apple-ios18.0-simulator', '-isysroot', sdk, str(kit / 'Sources/LodyKit/Chat/Shaders/ChatEffortHeat.metal'), '-o', air], check=True, timeout=120)
     subprocess.run(['xcrun', '--sdk', 'iphonesimulator', 'metallib', air, '-o', str(shader_bundle / 'default.metallib')], check=True, timeout=120)
     # Build the extracted modules from their production sources. Core remains
     # host-testable; UIKit checks link the same package module as the app.
@@ -157,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         command = ['xcrun', 'swiftc', '-swift-version', '6']
         if simulator:
             arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
-            command += ['-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator']
+            command += ['-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator']
         modules = ['ChatKitCore', 'ChatKit'] if simulator else ['ChatKitCore']
         for module in modules:
             sources = sorted((root / 'packages/chat-kit/Sources' / module).glob('*.swift'))
@@ -176,7 +177,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
         for module, version in lexical_modules:
             sources = sorted((root / 'packages/lexical-swift/Sources' / module).rglob('*.swift'))
-            subprocess.run(['xcrun', 'swiftc', '-swift-version', version, '-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator',
+            subprocess.run(['xcrun', 'swiftc', '-swift-version', version, '-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator',
                 '-I', str(lexical_dir), '-emit-module', '-emit-library', '-static', '-module-name', module,
                 '-emit-module-path', str(lexical_dir / f'{module}.swiftmodule'), *map(str, sources),
                 '-o', str(lexical_dir / f'lib{module}.a')], check=True, timeout=600)
@@ -218,7 +219,8 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                         '-framework', 'LodyDataChannel']
         if simulator:
             arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
-            ios = '26.0'
+            # These checks exercise iOS 26 scroll edges, glass and navigation APIs directly.
+            ios = '26.0' if name in ['scroll-edges', 'glass-transition', 'model-panel', 'chat-title'] else '18.0'
             command += ['-sdk', sdk, '-target', f'{arch}-apple-ios{ios}-simulator']
         if name in ['composer', 'composer-dictation']:
             manifest = subprocess.check_output([
@@ -249,14 +251,14 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 resources.mkdir()
                 subprocess.run(['xcrun', 'actool', str(design / 'Resources/LodyIcons.xcassets'),
                     '--compile', str(resources), '--platform', 'iphonesimulator',
-                    '--minimum-deployment-target', '26.0', '--target-device', 'iphone',
+                    '--minimum-deployment-target', '18.0', '--target-device', 'iphone',
                     '--target-device', 'ipad'], check=True, timeout=120)
                 # SwiftPM normally generates this accessor; these checks compile directly.
                 accessor = directory / 'resource_bundle_accessor.swift'
                 accessor.write_text('import Foundation\nextension Bundle { static let module = Bundle(path: '
                                     + '"' + str(resources) + '")! }\n')
                 subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-sdk', sdk,
-                    '-target', f'{arch}-apple-ios26.0-simulator', '-emit-module', '-emit-library', '-static',
+                    '-target', f'{arch}-apple-ios18.0-simulator', '-emit-module', '-emit-library', '-static',
                     '-module-name', 'LodyDesignSystem', '-emit-module-path', str(directory / 'LodyDesignSystem.swiftmodule'),
                     *map(str, sorted(design.glob('*.swift'))), str(accessor),
                     '-o', str(directory / 'libLodyDesignSystem.a')], check=True, timeout=240)
@@ -268,7 +270,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 sources = sorted((root / 'packages/lody-core/Sources/LodyCore').rglob('*.swift'))
                 compile_core = ['xcrun', 'swiftc', '-swift-version', '6']
                 if simulator:
-                    compile_core += ['-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator']
+                    compile_core += ['-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator']
                 subprocess.run(compile_core + ['-emit-module', '-emit-library', '-static', '-module-name', 'LodyCore',
                     '-emit-module-path', str(directory / 'LodyCore.swiftmodule'), *map(str, sources),
                     '-o', str(directory / 'libLodyCore.a')], check=True, timeout=120)
@@ -279,7 +281,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             runtime = Path(output) / 'preview-runtime'
             runtime.mkdir()
             subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-sdk', sdk,
-                '-target', f'{arch}-apple-ios26.0-simulator', '-emit-module', '-emit-library', '-static',
+                '-target', f'{arch}-apple-ios18.0-simulator', '-emit-module', '-emit-library', '-static',
                 '-module-name', 'LodyRuntime', '-emit-module-path', str(runtime / 'LodyRuntime.swiftmodule'),
                 str(root / 'packages/lody-core/Sources/LodyRuntime/RuntimeDocument.swift'),
                 '-o', str(runtime / 'libLodyRuntime.a')], check=True, timeout=120)

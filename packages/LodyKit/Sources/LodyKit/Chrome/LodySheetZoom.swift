@@ -26,6 +26,7 @@ enum LodySheetZoom {
         guard let root = presenter.view.window?.rootViewController,
           findSource(label: sourceLabel, from: root) != nil
         else { return }
+        guard #available(iOS 26.0, *) else { presented = destination; return }
         destination.preferredTransition = .zoom(sourceBarButtonItemProvider: { [weak presenter] _ in
           // Sending opens a conversation underneath the sheet. Once the source
           // screen is gone, let UIKit handle a missing return target.
