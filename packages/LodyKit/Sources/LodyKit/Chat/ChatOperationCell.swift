@@ -30,7 +30,7 @@ final class ChatOperationCell: UICollectionViewCell {
       else if row.operation?.kind == "reply", row.operation?.reply?.isEmpty == false { onReply?() }
       else { onOpen?() }
     }, for: .touchUpInside)
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (cell: ChatOperationCell, _) in
+    lodyObserveTraitChanges([.preferredContentSizeCategory]) { (cell: ChatOperationCell, _) in
       if let row = cell.row { cell.configure(row) }
     }
   }

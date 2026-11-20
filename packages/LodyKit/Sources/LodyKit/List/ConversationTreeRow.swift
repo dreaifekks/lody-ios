@@ -39,7 +39,7 @@ final class ConversationTreeRow: UIView {
     detailLabel.textColor = LodyUIColor.textSecondary
     statusLabel.textColor = LodyUIColor.textTertiary
     for label in [titleLabel, detailLabel, statusLabel] { label.numberOfLines = 1 }
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, UITraitPreferredContentSizeCategory.self]) { (view: ConversationTreeRow, _) in view.setNeedsLayout() }
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast, .preferredContentSizeCategory]) { (view: ConversationTreeRow, _) in view.setNeedsLayout() }
   }
   required init?(coder: NSCoder) { fatalError() }
 

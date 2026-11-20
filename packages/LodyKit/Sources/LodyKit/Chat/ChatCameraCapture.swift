@@ -171,7 +171,14 @@ final class ChatCameraCapture: NSObject, AVCapturePhotoCaptureDelegate, @uncheck
         }
         return
       }
-      guard session.isRunning, !session.isInterrupted, output.captureReadiness == .ready else {
+      guard session.isRunning, !session.isInterrupted else {
+        captureGeneration = nil
+        fail("native.chat.camera.interrupted")
+        return
+      }
+      // `captureReadiness` is iOS 17; earlier systems rely on the capture
+      // delegate's error for a busy output.
+      if #available(iOS 17.0, *), output.captureReadiness != .ready {
         captureGeneration = nil
         fail("native.chat.camera.interrupted")
         return
@@ -180,7 +187,11 @@ final class ChatCameraCapture: NSObject, AVCapturePhotoCaptureDelegate, @uncheck
       captureID = settings.uniqueID
       if output.supportedFlashModes.contains(flash) { settings.flashMode = flash }
       if let connection = output.connection(with: .video) {
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        if #available(iOS 17.0, *) {
+          if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        } else if connection.isVideoOrientationSupported {
+          connection.videoOrientation = LodyCameraRotation.videoOrientation(for: angle)
+        }
         if connection.isVideoMirroringSupported {
           connection.automaticallyAdjustsVideoMirroring = false
           connection.isVideoMirrored = input?.device.position == .front

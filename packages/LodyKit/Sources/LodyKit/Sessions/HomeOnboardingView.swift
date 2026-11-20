@@ -48,7 +48,7 @@ final class HomeOnboardingView: UIView {
     stack.addArrangedSubview(nextSteps())
     render()
     // Layer borders hold resolved colours; refresh them when the appearance changes.
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) { (self: Self, _: UITraitCollection) in self.updateBorders() }
+    lodyObserveTraitChanges([.userInterfaceStyle, .displayScale]) { (view: HomeOnboardingView, _: UITraitCollection) in view.updateBorders() }
   }
 
   @available(*, unavailable)

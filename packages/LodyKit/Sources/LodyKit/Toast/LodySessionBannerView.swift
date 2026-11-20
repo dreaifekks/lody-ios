@@ -169,6 +169,6 @@ extension UIImageView {
   func playDrawOnSymbol() {
     guard !UIAccessibility.isReduceMotionEnabled else { return }
     if #available(iOS 26.0, *) { addSymbolEffect(.drawOn, options: .nonRepeating) }
-    else { addSymbolEffect(.bounce, options: .nonRepeating) }
+    else if #available(iOS 17.0, *) { addSymbolEffect(.bounce, options: .nonRepeating) }
   }
 }

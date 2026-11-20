@@ -10,7 +10,13 @@ struct PullRequestCheck: Codable, Equatable {
   var state: String { status == "completed" ? conclusion ?? "unknown" : status }
   var failed: Bool { status == "completed" && ["failure", "timed_out", "action_required"].contains(conclusion ?? "") }
   var symbol: String {
-    ["queued": "clock", "in_progress": "arrow.trianglehead.2.clockwise.rotate.90", "success": "checkmark.circle",
+    let progress: String
+    if #available(iOS 18.0, *) {
+      progress = "arrow.trianglehead.2.clockwise.rotate.90"
+    } else {
+      progress = "arrow.triangle.2.circlepath"
+    }
+    return ["queued": "clock", "in_progress": progress, "success": "checkmark.circle",
      "failure": "xmark.circle", "neutral": "minus.circle", "cancelled": "slash.circle", "timed_out": "clock.badge.exclamationmark",
      "action_required": "exclamationmark.circle", "stale": "clock", "skipped": "arrow.uturn.right.circle"][state] ?? "questionmark.circle"
   }

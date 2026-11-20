@@ -1,23 +1,22 @@
 import SwiftUI
 import UIKit
 
-@Observable
-final class ChatNumericTextModel {
-  var attributed = AttributedString()
-  var value = ""
-  var shines = false
-  var color = Color.primary
+final class ChatNumericTextModel: ObservableObject {
+  @Published var attributed = AttributedString()
+  @Published var value = ""
+  @Published var shines = false
+  @Published var color = Color.primary
 }
 
 struct ChatNumericTextBridge: View {
-  var model: ChatNumericTextModel
+  @ObservedObject var model: ChatNumericTextModel
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !model.shines || reduceMotion)) { context in
       let period = 1.5
       let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
-      let highlight = model.shines && !reduceMotion ? model.color.mix(with: .white, by: 0.64) : model.color
+      let highlight = model.shines && !reduceMotion ? model.color.lodyMixed(with: .white, by: 0.64) : model.color
       Text(model.attributed)
         .foregroundStyle(LinearGradient(
           stops: [
@@ -108,5 +107,23 @@ final class ChatNumericTextHost: UIView {
     hosting.sizeThatFits(
       in: CGSize(width: max(1, size.width), height: UIView.layoutFittingExpandedSize.height)
     )
+  }
+}
+
+private extension Color {
+  /// `Color.mix` is iOS 18; earlier systems blend in UIColor space.
+  func lodyMixed(with other: Color, by fraction: Double) -> Color {
+    if #available(iOS 18.0, *) { return mix(with: other, by: fraction) }
+    let base = UIColor(self)
+    let overlay = UIColor(other)
+    var (r1, g1, b1, a1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+    var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+    base.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+    overlay.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+    return Color(UIColor(
+      red: r1 + (r2 - r1) * fraction,
+      green: g1 + (g2 - g1) * fraction,
+      blue: b1 + (b2 - b1) * fraction,
+      alpha: a1 + (a2 - a1) * fraction))
   }
 }

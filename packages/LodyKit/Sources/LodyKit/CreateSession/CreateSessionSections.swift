@@ -48,7 +48,12 @@ enum CreateSessionSections {
       var image = "", asset = ""
       switch marks[option.id] {
       case .asset(let name): asset = name
-      case .terminal: image = "apple.terminal"
+      case .terminal:
+        if #available(iOS 17.0, *) {
+          image = "apple.terminal"
+        } else {
+          image = "greaterthan.square"
+        }
       case .generic: image = "sparkles"
       case nil: break
       }

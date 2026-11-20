@@ -55,8 +55,8 @@ final class LoginDitherView: UIView, MTKViewDelegate {
       metal.enableSetNeedsDisplay = true
       addSubview(metal)
     }
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: LoginDitherView, _: UITraitCollection) in view.metal?.setNeedsDisplay() }
-    registerForTraitChanges([UITraitDisplayScale.self]) { (view: LoginDitherView, _: UITraitCollection) in view.setNeedsLayout() }
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (view: LoginDitherView, _: UITraitCollection) in view.metal?.setNeedsDisplay() }
+    lodyObserveTraitChanges([.displayScale]) { (view: LoginDitherView, _: UITraitCollection) in view.setNeedsLayout() }
     let pan = UIPanGestureRecognizer(target: self, action: #selector(track(_:)))
     pan.cancelsTouchesInView = false
     addGestureRecognizer(pan)

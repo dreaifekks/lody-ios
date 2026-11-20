@@ -113,10 +113,11 @@ final class FileQuickLookController: QLPreviewController, QLPreviewControllerDat
 
   private func load() {
     loadTask?.cancel()
-    var loading = UIContentUnavailableConfiguration.loading()
+    var loading = LodyEmptyConfiguration()
+    loading.loading = true
     loading.text = String(localized: "native.file.reading", bundle: .lody)
-    loading.background.backgroundColor = .lodyBackground
-    contentUnavailableConfiguration = loading
+    loading.backgroundColor = .lodyBackground
+    lodyContentUnavailable = loading
     spinner.startAnimating()
     let sessionId = sessionId
     let path = path
@@ -165,20 +166,20 @@ final class FileQuickLookController: QLPreviewController, QLPreviewControllerDat
       return
     }
     spinner.stopAnimating()
-    contentUnavailableConfiguration = nil
+    lodyContentUnavailable = nil
     reloadData()
   }
 
   private func fail(_ message: String) {
-    var failed = UIContentUnavailableConfiguration.empty()
-    failed.background.backgroundColor = .lodyBackground
+    var failed = LodyEmptyConfiguration()
+    failed.backgroundColor = .lodyBackground
     failed.image = UIImage(systemName: "doc.badge.ellipsis")
     failed.text = (path as NSString).lastPathComponent
     failed.secondaryText = message
     failed.button.title = String(localized: "native.file.retry", bundle: .lody)
-    failed.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.load() }
+    failed.buttonAction = { [weak self] in self?.load() }
     spinner.stopAnimating()
-    contentUnavailableConfiguration = failed
+    lodyContentUnavailable = failed
   }
 
   func previewControllerDidDismiss(_ controller: QLPreviewController) {

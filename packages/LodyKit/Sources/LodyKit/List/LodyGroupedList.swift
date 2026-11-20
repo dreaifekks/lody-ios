@@ -129,7 +129,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
   private var inputSections: [LodyListSection] = []
   private var notice: LodyListNotice?
   private var loading = false
-  private var unavailableView: UIContentUnavailableView?
+  private var unavailableView: LodyEmptyStateView?
   private static let visualRowID = "__visual"
   private static let noticeSectionID = "__notice"
   private static let skeletonSectionID = "__skeleton"
@@ -348,7 +348,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       updatePlaceholder()
       return
     }
-    var configuration = UIContentUnavailableConfiguration.empty()
+    var configuration = LodyEmptyConfiguration()
     configuration.image = UIImage(systemName: value.symbol)
     configuration.text = value.title
     configuration.secondaryText = value.message.isEmpty ? nil : value.message
@@ -356,12 +356,12 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
       var button = UIButton.Configuration.lodyProminent()
       button.title = value.actionTitle
       configuration.button = button
-      configuration.buttonProperties.primaryAction = UIAction { [weak self] _ in
+      configuration.buttonAction = { [weak self] in
         self?.onUnavailableAction([:])
         self?.forwarded?("unavailableAction", [:])
       }
     }
-    let view = unavailableView ?? UIContentUnavailableView(configuration: configuration)
+    let view = unavailableView ?? LodyEmptyStateView(configuration: configuration)
     view.configuration = configuration
     view.accessibilityIdentifier = "list-unavailable"
     if view.superview == nil { insertSubview(view, aboveSubview: collection) }
@@ -690,7 +690,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     collection.setCollectionViewLayout(layout, animated: false)
     LodyScrollEdges.grouped(collection)
     refreshControl.addTarget(self, action: #selector(refreshPulled), for: .valueChanged)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self], action: #selector(appearanceChanged))
+    lodyObserveTraitChanges([.userInterfaceStyle], action: #selector(appearanceChanged))
     placeholder.textAlignment = .center
     placeholder.numberOfLines = 0
     placeholder.textColor = .secondaryLabel

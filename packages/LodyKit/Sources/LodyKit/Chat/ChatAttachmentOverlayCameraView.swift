@@ -36,8 +36,7 @@ final class ChatAttachmentOverlayCameraView: UIView {
   private var supportsFlash = false
   private var canSwitchCamera = false
   private var flashMode: AVCaptureDevice.FlashMode = .auto
-  private var rotation: AVCaptureDevice.RotationCoordinator?
-  private var rotationObservation: NSKeyValueObservation?
+  private var rotation: LodyCameraRotation?
   var controlInsets = UIEdgeInsets.zero { didSet { controls.safeAreaClearance = controlInsets } }
   var previewLayer: AVCaptureVideoPreviewLayer { preview.previewLayer }
 
@@ -74,7 +73,10 @@ final class ChatAttachmentOverlayCameraView: UIView {
       guard let self else { return }
       setToolsExpanded(!toolsExpanded, animated: true)
     }, for: .touchUpInside)
-    flip.setImage(UIImage(systemName: "arrow.trianglehead.2.clockwise.rotate.90.camera"), for: .normal)
+    // `arrow.trianglehead.2.clockwise.rotate.90.camera` is iOS 18; use the
+    // older camera-flip symbol before it so the button is never empty.
+    flip.setImage(UIImage(systemName: "arrow.trianglehead.2.clockwise.rotate.90.camera")
+      ?? UIImage(systemName: "arrow.triangle.2.circlepath.camera"), for: .normal)
     flip.accessibilityIdentifier = "camera-flip"
     flip.accessibilityLabel = String(localized: "native.chat.camera.flip", bundle: .lody)
     flip.addAction(UIAction { [weak self] _ in
@@ -115,7 +117,7 @@ final class ChatAttachmentOverlayCameraView: UIView {
         self.shutterFlash.alpha = 0
         self.shutterFace.transform = .identity
       }
-      onShutter?(flashMode, rotation?.videoRotationAngleForHorizonLevelCapture ?? 90)
+      onShutter?(flashMode, rotation?.captureAngle ?? 90)
     }, for: .touchUpInside)
     status.textColor = .white
     status.backgroundColor = .black.withAlphaComponent(0.65)
@@ -175,19 +177,7 @@ final class ChatAttachmentOverlayCameraView: UIView {
   }
 
   func preparePreview(device: AVCaptureDevice?) {
-    rotationObservation = nil
-    rotation = device.map { AVCaptureDevice.RotationCoordinator(device: $0, previewLayer: previewLayer) }
-    rotationObservation = rotation?.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.initial, .new]) { [weak self] coordinator, _ in
-      // RotationCoordinator delivers preview-angle observations on the main queue.
-      MainActor.assumeIsolated {
-        guard let connection = self?.previewLayer.connection else { return }
-        let angle = coordinator.videoRotationAngleForHorizonLevelPreview
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
-        CATransaction.commit()
-      }
-    }
+    rotation = device.map { LodyCameraRotation(device: $0, previewLayer: previewLayer) }
   }
 
   func setReady(device: AVCaptureDevice?, canFlip: Bool) {

@@ -19,6 +19,8 @@ final class ActivityPushTokens {
     updates.removeAll()
     session = next
     guard let next else { return }
+    // ActivityKit tokens only exist where Live Activities can run.
+    guard ConversationActivities.supported else { return }
     for activity in Live.activities { observe(activity, session: next) }
     observers.append(Task {
       for await activity in Live.activityUpdates {
@@ -26,13 +28,15 @@ final class ActivityPushTokens {
         observe(activity, session: next)
       }
     })
-    observers.append(Task {
-      if let token = Live.pushToStartToken { await upload(token, session: next) }
-      for await token in Live.pushToStartTokenUpdates {
-        guard !Task.isCancelled else { return }
-        await upload(token, session: next)
-      }
-    })
+    if #available(iOS 17.2, *) {
+      observers.append(Task {
+        if let token = Live.pushToStartToken { await upload(token, session: next) }
+        for await token in Live.pushToStartTokenUpdates {
+          guard !Task.isCancelled else { return }
+          await upload(token, session: next)
+        }
+      })
+    }
   }
 
   private func observe(_ activity: Live, session: PushRegistration.Session) {

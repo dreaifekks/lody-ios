@@ -35,7 +35,6 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     }
   }
   private static let createID = "home-new-session"
-  private var homeTabs: [UITab] = []
   /// Before iOS 26 the create action floats above the tab bar's trailing edge instead of taking a tab.
   private lazy var floatingCreate: UIButton? = Self.makeFloatingCreate()
   private static let floatingSize: CGFloat = 56
@@ -59,7 +58,8 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   override func viewDidLoad() {
     super.viewDidLoad()
     delegate = self
-    mode = .tabBar
+    // `mode` is iOS 18; earlier systems only have the classic tab bar.
+    if #available(iOS 18.0, *) { mode = .tabBar }
     if #available(iOS 26.0, *) { tabBarMinimizeBehavior = .onScrollDown }
     tabBar.tintColor = LodyUIColor.accentFg
     tabBar.unselectedItemTintColor = LodyUIColor.iconSecondary
@@ -88,10 +88,10 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
 
   func install(navigation: @escaping (HomeTab) -> UINavigationController) {
     // Restore roots moved into the regular-width detail column even when UIKit has
-    // already resolved a tab's provider. Each navigation keeps its original UITab.
+    // already resolved a tab's provider. Each navigation keeps its original tab.
     let navigations = HomeTab.allCases.map { ($0, navigation($0)) }
-    if homeTabs.isEmpty {
-      homeTabs = navigations.map { destination, controller in
+    if #available(iOS 18.0, *) {
+      var built = navigations.map { destination, controller in
         let tab = UITab(title: destination.title, image: destination.icon.uiImage,
           identifier: "home-tab-\(destination)") { _ in controller }
         tab.accessibilityIdentifier = tab.identifier
@@ -101,8 +101,19 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
         let create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
           identifier: Self.createID) { _ in UIViewController() }
         create.accessibilityIdentifier = Self.createID
-        homeTabs.append(create)
+        built.append(create)
       }
+      tabs = built
+      // iOS 27 supports a separate prominent action without misrepresenting it as Search.
+      if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
+    } else if viewControllers == nil {
+      // Classic tab bar items carry the same titles, icons and identifiers.
+      for (index, (destination, controller)) in navigations.enumerated() {
+        let item = UITabBarItem(title: destination.title, image: destination.icon.uiImage, tag: index)
+        item.accessibilityIdentifier = "home-tab-\(destination)"
+        controller.tabBarItem = item
+      }
+      viewControllers = navigations.map(\.1)
     }
     // Lists keep their last rows clear of the floating create action.
     if floatingCreate != nil {
@@ -110,13 +121,14 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
         controller.additionalSafeAreaInsets.bottom = destination == .settings ? 0 : Self.floatingSize + Self.floatingMargin
       }
     }
-    tabs = homeTabs
-    // iOS 27 supports a separate prominent action without misrepresenting it as Search.
-    if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
   }
 
   func show(_ destination: HomeTab) {
-    selectedTab = tab(forIdentifier: "home-tab-\(destination)")
+    if #available(iOS 18.0, *) {
+      selectedTab = tab(forIdentifier: "home-tab-\(destination)")
+    } else {
+      selectedIndex = HomeTab.allCases.firstIndex(of: destination) ?? 0
+    }
     if #available(iOS 26.0, *) { tabBarMinimizeBehavior = destination == .chats ? .onScrollDown : .never }
     updateCreate(destination)
   }
@@ -124,25 +136,44 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   /// The create action keeps the compose glyph; on Schedules it adds a schedule, elsewhere it starts a chat.
   private func updateCreate(_ destination: HomeTab) {
     let title = String(localized: String.LocalizationValue(destination == .schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
-    tab(forIdentifier: Self.createID)?.title = title
+    if #available(iOS 18.0, *) { tab(forIdentifier: Self.createID)?.title = title }
     floatingCreate?.accessibilityLabel = title
     floatingCreate?.isHidden = destination == .settings
   }
 
+  @available(iOS 18.0, *)
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
     if tab.identifier == Self.createID { if canCreate { onCreate() }; return false }
     return true
   }
 
+  @available(iOS 18.0, *)
   func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
     guard let destination = HomeTab.allCases.first(where: { selectedTab.identifier == "home-tab-\($0)" }) else { return }
+    didSelect(destination)
+  }
+
+  // The create action never exists as a classic tab bar item (the floating
+  // button covers it below iOS 26), so every classic selection is a real tab.
+  func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
+    guard let index = viewControllers?.firstIndex(of: viewController),
+          index < HomeTab.allCases.count else { return }
+    didSelect(HomeTab.allCases[index])
+  }
+
+  private func didSelect(_ destination: HomeTab) {
     if #available(iOS 26.0, *) { tabBarMinimizeBehavior = destination == .chats ? .onScrollDown : .never }
     updateCreate(destination)
     onSelect(destination)
   }
 
   @objc private func longPressed(_ gesture: UILongPressGestureRecognizer) {
-    guard gesture.state == .began, selectedTab?.identifier == "home-tab-settings" else { return }
+    guard gesture.state == .began else { return }
+    if #available(iOS 18.0, *) {
+      guard selectedTab?.identifier == "home-tab-settings" else { return }
+    } else {
+      guard selectedIndex == HomeTab.allCases.firstIndex(of: .settings) else { return }
+    }
     onDebug()
   }
 }

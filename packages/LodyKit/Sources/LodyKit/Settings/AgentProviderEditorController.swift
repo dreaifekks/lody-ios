@@ -131,8 +131,14 @@ final class AgentProviderEditorController: LodyFormController {
     refreshButton.accessibilityIdentifier = "provider-refresh-models"
     refreshButton.addAction(UIAction { [weak self] _ in self?.refreshModels() }, for: .touchUpInside)
     var actionRows: [UIView] = [testButton, refreshButton, authButton]
+    let rateLimits: String
+    if #available(iOS 17.0, *) {
+      rateLimits = "gauge.with.dots.needle.33percent"
+    } else {
+      rateLimits = "gauge.medium"
+    }
     let symbols = ["binary-status": "shippingbox", "binary-install": "arrow.down.circle",
-                   "pi-extension-scan": "puzzlepiece.extension", "rate-limits-refresh": "gauge.with.dots.needle.33percent"]
+                   "pi-extension-scan": "puzzlepiece.extension", "rate-limits-refresh": rateLimits]
     for action in ["binary-status", "binary-install", "pi-extension-scan", "rate-limits-refresh"] {
       let button = UIButton(type: .system)
       configureAction(button, title: text(action), symbol: symbols[action] ?? "circle")

@@ -100,13 +100,15 @@ final class NotificationPreviewController: NotificationPreviewHost {
 
   override func viewDidLoad() {
     title = "Notification fixture"
-    for view in [
+    var controls: [UIView] = [
       Self.label("notification-preview-ready", "Notification permission fixture"),
       opened,
-      Self.button("activity-demo", "Toggle sample Live Activity") { [weak self] in self?.toggleActivity() },
-
-      Self.button("notification-reset", "Reset") { [weak self] in self?.reset() },
-    ] as [UIView] {
+    ]
+    if ConversationActivities.supported {
+      controls.append(Self.button("activity-demo", "Toggle sample Live Activity") { [weak self] in self?.toggleActivity() })
+    }
+    controls.append(Self.button("notification-reset", "Reset") { [weak self] in self?.reset() })
+    for view in controls {
       header.addArrangedSubview(view)
     }
     super.viewDidLoad()

@@ -82,7 +82,7 @@ final class ChatPlanCell: UICollectionViewCell {
     decisionMessage.font = .preferredFont(forTextStyle: .footnote)
     decisionMessage.textColor = .secondaryLabel
     decisionMessage.numberOfLines = 0
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (self: ChatPlanCell, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (self: ChatPlanCell, _) in
       self.card.layer.borderColor = UIColor.separator.cgColor
     }
   }

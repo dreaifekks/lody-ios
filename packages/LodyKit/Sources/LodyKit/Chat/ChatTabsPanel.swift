@@ -66,7 +66,7 @@ struct ChatTabsPanel: View {
     }
     .clipped()
     .padding(.vertical, LodySpacing.xs)
-    .onChange(of: state.height) { _, height in state.resize?(height) }
+    .onChange(of: state.height) { height in state.resize?(height) }
   }
 
   private func changePage(_ closed: Bool) {
@@ -203,8 +203,8 @@ final class ChatTabsOverlay: UIView {
     card.alpha = 0
     content.view.alpha = 0
     if !UIAccessibility.isReduceMotionEnabled { card.transform = collapsedTransform }
-    UIView.animate(springDuration: 0.3, bounce: 0, initialSpringVelocity: 0,
-                   options: [.beginFromCurrentState, .allowUserInteraction]) {
+    UIView.lodySpring(duration: 0.3, bounce: 0, initialSpringVelocity: 0,
+                      options: [.beginFromCurrentState, .allowUserInteraction]) {
       self.card.alpha = 1
       self.card.transform = .identity
       self.content.view.alpha = 1

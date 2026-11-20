@@ -114,7 +114,7 @@ private final class SessionRelationCell: UICollectionViewListCell {
     contentView.addSubview(strip)
     rowHeight = contentView.heightAnchor.constraint(equalToConstant: 44)
     rowHeight.isActive = true
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (cell: SessionRelationCell, _) in cell.updateHeight() }
+    lodyObserveTraitChanges([.preferredContentSizeCategory]) { (cell: SessionRelationCell, _) in cell.updateHeight() }
   }
   required init?(coder: NSCoder) { fatalError() }
   func updateHeight() {

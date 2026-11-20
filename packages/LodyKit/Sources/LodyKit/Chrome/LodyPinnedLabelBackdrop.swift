@@ -16,7 +16,7 @@ final class LodyPinnedLabelBackdrop: UIView {
     addSubview(base)
     addSubview(upper)
     updateTone()
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: LodyPinnedLabelBackdrop, _: UITraitCollection) in
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (view: LodyPinnedLabelBackdrop, _: UITraitCollection) in
       view.updateTone()
     }
   }

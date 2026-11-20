@@ -40,7 +40,7 @@ final class ChatProposalCell: UICollectionViewCell {
     noteLabel.numberOfLines = 0
     dismissButton.addAction(UIAction { [weak self] _ in self?.decide(false) }, for: .primaryActionTriggered)
     confirmButton.addAction(UIAction { [weak self] _ in self?.confirm() }, for: .primaryActionTriggered)
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitUserInterfaceStyle.self]) { (cell: ChatProposalCell, _) in
+    lodyObserveTraitChanges([.preferredContentSizeCategory, .userInterfaceStyle]) { (cell: ChatProposalCell, _) in
       cell.card.layer.borderColor = UIColor.separator.resolvedColor(with: cell.traitCollection).cgColor
       if let row = cell.row { cell.configure(row) }
     }

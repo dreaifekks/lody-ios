@@ -123,8 +123,15 @@ private struct LodyListBarsView: View {
             .fill(.clear)
             .contentShape(Rectangle())
             .onTapGesture { location in
-              guard let plot = proxy.plotFrame else { return }
-              let x = location.x - geometry[plot].origin.x
+              let x: CGFloat
+              if #available(iOS 17.0, *) {
+                guard let plot = proxy.plotFrame else { return }
+                x = location.x - geometry[plot].origin.x
+              } else {
+                // No plot frame anchor before iOS 17; the overlay already hugs
+                // the plot, so axis-edge taps land a few points off at worst.
+                x = location.x
+              }
               guard let id: String = proxy.value(atX: x) else { return }
               selected = selected == id ? nil : id
             }

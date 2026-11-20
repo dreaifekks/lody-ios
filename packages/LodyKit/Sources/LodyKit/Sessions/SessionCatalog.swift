@@ -230,8 +230,19 @@ struct SessionCatalog: Equatable, Sendable {
   var machineSimulators: [String: String] = [:]
   /// Computer id to `available` when its CLI offers Android Emulator preview, on any OS.
   var machineEmulators: [String: String] = [:]
+  /// Computer id to numeric protocol capability versions advertised by its CLI.
+  var machineCapabilities: [String: [String: Int]] = [:]
 
   func session(_ id: String) -> SessionItem? { sessions.first { $0.id == id } }
+
+  func supportsPreviewStopProcess(machineId: String) -> Bool {
+    (machineCapabilities[machineId]?["previewStopProcess"] ?? 0) >= 1
+  }
+
+  func supportsDeviceShutdown(_ platform: DevicePlatform, machineId: String) -> Bool {
+    let key = platform == .android ? "androidEmulatorShutdown" : "iosSimulatorShutdown"
+    return (machineCapabilities[machineId]?[key] ?? 0) >= 1
+  }
 
   func viewed(_ views: [String: Double]) -> SessionCatalog {
     guard !views.isEmpty else { return self }
@@ -253,13 +264,14 @@ struct SessionCatalog: Equatable, Sendable {
       var machineOs: Lossy<[String: String]>?
       var machineSimulators: Lossy<[String: String]>?
       var machineEmulators: Lossy<[String: String]>?
+      var machineCapabilities: Lossy<[String: [String: Int]]>?
     }
     struct Saved: Decodable { var catalog: Shape }
     guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
       machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
-      machineEmulators: shape.machineEmulators?.value ?? [:]
+      machineEmulators: shape.machineEmulators?.value ?? [:], machineCapabilities: shape.machineCapabilities?.value ?? [:]
     )
   }
 }

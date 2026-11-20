@@ -39,7 +39,7 @@ final class ChatFileCardCell: UICollectionViewCell {
     chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
     isAccessibilityElement = true
     accessibilityTraits = .button
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (cell: ChatFileCardCell, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (cell: ChatFileCardCell, _) in
       cell.card.layer.borderColor = UIColor.separator.resolvedColor(with: cell.traitCollection).cgColor
     }
   }

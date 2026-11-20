@@ -71,7 +71,16 @@ import UIKit
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-  isolated deinit { stream?.stop(); leaving?.stop() }
+  isolated deinit {
+    if let stream {
+      if stream.preview === self { stream.preview = nil }
+      if !stream.isRetainedByCache { stream.stop() }
+    }
+    if let leaving {
+      if leaving.preview === self { leaving.preview = nil }
+      if !leaving.isRetainedByCache { leaving.stop() }
+    }
+  }
 
   func setSource(_ json: String) {
     let next = SimulatorStreamView.shared(json)
@@ -87,7 +96,8 @@ import UIKit
       powerOff(previous)
     } else {
       endMotion()
-      previous?.stop()
+      if previous?.preview === self { previous?.preview = nil }
+      if previous?.isRetainedByCache != true { previous?.stop() }
       previous?.removeFromSuperview()
     }
     if next == nil, motion == nil { isHidden = true }
@@ -235,8 +245,11 @@ import UIKit
     setChrome(alpha: 1)
     blackout?.removeFromSuperview()
     blackout = nil
-    leaving?.stop()
-    leaving?.removeFromSuperview()
+    if let leaving {
+      if leaving.preview === self { leaving.preview = nil }
+      if !leaving.isRetainedByCache { leaving.stop() }
+      leaving.removeFromSuperview()
+    }
     leaving = nil
     isUserInteractionEnabled = true
   }

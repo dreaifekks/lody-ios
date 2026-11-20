@@ -93,6 +93,8 @@ export type Catalog = {
   machineSimulators?: Record<string, 'available' | 'upgrade-required'>;
   /** Machines whose CLI advertises Android emulator preview (`androidEmulator: 1`), on any OS. */
   machineEmulators?: Record<string, 'available'>;
+  /** Per-machine numeric protocol capability versions advertised by the CLI. */
+  machineCapabilities?: Record<string, Record<string, number>>;
 };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };
 export type Connection = {

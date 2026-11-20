@@ -144,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
     shader_bundle = Path(output) / 'LodyKitShaders.bundle'
     shader_bundle.mkdir()
     air = str(Path(output) / 'ChatEffortHeat.air')
-    subprocess.run(['xcrun', '--sdk', 'iphonesimulator', 'metal', '-c', '-target', 'air64-apple-ios18.0-simulator', '-isysroot', sdk, str(kit / 'Sources/LodyKit/Chat/Shaders/ChatEffortHeat.metal'), '-o', air], check=True, timeout=120)
+    subprocess.run(['xcrun', '--sdk', 'iphonesimulator', 'metal', '-c', '-target', 'air64-apple-ios16.4-simulator', '-isysroot', sdk, str(kit / 'Sources/LodyKit/Chat/Shaders/ChatEffortHeat.metal'), '-o', air], check=True, timeout=120)
     subprocess.run(['xcrun', '--sdk', 'iphonesimulator', 'metallib', air, '-o', str(shader_bundle / 'default.metallib')], check=True, timeout=120)
     # Build the extracted modules from their production sources. Core remains
     # host-testable; UIKit checks link the same package module as the app.
@@ -158,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         command = ['xcrun', 'swiftc', '-swift-version', '6']
         if simulator:
             arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
-            command += ['-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator']
+            command += ['-sdk', sdk, '-target', f'{arch}-apple-ios16.4-simulator']
         modules = ['ChatKitCore', 'ChatKit'] if simulator else ['ChatKitCore']
         for module in modules:
             sources = sorted((root / 'packages/chat-kit/Sources' / module).glob('*.swift'))
@@ -177,7 +177,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
         for module, version in lexical_modules:
             sources = sorted((root / 'packages/lexical-swift/Sources' / module).rglob('*.swift'))
-            subprocess.run(['xcrun', 'swiftc', '-swift-version', version, '-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator',
+            subprocess.run(['xcrun', 'swiftc', '-swift-version', version, '-sdk', sdk, '-target', f'{arch}-apple-ios16.4-simulator',
                 '-I', str(lexical_dir), '-emit-module', '-emit-library', '-static', '-module-name', module,
                 '-emit-module-path', str(lexical_dir / f'{module}.swiftmodule'), *map(str, sources),
                 '-o', str(lexical_dir / f'lib{module}.a')], check=True, timeout=600)
@@ -220,7 +220,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         if simulator:
             arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
             # These checks exercise iOS 26 scroll edges, glass and navigation APIs directly.
-            ios = '26.0' if name in ['scroll-edges', 'glass-transition', 'model-panel', 'chat-title'] else '18.0'
+            ios = '26.0' if name in ['scroll-edges', 'glass-transition', 'model-panel', 'chat-title'] else '16.4'
             command += ['-sdk', sdk, '-target', f'{arch}-apple-ios{ios}-simulator']
         if name in ['composer', 'composer-dictation']:
             manifest = subprocess.check_output([
@@ -251,14 +251,14 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 resources.mkdir()
                 subprocess.run(['xcrun', 'actool', str(design / 'Resources/LodyIcons.xcassets'),
                     '--compile', str(resources), '--platform', 'iphonesimulator',
-                    '--minimum-deployment-target', '18.0', '--target-device', 'iphone',
+                    '--minimum-deployment-target', '16.4', '--target-device', 'iphone',
                     '--target-device', 'ipad'], check=True, timeout=120)
                 # SwiftPM normally generates this accessor; these checks compile directly.
                 accessor = directory / 'resource_bundle_accessor.swift'
                 accessor.write_text('import Foundation\nextension Bundle { static let module = Bundle(path: '
                                     + '"' + str(resources) + '")! }\n')
                 subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-sdk', sdk,
-                    '-target', f'{arch}-apple-ios18.0-simulator', '-emit-module', '-emit-library', '-static',
+                    '-target', f'{arch}-apple-ios16.4-simulator', '-emit-module', '-emit-library', '-static',
                     '-module-name', 'LodyDesignSystem', '-emit-module-path', str(directory / 'LodyDesignSystem.swiftmodule'),
                     *map(str, sorted(design.glob('*.swift'))), str(accessor),
                     '-o', str(directory / 'libLodyDesignSystem.a')], check=True, timeout=240)
@@ -270,7 +270,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 sources = sorted((root / 'packages/lody-core/Sources/LodyCore').rglob('*.swift'))
                 compile_core = ['xcrun', 'swiftc', '-swift-version', '6']
                 if simulator:
-                    compile_core += ['-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator']
+                    compile_core += ['-sdk', sdk, '-target', f'{arch}-apple-ios16.4-simulator']
                 subprocess.run(compile_core + ['-emit-module', '-emit-library', '-static', '-module-name', 'LodyCore',
                     '-emit-module-path', str(directory / 'LodyCore.swiftmodule'), *map(str, sources),
                     '-o', str(directory / 'libLodyCore.a')], check=True, timeout=120)
@@ -281,7 +281,7 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
             runtime = Path(output) / 'preview-runtime'
             runtime.mkdir()
             subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-sdk', sdk,
-                '-target', f'{arch}-apple-ios18.0-simulator', '-emit-module', '-emit-library', '-static',
+                '-target', f'{arch}-apple-ios16.4-simulator', '-emit-module', '-emit-library', '-static',
                 '-module-name', 'LodyRuntime', '-emit-module-path', str(runtime / 'LodyRuntime.swiftmodule'),
                 str(root / 'packages/lody-core/Sources/LodyRuntime/RuntimeDocument.swift'),
                 '-o', str(runtime / 'libLodyRuntime.a')], check=True, timeout=120)

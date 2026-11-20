@@ -1150,7 +1150,8 @@
               "type": "object",
               "properties": {
                 "action": { "type": "string", "const": "stop" },
-                "operationId": { "type": "string", "minLength": 1 }
+                "operationId": { "type": "string", "minLength": 1 },
+                "shutdownDevice": { "type": "boolean" }
               },
               "required": ["action", "operationId"]
             }
@@ -2081,7 +2082,8 @@
               "type": "object",
               "properties": {
                 "action": { "type": "string", "const": "stop" },
-                "operationId": { "type": "string", "minLength": 1 }
+                "operationId": { "type": "string", "minLength": 1 },
+                "shutdownDevice": { "type": "boolean" }
               },
               "required": ["action", "operationId"]
             }
@@ -3591,7 +3593,9 @@
       "properties": {
         "sessionId": { "type": "string", "minLength": 1 },
         "userId": { "type": "string" },
-        "action": { "type": "string", "enum": ["create", "revoke"] }
+        "action": { "type": "string", "enum": ["create", "status", "revoke"] },
+        "restart": { "type": "boolean" },
+        "stopProcess": { "type": "boolean" }
       },
       "required": ["sessionId", "userId"]
     },
@@ -3599,6 +3603,8 @@
       "type": "object",
       "properties": {
         "url": { "type": "string", "minLength": 1 },
+        "expiresAt": { "type": "number" },
+        "active": { "type": "boolean" },
         "error": { "type": "string" },
         "message": { "type": "string" },
         "status": {

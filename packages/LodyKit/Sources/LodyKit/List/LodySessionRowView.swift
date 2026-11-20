@@ -83,7 +83,7 @@ final class LodySessionRowView: UIView, UIContentView {
     tree.lineWidth = 1
     tree.lineCap = .round
     layer.addSublayer(tree)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: Self, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (view: LodySessionRowView, _) in
       view.setNeedsLayout()
     }
     title.adjustsFontForContentSizeCategory = true

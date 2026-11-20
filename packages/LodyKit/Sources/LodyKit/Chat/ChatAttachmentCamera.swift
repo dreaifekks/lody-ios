@@ -43,8 +43,7 @@ final class ChatAttachmentCameraView: UIView {
   private var ready = false
   private var busy = false
   private var flashMode: AVCaptureDevice.FlashMode = .auto
-  private var rotation: AVCaptureDevice.RotationCoordinator?
-  private var rotationObservation: NSKeyValueObservation?
+  private var rotation: LodyCameraRotation?
   var controlInsets = UIEdgeInsets.zero
   var previewLayer: AVCaptureVideoPreviewLayer { preview.previewLayer }
 
@@ -117,9 +116,12 @@ final class ChatAttachmentCameraView: UIView {
       UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
       shutterFlash.alpha = 1
       UIView.animate(withDuration: 0.2, delay: 0.02) { self.shutterFlash.alpha = 0 }
-      onShutter?(flashMode, rotation?.videoRotationAngleForHorizonLevelCapture ?? 90)
+      onShutter?(flashMode, rotation?.captureAngle ?? 90)
     }, for: .touchUpInside)
-    flip.setImage(UIImage(systemName: "arrow.trianglehead.2.clockwise.rotate.90.camera"), for: .normal)
+    // `arrow.trianglehead.2.clockwise.rotate.90.camera` is iOS 18; use the
+    // older camera-flip symbol before it so the button is never empty.
+    flip.setImage(UIImage(systemName: "arrow.trianglehead.2.clockwise.rotate.90.camera")
+      ?? UIImage(systemName: "arrow.triangle.2.circlepath.camera"), for: .normal)
     flip.accessibilityLabel = String(localized: "native.chat.camera.flip", bundle: .lody)
     flip.accessibilityIdentifier = "camera-flip"
     library.setImage(UIImage(systemName: "photo.stack"), for: .normal)
@@ -245,16 +247,7 @@ final class ChatAttachmentCameraView: UIView {
     ready = true
     busy = false
     status.text = nil
-    rotationObservation = nil
-    rotation = device.map { AVCaptureDevice.RotationCoordinator(device: $0, previewLayer: previewLayer) }
-    rotationObservation = rotation?.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.initial, .new]) { [weak self] coordinator, _ in
-      // RotationCoordinator delivers preview-angle observations on the main queue.
-      MainActor.assumeIsolated {
-        guard let connection = self?.previewLayer.connection else { return }
-        let angle = coordinator.videoRotationAngleForHorizonLevelPreview
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
-      }
-    }
+    rotation = device.map { LodyCameraRotation(device: $0, previewLayer: previewLayer) }
     flash.isEnabled = device?.hasFlash == true || ChatCameraCapture.fixture
     flip.isEnabled = canFlip
     render()

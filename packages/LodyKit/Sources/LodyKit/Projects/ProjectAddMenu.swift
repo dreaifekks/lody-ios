@@ -88,8 +88,8 @@ final class ProjectAddMenu: UIView {
     for (index, view) in options.reversed().enumerated() {
       view.alpha = 0
       if !reduce { view.transform = Self.folded(view, rise: CGFloat(index + 1) * 28) }
-      UIView.animate(springDuration: reduce ? 0.2 : 0.42, bounce: reduce ? 0 : 0.22, initialSpringVelocity: 0, delay: Double(index) * 0.045,
-                     options: [.allowUserInteraction]) {
+      UIView.lodySpring(duration: reduce ? 0.2 : 0.42, bounce: reduce ? 0 : 0.22, initialSpringVelocity: 0, delay: Double(index) * 0.045,
+                        options: [.allowUserInteraction]) {
         view.alpha = 1
         view.transform = .identity
       }

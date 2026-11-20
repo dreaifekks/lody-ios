@@ -37,7 +37,7 @@ final class LodyStatusGlyphView: UIView {
       shape.lineJoin = .round
       layer.addSublayer(shape)
     }
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: Self, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (view: LodyStatusGlyphView, _) in
       view.setNeedsLayout()
     }
     NotificationCenter.default.addObserver(

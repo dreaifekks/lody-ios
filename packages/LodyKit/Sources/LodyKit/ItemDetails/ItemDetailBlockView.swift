@@ -106,7 +106,8 @@ enum ItemDetailBlockView {
       if offset > 0 {
         let rule = UIView()
         rule.backgroundColor = .separator
-        rule.heightAnchor.constraint(equalToConstant: 1 / max(1, UITraitCollection.current.displayScale)).isActive = true
+        let scale = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.scale ?? 2
+        rule.heightAnchor.constraint(equalToConstant: 1 / max(1, scale)).isActive = true
         stack.addArrangedSubview(rule)
       }
       stack.addArrangedSubview(section)

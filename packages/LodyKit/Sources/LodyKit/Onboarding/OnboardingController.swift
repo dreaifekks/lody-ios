@@ -259,11 +259,14 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
     let group = UIStackView()
     group.axis = .vertical
     group.spacing = 8
+    // `apple.logo` is the iOS 18 symbol name; earlier systems use `applelogo`.
+    let appleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+    let appleMark = UIImage(systemName: "apple.logo", withConfiguration: appleConfiguration)
+      ?? UIImage(systemName: "applelogo", withConfiguration: appleConfiguration)
     let marks: [(NativeLastLoginMethod, NativeLoginMethod, String, String, UIImage?)] = [
       (.github, .github, String(localized: "auth.login.github", bundle: .lody), "auth.native.github", UIImage(named: "lody-login-github")),
       (.google, .google, String(localized: "auth.login.google", bundle: .lody), "auth.native.google", UIImage(named: "lody-login-google")),
-      (.apple, .apple, String(localized: "auth.login.apple", bundle: .lody), "auth-apple",
-       UIImage(systemName: "apple.logo", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))),
+      (.apple, .apple, String(localized: "auth.login.apple", bundle: .lody), "auth-apple", appleMark),
       (.discord, .discord, String(localized: "auth.login.discord", bundle: .lody), "auth.native.discord", UIImage(named: "lody-login-discord")),
     ]
     for (kind, method, label, identifier, image) in marks {

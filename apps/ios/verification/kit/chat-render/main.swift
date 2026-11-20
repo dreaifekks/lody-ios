@@ -187,7 +187,7 @@ for style in [UIUserInterfaceStyle.light, .dark] {
       }
       let cell = ChatCell(frame: CGRect(x: 0, y: 0, width: 358, height: ChatCell.processHeight(for: row, width: 358, traits: traits)))
       window.addSubview(cell)
-      cell.traitOverrides.preferredContentSizeCategory = category
+      if #available(iOS 17.0, *) { cell.traitOverrides.preferredContentSizeCategory = category }
       cell.overrideUserInterfaceStyle = style
       cell.configure(row, text: title)
       cell.setNeedsLayout()

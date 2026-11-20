@@ -26,7 +26,7 @@ final class ChatImageCell: UICollectionViewCell {
     photo.layer.cornerCurve = .continuous
     photo.clipsToBounds = true
     photo.layer.borderWidth = 0.5
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (cell: ChatImageCell, _) in cell.setNeedsLayout() }
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (cell: ChatImageCell, _) in cell.setNeedsLayout() }
     failure.text = String(localized: "native.chat.image.failed", bundle: .lody)
     failure.font = .preferredFont(forTextStyle: .caption1)
     failure.textColor = .secondaryLabel

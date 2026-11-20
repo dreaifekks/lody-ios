@@ -847,14 +847,14 @@ private struct MoreRowContent: View {
 
 /// Home group labels the person collapsed, stored per device by section id. Headers observe it,
 /// so a toggle turns the chevron of the label already on screen.
-@MainActor @Observable
-private final class ChatGroupFolds {
+@MainActor
+private final class ChatGroupFolds: ObservableObject {
   private static let key = "homeCollapsedGroups"
-  private var collapsed = Set(UserDefaults.standard.stringArray(forKey: ChatGroupFolds.key) ?? [])
+  @Published private var collapsed = Set(UserDefaults.standard.stringArray(forKey: ChatGroupFolds.key) ?? [])
   /// Home labels collapse; search labels do not.
-  var enabled = true
+  @Published var enabled = true
   /// Archived buckets reuse the activity ids, so they fold separately.
-  var scope = ""
+  @Published var scope = ""
 
   func isCollapsed(_ id: String) -> Bool { enabled && collapsed.contains(scope + id) }
 
@@ -868,7 +868,7 @@ private final class ChatGroupFolds {
 private struct SectionTitle: View {
   let text: String
   var repository = ""
-  let folds: ChatGroupFolds
+  @ObservedObject var folds: ChatGroupFolds
   let groupId: String
   let onToggle: () -> Void
 

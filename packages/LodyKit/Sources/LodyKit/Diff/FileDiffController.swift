@@ -24,7 +24,7 @@ class FileDiffController: UIViewController {
   private let files: FileContentService
   private let document = DiffDocumentView()
   private let toolbar = LodyDiffToolbar(frame: .zero)
-  private let notice = UIContentUnavailableView(configuration: .empty())
+  private let notice = LodyEmptyStateView()
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let renderProbe = UIView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
   private var body = Body.loading
@@ -145,13 +145,11 @@ class FileDiffController: UIViewController {
     case .loading:
       spinner.startAnimating()
     case .notice(let text, let action):
-      var configuration = UIContentUnavailableConfiguration.empty()
+      var configuration = LodyEmptyConfiguration()
       configuration.secondaryText = text
       if let action {
-        var button = UIButton.Configuration.gray()
-        button.title = String(localized: String.LocalizationValue(action == .retry ? "common.retry" : "diff.action.previewFile"), bundle: .lody)
-        configuration.button = button
-        configuration.buttonProperties.primaryAction = UIAction { [weak self] _ in
+        configuration.button.title = String(localized: String.LocalizationValue(action == .retry ? "common.retry" : "diff.action.previewFile"), bundle: .lody)
+        configuration.buttonAction = { [weak self] in
           if action == .retry { self?.reload() } else { self?.preview() }
         }
       }

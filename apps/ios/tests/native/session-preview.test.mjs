@@ -104,12 +104,14 @@ const nonce = '4b9f2d1e-8c3a-4f5b-9d6e-1a2b3c4d5e6f';
 
 test('create proves the exact intent and opens the tunnel path', async () => {
   const intents = [];
+  const expiresAt = 1_800_000_060_000;
   const { calls, rpc } = machine(({ method }) =>
     method === 'machine/preview-control'
       ? { result: { success: true, runtimeNonce: nonce } }
       : {
           result: {
             success: true,
+            expiresAt,
             connection: { status: 'active', publicUrl: tunnel },
           },
         },
@@ -125,6 +127,8 @@ test('create proves the exact intent and opens the tunnel path', async () => {
   );
   assert.deepEqual(reply, {
     url: 'https://calm-river-demo.trycloudflare.com/app?__lody_preview_token=abc',
+    expiresAt,
+    active: true,
   });
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -151,6 +155,96 @@ test('create proves the exact intent and opens the tunnel path', async () => {
     restart: false,
   });
   assert.equal('requesterUserId' in intents[0], false);
+});
+
+test('create with restart signs restart: true and forwards restart param', async () => {
+  const intents = [];
+  const expiresAt = 1_800_000_120_000;
+  const { calls, rpc } = machine(({ method }) =>
+    method === 'machine/preview-control'
+      ? { result: { success: true, runtimeNonce: nonce } }
+      : {
+          result: {
+            success: true,
+            expiresAt,
+            connection: { status: 'active', publicUrl: tunnel },
+          },
+        },
+  );
+  const reply = await runtime.createPreview(
+    args({
+      rpc,
+      restart: true,
+      mintToken: async (intent) => {
+        intents.push(intent);
+        return 'signed';
+      },
+    }),
+  );
+  assert.equal(reply.active, true);
+  assert.equal(reply.expiresAt, expiresAt);
+  assert.equal(calls[1].params.restart, true);
+  assert.deepEqual(intents[0].operation, {
+    action: 'create',
+    target: args().target,
+    restart: true,
+  });
+});
+
+test('status checks preview availability and distinguishes inactive from error', async () => {
+  const intents = [];
+  const expiresAt = 1_800_000_180_000;
+  let { calls, rpc } = machine(({ method }) =>
+    method === 'machine/preview-control'
+      ? { result: { success: true, runtimeNonce: nonce } }
+      : {
+          result: {
+            success: true,
+            expiresAt,
+            connection: { status: 'active', publicUrl: tunnel },
+          },
+        },
+  );
+  const active = await runtime.statusPreview(
+    args({
+      rpc,
+      mintToken: async (intent) => {
+        intents.push(intent);
+        return 'signed';
+      },
+    }),
+  );
+  assert.deepEqual(active, {
+    url: 'https://calm-river-demo.trycloudflare.com/app?__lody_preview_token=abc',
+    expiresAt,
+    active: true,
+  });
+  assert.deepEqual(intents[0].operation, { action: 'status' });
+  assert.equal(calls[1].method, 'session/preview-status');
+
+  ({ rpc } = machine(({ method }) =>
+    method === 'machine/preview-control'
+      ? { result: { success: true, runtimeNonce: nonce } }
+      : {
+          result: {
+            success: true,
+            connection: { status: 'closed', closedReason: 'idle_timeout' },
+          },
+        },
+  ));
+  assert.deepEqual(await runtime.statusPreview(args({ rpc })), {
+    active: false,
+  });
+
+  ({ rpc } = machine(({ method }) =>
+    method === 'machine/preview-control'
+      ? { result: { success: true, runtimeNonce: nonce } }
+      : { error: { code: 'timeout', message: 'Timed out' } },
+  ));
+  assert.deepEqual(await runtime.statusPreview(args({ rpc })), {
+    error: 'timeout',
+    message: 'Timed out',
+  });
 });
 
 test('machine failures surface its code and message', async () => {
@@ -209,6 +303,31 @@ test('revoke signs a revoke intent and reports success', async () => {
     'requestedByUserId',
     'sessionId',
   ]);
+});
+
+test('revoke with stopProcess signs stopProcess: true and forwards stopProcess param', async () => {
+  const intents = [];
+  const { calls, rpc } = machine(({ method }) =>
+    method === 'machine/preview-control'
+      ? { result: { success: true, runtimeNonce: nonce } }
+      : { result: { success: true } },
+  );
+  const reply = await runtime.revokePreview(
+    args({
+      rpc,
+      stopProcess: true,
+      mintToken: async (intent) => {
+        intents.push(intent);
+        return 'signed';
+      },
+    }),
+  );
+  assert.deepEqual(reply, {});
+  assert.deepEqual(intents[0].operation, {
+    action: 'revoke',
+    stopProcess: true,
+  });
+  assert.equal(calls[1].params.stopProcess, true);
 });
 
 test('summary labels the target and tracks a live connection', () => {

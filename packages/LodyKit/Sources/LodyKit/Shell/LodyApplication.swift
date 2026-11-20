@@ -36,7 +36,10 @@ public final class LodyApplication {
     lodyApplyWindowAccent()
     DataRuntime.current = runtime
     AuthSession.shared.presenter = { LodyShell.shared.presenter }
-    AuthSession.shared.stopRuntime = { [weak self] in self?.runtime.stop() }
+    AuthSession.shared.stopRuntime = { [weak self] in
+      SessionPreviewCache.shared.clearAll()
+      self?.runtime.stop()
+    }
     OutboxSession.shared.presenter = { LodyShell.shared.presenter }
     OutboxSession.shared.attach(runtime)
     CatalogSession.shared.attach(runtime)
@@ -90,6 +93,7 @@ public final class LodyApplication {
     guard auth.localReady, !auth.busy else { return }
     activities.refresh()
     if auth.account == nil {
+      SessionPreviewCache.shared.clearAll()
       shares.stop()
       guard onboarding == nil else { return }
       let regular = HomeController.current?.traitCollection.horizontalSizeClass == .regular

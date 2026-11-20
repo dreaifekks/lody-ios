@@ -4,7 +4,7 @@ import UIKit
 final class SimulatorController: UIViewController {
   private let store: SessionSimulator
   private let simulator = LodySimulatorView(frame: .zero)
-  private let notice = UIContentUnavailableView(configuration: .empty())
+  private let notice = LodyEmptyStateView()
   private var command = 0
 
   init(store: SessionSimulator) { self.store = store; super.init(nibName: nil, bundle: nil) }
@@ -32,7 +32,7 @@ final class SimulatorController: UIViewController {
     let source = store.sourceJSON
     simulator.setSource(source); simulator.isHidden = source.isEmpty; notice.isHidden = !source.isEmpty
     if source.isEmpty {
-      var configuration = UIContentUnavailableConfiguration.empty()
+      var configuration = LodyEmptyConfiguration()
       configuration.text = store.phaseText
       configuration.secondaryText = store.message
       notice.configuration = configuration
@@ -97,15 +97,25 @@ final class SimulatorController: UIViewController {
   }
   private func lifecycleMenu() -> UIMenu {
     let android = store.platform == .android
-    return UIMenu(options: .displayInline, children: [
+    var children: [UIMenuElement] = [
       UIAction(title: String(localized: String.LocalizationValue(android ? "emulator.chooseAnother" : "simulator.chooseAnother"), bundle: .lody),
-        image: UIImage(systemName: android ? "smartphone" : "iphone.gen3")) { [weak self] _ in
+        image: UIImage(systemName: android ? DevicePlatform.androidSymbol : "iphone.gen3")) { [weak self] _ in
         guard let self else { return }
         let picker = SimulatorPickerController(store: store) { [weak self] device in self?.store.start(device) }
         LodyShell.shared.presentNative(picker, title: String(localized: String.LocalizationValue(android ? "emulator.choose" : "simulator.choose"), bundle: .lody), grabber: true)
       },
-      UIAction(title: String(localized: "simulator.stop", bundle: .lody), image: UIImage(systemName: "stop.circle"), attributes: .destructive) { [weak self] _ in self?.stop() },
-    ])
+      UIAction(title: String(localized: "simulator.stop", bundle: .lody), image: UIImage(systemName: "stop.circle"), attributes: store.canShutdownDevice ? [] : .destructive) { [weak self] _ in self?.stop(shutdownDevice: false) },
+    ]
+    if store.canShutdownDevice {
+      children.append(
+        UIAction(
+          title: String(localized: String.LocalizationValue(android ? "emulator.stopAndShutdown" : "simulator.stopAndShutdown"), bundle: .lody),
+          image: UIImage(systemName: "power"),
+          attributes: .destructive
+        ) { [weak self] _ in self?.stop(shutdownDevice: true) }
+      )
+    }
+    return UIMenu(options: .displayInline, children: children)
   }
   /// The text is typed into the emulator's focused field; nothing is read from the pasteboard
   /// until the person pastes into this field.
@@ -126,10 +136,10 @@ final class SimulatorController: UIViewController {
     if let text { body["text"] = text }
     simulator.setCommand(SessionController.json(body))
   }
-  private func stop() {
+  private func stop(shutdownDevice: Bool = false) {
     Task { [weak self] in
       guard let self else { return }
-      do { try await store.stop(); SettingsPage.pop(self) }
+      do { try await store.stop(shutdownDevice: shutdownDevice); SettingsPage.pop(self) }
       catch { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error) }
     }
   }
@@ -197,7 +207,7 @@ final class SimulatorPickerController: UIViewController {
       var section = LodyListSection(); section.id = key; section.header = String(localized: String.LocalizationValue("simulator.section." + key), bundle: .lody)
       section.rows = group.map { device in
         var row = LodyListRow(); row.id = device.id; row.title = device.name; row.subtitle = device.runtime
-        if android { row.image = "smartphone" } else { row.image = device.deviceType.hasPrefix("iPad") ? "ipad" : "iphone" }
+        if android { row.image = DevicePlatform.androidSymbol } else { row.image = device.deviceType.hasPrefix("iPad") ? "ipad" : "iphone" }
         row.value = String(localized: String.LocalizationValue(device.state == "Booted" ? "simulator.device.preview" : "simulator.device.boot"), bundle: .lody)
         if device.occupied { row.value = String(localized: "simulator.device.occupied", bundle: .lody) }
         if !device.available { row.value = device.unavailableReason ?? "" }
