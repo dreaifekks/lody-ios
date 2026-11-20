@@ -36,7 +36,8 @@ final class SessionPreviewController: SessionController {
         return .init(success: true, preview: .init(operationId: "native-fixture", udid: "native-fixture-phone", phase: .ready, transport: .remote, viewerUrl: "lody-simulator-fixture://stream"))
       },
       pullRequest: { reference, _ in PullRequestPreviewController(params: scenario.hasPrefix("bar-") ? ["state": reference.status, "reference": reference] : [:]) },
-      browser: { _, _ in .init(url: "https://native-fixture.trycloudflare.com") }
+      browser: { _, _, _, _ in .init(url: "https://native-fixture.trycloudflare.com", active: true) },
+      previewCache: SessionPreviewCache(observeMemoryWarning: false)
     )
   }
 

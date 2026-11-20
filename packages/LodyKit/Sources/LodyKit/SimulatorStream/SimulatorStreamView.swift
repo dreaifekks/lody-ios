@@ -17,6 +17,9 @@ import UIKit.UIGestureRecognizerSubclass
   private static let fixtureURL = "lody-simulator-fixture://stream"
   weak var preview: SimulatorPreview?
   weak var fullscreen: LodySimulatorView?
+  /// Retained by `SessionPreviewCache` across conversation switches so detaching from a
+  /// conversation view does not drop or disconnect the live stream.
+  var isRetainedByCache = false
   var compact = false { didSet { isUserInteractionEnabled = !compact; setNeedsLayout() } }
   var displayFrame: CGRect {
     guard let device else { return bounds }
@@ -235,7 +238,10 @@ import UIKit.UIGestureRecognizerSubclass
     let started = Date()
     timers = [
       Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-        MainActor.assumeIsolated { if self?.window != nil { self?.send(["type": "heartbeat"]) } }
+        MainActor.assumeIsolated {
+          guard let self, UIApplication.shared.applicationState != .background else { return }
+          if self.window != nil || self.isRetainedByCache { self.send(["type": "heartbeat"]) }
+        }
       },
       Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
         MainActor.assumeIsolated {

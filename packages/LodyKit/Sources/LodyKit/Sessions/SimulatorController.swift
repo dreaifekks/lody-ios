@@ -97,15 +97,25 @@ final class SimulatorController: UIViewController {
   }
   private func lifecycleMenu() -> UIMenu {
     let android = store.platform == .android
-    return UIMenu(options: .displayInline, children: [
+    var children: [UIMenuElement] = [
       UIAction(title: String(localized: String.LocalizationValue(android ? "emulator.chooseAnother" : "simulator.chooseAnother"), bundle: .lody),
         image: UIImage(systemName: android ? DevicePlatform.androidSymbol : "iphone.gen3")) { [weak self] _ in
         guard let self else { return }
         let picker = SimulatorPickerController(store: store) { [weak self] device in self?.store.start(device) }
         LodyShell.shared.presentNative(picker, title: String(localized: String.LocalizationValue(android ? "emulator.choose" : "simulator.choose"), bundle: .lody), grabber: true)
       },
-      UIAction(title: String(localized: "simulator.stop", bundle: .lody), image: UIImage(systemName: "stop.circle"), attributes: .destructive) { [weak self] _ in self?.stop() },
-    ])
+      UIAction(title: String(localized: "simulator.stop", bundle: .lody), image: UIImage(systemName: "stop.circle"), attributes: store.canShutdownDevice ? [] : .destructive) { [weak self] _ in self?.stop(shutdownDevice: false) },
+    ]
+    if store.canShutdownDevice {
+      children.append(
+        UIAction(
+          title: String(localized: String.LocalizationValue(android ? "emulator.stopAndShutdown" : "simulator.stopAndShutdown"), bundle: .lody),
+          image: UIImage(systemName: "power"),
+          attributes: .destructive
+        ) { [weak self] _ in self?.stop(shutdownDevice: true) }
+      )
+    }
+    return UIMenu(options: .displayInline, children: children)
   }
   /// The text is typed into the emulator's focused field; nothing is read from the pasteboard
   /// until the person pastes into this field.
@@ -126,10 +136,10 @@ final class SimulatorController: UIViewController {
     if let text { body["text"] = text }
     simulator.setCommand(SessionController.json(body))
   }
-  private func stop() {
+  private func stop(shutdownDevice: Bool = false) {
     Task { [weak self] in
       guard let self else { return }
-      do { try await store.stop(); SettingsPage.pop(self) }
+      do { try await store.stop(shutdownDevice: shutdownDevice); SettingsPage.pop(self) }
       catch { LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error) }
     }
   }

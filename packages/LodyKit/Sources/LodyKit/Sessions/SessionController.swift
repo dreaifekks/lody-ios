@@ -4,7 +4,7 @@ import SwiftUI
 
 @MainActor
 class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresentationControllerDelegate {
-  typealias BrowserRequest = @MainActor (SessionListState, RuntimeContract.SessionPreviewParamsAction) async throws -> RuntimeContract.SessionPreviewResult
+  typealias BrowserRequest = @MainActor (SessionListState, RuntimeContract.SessionPreviewParamsAction, Bool, Bool) async throws -> RuntimeContract.SessionPreviewResult
   let chat = LodyChatView(frame: .zero)
   let source: SessionSource
   let sessionId: String
@@ -28,6 +28,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var devicePreviewOrder: [DevicePlatform] = []
   var openingSimulator = false
   var browserBusy = false
+  var browserCheckTask: Task<Void, Never>?
+  let previewCache: SessionPreviewCache
   let requestBrowserPreview: BrowserRequest
   let deviceServices: [DevicePlatform: SimulatorService]
   let pullRequestPage: @MainActor (SessionPullRequest, SessionListState) -> PullRequestController
@@ -80,10 +82,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
        feed: SessionFeedService = .live, environment: SessionSendEnvironment = .live, permission: PermissionService = .live,
        itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil, emulator: SimulatorService? = nil,
        pullRequest: @escaping @MainActor (SessionPullRequest, SessionListState) -> PullRequestController = SessionController.livePullRequest,
-       browser: BrowserRequest? = nil) {
-    requestBrowserPreview = browser ?? { state, action in
+       browser: BrowserRequest? = nil,
+       previewCache: SessionPreviewCache = .shared) {
+    self.previewCache = previewCache
+    requestBrowserPreview = browser ?? { state, action, restart, stopProcess in
       guard let runtime = DataRuntime.current, runtime.workspace == state.workspaceId, runtime.userId == state.userId else { throw OutboxError.scopeExpired }
-      return try await runtime.perform(RuntimeContract.Calls.SessionPreview.self, .init(sessionId: sessionId, userId: state.userId, action: action))
+      return try await runtime.perform(RuntimeContract.Calls.SessionPreview.self, .init(sessionId: sessionId, userId: state.userId, action: action, restart: restart ? true : nil, stopProcess: stopProcess ? true : nil))
     }
     self.sessionId = sessionId
     self.findQuery = findQuery
@@ -119,8 +123,9 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   isolated deinit {
     memberTask?.cancel()
     githubSettle?.cancel()
+    browserCheckTask?.cancel()
     feed?.finish()
-    for store in devicePreviews.values { store.finish() }
+    for store in devicePreviews.values where !previewCache.isDeviceCached(store) { store.finish() }
     if sender != nil { environment.foreground(sessionId, false) }
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
   }

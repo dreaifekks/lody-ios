@@ -101,7 +101,8 @@ export function projectRows(
     machineNames: Record<string, string> = {},
     machineOs: Record<string, string> = {},
     machineSimulators: NonNullable<Catalog['machineSimulators']> = {},
-    machineEmulators: NonNullable<Catalog['machineEmulators']> = {};
+    machineEmulators: NonNullable<Catalog['machineEmulators']> = {},
+    machineCapabilities: NonNullable<Catalog['machineCapabilities']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -151,13 +152,21 @@ export function projectRows(
       if (name) machineNames[machineId] = name;
       const os = text(value.os);
       if (os) machineOs[machineId] = os;
+      const caps = object(value.protocolCapabilities);
+      const numericCaps: Record<string, number> = {};
+      for (const [capKey, capValue] of Object.entries(caps)) {
+        if (typeof capValue === 'number' && Number.isFinite(capValue)) {
+          numericCaps[capKey] = capValue;
+        }
+      }
+      if (Object.keys(numericCaps).length > 0) {
+        machineCapabilities[machineId] = numericCaps;
+      }
       if (value.os === 'darwin')
         machineSimulators[machineId] =
-          Number(object(value.protocolCapabilities).iosSimulator) >= 1
-            ? 'available'
-            : 'upgrade-required';
+          Number(caps.iosSimulator) >= 1 ? 'available' : 'upgrade-required';
       // Android preview has no OS gate; an old CLI simply does not offer it.
-      if (Number(object(value.protocolCapabilities).androidEmulator) >= 1)
+      if (Number(caps.androidEmulator) >= 1)
         machineEmulators[machineId] = 'available';
       // Match the CLI's legacy metadata + machine Flock project merge.
       for (const [localId, item] of Object.entries(
@@ -286,6 +295,7 @@ export function projectRows(
     machineOs,
     machineSimulators,
     machineEmulators,
+    machineCapabilities,
     agentUsage,
   };
 }

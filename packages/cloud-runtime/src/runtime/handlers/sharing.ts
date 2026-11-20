@@ -5,6 +5,7 @@ import {
   iosSimulatorControl,
   previewTarget,
   revokePreview,
+  statusPreview,
 } from '../preview';
 import { sessionDoc } from '../session';
 import { sessionActionMeta } from '../fork-session';
@@ -89,11 +90,27 @@ export function registerSharing(ctx: RuntimeContext) {
   channel.handle('sessionPreview', async (args) => {
     const doc = sessionDoc(args.sessionId);
     const target = doc && previewTarget(doc);
+    if (args.action === 'status') {
+      const control = previewControl(args.sessionId, args.userId);
+      return statusPreview({ ...control, target });
+    }
+    if (args.action === 'revoke') {
+      const control = previewControl(args.sessionId, args.userId);
+      const stopProcess = args.stopProcess === true;
+      if (stopProcess) {
+        const capabilities = machineCapabilities(control.machineId);
+        if (!((capabilities?.previewStopProcess ?? 0) >= 1)) {
+          return { error: 'unsupported' };
+        }
+      }
+      return revokePreview({
+        ...control,
+        ...(stopProcess ? { stopProcess: true } : {}),
+      });
+    }
     if (!target) return { error: 'unavailable' };
     const control = previewControl(args.sessionId, args.userId);
-    return args.action === 'revoke'
-      ? revokePreview(control)
-      : createPreview({ ...control, target });
+    return createPreview({ ...control, target, restart: args.restart });
   });
   function machineCapabilities(machineId: string) {
     const room = `machine-${machineId}`;
@@ -110,7 +127,18 @@ export function registerSharing(ctx: RuntimeContext) {
     // Older CLIs drop unknown methods without replying.
     if (!((capabilities?.iosSimulator ?? 0) >= 1))
       return { error: 'unsupported', capabilities };
-    return iosSimulatorControl({ ...control, command: args.command });
+    let command = args.command;
+    if (command.action === 'stop') {
+      if (command.shutdownDevice === true) {
+        if (!((capabilities?.iosSimulatorShutdown ?? 0) >= 1)) {
+          return { error: 'unsupported', capabilities };
+        }
+      } else if ('shutdownDevice' in command) {
+        const { shutdownDevice: _shutdownDevice, ...rest } = command;
+        command = rest;
+      }
+    }
+    return iosSimulatorControl({ ...control, command });
   });
   channel.handle('androidEmulatorControl', async (args) => {
     if (args.workspaceId !== state.workspace)
@@ -127,6 +155,16 @@ export function registerSharing(ctx: RuntimeContext) {
     ) {
       const { quality: _quality, ...rest } = command;
       command = rest;
+    }
+    if (command.action === 'stop') {
+      if (command.shutdownDevice === true) {
+        if (!((capabilities?.androidEmulatorShutdown ?? 0) >= 1)) {
+          return { error: 'unsupported', capabilities };
+        }
+      } else if ('shutdownDevice' in command) {
+        const { shutdownDevice: _shutdownDevice, ...rest } = command;
+        command = rest;
+      }
     }
     return androidEmulatorControl({ ...control, command });
   });
