@@ -35,9 +35,13 @@ struct HomeSyncPill: View {
       }
     }
     .animation(LodySpring.snappy, value: state)
-    .onChange(of: state) { _, next in
+    .onChange(of: state) { next in
       guard let next else { return }
-      AccessibilityNotification.Announcement(label(next)).post()
+      if #available(iOS 17.0, *) {
+        AccessibilityNotification.Announcement(label(next)).post()
+      } else {
+        UIAccessibility.post(notification: .announcement, argument: label(next))
+      }
     }
   }
 

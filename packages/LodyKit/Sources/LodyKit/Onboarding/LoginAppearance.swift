@@ -140,7 +140,7 @@ final class LoginButton: UIButton {
     }
     NSLayoutConstraint.activate(constraints)
     accessibilityLabel = text
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: LoginButton, _: UITraitCollection) in view.paint() }
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (view: LoginButton, _: UITraitCollection) in view.paint() }
     paint()
   }
 
@@ -285,7 +285,7 @@ final class LoginTextField: UITextField {
     spellCheckingType = .no
     clearButtonMode = .never
     heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: LoginTextField, _: UITraitCollection) in view.paintEdge() }
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (view: LoginTextField, _: UITraitCollection) in view.paintEdge() }
     paintEdge()
   }
 

@@ -20,6 +20,9 @@ enum LodyVerifyWidth {
   @MainActor private static func apply(_ width: String) {
     let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
     NSLog("[verify-width] %@ on %d windows", width, windows.count)
+    // Size-class overrides are iOS 17 `traitOverrides`; earlier systems have
+    // no window-level equivalent, so the verify width command is a no-op there.
+    guard #available(iOS 17.0, *) else { return }
     for window in windows {
       switch width {
       case "compact": window.traitOverrides.horizontalSizeClass = .compact

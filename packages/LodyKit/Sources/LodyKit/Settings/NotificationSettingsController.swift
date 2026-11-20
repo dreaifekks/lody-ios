@@ -134,16 +134,18 @@ final class NotificationSettingsController: UIViewController {
       "notification-permission", permissionTitle, subtitle: permissionHint(signedIn: signedIn), image: "bell",
       action: signedIn && configured && !busy, disclosure: signedIn && configured
     )
-    var liveActivities = LodyListRow.item(
-      "live-activities-enabled", text("notifications.liveActivities.toggle"), image: "dot.radiowaves.left.and.right"
-    )
-    liveActivities.toggle = LodyPreferences.liveActivitiesEnabled
+    // Hide Live Activity controls where the feature cannot run (pre-iOS 17).
+    var rows = [permission]
+    if ConversationActivities.supported {
+      var liveActivities = LodyListRow.item(
+        "live-activities-enabled", text("notifications.liveActivities.toggle"), image: "dot.radiowaves.left.and.right"
+      )
+      liveActivities.toggle = LodyPreferences.liveActivitiesEnabled
+      rows.append(liveActivities)
+      rows.append(.item("live-activities", text("notifications.liveActivities"), image: "gearshape", action: true, disclosure: true))
+    }
     list.setSections([
-      .group("notifications", header: text("notifications.section.header"), footer: text("notifications.section.footer"), [
-        permission,
-        liveActivities,
-        .item("live-activities", text("notifications.liveActivities"), image: "gearshape", action: true, disclosure: true),
-      ]),
+      .group("notifications", header: text("notifications.section.header"), footer: text("notifications.section.footer"), rows),
     ])
   }
 

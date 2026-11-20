@@ -13,13 +13,12 @@ private func inkBottom(text: String, font: UIFont) -> CGFloat {
   return ceil(max(0, font.ascender - ink.origin.y))
 }
 
-@Observable
-final class ChatNavigationTitleModel {
-  var text = ""
+final class ChatNavigationTitleModel: ObservableObject {
+  @Published var text = ""
 }
 
 struct ChatNavigationTitleBridge: View {
-  var model: ChatNavigationTitleModel
+  @ObservedObject var model: ChatNavigationTitleModel
 
   var body: some View {
     Text(model.text)

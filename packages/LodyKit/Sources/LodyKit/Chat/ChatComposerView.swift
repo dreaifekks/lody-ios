@@ -1491,7 +1491,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       finish(true)
       return
     }
-    UIView.animate(springDuration: 0.42, bounce: 0, options: [.beginFromCurrentState], animations: changes, completion: finish)
+    UIView.lodySpring(duration: 0.42, bounce: 0, options: [.beginFromCurrentState], animations: changes, completion: finish)
   }
   enum GrabberRelease { case close, sheet, fullScreen }
   static func grabberRelease(fromFullScreen: Bool, progress: CGFloat, translation: CGFloat, velocity: CGFloat) -> GrabberRelease {
@@ -1544,7 +1544,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         finish(true)
         return
       }
-      UIView.animate(springDuration: 0.42, bounce: 0, options: [.beginFromCurrentState], animations: settle, completion: finish)
+      UIView.lodySpring(duration: 0.42, bounce: 0, options: [.beginFromCurrentState], animations: settle, completion: finish)
     }
   }
   var connection: String { state.connection ?? "" }
@@ -1589,7 +1589,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // The prompt (and everything above it) sits on top of the docked panel.
     (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(mentionPanel.panelHeight)
     if dockChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
-      UIView.animate(springDuration: 0.32, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+      UIView.lodySpring(duration: 0.32, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
         (self.window ?? self.superview ?? self).layoutIfNeeded()
       }
     }
@@ -1773,7 +1773,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // The card is always "expanded", so its focus change grows the input here: ride along with
     // the keyboard on the same spring rather than jumping.
     if cardFocusChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
-      UIView.animate(springDuration: 0.35, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+      UIView.lodySpring(duration: 0.35, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
         (self.window ?? self.superview ?? self).layoutIfNeeded()
       }
     }

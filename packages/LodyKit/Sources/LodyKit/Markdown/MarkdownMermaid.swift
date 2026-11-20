@@ -197,7 +197,7 @@ private final class DiagramView: UIView, UIContextMenuInteractionDelegate {
     // preview, where it can be pinched, panned, copied, saved and shared like any image.
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
     addInteraction(UIContextMenuInteraction(delegate: self))
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: DiagramView, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (view: DiagramView, _) in
       view.renderer = DiagramRenderer(theme: MarkdownMermaid.theme(view.traitCollection))
       view.setNeedsDisplay()
     }

@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 struct LodyListState {
   var loading = false
@@ -71,19 +70,20 @@ enum LodyRelativeTime {
   }
 
   // Keep one configuration; serialize both replacement and use of the mutable formatter.
-  private static let dateFormat = Mutex<DateFormat?>(nil)
+  private static let dateFormatLock = NSLock()
+  nonisolated(unsafe) private static var dateFormat: DateFormat?
 
   private static func date(_ value: Double, locale: Locale, timeZone: TimeZone) -> String {
-    dateFormat.withLock { cached in
-      if cached?.locale != locale || cached?.timeZone != timeZone {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.timeZone = timeZone
-        formatter.setLocalizedDateFormatFromTemplate("MMMd")
-        cached = DateFormat(locale: locale, timeZone: timeZone, formatter: formatter)
-      }
-      return cached!.formatter.string(from: Date(timeIntervalSince1970: value / 1000))
+    dateFormatLock.lock()
+    defer { dateFormatLock.unlock() }
+    if dateFormat?.locale != locale || dateFormat?.timeZone != timeZone {
+      let formatter = DateFormatter()
+      formatter.locale = locale
+      formatter.timeZone = timeZone
+      formatter.setLocalizedDateFormatFromTemplate("MMMd")
+      dateFormat = DateFormat(locale: locale, timeZone: timeZone, formatter: formatter)
     }
+    return dateFormat!.formatter.string(from: Date(timeIntervalSince1970: value / 1000))
   }
 
   static func now() -> Double { Date().timeIntervalSince1970 * 1000 }

@@ -51,7 +51,7 @@ final class DiffDocumentView: UIView, UICollectionViewDataSource, UICollectionVi
     collectionView.register(DiffDocumentLineCell.self, forCellWithReuseIdentifier: DiffDocumentLineCell.reuse)
     collectionView.register(DiffDocumentGapCell.self, forCellWithReuseIdentifier: DiffDocumentGapCell.reuse)
     addSubview(collectionView)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: DiffDocumentView, _: UITraitCollection) in
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (view: DiffDocumentView, _: UITraitCollection) in
       view.scheduleHighlight()
     }
   }

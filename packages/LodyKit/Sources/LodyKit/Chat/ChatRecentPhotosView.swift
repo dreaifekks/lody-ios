@@ -63,7 +63,7 @@ private final class ChatPhotoCell: UICollectionViewCell {
     ])
     isAccessibilityElement = true
     accessibilityTraits = .image
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (cell: ChatPhotoCell, _: UITraitCollection) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (cell: ChatPhotoCell, _: UITraitCollection) in
       cell.refreshAccent()
     }
   }
@@ -119,7 +119,7 @@ final class ChatRecentPhotosView: UIView, UICollectionViewDataSource, UICollecti
     back.appearance = ChatAttachmentMenu.mediaActionAppearance
     configure()
     NotificationCenter.default.addObserver(self, selector: #selector(refreshAccent), name: .lodyAppearanceDidChange, object: nil)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: ChatRecentPhotosView, _: UITraitCollection) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (view: ChatRecentPhotosView, _: UITraitCollection) in
       view.refreshAccent()
     }
     refreshAccent()

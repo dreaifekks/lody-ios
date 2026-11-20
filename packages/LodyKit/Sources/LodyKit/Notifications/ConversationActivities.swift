@@ -6,6 +6,13 @@ import Foundation
 @MainActor
 final class ConversationActivities {
   typealias Attributes = LodyConversationLiveActivityAttributes
+  /// Live Activities and their Dynamic Island/lock-screen UI require iOS 17;
+  /// earlier systems disable the feature entirely so settings can hide it.
+  static var supported: Bool {
+    if #available(iOS 17.0, *) { return true }
+    return false
+  }
+
   private var pending = false
   private var worker: Task<Void, Never>?
 
@@ -24,7 +31,8 @@ final class ConversationActivities {
   private func reconcile() async {
     let list = SessionPublished.state()
     let workspace = list.workspace
-    let enabled = LodyPreferences.liveActivitiesEnabled && workspace?.resolvedMode == .plaintext && !list.userId.isEmpty
+    let enabled = Self.supported && LodyPreferences.liveActivitiesEnabled
+      && workspace?.resolvedMode == .plaintext && !list.userId.isEmpty
       && ActivityAuthorizationInfo().areActivitiesEnabled
     let id = "lody-conversations:v5:\(list.workspaceId):\(list.userId)"
     var existing: Activity<Attributes>?

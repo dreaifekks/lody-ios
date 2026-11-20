@@ -435,7 +435,13 @@ final class ScheduleEditorController: LodyFormController {
       }
     }
     if item.lastSessionId != nil, let openChat {
-      actions.append(.init(id: "schedule-last-chat", title: text("lastChat"), symbol: "bubble.left.and.text.bubble.right", enabled: true) {
+      let lastChatSymbol: String
+      if #available(iOS 17.0, *) {
+        lastChatSymbol = "bubble.left.and.text.bubble.right"
+      } else {
+        lastChatSymbol = "bubble.left.and.bubble.right"
+      }
+      actions.append(.init(id: "schedule-last-chat", title: text("lastChat"), symbol: lastChatSymbol, enabled: true) {
         openChat(item)
       })
     }

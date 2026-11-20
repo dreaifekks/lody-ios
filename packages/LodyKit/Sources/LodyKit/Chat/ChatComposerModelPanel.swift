@@ -124,7 +124,7 @@ private final class ChatEffortHeat: MTKView, MTKViewDelegate {
     preferredFramesPerSecond = 60
     isPaused = true
     delegate = self
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: ChatEffortHeat, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast]) { (view: ChatEffortHeat, _) in
       view.wake()
     }
   }

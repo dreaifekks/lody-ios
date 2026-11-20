@@ -18,7 +18,7 @@ class FileContentController: UIViewController {
   private let html: Bool
   private let markdown: Bool
   private let spinner = UIActivityIndicatorView(style: .medium)
-  private let notice = UIContentUnavailableView(configuration: .empty())
+  private let notice = LodyEmptyStateView()
   private let summary = FileIssuesSummary()
   private let content = UIView()
   private var body: UIView?
@@ -124,15 +124,15 @@ class FileContentController: UIViewController {
     spinner.stopAnimating()
     notice.isHidden = true
     if !error.isEmpty {
-      var configuration = UIContentUnavailableConfiguration.empty()
+      var configuration = LodyEmptyConfiguration()
       configuration.text = error
       configuration.button = .gray()
       configuration.button.title = String(localized: "common.retry", bundle: .lody)
-      configuration.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.reload() }
+      configuration.buttonAction = { [weak self] in self?.reload() }
       if html, !issues.isEmpty {
         configuration.secondaryButton = .plain()
         configuration.secondaryButton.title = String(localized: "html.issues.title", bundle: .lody)
-        configuration.secondaryButtonProperties.primaryAction = UIAction { [weak self] _ in self?.showIssues() }
+        configuration.secondaryButtonAction = { [weak self] in self?.showIssues() }
       }
       notice.configuration = configuration
       notice.isHidden = false

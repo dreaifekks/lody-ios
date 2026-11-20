@@ -59,6 +59,8 @@ final class LodySimulatorView: UIView {
   }
 
   func adoptZoomTransition(on destination: UIViewController? = nil) {
+    // Zoom transitions are iOS 18; earlier systems keep the default push/sheet.
+    guard #available(iOS 18.0, *) else { return }
     guard let controller = destination ?? (sequence(first: self as UIResponder, next: { $0.next })
       .first(where: { $0 is UIViewController }) as? UIViewController),
       controller.preferredTransition == nil else { return }

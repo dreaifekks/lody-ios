@@ -5,6 +5,12 @@ import Foundation
 /// signed lifecycle call, state and stream; an iOS proof never authorizes Android.
 enum DevicePlatform: String, CaseIterable, Sendable {
   case ios, android
+
+  /// The generic `smartphone` symbol is iOS 17; earlier systems use the closest phone glyph.
+  static var androidSymbol: String {
+    if #available(iOS 17.0, *) { return "smartphone" }
+    return "iphone.gen2"
+  }
 }
 
 /// Android capture tiers. Remote previews start Balanced; switching starts the same AVD again.

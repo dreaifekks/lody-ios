@@ -86,7 +86,9 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     sdkStarted = true
     OneSignal.Debug.setLogLevel(.LL_NONE)
     OneSignal.initialize(appId, withLaunchOptions: launchOptions)
-    OneSignal.LiveActivities.setup(LodyConversationLiveActivityAttributes.self)
+    if ConversationActivities.supported {
+      OneSignal.LiveActivities.setup(LodyConversationLiveActivityAttributes.self)
+    }
     OneSignal.User.pushSubscription.addObserver(self)
     evaluateSubscription(OneSignal.User.pushSubscription.id)
     OneSignal.Notifications.addClickListener(self)

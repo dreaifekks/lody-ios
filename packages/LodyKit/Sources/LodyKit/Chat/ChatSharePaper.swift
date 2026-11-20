@@ -44,7 +44,12 @@ final class ChatSharePaper: UIView {
     paper.overrideUserInterfaceStyle = .light
     paper.backgroundColor = Self.paper
     let width = ChatMessageShare.width - inset * 2
-    let traits = light.modifyingTraits { $0.preferredContentSizeCategory = .large }
+    let traits: UITraitCollection
+    if #available(iOS 17.0, *) {
+      traits = light.modifyingTraits { $0.preferredContentSizeCategory = .large }
+    } else {
+      traits = UITraitCollection(traitsFrom: [light, UITraitCollection(preferredContentSizeCategory: .large)])
+    }
     var theme = ChatMarkdownTheme.make(traits: traits, secondary: false)
     theme.fonts.body = .systemFont(ofSize: 18)
     theme.fonts.bold = theme.fonts.body.bold

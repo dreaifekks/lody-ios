@@ -4,7 +4,7 @@ import UIKit
 final class SimulatorController: UIViewController {
   private let store: SessionSimulator
   private let simulator = LodySimulatorView(frame: .zero)
-  private let notice = UIContentUnavailableView(configuration: .empty())
+  private let notice = LodyEmptyStateView()
   private var command = 0
 
   init(store: SessionSimulator) { self.store = store; super.init(nibName: nil, bundle: nil) }
@@ -32,7 +32,7 @@ final class SimulatorController: UIViewController {
     let source = store.sourceJSON
     simulator.setSource(source); simulator.isHidden = source.isEmpty; notice.isHidden = !source.isEmpty
     if source.isEmpty {
-      var configuration = UIContentUnavailableConfiguration.empty()
+      var configuration = LodyEmptyConfiguration()
       configuration.text = store.phaseText
       configuration.secondaryText = store.message
       notice.configuration = configuration
@@ -99,7 +99,7 @@ final class SimulatorController: UIViewController {
     let android = store.platform == .android
     return UIMenu(options: .displayInline, children: [
       UIAction(title: String(localized: String.LocalizationValue(android ? "emulator.chooseAnother" : "simulator.chooseAnother"), bundle: .lody),
-        image: UIImage(systemName: android ? "smartphone" : "iphone.gen3")) { [weak self] _ in
+        image: UIImage(systemName: android ? DevicePlatform.androidSymbol : "iphone.gen3")) { [weak self] _ in
         guard let self else { return }
         let picker = SimulatorPickerController(store: store) { [weak self] device in self?.store.start(device) }
         LodyShell.shared.presentNative(picker, title: String(localized: String.LocalizationValue(android ? "emulator.choose" : "simulator.choose"), bundle: .lody), grabber: true)
@@ -197,7 +197,7 @@ final class SimulatorPickerController: UIViewController {
       var section = LodyListSection(); section.id = key; section.header = String(localized: String.LocalizationValue("simulator.section." + key), bundle: .lody)
       section.rows = group.map { device in
         var row = LodyListRow(); row.id = device.id; row.title = device.name; row.subtitle = device.runtime
-        if android { row.image = "smartphone" } else { row.image = device.deviceType.hasPrefix("iPad") ? "ipad" : "iphone" }
+        if android { row.image = DevicePlatform.androidSymbol } else { row.image = device.deviceType.hasPrefix("iPad") ? "ipad" : "iphone" }
         row.value = String(localized: String.LocalizationValue(device.state == "Booted" ? "simulator.device.preview" : "simulator.device.boot"), bundle: .lody)
         if device.occupied { row.value = String(localized: "simulator.device.occupied", bundle: .lody) }
         if !device.available { row.value = device.unavailableReason ?? "" }

@@ -382,7 +382,7 @@ struct CreateContextPanel: View {
         }
       }
       .scrollBounceBehavior(.basedOnSize)
-      .defaultScrollAnchor(.bottom)
+      .lodyScrollAnchor(.bottom)
     }
   }
 
@@ -617,7 +617,7 @@ struct CreateRunConfigSheet: View {
                   state.openInSheet = nil
                   state.onPick(row.id, id)
                 }
-                .transition(.blurReplace)
+                .transition(.lodyBlurReplace)
               }
             }
           }
@@ -710,5 +710,25 @@ struct CreateRunConfigSheet: View {
   private func valueColor(_ row: CreatePicker) -> Color {
     if row.placeholder { return LodyColor.textTertiary }
     return row.options.isEmpty ? LodyColor.textSecondary : LodyColor.textPrimary
+  }
+}
+
+private extension View {
+  /// `defaultScrollAnchor` is iOS 17; earlier systems keep the top anchor.
+  @ViewBuilder
+  func lodyScrollAnchor(_ anchor: UnitPoint) -> some View {
+    if #available(iOS 17.0, *) {
+      defaultScrollAnchor(anchor)
+    } else {
+      self
+    }
+  }
+}
+
+private extension AnyTransition {
+  /// `blurReplace` is iOS 17; earlier systems fall back to opacity.
+  static var lodyBlurReplace: AnyTransition {
+    if #available(iOS 17.0, *) { return AnyTransition(BlurReplaceTransition(configuration: .downUp)) }
+    return .opacity
   }
 }

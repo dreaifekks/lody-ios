@@ -28,7 +28,7 @@ final class ChatErrorCell: UICollectionViewCell {
     isAccessibilityElement = false
     retryButton.addTarget(self, action: #selector(retry), for: .primaryActionTriggered)
     detailButton.addTarget(self, action: #selector(detail), for: .primaryActionTriggered)
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (cell: ChatErrorCell, _) in
+    lodyObserveTraitChanges([.preferredContentSizeCategory]) { (cell: ChatErrorCell, _) in
       if let row = cell.row { cell.configure(row) }
     }
   }

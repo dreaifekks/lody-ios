@@ -89,10 +89,13 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate, UIC
       sourceView: sourceView
     )
     // Swipe-down dismissal is ours (`dismissDrag`): the system's interactive zoom dismissal
-    // competes with paging and zooming, and never began over the photo.
-    let options = UIViewController.Transition.ZoomOptions()
-    options.interactiveDismissShouldBegin = { _ in false }
-    preview.preferredTransition = .zoom(options: options) { [weak preview] _ in preview?.currentSourceView() }
+    // competes with paging and zooming, and never began over the photo. Zoom
+    // transitions are iOS 18; earlier systems use the default presentation.
+    if #available(iOS 18.0, *) {
+      let options = UIViewController.Transition.ZoomOptions()
+      options.interactiveDismissShouldBegin = { _ in false }
+      preview.preferredTransition = .zoom(options: options) { [weak preview] _ in preview?.currentSourceView() }
+    }
     controller.present(preview, animated: true)
     return preview
   }
@@ -194,7 +197,7 @@ final class ChatImagePreview: UIViewController, UIGestureRecognizerDelegate, UIC
     }
     applyBackdrop()
     overlayAlpha(0)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (controller: ChatImagePreview, _) in
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (controller: ChatImagePreview, _) in
       controller.applyBackdrop()
     }
   }

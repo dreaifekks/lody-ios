@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "LodyCore",
-  platforms: [.iOS("18.0"), .macOS("26.0")],
+  platforms: [.iOS("16.4"), .macOS("26.0")],
   products: [
     .library(name: "LodyCore", targets: ["LodyCore"]),
     .library(name: "LodyRuntime", targets: ["LodyRuntime"]),

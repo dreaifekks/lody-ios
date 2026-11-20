@@ -72,7 +72,7 @@ final class ChatMetaCell: UICollectionViewCell {
     actionButton.showsMenuAsPrimaryAction = true
     actionButton.accessibilityLabel = String(localized: "native.chat.message.actions", bundle: .lody)
     contentView.addSubview(actionButton)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitPreferredContentSizeCategory.self]) {
+    lodyObserveTraitChanges([.userInterfaceStyle, .preferredContentSizeCategory]) {
       (cell: ChatMetaCell, _) in
       cell.apply()
     }
@@ -180,17 +180,19 @@ final class ChatMarkView: UIImageView {
 
   func setMark(_ image: UIImage?, animated: Bool) {
     lastReplaceAnimated = animated && image != nil
-    if let image, animated {
-      setSymbolImage(image, contentTransition: .replace.downUp)
-      return
+    if #available(iOS 17.0, *) {
+      if let image, animated {
+        setSymbolImage(image, contentTransition: .replace.downUp)
+        return
+      }
+      removeAllSymbolEffects(animated: false)
     }
-    removeAllSymbolEffects(animated: false)
     self.image = image
   }
 
   func cancelMarkEffects() {
     lastReplaceAnimated = false
-    removeAllSymbolEffects(animated: false)
+    if #available(iOS 17.0, *) { removeAllSymbolEffects(animated: false) }
   }
 }
 

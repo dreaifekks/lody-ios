@@ -62,7 +62,7 @@ final class InboxController: UIViewController {
         }
       }
     }
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitHorizontalSizeClass.self]) { (self: Self, _: UITraitCollection) in self.render() }
+    lodyObserveTraitChanges([.userInterfaceStyle, .horizontalSizeClass]) { (view: InboxController, _: UITraitCollection) in view.render() }
   }
 
   override func viewWillAppear(_ animated: Bool) {

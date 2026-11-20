@@ -131,7 +131,13 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     // A size transition can finish while the resize handle is still held. Keep
     // container ownership stable until the scene reports the end of the gesture.
     guard !interactivelyResizing, !updatingTabContainer, !updatingLayout else { return }
-    primary.traitOverrides.horizontalSizeClass = traitCollection.horizontalSizeClass
+    if #available(iOS 17.0, *) {
+      primary.traitOverrides.horizontalSizeClass = traitCollection.horizontalSizeClass
+    } else {
+      split.setOverrideTraitCollection(
+        UITraitCollection(horizontalSizeClass: traitCollection.horizontalSizeClass),
+        forChild: primary)
+    }
     (folded ? foldHost?.controller : split)?.view.frame = view.bounds
     view.accessibilityIdentifier = traitCollection.horizontalSizeClass == .regular ? "ipad-home" : "home"
     // Tabs exist only on compact width; a wide layout keeps Chats in the list column and shows
@@ -270,11 +276,11 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     let controller = UIViewController()
     controller.view.backgroundColor = .lodyBackground
     controller.view.accessibilityIdentifier = "ipad-detail-placeholder"
-    var configuration = UIContentUnavailableConfiguration.empty()
+    var configuration = LodyEmptyConfiguration()
     configuration.image = UIImage(systemName: "bubble.left.and.bubble.right")
     configuration.text = String(localized: "ipad.detail.title", bundle: .lody)
     configuration.secondaryText = String(localized: "ipad.detail.message", bundle: .lody)
-    controller.contentUnavailableConfiguration = configuration
+    controller.lodyContentUnavailable = configuration
     return controller
   }
   private func configureTabs() {

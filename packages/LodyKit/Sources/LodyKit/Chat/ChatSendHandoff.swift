@@ -86,7 +86,7 @@ final class ChatReferenceChipsView: UIView {
     isOpaque = false
     isUserInteractionEnabled = false
     contentMode = .redraw
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: ChatReferenceChipsView, _: UITraitCollection) in view.setNeedsDisplay() }
+    lodyObserveTraitChanges([.userInterfaceStyle]) { (view: ChatReferenceChipsView, _: UITraitCollection) in view.setNeedsDisplay() }
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 

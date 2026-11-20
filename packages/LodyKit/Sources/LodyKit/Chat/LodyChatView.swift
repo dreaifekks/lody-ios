@@ -341,7 +341,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       self?.deselectFileOnReturn(animated: animated, coordinator: coordinator)
     }
     backgroundColor = .lodyBackground
-    registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (view: LodyChatView, _: UITraitCollection) in
+    lodyObserveTraitChanges([.horizontalSizeClass]) { (view: LodyChatView, _: UITraitCollection) in
       view.backgroundColor = view.processBackground
     }
     collection.backgroundColor = .clear

@@ -135,7 +135,7 @@ final class LodyPageController: UIViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (page: LodyPageController, _: UITraitCollection) in
+    lodyObserveTraitChanges([.horizontalSizeClass]) { (page: LodyPageController, _: UITraitCollection) in
       page.updateBackground()
     }
   }

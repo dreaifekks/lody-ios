@@ -100,7 +100,7 @@ final class LodyProjectRowView: UIView, UIContentView {
       fold.centerYAnchor.constraint(equalTo: name.centerYAnchor),
       detail.leadingAnchor.constraint(equalTo: fold.trailingAnchor, constant: 8),
     ]
-    registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self], action: #selector(resolveAvatarBorder))
+    lodyObserveTraitChanges([.userInterfaceStyle, .accessibilityContrast], action: #selector(resolveAvatarBorder))
     resolveAvatarBorder()
     apply()
   }

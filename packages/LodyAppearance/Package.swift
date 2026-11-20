@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "LodyAppearance",
-  platforms: [.iOS("18.0")],
+  platforms: [.iOS("16.4")],
   products: [.library(name: "LodyDesignSystem", targets: ["LodyDesignSystem"])],
   targets: [
     .target(name: "LodyDesignSystem", resources: [.process("Resources")]),

@@ -517,15 +517,14 @@ final class ChatMentionLevelController: UIViewController, UICollectionViewDelega
     snapshot.appendItems(ids)
     snapshot.reconfigureItems(ids)
     data.apply(snapshot, animatingDifferences: animated)
+    var empty: LodyEmptyConfiguration?
     if ids.isEmpty {
-      var empty = UIContentUnavailableConfiguration.empty()
-      empty.text = String(localized: "native.chat.mention.empty", bundle: .lody)
-      empty.textProperties.font = .dynamic(of: 15)
-      empty.textProperties.color = .secondaryLabel
-      contentUnavailableConfiguration = empty
-    } else {
-      contentUnavailableConfiguration = nil
+      empty = LodyEmptyConfiguration()
+      empty?.text = String(localized: "native.chat.mention.empty", bundle: .lody)
+      empty?.textFont = .dynamic(of: 15)
+      empty?.textColor = .secondaryLabel
     }
+    lodyContentUnavailable = empty
   }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {

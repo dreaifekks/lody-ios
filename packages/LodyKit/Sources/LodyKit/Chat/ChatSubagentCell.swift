@@ -25,9 +25,7 @@ final class ChatSubagentCell: UICollectionViewCell {
     statusLabel.textAlignment = .right
     detailLabel.textColor = .lodySecondary
     isAccessibilityElement = true
-    registerForTraitChanges([
-      UITraitPreferredContentSizeCategory.self, UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self,
-    ]) { (cell: ChatSubagentCell, _) in
+    lodyObserveTraitChanges([.preferredContentSizeCategory, .userInterfaceStyle, .accessibilityContrast]) { (cell: ChatSubagentCell, _) in
       if let row = cell.row { cell.configure(row) }
     }
   }

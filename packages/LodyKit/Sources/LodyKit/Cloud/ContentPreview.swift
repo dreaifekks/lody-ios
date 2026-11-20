@@ -75,12 +75,13 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
 
   private func load() {
     download?.cancel()
-    var loading = UIContentUnavailableConfiguration.loading()
+    var loading = LodyEmptyConfiguration()
+    loading.loading = true
     loading.text = String(localized: "native.attachment.preview.loading", bundle: .lody)
-    loading.background.backgroundColor = .lodyBackground
+    loading.backgroundColor = .lodyBackground
     loading.button.title = String(localized: "native.close", bundle: .lody)
-    loading.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.dismiss(animated: true) }
-    contentUnavailableConfiguration = loading
+    loading.buttonAction = { [weak self] in self?.dismiss(animated: true) }
+    lodyContentUnavailable = loading
     fixtureAttempt += 1
     let attempt = fixtureAttempt
     download = Task { [weak self, file, workspace, session, directory] in
@@ -99,23 +100,23 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
         try Task.checkCancellation()
         guard let self else { try? FileManager.default.removeItem(at: directory); return }
         self.url = url
-        self.contentUnavailableConfiguration = nil
+        self.lodyContentUnavailable = nil
         self.reloadData()
       } catch {
         try? FileManager.default.removeItem(at: directory)
         guard !Task.isCancelled, let self else { return }
-        var failed = UIContentUnavailableConfiguration.empty()
-        failed.background.backgroundColor = .lodyBackground
+        var failed = LodyEmptyConfiguration()
+        failed.backgroundColor = .lodyBackground
         failed.image = UIImage(systemName: "doc.badge.ellipsis")
         failed.text = file.fileName
         failed.secondaryText = error.localizedDescription
         failed.secondaryButton.title = String(localized: "native.close", bundle: .lody)
-        failed.secondaryButtonProperties.primaryAction = UIAction { [weak self] _ in self?.dismiss(animated: true) }
+        failed.secondaryButtonAction = { [weak self] in self?.dismiss(animated: true) }
         if file.transport != "local" {
           failed.button.title = String(localized: "native.attachment.preview.retry", bundle: .lody)
-          failed.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.load() }
+          failed.buttonAction = { [weak self] in self?.load() }
         }
-        self.contentUnavailableConfiguration = failed
+        self.lodyContentUnavailable = failed
       }
     }
   }

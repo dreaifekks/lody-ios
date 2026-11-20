@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
   name: "LodyKit",
   defaultLocalization: "en",
-  platforms: [.iOS("18.0")],
+  platforms: [.iOS("16.4")],
   products: [.library(name: "LodyKit", targets: ["LodyKit"])],
   dependencies: [
     .package(url: "https://github.com/google/GoogleSignIn-iOS.git", exact: "9.0.0"),

@@ -750,7 +750,7 @@ struct LodyListSection { var rows: [LodyListRow] = [] }
 let retryList = SessionListView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
 var retries = 0
 for sizeClass in [UIUserInterfaceSizeClass.compact, .regular] {
-  retryList.traitOverrides.horizontalSizeClass = sizeClass
+  if #available(iOS 17.0, *) { retryList.traitOverrides.horizontalSizeClass = sizeClass }
   retryList.setSections([])
   retryList.setRetry { retries += 1 }
   retryList.layoutIfNeeded()

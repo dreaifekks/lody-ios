@@ -300,57 +300,73 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     data.apply(snapshot, animatingDifferences: view.window != nil && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
       self?.updateBackdrop()
     }
-    setNeedsUpdateContentUnavailableConfiguration()
+    refreshEmptyState()
   }
 
+  private func refreshEmptyState() {
+    if #available(iOS 17.0, *) {
+      setNeedsUpdateContentUnavailableConfiguration()
+    } else {
+      lodyContentUnavailable = emptyState()
+    }
+  }
+
+  @available(iOS 17.0, *)
   override func updateContentUnavailableConfiguration(using state: UIContentUnavailableConfigurationState) {
+    contentUnavailableConfiguration = emptyState()?.system()
+  }
+
+  private func emptyState() -> LodyEmptyConfiguration? {
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
     let empty = (data?.snapshot().numberOfItems ?? 0) == 0
-    var configuration: UIContentUnavailableConfiguration?
-    if !source.state.workspaceId.isEmpty, empty {
-      if result == nil, loading {
-        configuration = .loading()
-        configuration?.text = ScheduleFormat.text("loading")
-      } else if result == nil, let failure {
-        var error = UIContentUnavailableConfiguration.empty()
-        error.image = UIImage(systemName: "exclamationmark.triangle")
-        error.text = failure
-        var retry = UIButton.Configuration.bordered()
-        retry.title = ScheduleFormat.text("retry")
-        error.button = retry
-        error.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.reload() }
-        configuration = error
-      } else if !ScheduleFinishedVisibility.shown, result?.items.contains(where: { $0.state.group == .ended }) == true,
-                term.isEmpty || result?.items.contains(where: { $0.title.localizedCaseInsensitiveContains(term) }) == true {
-        // Everything left (or matching) has finished and is hidden by the view menu.
-        var none = UIContentUnavailableConfiguration.empty()
-        none.image = LodyIcon.clock.uiImage
-        none.text = ScheduleFormat.text("finishedHidden")
-        var show = UIButton.Configuration.bordered()
-        show.title = ScheduleFormat.text("view.showFinished")
-        none.button = show
-        none.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.setFinishedShown(true) }
-        configuration = none
-      } else if !term.isEmpty {
-        var none = UIContentUnavailableConfiguration.search()
-        none.text = ScheduleFormat.text("noMatches")
-        configuration = none
-      } else if result != nil {
-        var none = UIContentUnavailableConfiguration.empty()
-        none.image = LodyIcon.clock.uiImage
-        none.text = ScheduleFormat.text("empty")
-        none.secondaryText = ScheduleFormat.text("emptyHelp")
-        var create = UIButton.Configuration.filled()
-        create.title = ScheduleFormat.text("new")
-        create.baseBackgroundColor = .lodyInk
-        create.baseForegroundColor = .lodyGround
-        create.cornerStyle = .capsule
-        none.button = create
-        none.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.newSchedule() }
-        configuration = none
-      }
+    guard !source.state.workspaceId.isEmpty, empty else { return nil }
+    if result == nil, loading {
+      var configuration = LodyEmptyConfiguration()
+      configuration.loading = true
+      configuration.text = ScheduleFormat.text("loading")
+      return configuration
     }
-    contentUnavailableConfiguration = configuration
+    if result == nil, let failure {
+      var error = LodyEmptyConfiguration()
+      error.image = UIImage(systemName: "exclamationmark.triangle")
+      error.text = failure
+      error.button = .bordered()
+      error.button.title = ScheduleFormat.text("retry")
+      error.buttonAction = { [weak self] in self?.reload() }
+      return error
+    }
+    if !ScheduleFinishedVisibility.shown, result?.items.contains(where: { $0.state.group == .ended }) == true,
+       term.isEmpty || result?.items.contains(where: { $0.title.localizedCaseInsensitiveContains(term) }) == true {
+      // Everything left (or matching) has finished and is hidden by the view menu.
+      var none = LodyEmptyConfiguration()
+      none.image = LodyIcon.clock.uiImage
+      none.text = ScheduleFormat.text("finishedHidden")
+      none.button = .bordered()
+      none.button.title = ScheduleFormat.text("view.showFinished")
+      none.buttonAction = { [weak self] in self?.setFinishedShown(true) }
+      return none
+    }
+    if !term.isEmpty {
+      var none = LodyEmptyConfiguration()
+      none.image = UIImage(systemName: "magnifyingglass")
+      none.text = ScheduleFormat.text("noMatches")
+      return none
+    }
+    if result != nil {
+      var none = LodyEmptyConfiguration()
+      none.image = LodyIcon.clock.uiImage
+      none.text = ScheduleFormat.text("empty")
+      none.secondaryText = ScheduleFormat.text("emptyHelp")
+      var create = UIButton.Configuration.filled()
+      create.title = ScheduleFormat.text("new")
+      create.baseBackgroundColor = .lodyInk
+      create.baseForegroundColor = .lodyGround
+      create.cornerStyle = .capsule
+      none.button = create
+      none.buttonAction = { [weak self] in self?.newSchedule() }
+      return none
+    }
+    return nil
   }
 
   private func configure(_ cell: UICollectionViewListCell, _ item: ScheduleItem) {

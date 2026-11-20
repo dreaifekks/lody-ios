@@ -131,7 +131,7 @@ extension SessionController {
     let requested = platform == .android ? owner.androidEmulatorPreviewRequestId : owner.iosSimulatorPreviewRequestId
     guard requested != nil || simulator.running else { return nil }
     let name = simulator.running ? simulator.name : String(localized: Self.deviceKey(platform, "menu"), bundle: .lody)
-    var item: [String: Any] = ["id": Self.deviceItemId(platform), "symbol": platform == .android ? "smartphone" : "iphone",
+    var item: [String: Any] = ["id": Self.deviceItemId(platform), "symbol": platform == .android ? DevicePlatform.androidSymbol : "iphone",
       "busy": simulator.connecting, "tap": true, "tint": "primary", "menuTitle": name,
       "accessibilityLabel": String.localizedStringWithFormat(String(localized: "simulator.chip.open", bundle: .lody), String(describing: name))]
     item["actions"] = simulator.running ? [["id": "stop", "title": String(localized: "simulator.stop", bundle: .lody), "symbol": "stop.circle", "destructive": true]] : []
