@@ -208,7 +208,7 @@ final class ChatProposalCell: UICollectionViewCell {
   }
 
   private static func button(_ title: String, primary: Bool, traits: UITraitCollection) -> UIButton.Configuration {
-    var configuration: UIButton.Configuration = primary ? .prominentGlass() : .glass()
+    var configuration: UIButton.Configuration = primary ? .lodyProminentGlass() : .lodyGlass()
     configuration.title = title
     // Resolve against the cell's appearance: a prominent glass button re-resolves dynamic
     // colors for its own tint, so `.systemBackground` on a light fill came out white in dark mode.

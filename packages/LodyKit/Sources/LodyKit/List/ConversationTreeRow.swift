@@ -66,7 +66,7 @@ final class ConversationTreeRow: UIView {
     let indent = CGFloat(depth) * step + padding
     selectionBackground.isHidden = !isCurrent
     // Padded rows (the relations sheet) get a full capsule; flush receipt rows keep the small radius.
-    selectionBackground.cornerConfiguration = padding > 0 ? .capsule() : .corners(radius: .fixed(6))
+    selectionBackground.lodySetCorners(padding > 0 ? .capsule() : .fixed(6))
     selectionBackground.frame = CGRect(x: indent - padding, y: 2, width: max(0, bounds.width - indent + padding), height: max(0, bounds.height - 4))
     let trailing = bounds.width - padding
     let textX = indent + (showsAgent ? LodyIconSize.sm + LodySpacing.sm : 0)

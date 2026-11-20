@@ -169,7 +169,7 @@ class PullRequestController: UIViewController {
       let merging = store.writing == "merge"
       let item = UIBarButtonItem(title: text(merging ? "merging" : "merge"), primaryAction: UIAction { [weak self] _ in self?.chooseMergeMethod() })
       mergeItem = item
-      item.style = .prominent
+      item.style = .lodyProminent
       item.isEnabled = enabled
       item.accessibilityIdentifier = "pr-merge"
       return item

@@ -725,10 +725,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     addSubview(segmentContainer)
     // Registers the overlay with the scroll view so UIKit shapes the top edge
     // effect around it. Without this the control floats with nothing behind it.
-    let interaction = UIScrollEdgeElementContainerInteraction()
-    interaction.scrollView = collection
-    interaction.edge = .top
-    segmentContainer.addInteraction(interaction)
+    LodyScrollEdges.shape(segmentContainer, around: collection, edge: .top)
     appearance.view = UIView(frame: .zero)
     appearance.view.isUserInteractionEnabled = false
     appearance.onWillAppear = { [weak self] animated, coordinator in
@@ -761,8 +758,7 @@ final class LodyGroupedList: LodyAppearanceView, UICollectionViewDelegate, UISea
     let fades = contentStyle && !transparent
     topFade.isHidden = !fades
     bottomFade.isHidden = !fades
-    collection.topEdgeEffect.isHidden = fades
-    collection.bottomEdgeEffect.isHidden = fades
+    LodyScrollEdges.setEdgesHidden(collection, top: fades, bottom: fades)
     guard fades else { return }
     let insets = collection.adjustedContentInset
     let topBottom = insets.top + LodyEdgeFade.topExtent

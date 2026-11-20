@@ -66,7 +66,7 @@ final class LodyNavigationHeader: NSObject {
       if item.hidesSearchBarWhenScrolling != search.hidesWhenScrolling {
         item.hidesSearchBarWhenScrolling = search.hidesWhenScrolling
       }
-      if item.searchBarPlacementAllowsToolbarIntegration != search.allowsToolbarIntegration {
+      if #available(iOS 26.0, *), item.searchBarPlacementAllowsToolbarIntegration != search.allowsToolbarIntegration {
         item.searchBarPlacementAllowsToolbarIntegration = search.allowsToolbarIntegration
       }
       if item.searchController !== search.controller { item.searchController = search.controller }
@@ -122,14 +122,14 @@ enum LodyNavigationHeaderItems {
     item.accessibilityLabel = spec["accessibilityLabel"] as? String ?? title
     item.accessibilityHint = spec["accessibilityHint"] as? String
     item.accessibilityIdentifier = spec["identifier"] as? String
-    if let badge = spec["badge"] as? String, !badge.isEmpty {
-      item.badge = .string(badge)
-    }
     if let tint = (spec["tintColor"] as? String).flatMap(lodyTint) { item.tintColor = tint }
-    if let hides = spec["hidesSharedBackground"] as? Bool { item.hidesSharedBackground = hides }
-    if let shares = spec["sharesBackground"] as? Bool { item.sharesBackground = shares }
+    if #available(iOS 26.0, *) {
+      if let badge = spec["badge"] as? String, !badge.isEmpty { item.badge = .string(badge) }
+      if let hides = spec["hidesSharedBackground"] as? Bool { item.hidesSharedBackground = hides }
+      if let shares = spec["sharesBackground"] as? Bool { item.sharesBackground = shares }
+    }
     if type != "view", let width = spec["width"] as? Double { item.width = CGFloat(width) }
-    let styles: [String: UIBarButtonItem.Style] = ["done": .prominent, "prominent": .prominent]
+    let styles: [String: UIBarButtonItem.Style] = ["done": .lodyProminent, "prominent": .lodyProminent]
     if let style = styles[spec["variant"] as? String ?? ""] { item.style = style }
     return item
   }

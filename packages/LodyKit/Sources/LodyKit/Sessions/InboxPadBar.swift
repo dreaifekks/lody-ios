@@ -17,15 +17,14 @@ final class InboxPadBar: UIView {
   var canCreate = false { didSet { createButton.isEnabled = canCreate } }
   /// The page this bar belongs to: its tab reads as selected and the create action follows it.
   var destination: HomeTab = .chats { didSet { if destination != oldValue { apply() } } }
-  private let tabsGlass = UIVisualEffectView(effect: UIGlassEffect())
+  private let tabsGlass = UIVisualEffectView(effect: LodyGlass.effect())
   private let tabs = UIStackView()
   private var buttons: [HomeTab: UIButton] = [:]
-  private let createButton = UIButton(configuration: .glass())
-  private let edge = UIScrollEdgeElementContainerInteraction()
+  private let createButton = UIButton(configuration: .lodyGlass())
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    tabsGlass.cornerConfiguration = .capsule()
+    tabsGlass.lodySetCorners(.capsule())
     tabs.axis = .horizontal
     tabs.distribution = .fillEqually
     for tab in HomeTab.allCases {
@@ -61,8 +60,6 @@ final class InboxPadBar: UIView {
       createButton.widthAnchor.constraint(equalToConstant: Self.height),
       createButton.heightAnchor.constraint(equalToConstant: Self.height),
     ])
-    edge.edge = .bottom
-    addInteraction(edge)
     apply()
   }
 
@@ -76,7 +73,7 @@ final class InboxPadBar: UIView {
 
   func attachScrollEdge(to scrollView: UIScrollView) {
     LodyScrollEdges.floatingControls(scrollView)
-    edge.scrollView = scrollView
+    LodyScrollEdges.shape(self, around: scrollView, edge: .bottom)
   }
 
   private func apply() {
@@ -89,7 +86,7 @@ final class InboxPadBar: UIView {
       button.accessibilityTraits = selected ? [.button, .selected] : .button
     }
     // As the iPhone create action: compose glyph, adding a schedule on Schedules and a chat elsewhere.
-    var create = UIButton.Configuration.glass()
+    var create = UIButton.Configuration.lodyGlass()
     create.image = LodyIcon.compose.uiImage?.withRenderingMode(.alwaysTemplate)
     create.baseForegroundColor = LodyUIColor.accentFg
     createButton.configuration = create

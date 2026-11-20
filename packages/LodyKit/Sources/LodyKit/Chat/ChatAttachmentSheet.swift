@@ -127,7 +127,7 @@ final class ChatAttachmentSheet: UIViewController, UICollectionViewDataSource, U
     grid.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "camera")
     grid.register(UICollectionReusableView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter, withReuseIdentifier: "status")
     LodyScrollEdges.navigation(grid)
-    grid.bottomEdgeEffect.isHidden = true
+    LodyScrollEdges.setEdgesHidden(grid, bottom: true)
     grid.register(ChatPhotoCell.self, forCellWithReuseIdentifier: "photo")
     statusLabel.numberOfLines = 0
     statusLabel.textAlignment = .center

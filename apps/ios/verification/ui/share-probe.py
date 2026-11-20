@@ -53,7 +53,7 @@ host.mkdir(exist_ok=True)
     'CFBundlePackageType': 'APPL',
     'CFBundleShortVersionString': '1.0',
     'CFBundleVersion': '1',
-    'MinimumOSVersion': '26.0',
+    'MinimumOSVersion': '18.0',
     'LSRequiresIPhoneOS': True,
     'UIDeviceFamily': [1],
     'UILaunchScreen': {},
@@ -69,7 +69,7 @@ sdk = subprocess.check_output(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-
 arch = 'arm64' if platform.machine() == 'arm64' else 'x86_64'
 subprocess.run([
     'xcrun', '--sdk', 'iphonesimulator', 'swiftc', '-swift-version', '6', '-parse-as-library', '-module-name', 'ShareProbeHost',
-    '-sdk', sdk, '-target', f'{arch}-apple-ios26.0-simulator',
+    '-sdk', sdk, '-target', f'{arch}-apple-ios18.0-simulator',
     str(Path(__file__).with_name('share-probe-host.swift')), '-o', str(host / 'ShareProbeHost'),
 ], check=True, timeout=120)
 subprocess.run(['codesign', '--force', '--sign', '-', str(host)], check=True, timeout=30)

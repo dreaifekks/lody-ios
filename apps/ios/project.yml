@@ -19,7 +19,7 @@ options:
         ]
   bundleIdPrefix: ai.lody
   deploymentTarget:
-    iOS: '26.0'
+    iOS: '18.0'
   developmentLanguage: en
   knownRegions:
     - en
@@ -173,6 +173,7 @@ targets:
           - UIFont+Dynamic.swift
           - LodyUIVerify.swift
           - Chrome/LodyScrollEdges.swift
+          - Chrome/LodyGlass.swift
           - Chrome/LodyEdgeFade.swift
           - List/LodyGroupedList.swift
           - List/LodyListModels.swift

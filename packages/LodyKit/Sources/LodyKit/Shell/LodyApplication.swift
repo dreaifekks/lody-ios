@@ -28,7 +28,9 @@ public final class LodyApplication {
 
   public func start(in window: UIWindow) {
     precondition(observers.isEmpty, "Lody supports one active scene")
-    ComposerDictator.defaultEngine = DictationFixture.engine ?? SpeechDictation.shared
+    var speech: ComposerDictating?
+    if #available(iOS 26.0, *) { speech = SpeechDictation.shared }
+    ComposerDictator.defaultEngine = DictationFixture.engine ?? speech
     ContentPreview.clearAll()
     if LodyUIVerify.offline { URLProtocol.registerClass(OfflineProbe.self) }
     lodyApplyWindowAccent()

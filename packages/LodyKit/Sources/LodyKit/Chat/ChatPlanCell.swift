@@ -61,7 +61,7 @@ final class ChatPlanCell: UICollectionViewCell {
     review.setTitle(String(localized: "native.chat.proposedPlan.review", bundle: .lody), for: .normal)
     execute.setTitle(String(localized: "native.chat.proposedPlan.execute", bundle: .lody), for: .normal)
     for button in [execute, discuss] {
-      var configuration: UIButton.Configuration = button === execute ? .prominentGlass() : .glass()
+      var configuration: UIButton.Configuration = button === execute ? .lodyProminentGlass() : .lodyGlass()
       configuration.baseForegroundColor = button === execute ? .white : .label
       if button === execute { configuration.baseBackgroundColor = .systemBlue }
       configuration.cornerStyle = .capsule

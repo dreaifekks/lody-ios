@@ -145,7 +145,7 @@ final class CreateProjectPickerController: CreateListController {
     segment = CreateProjectPicker.isGithub(selectedId) ? 1 : 0
     super.init(nibName: nil, bundle: nil)
     title = String(localized: "create.row.selectProject", bundle: .lody)
-    navigationItem.subtitle = machineName
+    if #available(iOS 26.0, *) { navigationItem.subtitle = machineName } else { navigationItem.prompt = machineName }
   }
 
   @available(*, unavailable)

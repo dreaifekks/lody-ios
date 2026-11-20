@@ -188,7 +188,9 @@ final class PageHeaderPopGestureDelegate: NSObject, UIGestureRecognizerDelegate 
     let top = navigation.topViewController
     let page = (top as? UINavigationController)?.topViewController ?? top
     let pageOwned = (page as? LodyPageController)?.ownsHeader == true && navigation.viewControllers.count > 1
-    for gesture in [navigation.interactivePopGestureRecognizer, navigation.interactiveContentPopGestureRecognizer].compactMap({ $0 }) {
+    var gestures = [navigation.interactivePopGestureRecognizer]
+    if #available(iOS 26.0, *) { gestures.append(navigation.interactiveContentPopGestureRecognizer) }
+    for gesture in gestures.compactMap({ $0 }) {
       let proxy: PageHeaderPopGestureDelegate
       if let existing = objc_getAssociatedObject(gesture, &association) as? PageHeaderPopGestureDelegate { proxy = existing }
       else {

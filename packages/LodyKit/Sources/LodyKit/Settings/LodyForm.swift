@@ -52,7 +52,7 @@ class LodyFormController: UIViewController {
     })
     item.accessibilityLabel = label
     if prominent {
-      item.style = .prominent
+      item.style = .lodyProminent
       item.tintColor = .lodyAccent
     }
     return item

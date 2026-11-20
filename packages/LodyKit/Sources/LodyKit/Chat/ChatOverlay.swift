@@ -43,8 +43,8 @@ final class ChatOverlay: UIView {
     super.init(frame: frame)
     isHidden = true
     isUserInteractionEnabled = false
-    statusSurface.cornerConfiguration = .capsule()
-    scrollSurface.cornerConfiguration = .capsule()
+    statusSurface.lodySetCorners(.capsule())
+    scrollSurface.lodySetCorners(.capsule())
     scrollHost.isUserInteractionEnabled = false
     addSubview(statusSurface)
     addSubview(scrollHost)

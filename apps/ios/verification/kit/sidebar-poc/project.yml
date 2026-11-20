@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: ai.lody.mobile
 settings:
   base:
-    IPHONEOS_DEPLOYMENT_TARGET: '26.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '18.0'
     DEVELOPMENT_TEAM: YTRMX32C99
     SWIFT_VERSION: '5.0'
 targets:

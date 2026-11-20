@@ -133,7 +133,7 @@ struct ChatActionBarContent: View {
   @Environment(\.dynamicTypeSize) private var typeSize
 
   var body: some View {
-    GlassEffectContainer(spacing: 8) {
+    LodyGlassGroup(spacing: 8) {
       ViewThatFits(in: .horizontal) {
         row(diffDot: false, folded: false)
         row(diffDot: true, folded: false)
@@ -192,7 +192,7 @@ struct ChatActionBarContent: View {
       ForEach(environment) { item($0) }
     }
     .padding(.horizontal, 2)
-    .glassEffect(.regular, in: .capsule)
+    .lodyGlass(in: .capsule)
     .fixedSize()
   }
 
@@ -219,7 +219,7 @@ struct ChatActionBarContent: View {
     }
     .buttonStyle(.plain)
     .padding(.horizontal, 2)
-    .glassEffect(.regular, in: .capsule)
+    .lodyGlass(in: .capsule)
     .fixedSize()
     .accessibilityLabel(items.map(\.accessibilityLabel).joined(separator: ", "))
     .accessibilityIdentifier("session-bar:environment")
@@ -308,7 +308,7 @@ struct ChatActionBarContent: View {
       onAction: { onAction("context:" + $0) }, label: label
     )
     .buttonStyle(.plain)
-    .glassEffect(.regular, in: .capsule)
+    .lodyGlass(in: .capsule)
     .accessibilityLabel([context.accessibilityLabel, state.diff?.accessibilityLabel].compactMap { $0 }.joined(separator: ", "))
     .accessibilityIdentifier("session-bar:context")
   }
@@ -354,7 +354,7 @@ struct ChatActionBarContent: View {
       onAction: { onAction("context:" + $0) }, label: label
     )
     .buttonStyle(.plain)
-    .glassEffect(.regular, in: .capsule)
+    .lodyGlass(in: .capsule)
     .accessibilityLabel([context?.accessibilityLabel, state.diff?.accessibilityLabel].compactMap { $0 }.joined(separator: ", "))
     .accessibilityIdentifier("session-bar:context")
   }
@@ -405,7 +405,7 @@ struct ChatActionBarContent: View {
     .disabled(primary.busy == true)
     .foregroundStyle(LodyColor.textPrimary)
     .fixedSize()
-    .glassEffect(.regular.interactive(), in: .capsule)
+    .lodyGlass(interactive: true, in: .capsule)
   }
 
   // MARK: Menus

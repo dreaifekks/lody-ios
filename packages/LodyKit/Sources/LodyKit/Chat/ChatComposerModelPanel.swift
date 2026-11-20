@@ -364,7 +364,7 @@ final class ChatComposerModelPanel: UIViewController, UIPopoverPresentationContr
     fastConfiguration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 14, weight: .regular)
     fastConfiguration.baseForegroundColor = enabled ? .lodyAccent : .secondaryLabel
     fastConfiguration.contentInsets = .zero
-    if fast.configuration?.image != nil {
+    if #available(iOS 26.0, *), fast.configuration?.image != nil {
       fastConfiguration.symbolContentTransition = .init(.replace.byLayer)
     }
     fast.configuration = fastConfiguration
