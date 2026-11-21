@@ -85,8 +85,7 @@ final class AgentProviderEnvironment: UIStackView {
       return row
     }
     add.update(value: "")
-    addArrangedSubview(LodyFormGroup(header: AgentProviderSections.text("environment"), footer: AgentProviderSections.text("envWriteOnly"),
-                                     rows: rows + [add]))
+    addArrangedSubview(LodyFormGroup(header: AgentProviderSections.text("environment"), rows: rows + [add]))
     setEditable(editable)
   }
 }

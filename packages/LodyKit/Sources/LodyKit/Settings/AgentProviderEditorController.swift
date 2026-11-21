@@ -1,5 +1,7 @@
-import UIKit
 import LodyCore
+import LodyDesignSystem
+import SwiftUI
+import UIKit
 
 struct AgentProviderFields: Encodable, Sendable {
   var name: String
@@ -57,21 +59,18 @@ final class AgentProviderEditorController: LodyFormController {
   private var busy = false
   private var invalid = false
   private var uncertain = false
-  /// Sign-in state learned in this editor: completed here, or reported missing by a probe.
-  private var signedIn = false
-  private var signInRequired = false
   private let provider = UIButton.lodyFormPicker("provider-type")
   private var commandGroup: LodyFormGroup?
   private var accountGroup: LodyFormGroup?
+  private var titleGroup: LodyFormGroup?
+  private weak var titleConfigSheet: UIViewController?
   private var nameValue: String
-  private var promptValue: String
+  private let promptValue: String
   private var commandValue: String
   private var argsValue: String
   private let nameRow = LodyFormValueRow(id: "provider-name", title: AgentProviderSections.text("name"))
   private let commandRow = LodyFormValueRow(id: "provider-command", title: AgentProviderSections.text("command"))
   private let argsRow = LodyFormValueRow(id: "provider-args", title: AgentProviderSections.text("args"))
-  private let promptRow = LodyFormValueRow(id: "provider-prompt", title: AgentProviderSections.text("systemPrompt"), stacked: true)
-  private let signInRow = LodyFormValueRow(id: "provider-sign-in", title: AgentProviderSections.text("signInRow"))
   private lazy var cancelItem = Self.barButton(symbol: "xmark", label: String(localized: "common.cancel", bundle: .lody)) { [weak self] in self?.closeForm() }
   private lazy var saveItem = Self.barButton(symbol: "checkmark", label: RemoteSettingsSections.remote("save"), prominent: true) { [weak self] in self?.save() }
   private lazy var moreItem: UIBarButtonItem = {
@@ -115,25 +114,20 @@ final class AgentProviderEditorController: LodyFormController {
       self.render()
     }
     stack.addArrangedSubview(makeHeader())
-    if item == nil {
-      let hint = LodyFormGroup.caption()
-      hint.text = text("setupHint")
-      hint.numberOfLines = 0
-      stack.addArrangedSubview(LodyFormGroup.inset(hint))
-    }
     stack.addArrangedSubview(LodyFormGroup(header: text("basics"), LodyFormRow(label: text("type"), content: provider, picker: true), nameRow))
-    let custom = LodyFormGroup(header: text("custom"), footer: text("argsHint"), commandRow, argsRow)
+    let custom = LodyFormGroup(header: text("custom"), commandRow, argsRow)
     commandGroup = custom
     stack.addArrangedSubview(custom)
     let account = LodyFormGroup(header: text("account"), rows: [
-      signInRow, advanced.credentialModeRow, advanced.credentialRow, advanced.endpointChoiceRow, advanced.endpointRow,
+      advanced.credentialModeRow, advanced.credentialRow, advanced.endpointChoiceRow, advanced.endpointRow,
       advanced.codexModeRow, advanced.codexEndpointRow,
     ])
     accountGroup = account
     stack.addArrangedSubview(account)
     stack.addArrangedSubview(LodyFormGroup.inset(advanced.unavailable))
-    stack.addArrangedSubview(LodyFormGroup(header: text("conversationDefaults"), footer: RemoteSettingsSections.remote("agentHint"),
-                                           promptRow, advanced.titleRows))
+    let title = LodyFormGroup(footer: text("titleGenerationHint"), advanced.titleRow)
+    titleGroup = title
+    stack.addArrangedSubview(title)
     stack.addArrangedSubview(LodyFormGroup.inset(advanced.extensions))
     stack.addArrangedSubview(advanced.environment)
     if item != nil, !isReadOnly { stack.addArrangedSubview(LodyFormGroup(deleteButton)) }
@@ -141,8 +135,7 @@ final class AgentProviderEditorController: LodyFormController {
     nameRow.addAction(UIAction { [weak self] _ in self?.editName() }, for: .touchUpInside)
     commandRow.addAction(UIAction { [weak self] _ in self?.editCommand() }, for: .touchUpInside)
     argsRow.addAction(UIAction { [weak self] _ in self?.editArgs() }, for: .touchUpInside)
-    promptRow.addAction(UIAction { [weak self] _ in self?.editPrompt() }, for: .touchUpInside)
-    signInRow.addAction(UIAction { [weak self] _ in self?.authenticate() }, for: .touchUpInside)
+    advanced.titleRow.addAction(UIAction { [weak self] _ in self?.presentTitleConfig() }, for: .touchUpInside)
     quotaLine.addAction(UIAction { [weak self] _ in self?.showUsage() }, for: .touchUpInside)
 
     advanced.configure(machine: machine)
@@ -218,8 +211,7 @@ final class AgentProviderEditorController: LodyFormController {
     display(nameRow, value: name)
     display(commandRow, value: command)
     display(argsRow, value: argsValue.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " "))
-    display(promptRow, value: promptValue.trimmingCharacters(in: .whitespacesAndNewlines))
-    for row in [nameRow, commandRow, argsRow, promptRow] { row.isEnabled = canEdit }
+    for row in [nameRow, commandRow, argsRow] { row.isEnabled = canEdit }
     commandGroup?.isHidden = selected?.cliType != "custom"
 
     providerHeader.update(
@@ -233,11 +225,9 @@ final class AgentProviderEditorController: LodyFormController {
     if activeOperation != nil { operationSpinner.startAnimating() } else { operationSpinner.stopAnimating() }
     statusContainer?.isHidden = activeOperation == nil && (operationStatus.text ?? "").isEmpty
 
-    renderSignIn(editable: canEdit)
     advanced.setEditable(canEdit)
-    accountGroup?.footer = advanced.accountFooter
-    accountGroup?.isHidden = signInRow.isHidden && !advanced.hasCredentials && !advanced.showsCodex
-    LodyFormGroup.setRow(advanced.titleRows, hidden: !advanced.showsTitle)
+    accountGroup?.isHidden = !advanced.hasCredentials && !advanced.showsCodex
+    titleGroup?.isHidden = !advanced.showsTitle
 
     saveItem.isEnabled = canEdit && advanced.isValid && selected != nil && !name.isEmpty
       && (selected?.cliType != "custom" || !command.isEmpty)
@@ -267,21 +257,6 @@ final class AgentProviderEditorController: LodyFormController {
 
   private func display(_ row: LodyFormValueRow, value: String) {
     if value.isEmpty { row.update(value: text("notSet"), placeholder: true) } else { row.update(value: value) }
-  }
-
-  /// Signed in, Sign in, or not supported; a draft provider cannot sign in until it is saved.
-  private func renderSignIn(editable: Bool) {
-    LodyFormGroup.setRow(signInRow, hidden: item == nil || advanced.detail == nil)
-    guard advanced.detail?.supportsAuthentication == true else {
-      signInRow.update(value: text("signInUnsupported"), placeholder: true, chevron: false)
-      signInRow.isEnabled = false
-      return
-    }
-    var state = "signIn"
-    if signInRequired { state = "setup.auth_required" }
-    if signedIn { state = "auth.authenticated" }
-    signInRow.update(value: text(state))
-    signInRow.isEnabled = editable
   }
 
   private func moreActions() -> [UIMenuElement] {
@@ -327,12 +302,30 @@ final class AgentProviderEditorController: LodyFormController {
     editText("provider-args", title: "args", value: argsValue, limit: 32000, options: options, detents: [1]) { $0.argsValue = $1 }
   }
 
-  private func editPrompt() {
-    var options = AgentProviderTextSheet.Options()
-    options.multiline = true
-    options.minHeight = 360
-    options.footer = RemoteSettingsSections.remote("agentHint")
-    editText("provider-prompt", title: "systemPrompt", value: promptValue, limit: 32000, options: options, detents: [1]) { $0.promptValue = $1 }
+  private func presentTitleConfig() {
+    guard editable, advanced.showsTitle, titleConfigSheet == nil else { return }
+    view.endEditing(true)
+    let state = advanced.makeTitleConfigState()
+    guard !state.runConfig.isEmpty else { return }
+    let title = text("titleGeneration")
+    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: state, title: title))
+    var contentHeight = CGFloat(state.runConfig.count) * (LodySize.controlMd + LodySpacing.xs * 2)
+      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
+    sheet.rootView = CreateRunConfigSheet(state: state, title: title, onHeightChange: { [weak sheet] height in
+      guard height > 0, abs(contentHeight - height) > 1 else { return }
+      contentHeight = height
+      sheet?.sheetPresentationController?.animateChanges {
+        sheet?.sheetPresentationController?.invalidateDetents()
+      }
+    })
+    if let presentation = sheet.sheetPresentationController {
+      presentation.detents = [.custom(identifier: .init("titleConfigContent")) { context in
+        min(contentHeight, context.maximumDetentValue)
+      }]
+      presentation.prefersGrabberVisible = true
+    }
+    titleConfigSheet = sheet
+    present(sheet, animated: true)
   }
 
   private func showUsage() {
@@ -424,7 +417,6 @@ final class AgentProviderEditorController: LodyFormController {
       guard scope.key == scopeKey else { return }
       advanced.updateCapabilities(result.capabilities)
       busy = false
-      signInRequired = result.authRequired
       var message = result.success ? "testPassed" : "testFailed"
       if result.authRequired { message = "authRequired" }
       LodyToastOverlay.shared.show(message: text(message), kind: result.success ? .success : .warning)
@@ -452,7 +444,6 @@ final class AgentProviderEditorController: LodyFormController {
         let result = try await details.probe(request)
         guard let self, self.scope.key == self.scopeKey else { return }
         self.advanced.updateCapabilities(result.capabilities)
-        self.signInRequired = result.authRequired
         var message = result.success ? "refreshDone" : "operationFailed"
         if result.authRequired { message = "authRequired" }
         self.finishRefresh(self.text(message))
@@ -473,19 +464,6 @@ final class AgentProviderEditorController: LodyFormController {
 
   isolated deinit {
     if let refreshObserver { NotificationCenter.default.removeObserver(refreshObserver) }
-  }
-
-  private func authenticate() {
-    guard editable, let detail = advanced.detail, detail.supportsAuthentication, let item, scope.key == scopeKey else { return }
-    let controller = AgentProviderAuthController(target: target, methods: detail.supportsMethodSelection ? detail.capabilities.authMethods : [], scope: scope, service: details)
-    controller.authenticated = { [weak self] in
-      guard let self else { return }
-      self.signedIn = true
-      self.signInRequired = false
-      self.operationStatus.text = self.text("auth.authenticated")
-      self.render()
-    }
-    LodyShell.shared.presentNative(controller, title: item.name, detents: [1])
   }
 
   override func viewDidDisappear(_ animated: Bool) {

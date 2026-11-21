@@ -19,7 +19,7 @@ def visible(identifier):
                   if i.get('type') == 'Button' and i.get('AXLabel') in ('Save', 'Cancel')
                   and 0 <= i['frame']['y'] < 180]
         top = max([100] + chrome)
-        if row and top <= row['frame']['y'] and row['frame']['y'] + row['frame']['height'] < bottom:
+        if row and (identifier == 'provider-add' or (top <= row['frame']['y'] and row['frame']['y'] + row['frame']['height'] < bottom)):
             return row
         down = row is not None and row['frame']['y'] < top
         ui.axe('drag', '--start-x', '80', '--start-y', str(bottom * (.45 if down else .85)),
@@ -143,8 +143,17 @@ ui.wait(lambda items: any((i.get('AXUniqueId') or '').startswith('provider-setup
 
 machine('studio')
 tap('provider:codex')
-assert ui.element('provider-prompt')['AXValue'] == 'Keep changes focused.'
+assert not any(i.get('AXUniqueId') == 'provider-prompt' for i in ui.state()), 'System prompt row should not be shown'
+assert not any(i.get('AXUniqueId') == 'provider-sign-in' for i in ui.state()), 'Sign-in row should not be shown'
 edit('provider-name', 'Codex Personal')
+ui.capture('provider-detail')
+tap('provider-title-generation')
+tap('run-config-model')
+ui.capture('provider-title-sheet')
+ui.axe('tap', '--label', 'Fixture model')
+ui.axe('tap', '-x', '180', '-y', '120')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-title-generation'
+                          and i.get('AXValue') == 'Fixture model' for i in items), 'Title generation choice did not update')
 tap('provider-env-add')
 enter('provider-env-key', 'FIXTURE_OPTION')
 enter('provider-env-value', 'synthetic-value', secret=True)
@@ -153,6 +162,8 @@ ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-env:FIXTURE_OPTION' f
 toolbar('settings.remote.save')
 saved_row('provider:codex', 'Codex Personal')
 tap('provider:codex')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-title-generation'
+                          and i.get('AXValue') == 'Fixture model' for i in items), 'Title generation choice did not persist')
 visible('provider-env:FIXTURE_OPTION')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-env:FIXTURE_OPTION'
                           and i.get('AXValue') == catalog.text('settings.providers.envStateSaved') for i in items), 'Variable did not persist')
@@ -162,15 +173,6 @@ toolbar('settings.providers.envRemove')
 toolbar('settings.providers.done')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-env:FIXTURE_OPTION'
                           and i.get('AXValue') == catalog.text('settings.providers.envStateRemoved') for i in items), 'Removal not drafted')
-tap('provider-sign-in')
-tap('provider-auth-method:fixture-sign-in')
-enter('provider-auth-field:code', 'synthetic-code', secret=True)
-tap('provider-auth-submit')
-ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-auth-status' and catalog.text('settings.providers.auth.authenticated') in (i.get('AXLabel') or '') for i in items), 'Sign-in did not complete')
-ui.capture('provider-authenticated')
-tap('provider-auth-done')
-ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-sign-in'
-                          and i.get('AXValue') == catalog.text('settings.providers.auth.authenticated') for i in items), 'Sign-in row did not update')
 ui.capture('provider-advanced')
 toolbar('settings.remote.save')
 saved_row('provider:codex', 'Codex Personal')
@@ -208,7 +210,7 @@ ui.element('provider:team-codex')
 assert not any(i.get('AXUniqueId') == 'provider-add' for i in ui.state())
 tap('provider:team-codex')
 ui.element('provider-name')
-ui.element('provider-prompt')
+assert not any(i.get('AXUniqueId') == 'provider-prompt' for i in ui.state()), 'Read-only provider showed system prompt'
 assert not any(i.get('AXLabel') == catalog.text('settings.remote.save') and i.get('type') == 'Button' for i in ui.state()), 'Read-only provider offered Save'
 visible('provider-env-add')
 assert not any(i.get('AXUniqueId') == 'provider-more' for i in ui.state()), 'Read-only provider offered More'

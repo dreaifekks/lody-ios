@@ -34,15 +34,16 @@ final class AgentProviderAdvanced {
   let credentialRow = LodyFormValueRow(id: "provider-credential", title: AgentProviderSections.text("apiKey"))
   private(set) lazy var endpointChoiceRow = LodyFormRow(label: AgentProviderSections.text("endpoint"), content: endpointChoice, picker: true)
   let endpointRow = LodyFormValueRow(id: "provider-endpoint", title: AgentProviderSections.text("endpointURL"))
-  /// Title generation pickers, hairline-separated, for the Conversation defaults group.
-  let titleRows = UIStackView()
+  /// Compact tappable row that opens the run-config sheet for title generation options.
+  let titleRow = LodyFormValueRow(id: "provider-title-generation", title: AgentProviderSections.text("titleGeneration"))
   let environment = AgentProviderEnvironment()
   /// "N extensions enabled" for Pi; the list itself is kept as saved.
   let extensions = LodyFormGroup.caption()
   let unavailable = LodyFormGroup.caption()
+  private weak var titleSheetState: CreatePanelState?
+  private static let titleDefaultOption = "__default__"
 
   init() {
-    titleRows.axis = .vertical
     environment.changed = { [weak self] in self?.changed?() }
     credentialRow.addAction(UIAction { [weak self] _ in self?.editCredential() }, for: .touchUpInside)
     endpointRow.addAction(UIAction { [weak self] _ in self?.editEndpoint() }, for: .touchUpInside)
@@ -59,13 +60,62 @@ final class AgentProviderAdvanced {
   /// Whether the provider takes a key, endpoint or Codex account choice.
   var hasCredentials: Bool { preset != nil || isDeepSeek }
   var showsCodex: Bool { option?.agentType == "codex" && option?.cliType == "builtin" && codexSupported }
-  var accountFooter: String? {
-    if hasCredentials { return text("credentialWriteOnly") }
-    if showsCodex { return text("codexCredentials") }
-    return nil
-  }
   /// Title generation applies only without a preset and when the agent does not title sessions itself.
-  var showsTitle: Bool { preset == nil && !capabilities.sessionTitle && titleRows.arrangedSubviews.contains { $0 is LodyFormRow } }
+  var showsTitle: Bool { preset == nil && !capabilities.sessionTitle && !titleOptions.isEmpty }
+
+  private var titleOptions: [ProviderCapabilities.Option] {
+    var options = capabilities.options
+    if !capabilities.models.isEmpty && !options.contains(where: { $0.id == "model" }) {
+      options.insert(.init(id: "model", name: text("titleModel"), type: "select", choices: capabilities.models), at: 0)
+    }
+    if !capabilities.modes.isEmpty && !options.contains(where: { $0.id == "mode" }) {
+      options.append(.init(id: "mode", name: text("titleMode"), type: "select", choices: capabilities.modes))
+    }
+    return options
+  }
+
+  private func titleChoices(for option: ProviderCapabilities.Option) -> [(id: String, name: String, value: ProviderJSON)] {
+    if option.type == "boolean" {
+      return [("true", text("enabled"), .bool(true)), ("false", text("disabled"), .bool(false))]
+    }
+    return option.choices.map { ($0.id, $0.name, ProviderJSON.string($0.id)) }
+  }
+
+  func makeTitleConfigState() -> CreatePanelState {
+    let state = CreatePanelState()
+    state.runConfig = titlePickers()
+    state.onPick = { [weak self, weak state] rowID, pickedID in
+      guard let self, self.editable else { return }
+      guard let option = self.titleOptions.first(where: { $0.id == rowID }) else { return }
+      if pickedID == Self.titleDefaultOption {
+        self.titleValues.removeValue(forKey: rowID)
+      } else if let match = self.titleChoices(for: option).first(where: { $0.id == pickedID }) {
+        self.titleValues[rowID] = match.value
+      }
+      self.titleChanged = true
+      state?.runConfig = self.titlePickers()
+      self.renderTitle()
+      self.changed?()
+    }
+    titleSheetState = state
+    return state
+  }
+
+  private func titlePickers() -> [CreatePicker] {
+    guard preset == nil, !capabilities.sessionTitle else { return [] }
+    return titleOptions.map { option in
+      let choices = titleChoices(for: option)
+      let override = titleValues[option.id]
+      let effective = override ?? option.value
+      let display = choices.first { $0.value == effective }?.name ?? text("default")
+      let defaultOption = CreateOption(id: Self.titleDefaultOption, title: text("default"), selected: override == nil)
+      let items = [defaultOption] + choices.map { choice in
+        CreateOption(id: choice.id, title: choice.name, selected: override == choice.value)
+      }
+      return CreatePicker(id: option.id, glyph: .symbol("sparkles"), title: display, label: option.name,
+                          placeholder: override == nil, options: items)
+    }
+  }
 
   func configure(machine: AgentProviderMachine) { codexSupported = machine.supportsCodexProfiles == true }
 
@@ -179,39 +229,25 @@ final class AgentProviderAdvanced {
   }
 
   private func renderTitle() {
-    titleRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-    var options = capabilities.options
-    if !capabilities.models.isEmpty && !options.contains(where: { $0.id == "model" }) {
-      options.insert(.init(id: "model", name: text("titleModel"), type: "select", choices: capabilities.models), at: 0)
+    titleSheetState?.runConfig = titlePickers()
+    guard showsTitle else {
+      titleRow.update(value: text("default"), placeholder: true)
+      return
     }
-    if !capabilities.modes.isEmpty && !options.contains(where: { $0.id == "mode" }) {
-      options.append(.init(id: "mode", name: text("titleMode"), type: "select", choices: capabilities.modes))
-    }
-    guard preset == nil, !capabilities.sessionTitle else { return }
-    for option in options {
-      let button = UIButton.lodyFormPicker("provider-title:\(option.id)")
-      let value = titleValues[option.id] ?? option.value
-      var choices = option.choices.map { ($0.id, $0.name, ProviderJSON.string($0.id)) }
-      if option.type == "boolean" { choices = [("true", text("enabled"), .bool(true)), ("false", text("disabled"), .bool(false))] }
-      let label = choices.first { $0.2 == value }?.1 ?? text("default")
-      button.configuration?.title = label
-      let reset = UIAction(title: text("default"), state: titleValues[option.id] == nil ? .on : .off) { [weak self] _ in
-        self?.titleValues.removeValue(forKey: option.id)
-        self?.titleChanged = true
-        self?.renderTitle()
-        self?.changed?()
+    var parts: [String] = []
+    for option in titleOptions {
+      guard let override = titleValues[option.id] else { continue }
+      let choices = titleChoices(for: option)
+      if let match = choices.first(where: { $0.value == override }) {
+        if option.type == "boolean" { parts.append("\(option.name): \(match.name)") } else { parts.append(match.name) }
+      } else if case .string(let raw) = override, !raw.isEmpty {
+        parts.append(raw)
       }
-      button.menu = UIMenu(children: [reset] + choices.map { choice in
-        UIAction(title: choice.1, state: choice.2 == titleValues[option.id] ? .on : .off) { [weak self] _ in
-          self?.titleValues[option.id] = choice.2
-          self?.titleChanged = true
-          self?.renderTitle()
-          self?.changed?()
-        }
-      })
-      button.isEnabled = editable
-      if !titleRows.arrangedSubviews.isEmpty { titleRows.addArrangedSubview(LodyFormGroup.hairline()) }
-      titleRows.addArrangedSubview(LodyFormRow(label: option.name, content: button, picker: true))
+    }
+    if parts.isEmpty {
+      titleRow.update(value: text("default"), placeholder: true)
+    } else {
+      titleRow.update(value: parts.joined(separator: " · "), placeholder: false)
     }
   }
 
@@ -223,12 +259,8 @@ final class AgentProviderAdvanced {
 
   func setEditable(_ editable: Bool) {
     self.editable = editable
-    for row in [credentialRow, endpointRow] { row.isEnabled = editable }
+    for row in [credentialRow, endpointRow, titleRow] { row.isEnabled = editable }
     for button in [credentialMode, endpointChoice] { button.isEnabled = editable }
-    for case let row as LodyFormRow in titleRows.arrangedSubviews { row.isUserInteractionEnabled = editable }
-    for case let row as LodyFormRow in titleRows.arrangedSubviews {
-      for case let button as UIButton in row.subviews { button.isEnabled = editable }
-    }
     environment.setEditable(editable)
     codexChoice.isEnabled = editable && detail == nil
     codexEndpointRow.isEnabled = editable && detail == nil

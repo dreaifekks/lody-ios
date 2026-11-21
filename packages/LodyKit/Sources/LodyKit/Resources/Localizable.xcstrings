@@ -31819,6 +31819,40 @@
       },
       "comment": "1: enabled Pi extensions"
     },
+    "settings.providers.titleGeneration": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Title generation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标题生成"
+          }
+        }
+      }
+    },
+    "settings.providers.titleGenerationHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the agent options used to automatically generate conversation titles."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置自动生成对话标题时使用的 Agent 参数。"
+          }
+        }
+      }
+    },
     "settings.providers.titleModel": {
       "extractionState": "manual",
       "localizations": {
