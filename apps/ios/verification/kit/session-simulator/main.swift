@@ -2,7 +2,6 @@ import Foundation
 import LodyCore
 
 enum OutboxError: Error { case scopeExpired }
-extension Bundle { static let lody = Bundle.main }
 @MainActor final class DataRuntime {
   static var current: DataRuntime?
   var workspace = ""

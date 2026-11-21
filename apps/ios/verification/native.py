@@ -121,6 +121,8 @@ if args.case:
         parser.error(f'Unknown check {args.case}; choose from {", ".join(checks)}')
     checks = {args.case: checks[args.case]}
 for files in checks.values():
+    if 'Sessions/SessionCatalog.swift' in files:
+        files.append('Sessions/StatusView.swift')
     if files and 'LodyLocalization.swift' not in files:
         files.append('LodyLocalization.swift')
     if 'LodyTint.swift' in files and 'Appearance/LodyDesign.swift' not in files:

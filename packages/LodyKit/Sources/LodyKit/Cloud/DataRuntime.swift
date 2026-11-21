@@ -299,7 +299,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   }
   private func startRuntime(_ view: WKWebView) {
     guard let workspace, let channel else { return }
-    let params = RuntimeContract.StartParams(workspaceId: workspace, userId: userId, active: !backgrounded, knownRepos: knownRepos)
+    // The runtime cannot see the member's role; Home also withdraws actions once the role is read later.
+    let params = RuntimeContract.StartParams(
+      workspaceId: workspace, userId: userId, active: !backgrounded, knownRepos: knownRepos,
+      workspaceReadOnly: WorkspaceMembers.readOnly(userId: userId, workspaceId: workspace)
+    )
     Task { @MainActor [weak self, weak view] in
       let started = (try? await channel.call(RuntimeContract.Calls.Start.self, params)) != nil
       guard let self, let view, self.webView === view, self.channel === channel else { return }

@@ -28,8 +28,8 @@ struct SessionCopyService {
   }
 }
 
-/// The conversation More menu's session actions, as web `SessionHeaderMenu`: Rename,
-/// Change owner (multi-member workspaces) and the Copy submenu (base branch when it
+/// The conversation More menu's session actions, as web `SessionHeaderMenu`: the Status view's
+/// Later / Settle / Move to Focus, Rename, Change owner (multi-member workspaces) and the Copy submenu (base branch when it
 /// differs from the current one, path, Markdown, URL, deeplink).
 extension SessionController {
   /// Web share origin for app session URLs (`VITE_SITE_URL`, official Lody Cloud).
@@ -37,6 +37,11 @@ extension SessionController {
 
   func sessionMenuItems(_ session: SessionItem) -> [UIMenuElement] {
     var items: [UIMenuElement] = []
+    // The row's tier as the Home list renders it: Later and Settle, or Move to Focus when settled.
+    if !session.archived, let row = statusActions.row(session.id) {
+      let status = statusActions.tierItems(row, from: self)
+      if !status.isEmpty { items.append(UIMenu(options: .displayInline, children: status)) }
+    }
     if !session.archived {
       items.append(UIAction(title: text("session.action.rename"), image: UIImage(systemName: "pencil")) { [weak self] _ in
         self?.perform("rename")

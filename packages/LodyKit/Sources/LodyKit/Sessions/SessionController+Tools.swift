@@ -24,7 +24,8 @@ extension SessionController {
     let sessionKey = previewSessionKey(state)
     var restored = false
     for platform in DevicePlatform.allCases where deviceAvailability(platform, state.catalog, session) != nil {
-      let canShutdown = state.catalog.supportsDeviceShutdown(platform, machineId: session.machineId)
+      let capability = platform == .android ? "androidEmulatorShutdown" : "iosSimulatorShutdown"
+      let canShutdown = (state.catalog.machineCapabilities[session.machineId]?[capability] ?? 0) >= 1
       if let existing = devicePreviews[platform] {
         existing.canShutdownDevice = canShutdown
         continue

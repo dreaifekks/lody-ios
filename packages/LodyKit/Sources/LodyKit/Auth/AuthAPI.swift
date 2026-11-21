@@ -4,6 +4,14 @@ struct WorkspaceMember: Codable, Equatable, Sendable {
   let id: String
   let name: String
   let image: String?
+  /// Workspace role from the member list (`owner`, `admin`, `member`, `viewer`, …); nil from older caches.
+  var role: String? = nil
+
+  /// Web `CODE_COLLAB_READ_WORKSPACE_ROLES`: a role without workspace write permission.
+  var readOnly: Bool {
+    let roles = Set((role ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+    return !roles.isDisjoint(with: ["viewer", "read", "guest"])
+  }
 }
 
 struct AuthUser: Codable, Equatable, Sendable {
@@ -340,7 +348,9 @@ struct AuthAPI: Sendable {
         let id = try Self.requiredString(row["userId"])
         let user = try Self.record(row["user"] as Any)
         guard user["id"] as? String == id else { throw AuthFailure(message: "Invalid member identity") }
-        members[id] = WorkspaceMember(id: id, name: user["name"] as? String ?? "", image: Self.optionalHTTPS(user["image"]))
+        members[id] = WorkspaceMember(
+          id: id, name: user["name"] as? String ?? "", image: Self.optionalHTTPS(user["image"]), role: row["role"] as? String
+        )
       }
       offset += rows.count
       if offset >= total { return members.values.sorted { $0.id < $1.id } }

@@ -35,8 +35,9 @@ SUITES = {
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
-CASES = PHONE_CASES + PAD_CASES + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
-HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
+STATUS_CASES = ('home-status', 'home-status-drag')
+CASES = PHONE_CASES + PAD_CASES + list(STATUS_CASES) + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
+HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general', *STATUS_CASES}
 PREVIEW = {
     'toast': 'session-preview-live',
     'message-quote': 'session-preview-quote',
@@ -442,6 +443,10 @@ try:
                         launch.append('--ui-verify-home')
                     if case == 'home-grouping-crash':
                         launch.append('--ui-verify-sticky-groups')
+                    if case in STATUS_CASES:
+                        launch.append('--ui-review-status')
+                    if case == 'home-status':
+                        launch.append('--ui-review-status-hold')
                     if case == 'navigation':
                         launch.append('--ui-verify-session-tabs')
                     if case in {'session-search', 'session-search-pad'}:
@@ -522,8 +527,8 @@ try:
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
                 script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'message-quote', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
-                if case == 'home-grouping-crash':
-                    script = Path(__file__).with_name('home-grouping-crash.py')
+                if case == 'home-grouping-crash' or case in STATUS_CASES:
+                    script = Path(__file__).with_name(f'{case}.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:

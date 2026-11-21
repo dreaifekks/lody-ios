@@ -46,24 +46,189 @@ enum InboxSections {
     }
   }
 
-  /// Home in the view menu's grouping; archived chats are hidden.
-  /// - Parameter owner: when set ("My tasks"), only chats owned by this user id are listed.
+  /// Home in the view menu's grouping; archived chats are hidden. With the runtime's Status view
+  /// `layout`, the Pinned area (every grouping) and the Status grouping's Focus / Later / Settled
+  /// tiers list exactly its sections and rows in its order; only time and project buckets are
+  /// grouped here. Without it (a runtime or cache older than the layout) Pinned is the flagged
+  /// families and Status falls back to time buckets, since Swift never classifies tiers itself.
+  /// - Parameter owner: when set ("My tasks"), time and project buckets list only families with
+  ///   chats owned by this user id; the layout is already scoped by the runtime.
   static func home(
-    _ catalog: SessionCatalog, grouping: HomeGrouping, owner: String? = nil, idleExpanded: Bool = false,
-    now: Double = LodyRelativeTime.now()
+    _ catalog: SessionCatalog, grouping: HomeGrouping, owner: String? = nil, layout: StatusViewLayout? = nil,
+    settledExpanded: Bool = false, now: Double = LodyRelativeTime.now()
   ) -> [LodyListSection] {
+    guard let layout else { return legacyHome(catalog, grouping: grouping, owner: owner, now: now) }
+    var home = HomeRows(catalog, now: now)
+    let index = layout.index
+    let pinnedIds = layout.pinnedIds
+    let pinned = pinnedArea(layout, home: home, index: index, sections: catalog.pinSections.map(\.id))
+    if let owner {
+      home.families = home.families.filter { family in ([family.session] + family.children).contains { $0.userId == owner } }
+    }
+    let bucketed: [SessionRows.Family] = home.families.compactMap { family in
+      guard !pinnedIds.contains(family.session.id) else { return nil }
+      return (family.session, family.children.filter { !pinnedIds.contains($0.id) })
+    }
+    var buckets = home
+    buckets.families = bucketed
+    let sections: [LodyListSection] = switch grouping {
+    case .time: timeline(buckets)
+    case .project: byProject(buckets)
+    case .status: tiers(layout, home: home, index: index, pending: bucketed.filter { $0.session.pending && index[$0.session.id] == nil }, settledExpanded: settledExpanded)
+    }
+    return pinned + sections
+  }
+
+  private static func legacyHome(_ catalog: SessionCatalog, grouping: HomeGrouping, owner: String?, now: Double) -> [LodyListSection] {
     var catalog = catalog
     if let owner { catalog.sessions = owned(catalog.sessions, by: owner) }
     var home = HomeRows(catalog, now: now)
     let pinned = home.families.filter { $0.session.pinned || $0.children.contains(where: \.pinned) }
     home.families.removeAll { $0.session.pinned || $0.children.contains(where: \.pinned) }
-    let sections: [LodyListSection] = switch grouping {
-    case .time: timeline(home)
-    case .project: byProject(home)
-    case .status: byStatus(home, idleExpanded: idleExpanded)
-    }
+    let sections = grouping == .project ? byProject(home) : timeline(home)
     guard !pinned.isEmpty else { return sections }
     return [section(pinnedId, header: String(localized: "inbox.section.pinned", bundle: .lody), rows: home.rows(pinned))] + sections
+  }
+
+  // MARK: Status view layout
+
+  static let focusId = "focus"
+  static let laterId = "later"
+  static let settledId = "settled"
+  /// A user pin section's list id; the default section keeps `pinnedId`.
+  static let pinSectionPrefix = "pinned:"
+  /// Later and Settled start collapsed (device-local, `ChatGroupFolds`).
+  static let collapsedByDefault: Set<String> = [laterId, settledId]
+  /// Settled conversations beyond this many top-level rows fold behind "Show all".
+  static let settledLimit = 20
+  static let settledMoreId = "view:settled"
+  /// The "N hidden in this view" line under a pin section.
+  static let hiddenRowPrefix = "view:hidden:"
+  /// Section header menu actions (`sectionAction`).
+  static let sectionActions = (create: "section:new", rename: "section:rename", up: "section:up", down: "section:down", delete: "section:delete")
+  /// Status row actions (`rowAction`); `later` opens the Later sheet.
+  static let statusActions = (settle: "status:settle", later: "status:later", focus: "status:focus")
+
+  /// `sections` are the pin section definitions in render order; Move Up / Move Down follow them.
+  private static func pinnedArea(
+    _ layout: StatusViewLayout, home: HomeRows, index: [String: StatusViewRow], sections: [String]
+  ) -> [LodyListSection] {
+    let userSections = sections.isEmpty ? layout.pinned.compactMap(\.sectionId) : sections
+    let manages = layout.canManageSections
+    return layout.pinned.map { pinned in
+      let area = StatusViewArea.pinned(pinned.sectionId)
+      let header = pinned.sectionId == nil
+        ? String(localized: "inbox.section.pinned", bundle: .lody)
+        : pinned.name ?? ""
+      var rows = layoutRows(pinned.rows, home: home, index: index)
+      if pinned.hiddenCount > 0 {
+        var hidden = LodyListRow()
+        hidden.id = hiddenRowPrefix + area.sectionId
+        hidden.title = String.localizedStringWithFormat(String(localized: "home.pins.hidden", bundle: .lody), pinned.hiddenCount)
+        rows.append(hidden)
+      }
+      var result = section(area.sectionId, header: header, rows: rows)
+      // Keep the label even when its rows are hidden: an empty user section stays a drop target.
+      result.keepsEmpty = pinned.sectionId != nil
+      result.headerValue = String(pinned.rows.flatMap(\.family).count)
+      if manages { result.headerMenu = sectionMenu(pinned.sectionId, among: userSections) }
+      return result
+    }
+  }
+
+  private static func sectionMenu(_ id: String?, among sections: [String]) -> [LodyListAction] {
+    var items = [listAction(sectionActions.create, "home.pins.newSection", "plus")]
+    guard let id, let position = sections.firstIndex(of: id) else { return items }
+    items.append(listAction(sectionActions.rename, "home.pins.rename", "pencil"))
+    if position > 0 { items.append(listAction(sectionActions.up, "home.pins.moveUp", "arrow.up")) }
+    if position < sections.count - 1 { items.append(listAction(sectionActions.down, "home.pins.moveDown", "arrow.down")) }
+    var delete = listAction(sectionActions.delete, "home.pins.delete", "trash")
+    delete.destructive = true
+    items.append(delete)
+    return items
+  }
+
+  private static func tiers(
+    _ layout: StatusViewLayout, home: HomeRows, index: [String: StatusViewRow], pending: [SessionRows.Family], settledExpanded: Bool
+  ) -> [LodyListSection] {
+    func header(_ key: String) -> String { String(localized: String.LocalizationValue("home.status." + key), bundle: .lody) }
+    // Creations the catalog has not read back yet have no layout row; they open at the top of Focus.
+    var focus = section(focusId, header: header("focus"), rows: home.rows(pending) + layoutRows(layout.focus, home: home, index: index))
+    focus.keepsEmpty = true
+    focus.headerValue = String(layout.focus.flatMap(\.family).count + pending.count)
+    var later = section(laterId, header: header("later"), rows: layoutRows(layout.later, home: home, index: index))
+    later.headerValue = String(layout.later.flatMap(\.family).count)
+    let roots = layout.settled.count
+    var settledRows = layoutRows(layout.settled, home: home, index: index, maxRoots: settledExpanded ? .max : settledLimit)
+    if roots > settledLimit {
+      var toggle = LodyListRow()
+      toggle.id = settledMoreId
+      toggle.title = settledExpanded
+        ? String(localized: "home.group.showLess", bundle: .lody)
+        : String.localizedStringWithFormat(String(localized: "home.group.showAll", bundle: .lody), roots)
+      toggle.action = true
+      settledRows.append(toggle)
+    }
+    var settled = section(settledId, header: header("settled"), rows: settledRows)
+    settled.headerValue = String(layout.settled.flatMap(\.family).count)
+    return [focus, later, settled]
+  }
+
+  /// Rows in the layout's order. Session content (title, project, PR, status mark) comes from the
+  /// catalog; unread, activity time, the Later countdown and the offered actions come from the
+  /// layout row. Rows the catalog does not have are skipped.
+  private static func layoutRows(
+    _ rows: [StatusViewRow], home: HomeRows, index: [String: StatusViewRow], maxRoots: Int = .max
+  ) -> [LodyListRow] {
+    let families: [SessionRows.Family] = rows.compactMap { row in
+      guard let session = home.sessions[row.id] else { return nil }
+      return (session, row.children.flatMap(\.family).compactMap { home.sessions[$0.id] })
+    }
+    return home.rows(families, maxRoots: maxRoots).map { row in
+      guard let source = index[row.id], let session = home.sessions[row.id] else { return row }
+      return decorate(row, source, session, now: home.now)
+    }
+  }
+
+  static func decorate(_ row: LodyListRow, _ source: StatusViewRow, _ session: SessionItem, now: Double) -> LodyListRow {
+    var row = row
+    if source.activityAt.isFinite {
+      row.value = LodyRelativeTime.compact(source.activityAt, now: now)
+      row.accessibilityValue = LodyRelativeTime.text(source.activityAt, now: now)
+      // The local viewed watermark clears emphasis before the read receipt syncs, as elsewhere.
+      row.unread = source.unread && (session.lastViewedMessageAt.map { $0 < source.activityAt } ?? true)
+    } else {
+      row.unread = source.unread
+    }
+    if source.tier == .later, let until = source.snoozedUntil, let countdown = StatusViewFormat.countdown(until: until, now: now) {
+      row.value = countdown
+      row.valueSymbol = "clock"
+      let date = Date(timeIntervalSince1970: until / 1000).formatted(date: .abbreviated, time: .shortened)
+      row.accessibilityValue = String.localizedStringWithFormat(String(localized: "home.status.returns", bundle: .lody), date)
+    }
+    row.pinned = source.tier == .pinned
+    row.leadingActions = source.canPrefer ? [SessionRows.pin(row.pinned)] : []
+    switch source.tier {
+    case .focus, .later:
+      row.actions = source.canManage
+        ? [listAction(statusActions.settle, "home.status.settle", "checkmark.circle"), listAction(statusActions.later, "home.status.later", "clock")]
+        : []
+    case .settled:
+      row.actions = [SessionRows.archive(false)]
+    case .pinned:
+      break
+    }
+    // Pin moves into the status menu beside Move to section; the rest of the menu stays.
+    row.menuActions.removeAll { $0.id == "pin" }
+    return row
+  }
+
+  private static func listAction(_ id: String, _ key: String, _ symbol: String) -> LodyListAction {
+    var item = LodyListAction()
+    item.id = id
+    item.title = String(localized: String.LocalizationValue(key), bundle: .lody)
+    item.symbol = symbol
+    return item
   }
 
   /// The view menu's Archived switch: only archived chats, in activity buckets, newest first.
@@ -83,10 +248,6 @@ enum InboxSections {
     })
     return sessions.filter { included.contains(DirectoryTabs.root($0, indexed: indexed)) }
   }
-
-  /// Quiet chats beyond this many top-level rows fold behind "Show all" in the status view.
-  static let idleLimit = 20
-  static let idleMoreId = "view:idle"
 
   /// Activity buckets only (no pinned / status groups).
   static func timeline(_ catalog: SessionCatalog, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
@@ -124,35 +285,6 @@ enum InboxSections {
     }
   }
 
-  /// `HomeStatusGroup` order; the idle group shows `idleLimit` chats until expanded.
-  static func byStatus(_ catalog: SessionCatalog, idleExpanded: Bool = false, now: Double = LodyRelativeTime.now()) -> [LodyListSection] {
-    byStatus(HomeRows(catalog, now: now), idleExpanded: idleExpanded)
-  }
-
-  private static func byStatus(_ home: HomeRows, idleExpanded: Bool) -> [LodyListSection] {
-    var groups: [HomeStatusGroup: [SessionRows.Family]] = [:]
-    for family in home.families {
-      groups[HomeStatusGroup(family.session, attention: home.attention[family.session.id]), default: []].append(family)
-    }
-    return HomeStatusGroup.allCases.compactMap { group in
-      guard let sessions = groups[group], !sessions.isEmpty else { return nil }
-      let header = String(localized: String.LocalizationValue("home.group." + group.rawValue), bundle: .lody)
-      guard group == .idle else { return section(group.rawValue, header: header, rows: home.rows(sessions)) }
-      let roots = sessions.count
-      var rows = home.rows(sessions, maxRoots: idleExpanded ? .max : idleLimit)
-      if roots > idleLimit {
-        var toggle = LodyListRow()
-        toggle.id = idleMoreId
-        toggle.title = idleExpanded
-          ? String(localized: "home.group.showLess", bundle: .lody)
-          : String.localizedStringWithFormat(String(localized: "home.group.showAll", bundle: .lody), roots)
-        toggle.action = true
-        rows.append(toggle)
-      }
-      return section(group.rawValue, header: header, rows: rows)
-    }
-  }
-
   /// Shared row building for the Home groupings.
   private struct HomeRows {
     let now: Double
@@ -161,11 +293,14 @@ enum InboxSections {
     let repositories: [String: String]
     var families: [SessionRows.Family]
     let attention: [String: SessionRows.ListAttention]
+    /// Every catalog session by id, archived included.
+    let sessions: [String: SessionItem]
 
     /// `archived` lists only archived chats (the view menu's Archived switch) instead of open ones.
     init(_ catalog: SessionCatalog, now: Double, archived: Bool = false) {
       let indexed = Dictionary(catalog.sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
       attention = SessionRows.conversationAttention(catalog.sessions, indexed: indexed)
+      sessions = indexed
       self.now = now
       names = InboxSections.projectNames(catalog)
       repositories = Dictionary(catalog.projects.compactMap { project in project.repoFullName.map { (project.id, $0) } }, uniquingKeysWith: { first, _ in first })

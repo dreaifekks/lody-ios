@@ -6,7 +6,8 @@ import Foundation
 enum LodyUIVerify {
   static var enabled: Bool { has("--ui-verify") }
   static var offline: Bool { enabled || has("--lody-offline") }
-  static var home: Bool { enabled && has("--ui-verify-home") }
+  static var home: Bool { enabled && (has("--ui-verify-home") || status) }
+  static var status: Bool { enabled && has("--ui-review-status") }
   static var mentions: Bool { enabled && has("--ui-verify-mentions") }
   static var throwProbe: Bool { enabled && has("--ui-verify-throw") }
   static var scroll: Bool {

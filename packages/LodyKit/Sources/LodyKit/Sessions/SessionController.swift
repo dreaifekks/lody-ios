@@ -12,6 +12,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private let feedService: SessionFeedService
   private let findQuery: String
   private lazy var actions = SessionActions(source: source)
+  /// Later / Settle / Move to Focus in the More menu, from the runtime's Status view layout.
+  lazy var statusActions = StatusViewActions(source: source)
   private(set) var feed: SessionFeed?
   lazy var composerModel = SessionComposerModel(choice: initialChoice, service: environment.composer)
   lazy var control = SessionControl(request: environment.control)

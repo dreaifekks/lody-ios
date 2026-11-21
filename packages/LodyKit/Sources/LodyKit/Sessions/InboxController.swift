@@ -6,9 +6,17 @@ final class InboxController: UIViewController {
   let source: SessionSource
   private let chrome = InboxChrome()
   private lazy var actions = SessionActions(source: source)
+  private lazy var status = StatusViewActions(source: source)
   private var query = ""
-  /// The status view's quiet group shows everything; not persisted, so it opens folded.
-  private var idleExpanded = false
+  /// Settled shows every conversation; not persisted, so it opens folded.
+  private var settledExpanded = false
+  /// A dropped row's order, held until the catalog reads the move back.
+  private var hold: (key: String, generation: Int, value: StatusViewHold)?
+  private var holdGeneration = 0
+  /// The layout the list shows (hold applied); drag, drop and accessibility moves resolve against it.
+  private var shownLayout: StatusViewLayout?
+  /// Re-renders Later countdowns each minute while any are listed.
+  private var countdownTimer: Timer?
   private var search: (key: String, catalog: SessionCatalog, hits: InboxSearchHits)?
   private var requested: (key: String, catalog: SessionCatalog)?
   private var searchTask: Task<Void, Never>?
@@ -35,6 +43,7 @@ final class InboxController: UIViewController {
   isolated deinit {
     searchTask?.cancel()
     memberTask?.cancel()
+    countdownTimer?.invalidate()
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
   }
 
@@ -44,6 +53,7 @@ final class InboxController: UIViewController {
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.accessibilityIdentifier = "ipad-inbox-list"
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
+    status.runMove = { [weak self] command in self?.runMove(command) }
     list.shareOnboarding = { [weak self] items, source in
       let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
       sheet.popoverPresentationController?.sourceView = source
@@ -51,7 +61,7 @@ final class InboxController: UIViewController {
     }
     view.addSubview(list)
     wireChrome()
-    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange]).map { name in
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange, .lodyWorkspaceRoleDidChange]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated {
           self?.render(onlyIfContentChanged: name == .lodyCatalogDidChange || name == .lodySessionCatalogPreviewDidChange)
@@ -159,6 +169,10 @@ final class InboxController: UIViewController {
     // The Archived switch narrows every view, search included, to archived chats.
     if archived { catalog.sessions = catalog.sessions.filter(\.archived) }
     list.setPinsGroupLabels(term.isEmpty)
+    let layout = statusLayout(state)
+    shownLayout = term.isEmpty && !archived ? layout : nil
+    list.setStatusHooks(shownLayout == nil ? nil : statusHooks)
+    scheduleCountdown(shownLayout)
     guard term.isEmpty else {
       renderSearch(term, state: state, catalog: catalog)
       return
@@ -169,7 +183,92 @@ final class InboxController: UIViewController {
     }
     // Every size class groups by the view menu's choice (time / project / status).
     let owner = HomeScope.stored == .mine ? state.userId : nil
-    list.setSections(InboxSections.home(catalog, grouping: HomeGrouping.stored, owner: owner, idleExpanded: idleExpanded))
+    // Layout times are on the server clock, so its rows age and count down against it.
+    list.setSections(InboxSections.home(
+      catalog, grouping: HomeGrouping.stored, owner: owner, layout: layout, settledExpanded: settledExpanded,
+      now: layout == nil ? LodyRelativeTime.now() : StatusViewActions.now
+    ))
+  }
+
+  // MARK: Status view
+
+  /// The runtime layout for the current scope, with a held drop applied until it reads back.
+  private func statusLayout(_ state: SessionListState) -> StatusViewLayout? {
+    if let nowMs = state.catalog.statusView?.nowMs {
+      StatusViewActions.clock.observe(serverNow: nowMs, deviceNow: LodyRelativeTime.now())
+    }
+    guard let published = state.catalog.statusView?.layout(team: HomeScope.stored == .team, readOnly: StatusViewActions.readOnly(state)) else {
+      hold = nil
+      return nil
+    }
+    guard let current = hold else { return published }
+    if current.key != state.key + HomeScope.stored.rawValue || current.value.released(by: published) {
+      hold = nil
+      return published
+    }
+    return current.value.apply(to: published)
+  }
+
+  private lazy var statusHooks = ChatListStatusHooks(
+    menu: { [weak self] id in
+      guard let self else { return [] }
+      return self.status.menu(id, from: self)
+    },
+    canDrag: { [weak self] id in
+      guard let row = self?.shownLayout?.index[id] else { return false }
+      return row.tier == .pinned ? row.canPrefer : row.canManage || row.canPrefer
+    },
+    drop: { [weak self] id, sectionId, beforeId in
+      guard let row = self?.shownLayout?.index[id], let area = StatusViewArea(sectionId: sectionId) else { return nil }
+      return StatusViewPlanning.drop(row, into: area, beforeId: beforeId)
+    },
+    moveDirections: { [weak self] in
+      self?.shownLayout.map { StatusViewPlanning.moveDirections(in: $0) } ?? [:]
+    },
+    step: { [weak self] id, up in
+      self?.shownLayout.flatMap { StatusViewPlanning.step(id, up: up, in: $0) }
+    },
+    perform: { [weak self] command in self?.runMove(command) }
+  )
+
+  /// Drops, Move to section, Move to top and accessibility moves: the list shows the new order at
+  /// once and keeps it until the catalog reads the write back (or the write fails).
+  private func runMove(_ command: StatusViewCommand) {
+    let state = source.state
+    guard let base = state.catalog.statusView?.layout(team: HomeScope.stored == .team, readOnly: StatusViewActions.readOnly(state)),
+      let value = StatusViewHold(command, base: base)
+    else {
+      status.run(command)
+      return
+    }
+    // Dropped where it already was: nothing to write, but the list must settle again.
+    guard !value.landed(in: base) else {
+      render()
+      return
+    }
+    holdGeneration += 1
+    let generation = holdGeneration
+    hold = (state.key + HomeScope.stored.rawValue, generation, value)
+    render()
+    Task { [weak self] in
+      guard let self else { return }
+      let writes = await self.status.perform(command)
+      guard self.hold?.generation == generation else { return }
+      // 0 writes: the planner refused the move or it changed nothing, so no read-back will come.
+      if let writes, writes > 0 { self.hold?.value.acknowledged = true } else { self.hold?.value.failed = true }
+      self.render()
+    }
+  }
+
+  private func scheduleCountdown(_ layout: StatusViewLayout?) {
+    let needed = HomeGrouping.stored == .status && !(layout?.later.isEmpty ?? true)
+    guard needed != (countdownTimer != nil) else { return }
+    countdownTimer?.invalidate()
+    countdownTimer = needed
+      ? Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        MainActor.assumeIsolated { self?.render() }
+      }
+      : nil
   }
 
   private func wireChrome() {
@@ -298,16 +397,21 @@ final class InboxController: UIViewController {
       }
     case "rowAction":
       guard let action = body["actionId"] as? String else { return }
+      if status.perform(action, row: id, from: self) { return }
       actions.perform(action, row: id, from: self)
+    case "sectionAction":
+      guard let action = body["actionId"] as? String else { return }
+      status.performSection(action, section: id, from: self)
     default:
       break
     }
   }
 
   private func consume(_ id: String) -> Bool {
-    // The Chats pseudo-project has no page of its own.
-    guard id == InboxSections.idleMoreId else { return InboxSections.isChatRow(id) }
-    idleExpanded.toggle()
+    // The Chats pseudo-project and the "hidden in this view" lines have no page of their own.
+    if id.hasPrefix(InboxSections.hiddenRowPrefix) { return true }
+    guard id == InboxSections.settledMoreId else { return InboxSections.isChatRow(id) }
+    settledExpanded.toggle()
     render()
     return true
   }

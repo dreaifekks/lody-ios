@@ -134,6 +134,11 @@ struct LodyListSection {
   var rows: [LodyListRow] = []
   var visual: LodyListVisual? = nil
   var gap: LodyListGap = .section
+  /// Chats list: keep the labelled section while it has no rows (an empty pin section or Focus
+  /// stays visible and a drop target).
+  var keepsEmpty: Bool = false
+  /// Chats list: the label's ⋯ menu (pin section management), emitted as `sectionAction`.
+  var headerMenu: [LodyListAction] = []
 }
 
 enum LodyListGap {

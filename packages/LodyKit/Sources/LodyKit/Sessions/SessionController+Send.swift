@@ -94,7 +94,7 @@ extension SessionController {
   var supportsMessageQuotes: Bool {
     let catalog = source.state.catalog
     guard let session = catalog.session(sessionId) else { return false }
-    return catalog.supportsMessageQuotes(machineId: session.machineId)
+    return (catalog.machineCapabilities[session.machineId]?[ChatMessageQuote.capability] ?? 0) >= 1
   }
 
   private func retryPendingInput(_ id: String) {

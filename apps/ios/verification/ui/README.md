@@ -66,6 +66,10 @@ semantic headings and the app process survive. Run it in light and dark with:
 pnpm verify:ui --case home-grouping-crash --require-video --app /absolute/path/to/Lody.app
 ```
 
+`home-status-drag` uses AXe 2.1 or newer for `drag --hold`. It checks a straight
+vertical drag within Focus, a drop onto an empty pin section, and the native menu
+on a stationary long press. Run it with `--case home-status-drag --require-video`.
+
 `pad-layout` checks rotation and size-class changes with a retained conversation,
 its draft and sheets, and returns to Chats to exercise a row after each compact
 handoff. Its width overrides preserve window bounds and do not simulate a held

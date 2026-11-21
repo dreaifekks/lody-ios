@@ -84,8 +84,8 @@ enum ProjectCards {
       }
       let sessions = byProject[project.id] ?? []
       guard !hideEmpty || !sessions.isEmpty else { return nil }
-      var groups: [HomeStatusGroup: Int] = [:]
-      for session in sessions { groups[HomeStatusGroup(session), default: 0] += 1 }
+      var groups: [ProjectCardStatus: Int] = [:]
+      for session in sessions { groups[ProjectCardStatus(session), default: 0] += 1 }
       let repo = project.repoFullName.flatMap { $0.isEmpty ? nil : $0 }
       let fallback = (project.rootPath as NSString).lastPathComponent
       let machine = github ? nil : catalog.machineNames[project.machineId] ?? (project.machineId.isEmpty ? nil : project.machineId)
@@ -109,6 +109,40 @@ enum ProjectCards {
       case (.none, .some): return false
       default: return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
       }
+    }
+  }
+}
+
+/// A project card's summary counts. Classification mirrors web `lib/home-now.ts`: every chat
+/// counts once, under the first reason that applies (see `init`). The Chats list no longer groups
+/// by it; its Status grouping is the runtime's Focus / Later / Settled layout.
+enum ProjectCardStatus: String, CaseIterable, Sendable {
+  /// Failed, waiting on the person, CI failed on an idle chat's open PR, or a draft PR.
+  case attention
+  /// Finished since the person last looked.
+  case finished
+  /// An open pull request with passing or pending CI.
+  case pullRequest
+  /// Working, even when unread or its CI is red: it may be fixing exactly that.
+  case running
+  /// Everything else, including chats whose PR is merged or closed.
+  case idle
+
+  init(_ session: SessionItem, attention: SessionRows.ListAttention? = nil) {
+    let state = attention?.state ?? SessionState(session)
+    let pr = session.pullRequests.last.flatMap { ["open", "draft"].contains($0.status) ? $0 : nil }
+    if state == .attention || state == .failed {
+      self = .attention
+    } else if state == .live {
+      self = .running
+    } else if let pr, PullRequestCI(pr.ci) == .fail {
+      self = .attention
+    } else if attention?.unread ?? SessionRows.isUnread(session) {
+      self = .finished
+    } else if pr?.status == "draft" {
+      self = .attention
+    } else {
+      self = pr == nil ? .idle : .pullRequest
     }
   }
 }
