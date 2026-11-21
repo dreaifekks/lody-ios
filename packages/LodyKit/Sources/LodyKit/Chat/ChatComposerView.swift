@@ -1730,7 +1730,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attachmentBar.render(attachments, quotes: quotes)
     attachmentBar.isHidden = !expanded
     let showsAttachmentRow = expanded && attachmentBar.hasVisiblePills
-    attachmentHeight.constant = showsAttachmentRow ? ChatAttachmentBar.tileSide : 0
+    attachmentHeight.constant = showsAttachmentRow ? attachmentBar.rowHeight : 0
     attachmentTop.constant = showsAttachmentRow ? 8 : 0
     attachmentStack.render(attachments, quotes: quotes)
     attachmentStack.isHidden = expanded || (attachments.isEmpty && quotes.isEmpty)

@@ -125,8 +125,13 @@ private func quoteSheetHeader(title: String, leading: UIView?, trailing: UIView?
     view.translatesAutoresizingMaskIntoConstraints = false
     header.addSubview(view)
   }
+  // The header keeps its bar height inside the sheet's stack; only larger text grows it.
+  let barHeight = header.heightAnchor.constraint(equalToConstant: 44)
+  barHeight.priority = .defaultHigh + 1
   var constraints = [
+    barHeight,
     header.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+    label.topAnchor.constraint(greaterThanOrEqualTo: header.topAnchor),
     label.centerXAnchor.constraint(equalTo: header.centerXAnchor),
     label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
     label.widthAnchor.constraint(lessThanOrEqualTo: header.widthAnchor, multiplier: 0.5),
@@ -134,11 +139,13 @@ private func quoteSheetHeader(title: String, leading: UIView?, trailing: UIView?
   if let leading {
     constraints += [leading.leadingAnchor.constraint(equalTo: header.leadingAnchor),
                     leading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+                    leading.topAnchor.constraint(greaterThanOrEqualTo: header.topAnchor),
                     leading.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)]
   }
   if let trailing {
     constraints += [trailing.trailingAnchor.constraint(equalTo: header.trailingAnchor),
                     trailing.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+                    trailing.topAnchor.constraint(greaterThanOrEqualTo: header.topAnchor),
                     trailing.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)]
   }
   NSLayoutConstraint.activate(constraints)
@@ -166,6 +173,7 @@ final class ChatQuoteSheetController: UIViewController, UITextViewDelegate {
   private let comment = UITextView()
   private let placeholder = UILabel()
   private var snapshotHeight: NSLayoutConstraint!
+  private let stack = UIStackView()
   private var expanded = false
   private static let collapsedLines: CGFloat = 4
 
@@ -225,10 +233,9 @@ final class ChatQuoteSheetController: UIViewController, UITextViewDelegate {
     placeholder.translatesAutoresizingMaskIntoConstraints = false
     comment.addSubview(placeholder)
 
-    let stack = UIStackView(arrangedSubviews: [header, snapshot, toggle, comment])
+    [header, snapshot, toggle, comment].forEach(stack.addArrangedSubview)
     stack.axis = .vertical
-    stack.spacing = 12
-    stack.setCustomSpacing(4, after: snapshot)
+    stack.spacing = 16
     if editingCard {
       var removeConfig = UIButton.Configuration.plain()
       removeConfig.title = String(localized: "native.chat.quote.remove", bundle: .lody)
@@ -282,6 +289,7 @@ final class ChatQuoteSheetController: UIViewController, UITextViewDelegate {
     let collapsed = collapsedHeight
     let expandable = full > collapsed + 1
     toggle.isHidden = !expandable
+    stack.setCustomSpacing(expandable ? 4 : stack.spacing, after: snapshot)
     let key = expanded ? "native.chat.message.collapse" : "native.chat.message.expand"
     toggle.setTitle(String(localized: String.LocalizationValue(key), bundle: .lody), for: .normal)
     // Expanded, the passage scrolls inside at most half the sheet so the comment stays in reach.

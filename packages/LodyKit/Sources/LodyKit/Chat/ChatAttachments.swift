@@ -268,6 +268,9 @@ final class ChatAttachmentBar: CKAttachmentStrip {
 
   static let thumbnailRadius: CGFloat = 10
   static let tileSide: CGFloat = 80
+  /// Quote cards alone use a compact row; files and images keep the full tile.
+  static let compactTileSide: CGFloat = 48
+  var rowHeight: CGFloat { style.tileSide }
 
   init() {
     var style = CKAttachmentStyle()
@@ -321,6 +324,8 @@ final class ChatAttachmentBar: CKAttachmentStrip {
     }
     let ids = Set(attachments.map(\.id))
     projected = projected.filter { ids.contains($0.key) }
+    let side = attachments.isEmpty ? Self.compactTileSide : Self.tileSide
+    if style.tileSide != side { style.tileSide = side }
     super.render(items + cards, animatedRemoval: animatedRemoval)
   }
 }
