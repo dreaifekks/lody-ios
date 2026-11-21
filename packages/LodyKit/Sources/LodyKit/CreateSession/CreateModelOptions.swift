@@ -41,13 +41,13 @@ enum CreateModelOptions {
       return capability.models.first { $0.id == id }?.name ?? id
     }
     guard let id = CreateLogic.resolvedModelId(capability) else { return text("model.unavailable") }
-    return String.localizedStringWithFormat(text("model.followAgent"), capability.models.first { $0.id == id }?.name ?? id)
+    return capability.models.first { $0.id == id }?.name ?? id
   }
 
   static func effortTitle(_ capability: Capability, _ value: ModelChoice) -> String {
     if let effort = value.effort, !effort.isEmpty, effort.lowercased() != "default" { return effort }
     guard let effort = CreateLogic.resolvedEffort(capability, value) else { return text("model.effortUnavailable") }
-    return String.localizedStringWithFormat(text("model.followAgent"), effort)
+    return effort
   }
 
   static func summary(_ capability: Capability, _ value: ModelChoice) -> String {

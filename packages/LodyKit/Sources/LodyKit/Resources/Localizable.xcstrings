@@ -31668,23 +31668,6 @@
         }
       }
     },
-    "model.followAgent": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Follow Agent: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "跟随 Agent：%@"
-          }
-        }
-      }
-    },
     "model.unavailable": {
       "extractionState": "manual",
       "localizations": {
