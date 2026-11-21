@@ -827,6 +827,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     didSet {
       guard cardStyle != oldValue else { return }
       (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setCard(cardStyle)
+      applyLaneInset()
       updateComposer()
     }
   }
@@ -839,6 +840,17 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// rest while a typed draft remains, so the prompt keeps showing its lines.
   private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder || hasDraftText) }
   private var hasDraftText: Bool { !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+  /// The action bar and queue line up with the resting surface's edges.
+  private var laneInset: CGFloat { ChatComposerLiquidGlassSurfaceLayout.restInset(card: cardStyle) }
+  private lazy var laneConstraints: [NSLayoutConstraint] = [
+    queueView.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+    queueView.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+    actionBar.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+    actionBar.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+  ]
+  private func applyLaneInset() {
+    for constraint in laneConstraints { constraint.constant = constraint.firstAttribute == .leading ? laneInset : -laneInset }
+  }
   private lazy var surfaceLayout: any ChatComposerSurfaceLayout = ChatComposerLiquidGlassSurfaceLayout(
     container: composer,
     inputSurface: inputSurface
@@ -1056,6 +1068,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     actionBarHeight = actionBar.heightAnchor.constraint(equalToConstant: 0)
     mentionHeight = mentionPanel.heightAnchor.constraint(equalToConstant: 0)
     surfaceLayout.activate()
+    applyLaneInset()
+    NSLayoutConstraint.activate(laneConstraints)
     NSLayoutConstraint.activate([
       composer.topAnchor.constraint(equalTo: topAnchor),
       composer.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1067,11 +1081,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       mentionPanel.leadingAnchor.constraint(equalTo: leadingAnchor),
       mentionPanel.trailingAnchor.constraint(equalTo: trailingAnchor),
       mentionPanel.bottomAnchor.constraint(equalTo: bottomAnchor), mentionHeight,
-      queueView.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 16),
-      queueView.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -16), queueHeight, queueGap,
-      actionBar.topAnchor.constraint(equalTo: notice.bottomAnchor),
-      actionBar.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 16),
-      actionBar.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -16), actionBarHeight,
+      queueHeight, queueGap,
+      actionBar.topAnchor.constraint(equalTo: notice.bottomAnchor), actionBarHeight,
       notice.topAnchor.constraint(equalTo: composer.topAnchor), notice.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 20),
       notice.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -20), noticeHeight,
       attachmentTop,
@@ -1686,7 +1697,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let showsBar = !editing && ChatActionBarView.shows(state.actionBar)
     actionBar.render(state.actionBar, visible: showsBar, animated: true)
     // One row of capsules; the stacked fallback at very large text is taller.
-    actionBarHeight.constant = showsBar ? actionBar.fittingHeight(width: max(0, bounds.width - 32)) : 0
+    actionBarHeight.constant = showsBar ? actionBar.fittingHeight(width: max(0, bounds.width - 2 * laneInset)) : 0
     queueGap.constant = showsBar && queueHeight.constant > 0 ? 8 : 0
     let noticeText = failedDraft == nil ? (displayError ?? state.notice) : String(localized: "native.chat.composer.failedDraft", bundle: .lody)
     let canReconnect = failedDraft != nil || displayError != nil || state.reconnect

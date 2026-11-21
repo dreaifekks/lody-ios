@@ -4,6 +4,8 @@ final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
   static let sheetCornerRadius: CGFloat = 28
   // The iOS 26 keyboard has rounded top corners; material continuing behind it keeps the sheet from showing a seam there.
   static let sheetBleed: CGFloat = 40
+  /// The resting surface's side inset; capsules stacked above it share this edge.
+  static func restInset(card: Bool) -> CGFloat { card ? 12 : 20 }
   private let inputSurface: UIVisualEffectView
   private let pill: [NSLayoutConstraint]
   private let sheet: [NSLayoutConstraint]
@@ -20,8 +22,8 @@ final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
     inputSurface.effect = LodyGlass.effect(interactive: true)
     let host = container.contentView
     pill = [
-      inputSurface.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 20),
-      inputSurface.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -20),
+      inputSurface.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Self.restInset(card: false)),
+      inputSurface.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -Self.restInset(card: false)),
       inputSurface.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -8),
     ]
     sheet = [
@@ -57,7 +59,7 @@ final class ChatComposerLiquidGlassSurfaceLayout: ChatComposerSurfaceLayout {
       NSLayoutConstraint.deactivate(sheet)
       NSLayoutConstraint.activate(pill)
       for constraint in pill where constraint.firstAttribute != .bottom {
-        constraint.constant = constraint.firstAttribute == .leading ? 12 : -12
+        constraint.constant = (constraint.firstAttribute == .leading ? 1 : -1) * Self.restInset(card: true)
       }
     }
     applyCorners()
