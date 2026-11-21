@@ -1,9 +1,16 @@
 import CryptoKit
 import Darwin
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 /// Only structured metadata enters diagnostics; never pass payloads, tokens or error descriptions.
 final class DiagnosticsStore: @unchecked Sendable {
+  /// Keeps the process running while a record may hold the App Group lock; `nil` means no execution time is
+  /// available. RunningBoard terminates a process suspended while holding a shared-container lock (0xdead10cc).
+  typealias Activity = @Sendable (_ expired: @escaping @Sendable () -> Void) -> (@Sendable () -> Void)?
+
   enum Process: String, CaseIterable, Sendable {
     case app, notificationService
   }
@@ -32,6 +39,8 @@ final class DiagnosticsStore: @unchecked Sendable {
   private let queue = DispatchQueue(label: "ai.lody.mobile.diagnostics", qos: .utility)
   private var lastPruned: Date?
   private var dropped = 0
+  private let activityLock = NSLock()
+  private var activity: Activity
 
   private struct Entry: Codable {
     let at: Date
@@ -42,12 +51,21 @@ final class DiagnosticsStore: @unchecked Sendable {
   }
 
   init(directory: URL, process: Process, maxBytes: Int = 5 * 1024 * 1024,
-       now: @escaping @Sendable () -> Date = { Date() }) {
+       now: @escaping @Sendable () -> Date = { Date() }, activity: @escaping Activity = { _ in {} }) {
     self.directory = directory
     self.process = process
     self.maxBytes = maxBytes
     self.now = now
+    self.activity = activity
   }
+
+  #if os(iOS)
+  /// The app can be suspended between records; extensions flush before completing and keep the default.
+  @MainActor func keepAlive(_ application: UIApplication) {
+    let assertions = BackgroundAssertions(application)
+    activityLock.withLock { activity = { assertions.begin($0) } }
+  }
+  #endif
 
   static func correlation(_ value: String) -> String {
     SHA256.hash(data: Data(value.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
@@ -85,7 +103,15 @@ final class DiagnosticsStore: @unchecked Sendable {
   func record(_ category: StaticString, _ event: StaticString, fields: [String: String] = [:]) {
     let entry = Entry(at: now(), process: process.rawValue, category: category.description,
                       event: event.description, fields: Self.metadata(fields))
+    let expiry = Expiry()
+    let begin = activityLock.withLock { activity }
+    guard let end = begin({ expiry.expire() }) else {
+      queue.async { self.dropped += 1 }
+      return
+    }
     queue.async {
+      defer { end() }
+      guard !expiry.expired else { self.dropped += 1; return }
       do { try self.withLock { try self.append(entry) } }
       catch { self.dropped += 1 }
     }
@@ -289,3 +315,56 @@ final class DiagnosticsStore: @unchecked Sendable {
     }
   }
 }
+
+private final class Expiry: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = false
+  var expired: Bool { lock.withLock { value } }
+  func expire() { lock.withLock { value = true } }
+}
+
+#if os(iOS)
+/// One background task per queued record. Expiration and completion race, so ending is idempotent.
+private final class BackgroundAssertions: @unchecked Sendable {
+  private final class Assertion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var id: UIBackgroundTaskIdentifier?
+    private var ended = false
+    func start(_ id: UIBackgroundTaskIdentifier) -> Bool {
+      lock.withLock {
+        if !ended { self.id = id }
+        return !ended
+      }
+    }
+    func take() -> UIBackgroundTaskIdentifier? {
+      lock.withLock {
+        ended = true
+        defer { id = nil }
+        return id
+      }
+    }
+  }
+
+  private let application: UIApplication
+
+  init(_ application: UIApplication) { self.application = application }
+
+  func begin(_ expired: @escaping @Sendable () -> Void) -> (@Sendable () -> Void)? {
+    let task = Assertion()
+    let id = application.beginBackgroundTask(withName: "Diagnostics") {
+      expired()
+      self.end(task)
+    }
+    guard id != .invalid else { return nil }
+    guard task.start(id) else {
+      application.endBackgroundTask(id)
+      return nil
+    }
+    return { self.end(task) }
+  }
+
+  private func end(_ task: Assertion) {
+    if let id = task.take() { application.endBackgroundTask(id) }
+  }
+}
+#endif
