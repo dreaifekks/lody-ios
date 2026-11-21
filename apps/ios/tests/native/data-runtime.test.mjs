@@ -914,12 +914,14 @@ test('bundled DataRuntime permits secure WS and retains the script and default C
 
 // iOS 16.4–17.3 WebKit has no AbortSignal.any; the runtime entry installs a
 // fallback before any module runs. Drive catalog sync's combined HEAD signal.
-test('catalog sync combines and cancels signals on a WebKit without AbortSignal.any', async (t) => {
+test('catalog sync combines and cancels signals on a WebKit without AbortSignal.any or URL.canParse', async (t) => {
   const nativeAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+  const nativeCanParse = Object.getOwnPropertyDescriptor(URL, 'canParse');
   const previousFetch = globalThis.fetch;
   const previousBroadcastChannel = globalThis.BroadcastChannel;
   t.after(() => {
     Object.defineProperty(AbortSignal, 'any', nativeAny);
+    Object.defineProperty(URL, 'canParse', nativeCanParse);
     globalThis.fetch = previousFetch;
     globalThis.BroadcastChannel = previousBroadcastChannel;
     delete globalThis.webkit;
@@ -927,6 +929,8 @@ test('catalog sync combines and cancels signals on a WebKit without AbortSignal.
     delete globalThis.dataRuntime;
   });
   delete AbortSignal.any;
+  delete URL.canParse;
+  assert.equal(URL.canParse, undefined);
   assert.equal(AbortSignal.any, undefined);
   globalThis.BroadcastChannel = undefined;
   globalThis.fetch = async () => {
@@ -1056,6 +1060,10 @@ test('catalog sync combines and cancels signals on a WebKit without AbortSignal.
     `data:text/javascript;base64,${Buffer.from(`${bundle.outputFiles[0].text}\n// abort-signal-any`).toString('base64')}`
   );
   assert.equal(typeof AbortSignal.any, 'function', 'the entry installs it');
+  assert.equal(typeof URL.canParse, 'function', 'the entry installs it');
+  assert.equal(URL.canParse('https://example.invalid/a'), true);
+  assert.equal(URL.canParse('not a url'), false);
+  assert.equal(URL.canParse('/a', 'https://example.invalid'), true);
   let next = 0;
   const call = (method, payload = {}) => {
     const id = `call-${++next}`;
@@ -1140,4 +1148,46 @@ test('the AbortSignal.any fallback follows the standard', async () => {
   const bare = {};
   assert.equal(installAbortSignalAny(bare), true);
   assert.equal(bare.any, abortSignalAny);
+});
+
+test('the URL.canParse fallback follows the standard and serves Effect URL schemas', async (t) => {
+  const { urlCanParse, installUrlCanParse } =
+    await import('../../../../packages/cloud-runtime/src/runtime/url-can-parse.ts');
+  assert.equal(urlCanParse('https://example.invalid/a?b#c'), true);
+  assert.equal(urlCanParse('https://exa mple.invalid'), false);
+  assert.equal(urlCanParse(''), false);
+  // A relative URL parses only against a base; an undefined base is no base.
+  assert.equal(urlCanParse('/path'), false);
+  assert.equal(urlCanParse('/path', 'https://example.invalid'), true);
+  assert.equal(urlCanParse('/path', undefined), false);
+  assert.equal(urlCanParse('/path', 'not a base'), false);
+  assert.equal(urlCanParse(new URL('https://example.invalid')), true);
+  // Same answers as the platform's own, where it exists.
+  for (const [url, base] of [
+    ['https://a.invalid'],
+    ['/x', 'https://a.invalid'],
+    ['/x'],
+    ['http://[::1'],
+  ])
+    assert.equal(urlCanParse(url, base), URL.canParse(url, base), url);
+
+  // A platform that has it keeps its own.
+  const native = function canParse() {};
+  const target = { canParse: native };
+  assert.equal(installUrlCanParse(target), false);
+  assert.equal(target.canParse, native);
+
+  // Effect's URLFromString calls URL.canParse while decoding.
+  const nativeCanParse = Object.getOwnPropertyDescriptor(URL, 'canParse');
+  t.after(() => Object.defineProperty(URL, 'canParse', nativeCanParse));
+  delete URL.canParse;
+  assert.equal(installUrlCanParse(), true);
+  assert.equal(URL.canParse, urlCanParse);
+  const { Schema } = await import('effect');
+  const decode = Schema.decodeUnknownSync(Schema.URLFromString);
+  assert.equal(
+    decode('https://example.invalid/a').href,
+    'https://example.invalid/a',
+  );
+  assert.throws(() => decode('not a url'));
 });

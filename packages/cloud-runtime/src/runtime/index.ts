@@ -1,5 +1,5 @@
-// First: later modules call AbortSignal.any, missing before iOS 17.4.
-import './abort-signal-any.ts';
+// First: later modules use Web APIs newer than the oldest supported WebView.
+import './platform-fallbacks.ts';
 import { sessionQuotaProjection } from '../protocol/session-usage.ts';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { StreamsClient } from '@loro-dev/streams-client';

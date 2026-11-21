@@ -1,7 +1,7 @@
 /**
- * `AbortSignal.any` for WebKit before 17.4 (the app supports iOS 16.4) and older
- * Android System WebViews. The runtime entry imports this module first, so every
- * runtime and vendored module may call `AbortSignal.any` unchanged.
+ * `AbortSignal.any` for WebKit before 17.4 (the app supports iOS 16.4) and
+ * Android System WebView before 116. Installed by `platform-fallbacks.ts`, so
+ * every runtime and vendored module may call `AbortSignal.any` unchanged.
  *
  * As the DOM standard: the result aborts with the reason of the first input to
  * abort, is already aborted (with that input's reason) when an input is, and
@@ -40,5 +40,3 @@ export function installAbortSignalAny(
   });
   return true;
 }
-
-installAbortSignalAny();
