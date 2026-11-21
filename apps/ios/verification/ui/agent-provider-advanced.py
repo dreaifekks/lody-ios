@@ -69,6 +69,14 @@ def enter(identifier, text, secret=False):
             'Input did not commit: ' + identifier)
 
 
+def edit(identifier, text, secret=False):
+    """Values are rows; each opens a sheet that edits the draft until Done."""
+    tap(identifier)
+    enter(identifier + ':input', text, secret)
+    toolbar('settings.providers.done')
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == identifier + ':input' for i in items), 'Sheet did not close: ' + identifier)
+
+
 def toolbar(key):
     label = catalog.text(key)
     ui.wait(lambda items: any(i.get('AXLabel') == label and i.get('type') == 'Button' for i in items), 'Missing toolbar ' + key)
@@ -107,63 +115,50 @@ def value(identifier, expected):
             'Saved field differs: ' + identifier)
 
 
-def extension(path, selected):
-    identifier = 'provider-extension:/fixture/extensions/' + path
-    row = visible(identifier)
-    assert ('✓' in (row.get('AXLabel') or '')) == selected, 'Incorrect persisted Pi selection: ' + path
-    return identifier
+def extensions(count):
+    row = visible('provider-pi-extensions')
+    assert str(count) in (row.get('AXLabel') or ''), 'Pi extension count differs'
 
 
 if case == 'agents-presets':
     tap('provider:preset-agent')
     tap('provider-credential-mode')
     ui.axe('tap', '--label', 'Custom endpoint')
-    enter('provider-endpoint', 'https://custom.fixture.invalid/v2')
-    enter('provider-credential', 'fixture-synthetic-key', secret=True)
-    visible('provider-env-mode:KEEP_ME')
-    assert not any(i.get('AXUniqueId') == 'provider-env-mode:FIXTURE_API_KEY' for i in ui.state()), 'Preset secret exposed as a generic env editor'
+    edit('provider-endpoint', 'https://custom.fixture.invalid/v2')
+    edit('provider-credential', 'fixture-synthetic-key', secret=True)
+    value('provider-credential', catalog.text('settings.providers.credentialNew'))
+    visible('provider-env:KEEP_ME')
+    assert not any(i.get('AXUniqueId') == 'provider-env:FIXTURE_API_KEY' for i in ui.state()), 'Preset secret exposed as a generic env editor'
     ui.capture('preset-draft')
     toolbar('settings.remote.save')
     saved_row('provider:preset-agent', 'Fixture gateway')
     tap('provider:preset-agent')
     value('provider-endpoint', 'https://custom.fixture.invalid/v2')
-    value('provider-credential', '')
+    value('provider-credential', catalog.text('settings.providers.credentialSet'))
     ui.capture('preset-reopened')
     # A name-only edit must omit preset fields and credentials, preserving the custom endpoint.
-    enter('provider-name', 'Fixture gateway renamed')
+    edit('provider-name', 'Fixture gateway renamed')
     toolbar('settings.remote.save')
     saved_row('provider:preset-agent', 'Fixture gateway renamed')
     tap('provider:preset-agent')
     value('provider-endpoint', 'https://custom.fixture.invalid/v2')
-    value('provider-credential', '')
+    value('provider-credential', catalog.text('settings.providers.credentialSet'))
     ui.capture('preset-preserved')
     print('PASS: preset mode, custom endpoint, write-only credential, protected env and unrelated-edit preservation')
 elif case == 'agents-pi':
+    # The runtime path and extension list are not edited on mobile: an unrelated edit must leave both
+    # out of the save (the fixture rejects a save that sends either).
     tap('provider:pi-agent')
-    value('provider-runtime-path', '/fixture/bin/pi')
-    tap('provider-pi-extension-scan')
-    extension('retained', True)
-    tap(extension('example', False))
-    extension('example', True)
-    ui.capture('pi-selection')
+    assert not any(i.get('AXUniqueId') in ('provider-runtime-path', 'provider-pi-extension-scan') for i in ui.state()), 'Hidden field shown'
+    extensions(1)
+    ui.capture('pi-extensions')
+    edit('provider-name', 'Fixture Pi renamed')
     toolbar('settings.remote.save')
-    saved_row('provider:pi-agent', 'Fixture Pi')
+    saved_row('provider:pi-agent', 'Fixture Pi renamed')
     tap('provider:pi-agent')
-    value('provider-runtime-path', '/fixture/bin/pi')
-    tap('provider-pi-extension-scan')
-    extension('retained', True)
-    tap(extension('example', True))
-    extension('example', False)
-    enter('provider-runtime-path', '')
-    toolbar('settings.remote.save')
-    saved_row('provider:pi-agent', 'Fixture Pi')
-    tap('provider:pi-agent')
-    value('provider-runtime-path', '')
-    tap('provider-pi-extension-scan')
-    extension('retained', True)
-    extension('example', False)
-    ui.capture('pi-removal-preserved')
-    print('PASS: Pi scan, persisted selection/deselection, runtime-path removal and untouched-extension preservation')
+    extensions(1)
+    ui.capture('pi-preserved')
+    print('PASS: Pi runtime path and extensions stay hidden and untouched by an unrelated save')
 elif case == 'agents-auth-methods':
     tap('provider-auth-start')
     tap('provider-auth-method:browser')

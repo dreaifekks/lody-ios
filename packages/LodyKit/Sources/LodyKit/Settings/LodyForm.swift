@@ -126,6 +126,15 @@ final class LodyFormGroup: UIStackView {
     return view
   }
 
+  /// Hides an arranged row together with the hairline drawn after it.
+  static func setRow(_ view: UIView, hidden: Bool) {
+    if view.isHidden != hidden { view.isHidden = hidden }
+    guard let group = view.superview as? UIStackView, let index = group.arrangedSubviews.firstIndex(of: view),
+          index + 1 < group.arrangedSubviews.count else { return }
+    let line = group.arrangedSubviews[index + 1]
+    if line.isHidden != hidden { line.isHidden = hidden }
+  }
+
   static func hairline() -> UIView {
     let container = UIView()
     let line = UIView()

@@ -1,8 +1,12 @@
 import LodyCore
 import UIKit
 
+/// The detail-backed part of the provider editor: account credentials (preset key, endpoint and mode,
+/// Codex auth), title generation, environment variables and notes. The editor places its rows into its
+/// own groups. The runtime path, description and Pi extension list are not edited on mobile; they are
+/// left out of the save so the stored values stay untouched.
 @MainActor
-final class AgentProviderAdvanced: UIStackView {
+final class AgentProviderAdvanced {
   var changed: (() -> Void)?
   private(set) var detail: ProviderDetail?
   private var option: AgentProviderCatalogItem?
@@ -10,82 +14,58 @@ final class AgentProviderAdvanced: UIStackView {
   private var presetChanged = false
   private var modeID: String?
   private var endpointValue: String?
-  private var runtimePatch: [String: ProviderJSON] = [:]
+  /// The new key typed into the credential sheet; empty keeps the stored one.
+  private var credentialDraft = ""
   private var titleValues: [String: ProviderJSON] = [:]
   private var titleChanged = false
   private var codexSupported = false
   private var codexMode = "chatgpt"
+  private var codexURL = "https://api.openai.com/v1"
+  private var editable = true
   private let profileID = UUID().uuidString.lowercased()
-  private let codexChoice = UIButton.lodyFormPicker("provider-codex-mode")
-  private let codexEndpoint = LodyFormField(id: "provider-codex-endpoint", label: AgentProviderSections.text("endpoint"), text: "https://api.openai.com/v1", limit: 2048)
-  private var codexGroup: LodyFormGroup!
-  private let unavailable = LodyFormGroup.caption()
-  private let extensionRows = UIStackView()
-  private var extensionChoices: [ProviderOperationResult.ExtensionPath] = []
-  private let credential = LodyFormField(id: "provider-credential", label: AgentProviderSections.text("apiKey"), text: "", limit: 32000)
-  private let endpoint = LodyFormField(id: "provider-endpoint", label: AgentProviderSections.text("endpoint"), text: "", limit: 2048)
-  private let descriptionField = LodyFormField(id: "provider-description", label: AgentProviderSections.text("description"), text: "", limit: 4096)
-  private let runtimePath = LodyFormField(id: "provider-runtime-path", label: AgentProviderSections.text("runtimePath"), text: "", limit: 4096)
-  private let credentialMode = UIButton.lodyFormPicker("provider-credential-mode")
-  private let endpointChoice = UIButton.lodyFormPicker("provider-endpoint-choice")
-  private let titleRows = UIStackView()
-  private let environment = AgentProviderEnvironment()
-  private var credentialsGroup: LodyFormGroup!
-  private var runtimeGroup: LodyFormGroup!
-  private var titleGroup: LodyFormGroup!
   private var capabilities = ProviderCapabilities()
 
-  init() {
-    super.init(frame: .zero)
-    axis = .vertical
-    spacing = LodyDesign.Rail.groupGap
-    credential.isSecureTextEntry = true
-    for field in [credential, endpoint, runtimePath] {
-      field.autocapitalizationType = .none
-      field.autocorrectionType = .no
-      field.clearButtonMode = .whileEditing
-    }
-    credential.changed = { [weak self] in self?.changed?() }
-    endpoint.changed = { [weak self] in self?.presetChanged = true; self?.endpointValue = self?.endpoint.trimmed; self?.changed?() }
-    descriptionField.changed = { [weak self] in self?.changed?() }
-    environment.changed = { [weak self] in self?.changed?() }
-    runtimePath.changed = { [weak self] in
-      guard let self, let key = self.runtimeKey else { return }
-      self.runtimePatch[key] = self.runtimePath.trimmed.isEmpty ? .null : .string(self.runtimePath.trimmed)
-      self.changed?()
-    }
-    titleRows.axis = .vertical
-    titleRows.spacing = 8
-    credentialsGroup = LodyFormGroup(header: text("credentials"), footer: text("credentialWriteOnly"),
-                                    credentialMode, credential, endpointChoice, endpoint)
-    runtimeGroup = LodyFormGroup(header: text("runtime"), footer: text("runtimeHint"), runtimePath)
-    titleGroup = LodyFormGroup(header: text("titleGeneration"), footer: text("titleHint"), titleRows)
-    addArrangedSubview(LodyFormGroup(descriptionField))
-    addArrangedSubview(credentialsGroup)
-    codexEndpoint.autocapitalizationType = .none
-    codexEndpoint.autocorrectionType = .no
-    codexGroup = LodyFormGroup(header: text("credentials"), footer: text("codexCredentials"), codexChoice, codexEndpoint)
-    addArrangedSubview(codexGroup)
-    extensionRows.axis = .vertical
-    addArrangedSubview(extensionRows)
-    addArrangedSubview(runtimeGroup)
-    addArrangedSubview(titleGroup)
-    addArrangedSubview(environment)
-    unavailable.accessibilityIdentifier = "provider-unavailable-actions"
-    addArrangedSubview(LodyFormGroup.inset(unavailable))
-  }
+  private let codexChoice = UIButton.lodyFormPicker("provider-codex-mode")
+  private let credentialMode = UIButton.lodyFormPicker("provider-credential-mode")
+  private let endpointChoice = UIButton.lodyFormPicker("provider-endpoint-choice")
+  private(set) lazy var codexModeRow = LodyFormRow(label: AgentProviderSections.text("credentials"), content: codexChoice, picker: true)
+  let codexEndpointRow = LodyFormValueRow(id: "provider-codex-endpoint", title: AgentProviderSections.text("endpointURL"))
+  private(set) lazy var credentialModeRow = LodyFormRow(label: AgentProviderSections.text("mode"), content: credentialMode, picker: true)
+  let credentialRow = LodyFormValueRow(id: "provider-credential", title: AgentProviderSections.text("apiKey"))
+  private(set) lazy var endpointChoiceRow = LodyFormRow(label: AgentProviderSections.text("endpoint"), content: endpointChoice, picker: true)
+  let endpointRow = LodyFormValueRow(id: "provider-endpoint", title: AgentProviderSections.text("endpointURL"))
+  /// Title generation pickers, hairline-separated, for the Conversation defaults group.
+  let titleRows = UIStackView()
+  let environment = AgentProviderEnvironment()
+  /// "N extensions enabled" for Pi; the list itself is kept as saved.
+  let extensions = LodyFormGroup.caption()
+  let unavailable = LodyFormGroup.caption()
 
-  @available(*, unavailable)
-  required init(coder: NSCoder) { fatalError() }
+  init() {
+    titleRows.axis = .vertical
+    environment.changed = { [weak self] in self?.changed?() }
+    credentialRow.addAction(UIAction { [weak self] _ in self?.editCredential() }, for: .touchUpInside)
+    endpointRow.addAction(UIAction { [weak self] _ in self?.editEndpoint() }, for: .touchUpInside)
+    codexEndpointRow.addAction(UIAction { [weak self] _ in self?.editCodexEndpoint() }, for: .touchUpInside)
+    extensions.accessibilityIdentifier = "provider-pi-extensions"
+    unavailable.accessibilityIdentifier = "provider-unavailable-actions"
+  }
 
   private func text(_ key: String) -> String { AgentProviderSections.text(key) }
   private var preset: ProviderPreset? { presets.first { $0.id == option?.presetId } }
   private var mode: ProviderPreset.Mode? { preset?.modes.first { $0.id == modeID } ?? preset?.modes.first }
   private var isDeepSeek: Bool { option?.cliType == "builtin" && option?.agentType == "deepseek" }
-  private var runtimeKey: String? {
-    guard option?.cliType == "builtin", preset == nil else { return nil }
-    return ["codex": "codexPath", "claude": "claudeCodeExecutable", "kimi": "kimiPath", "grok": "grokPath", "devin": "devinPath", "pi": "piPath"][option?.agentType ?? ""]
+
+  /// Whether the provider takes a key, endpoint or Codex account choice.
+  var hasCredentials: Bool { preset != nil || isDeepSeek }
+  var showsCodex: Bool { option?.agentType == "codex" && option?.cliType == "builtin" && codexSupported }
+  var accountFooter: String? {
+    if hasCredentials { return text("credentialWriteOnly") }
+    if showsCodex { return text("codexCredentials") }
+    return nil
   }
+  /// Title generation applies only without a preset and when the agent does not title sessions itself.
+  var showsTitle: Bool { preset == nil && !capabilities.sessionTitle && titleRows.arrangedSubviews.contains { $0 is LodyFormRow } }
 
   func configure(machine: AgentProviderMachine) { codexSupported = machine.supportsCodexProfiles == true }
 
@@ -94,25 +74,22 @@ final class AgentProviderAdvanced: UIStackView {
     self.option = option
     self.presets = presets
     if different {
-      credential.text = ""
+      credentialDraft = ""
       modeID = preset?.modes.first?.id
       endpointValue = nil
-      runtimePatch = [:]
     }
     render()
   }
 
   func load(_ detail: ProviderDetail) {
     self.detail = detail
-    runtimePatch.removeAll()
     titleChanged = false
     titleValues.removeAll()
-    descriptionField.text = detail.description
     capabilities = detail.capabilities
     codexSupported = detail.supportsCodexProfiles
     if case .object(let profile) = detail.codexAuth {
       if case .string(let mode) = profile["mode"] { codexMode = mode }
-      if case .string(let url) = profile["baseUrl"] { codexEndpoint.text = url }
+      if case .string(let url) = profile["baseUrl"] { codexURL = url }
     }
     if case .object(let generation) = detail.titleGeneration, case .object(let values) = generation["configOptionValues"] { titleValues = values }
     if let current = detail.endpoints.first?.value {
@@ -120,7 +97,6 @@ final class AgentProviderAdvanced: UIStackView {
       modeID = preset?.modes.first(where: { $0.endpoint == current || $0.endpoints.contains(where: { $0.url == current }) })?.id ?? preset?.modes.first(where: { $0.customEndpoint })?.id ?? modeID
     }
     presetChanged = false
-    environment.configure(keys: detail.env.map(\.key), protectedKeys: protectedKeys)
     render()
   }
 
@@ -135,66 +111,83 @@ final class AgentProviderAdvanced: UIStackView {
     return []
   }
 
+  private var tokenKey: String? { preset?.tokenEnvKey ?? (isDeepSeek ? "DEEPSEEK_API_KEY" : nil) }
+
+  private var endpointText: String {
+    let endpointKey = isDeepSeek ? "DEEPSEEK_BASE_URL" : "ANTHROPIC_BASE_URL"
+    return endpointValue ?? detail?.endpoints.first { $0.key == endpointKey }?.value ?? mode?.endpoint ?? mode?.endpoints.first?.url ?? ""
+  }
+
   private func render() {
     let reason = detail?.unavailableActions.contains(where: { $0.reason == "machine_capability_missing" }) == true ? "sorbetCapabilityMissing" : "sorbetUnavailable"
     unavailable.text = option?.agentType == "sorbet" ? text(reason) : nil
-    unavailable.isHidden = option?.agentType != "sorbet"
-    codexGroup.isHidden = option?.agentType != "codex" || option?.cliType != "builtin" || !codexSupported
+    unavailable.superview?.isHidden = option?.agentType != "sorbet"
+
+    var enabledExtensions = 0
+    if case .array(let paths) = detail?.runtimeOverrides["piExtensions"] { enabledExtensions = paths.count }
+    extensions.text = String.localizedStringWithFormat(text("piExtensionsEnabled"), enabledExtensions)
+    extensions.superview?.isHidden = option?.agentType != "pi" || enabledExtensions == 0
+
     codexChoice.configuration?.title = codexMode == "chatgpt" ? "ChatGPT" : text("customAPI")
     codexChoice.menu = UIMenu(children: ["chatgpt", "api-key"].map { mode in
       UIAction(title: mode == "chatgpt" ? "ChatGPT" : text("customAPI"), state: mode == codexMode ? .on : .off) { [weak self] _ in
         self?.codexMode = mode
         self?.render()
+        self?.changed?()
       }
     })
-    codexEndpoint.isHidden = codexMode != "api-key"
-    extensionRows.isHidden = option?.agentType != "pi"
+    LodyFormGroup.setRow(codexModeRow, hidden: !showsCodex)
+    codexEndpointRow.update(value: codexURL, placeholder: codexURL.isEmpty)
+    LodyFormGroup.setRow(codexEndpointRow, hidden: !showsCodex || codexMode != "api-key")
 
-    credentialsGroup.isHidden = preset == nil && !isDeepSeek
-    credentialMode.isHidden = (preset?.modes.count ?? 0) < 2
+    LodyFormGroup.setRow(credentialModeRow, hidden: preset == nil || (preset?.modes.count ?? 0) < 2)
     credentialMode.configuration?.title = mode?.name
     credentialMode.menu = UIMenu(children: (preset?.modes ?? []).map { next in
       UIAction(title: next.name, state: next.id == mode?.id ? .on : .off) { [weak self] _ in
         self?.presetChanged = true
         self?.modeID = next.id
         self?.endpointValue = nil
-        self?.credential.text = ""
+        self?.credentialDraft = ""
         self?.render()
         self?.changed?()
       }
     })
-    endpointChoice.isHidden = (mode?.endpoints.isEmpty ?? true)
-    endpointChoice.configuration?.title = text("chooseEndpoint")
-    endpointChoice.menu = UIMenu(children: (mode?.endpoints ?? []).map { next in
-      UIAction(title: next.name) { [weak self] _ in
+    let saved = tokenKey.map { key in detail?.env.contains { $0.key == key && $0.hasValue } == true } ?? false
+    if !credentialDraft.isEmpty { credentialRow.update(value: text("credentialNew")) }
+    else if saved { credentialRow.update(value: text("credentialSet")) }
+    else { credentialRow.update(value: text("credentialNotSet"), placeholder: true) }
+    LodyFormGroup.setRow(credentialRow, hidden: !hasCredentials)
+
+    let endpoints = mode?.endpoints ?? []
+    let current = endpointText
+    endpointChoice.configuration?.title = endpoints.first { $0.url == current }?.name ?? text("chooseEndpoint")
+    endpointChoice.menu = UIMenu(children: endpoints.map { next in
+      UIAction(title: next.name, state: next.url == current ? .on : .off) { [weak self] _ in
         self?.presetChanged = true
         self?.endpointValue = next.url
-        self?.endpoint.text = next.url
+        self?.render()
         self?.changed?()
       }
     })
-    endpoint.isHidden = !isDeepSeek && mode?.customEndpoint != true
-    let endpointKey = isDeepSeek ? "DEEPSEEK_BASE_URL" : "ANTHROPIC_BASE_URL"
-    endpoint.text = endpointValue ?? detail?.endpoints.first { $0.key == endpointKey }?.value ?? mode?.endpoint ?? mode?.endpoints.first?.url ?? ""
-    runtimeGroup.isHidden = runtimeKey == nil
-    if let runtimeKey {
-      if case .string(let path) = runtimePatch[runtimeKey] ?? detail?.runtimeOverrides[runtimeKey] { runtimePath.text = path }
-      else { runtimePath.text = "" }
-    }
+    LodyFormGroup.setRow(endpointChoiceRow, hidden: !hasCredentials || endpoints.isEmpty)
+    endpointRow.update(value: current.isEmpty ? text("notSet") : current, placeholder: current.isEmpty)
+    LodyFormGroup.setRow(endpointRow, hidden: !isDeepSeek && mode?.customEndpoint != true)
+
     environment.configure(keys: detail?.env.map(\.key) ?? [], protectedKeys: protectedKeys)
     renderTitle()
+    setEditable(editable)
   }
 
   private func renderTitle() {
     titleRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-    titleGroup.isHidden = preset != nil || capabilities.sessionTitle
     var options = capabilities.options
     if !capabilities.models.isEmpty && !options.contains(where: { $0.id == "model" }) {
-      options.insert(.init(id: "model", name: text("model"), type: "select", choices: capabilities.models), at: 0)
+      options.insert(.init(id: "model", name: text("titleModel"), type: "select", choices: capabilities.models), at: 0)
     }
     if !capabilities.modes.isEmpty && !options.contains(where: { $0.id == "mode" }) {
-      options.append(.init(id: "mode", name: text("mode"), type: "select", choices: capabilities.modes))
+      options.append(.init(id: "mode", name: text("titleMode"), type: "select", choices: capabilities.modes))
     }
+    guard preset == nil, !capabilities.sessionTitle else { return }
     for option in options {
       let button = UIButton.lodyFormPicker("provider-title:\(option.id)")
       let value = titleValues[option.id] ?? option.value
@@ -216,78 +209,99 @@ final class AgentProviderAdvanced: UIStackView {
           self?.changed?()
         }
       })
+      button.isEnabled = editable
+      if !titleRows.arrangedSubviews.isEmpty { titleRows.addArrangedSubview(LodyFormGroup.hairline()) }
       titleRows.addArrangedSubview(LodyFormRow(label: option.name, content: button, picker: true))
     }
   }
 
   var isValid: Bool {
-    if detail == nil, preset != nil || isDeepSeek, (credential.text ?? "").isEmpty { return false }
-    if let prefix = mode?.tokenPrefix, let token = credential.text, !token.isEmpty { return token.hasPrefix(prefix) }
+    if detail == nil, preset != nil || isDeepSeek, credentialDraft.isEmpty { return false }
+    if let prefix = mode?.tokenPrefix, !credentialDraft.isEmpty { return credentialDraft.hasPrefix(prefix) }
     return true
   }
 
   func setEditable(_ editable: Bool) {
-    for field in [descriptionField, credential, endpoint, runtimePath] { field.isEnabled = editable }
+    self.editable = editable
+    for row in [credentialRow, endpointRow] { row.isEnabled = editable }
     for button in [credentialMode, endpointChoice] { button.isEnabled = editable }
-    titleRows.isUserInteractionEnabled = editable
+    for case let row as LodyFormRow in titleRows.arrangedSubviews { row.isUserInteractionEnabled = editable }
+    for case let row as LodyFormRow in titleRows.arrangedSubviews {
+      for case let button as UIButton in row.subviews { button.isEnabled = editable }
+    }
     environment.setEditable(editable)
     codexChoice.isEnabled = editable && detail == nil
-    codexEndpoint.isEnabled = editable && detail == nil
-    extensionRows.isUserInteractionEnabled = editable
+    codexEndpointRow.isEnabled = editable && detail == nil
   }
 
   func apply(to fields: inout AgentProviderFields) {
     fields.detailRevision = detail?.revision
     if detail == nil, codexSupported, option?.cliType == "builtin", option?.agentType == "codex" {
       var profile: [String: ProviderJSON] = ["mode": .string(codexMode), "profileId": .string(profileID)]
-      if codexMode == "api-key" { profile["baseUrl"] = .string(codexEndpoint.trimmed) }
+      if codexMode == "api-key" { profile["baseUrl"] = .string(codexURL.trimmingCharacters(in: .whitespacesAndNewlines)) }
       fields.codexAuth = .object(profile)
     }
-    if descriptionField.text != detail?.description { fields.description = descriptionField.text ?? "" }
     var patch = environment.patch.filter { !protectedKeys.contains($0.key) }
+    let endpoint = endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
     if let preset {
-      if detail == nil || presetChanged || !(credential.text ?? "").isEmpty || detail?.presetId != preset.id {
+      if detail == nil || presetChanged || !credentialDraft.isEmpty || detail?.presetId != preset.id {
         fields.presetId = preset.id
         fields.presetModeId = mode?.id
-        fields.presetEndpoint = endpoint.trimmed.isEmpty ? nil : endpoint.trimmed
+        fields.presetEndpoint = endpoint.isEmpty ? nil : endpoint
       }
-      if let token = credential.text, !token.isEmpty { patch.updateValue(token, forKey: preset.tokenEnvKey) }
+      if !credentialDraft.isEmpty { patch.updateValue(credentialDraft, forKey: preset.tokenEnvKey) }
     } else if isDeepSeek {
-      if let token = credential.text, !token.isEmpty { patch.updateValue(token, forKey: "DEEPSEEK_API_KEY") }
-      if endpointValue != nil { patch.updateValue(endpoint.trimmed.isEmpty ? nil : endpoint.trimmed, forKey: "DEEPSEEK_BASE_URL") }
+      if !credentialDraft.isEmpty { patch.updateValue(credentialDraft, forKey: "DEEPSEEK_API_KEY") }
+      if endpointValue != nil { patch.updateValue(endpoint.isEmpty ? nil : endpoint, forKey: "DEEPSEEK_BASE_URL") }
     }
     if !patch.isEmpty { fields.envPatch = patch }
-    if !runtimePatch.isEmpty {
-      let remove = runtimePatch.filter { $0.value == .null }.keys.sorted().map { ProviderJSON.string($0) }
-      fields.runtimeOverrides = .object(["action": .string("merge"), "value": .object(runtimePatch.filter { $0.value != .null }), "remove": .array(remove)])
-    }
     if titleChanged { fields.titleGeneration = .object(["action": .string("set"), "value": .object(["configOptionValues": .object(titleValues)])]) }
   }
 
-  func showExtensions(_ choices: [ProviderOperationResult.ExtensionPath]) {
-    extensionChoices = choices
-    extensionRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
-    var selected: [ProviderJSON] = []
-    if case .array(let paths) = runtimePatch["piExtensions"] ?? detail?.runtimeOverrides["piExtensions"] { selected = paths }
-    for choice in choices {
-      let button = UIButton(type: .system)
-      let enabled = selected.contains(.string(choice.path))
-      button.setTitle((enabled ? "✓ " : "") + choice.name, for: .normal)
-      button.accessibilityIdentifier = "provider-extension:\(choice.path)"
-      button.addAction(UIAction { [weak self] _ in
-        guard let self else { return }
-        var next = selected.filter { $0 != .string(choice.path) }
-        if !enabled { next.append(.string(choice.path)) }
-        self.runtimePatch["piExtensions"] = .array(next)
-        self.showExtensions(self.extensionChoices)
-        self.changed?()
-      }, for: .touchUpInside)
-      extensionRows.addArrangedSubview(LodyFormGroup(button))
-    }
+  func clearSecrets() {
+    credentialDraft = ""
+    environment.clearSecrets()
+    render()
   }
 
-  func clearSecrets() {
-    credential.text = ""
-    environment.clearSecrets()
+  private func editCredential() {
+    guard editable, hasCredentials else { return }
+    var options = AgentProviderTextSheet.Options()
+    options.secure = true
+    options.footer = text("credentialWriteOnly")
+    let sheet = AgentProviderTextSheet(id: "provider-credential", label: text("apiKey"), text: "", limit: 32000, options: options) { [weak self] value in
+      guard let self else { return }
+      self.credentialDraft = value
+      self.render()
+      self.changed?()
+    }
+    LodyShell.shared.presentNative(sheet, title: text("apiKey"), detents: [0.5, 1])
+  }
+
+  private func editEndpoint() {
+    guard editable else { return }
+    var options = AgentProviderTextSheet.Options()
+    options.url = true
+    let sheet = AgentProviderTextSheet(id: "provider-endpoint", label: text("endpointURL"), text: endpointText, limit: 2048, options: options) { [weak self] value in
+      guard let self else { return }
+      self.presetChanged = true
+      self.endpointValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      self.render()
+      self.changed?()
+    }
+    LodyShell.shared.presentNative(sheet, title: text("endpointURL"), detents: [0.5, 1])
+  }
+
+  private func editCodexEndpoint() {
+    guard editable, detail == nil else { return }
+    var options = AgentProviderTextSheet.Options()
+    options.url = true
+    let sheet = AgentProviderTextSheet(id: "provider-codex-endpoint", label: text("endpointURL"), text: codexURL, limit: 2048, options: options) { [weak self] value in
+      guard let self else { return }
+      self.codexURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      self.render()
+      self.changed?()
+    }
+    LodyShell.shared.presentNative(sheet, title: text("endpointURL"), detents: [0.5, 1])
   }
 }

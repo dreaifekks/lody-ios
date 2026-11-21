@@ -69,8 +69,9 @@ enum AgentProviderSections {
     snapshot.machines.first { $0.id == id } ?? snapshot.machines.first
   }
 
-  /// The selected computer's line, its providers (tap to open; long-press for actions) and, when
-  /// the computer reports subscription windows, one usage bar per window. Adding lives in the bar's "+".
+  /// The selected computer's line and its providers (tap to open; long-press for actions). A provider
+  /// with subscription windows carries their compact summary as its accessibility value; the page draws
+  /// it as the row's quota line (`AgentProviderRowContent`). Adding lives in the bar's "+".
   /// `refreshing` names the provider whose capabilities are being refreshed and the progress
   /// line shown in place of its subtitle.
   static func make(_ snapshot: AgentProviderSnapshot, selectedID: String?, busy: Bool, usage: [String: AgentUsage] = [:],
@@ -114,7 +115,8 @@ enum AgentProviderSections {
       row.title = provider.name.isEmpty ? RemoteSettingsSections.agentName(provider.agentType) : provider.name
       row.image = provider.cliType == "custom" ? "terminal" : "sparkles"
       row.imageAsset = LodyAgentIcon.asset(cliType: provider.cliType, agentType: provider.agentType) ?? ""
-      row.subtitle = subtitle(provider, windows: windows[provider.id] ?? [])
+      row.subtitle = subtitle(provider)
+      row.accessibilityValue = quotaSummary(windows[provider.id] ?? [])
       if let refreshing, refreshing.id == provider.id {
         row.subtitle = refreshing.text
         row.wrapSubtitle = true
@@ -142,25 +144,7 @@ enum AgentProviderSections {
       empty.wrapSubtitle = true
       providers.rows = [empty]
     }
-    var sections = [computers, providers]
-    let bars = windows.values.flatMap { $0 }.sorted { $0.id < $1.id }
-    if !bars.isEmpty {
-      var usageSection = LodyListSection()
-      usageSection.id = "provider-usage"
-      usageSection.header = text("usage")
-      usageSection.footer = machine.online ? RemoteSettingsSections.usage("sharedShort") : RemoteSettingsSections.usage("lastOffline")
-      usageSection.rows = bars.map { ring in
-        var row = LodyListRow()
-        row.id = ring.id
-        row.title = ring.label
-        row.value = ring.value
-        row.subtitle = [ring.caption, ring.detail].filter { !$0.isEmpty }.joined(separator: " · ")
-        row.progress = max(0, 1 - ring.fraction)
-        return row
-      }
-      sections.append(usageSection)
-    }
-    return sections
+    return [computers, providers]
   }
 
   /// Subscription windows per provider id, as the shared usage projection reports them.
@@ -177,7 +161,7 @@ enum AgentProviderSections {
     return result
   }
 
-  private static func subtitle(_ provider: AgentProviderItem, windows: [LodyListVisualItem]) -> String {
+  private static func subtitle(_ provider: AgentProviderItem) -> String {
     var parts: [String] = []
     if provider.cliType == "custom" {
       parts.append(provider.command.isEmpty ? text("custom") : provider.command)
@@ -186,8 +170,54 @@ enum AgentProviderSections {
       if kind != provider.name { parts.append(kind) }
       if provider.cliType == "registry" { parts.append(text("registry")) }
     }
-    if let tightest = windows.min(by: { $0.fraction > $1.fraction }) { parts.append(tightest.value) }
     return parts.joined(separator: " · ")
+  }
+
+  /// The inline quota line shows at most two windows: the tightest (least remaining), kept in
+  /// their reported order, and counts the rest.
+  static func compactQuota(_ windows: [LodyListVisualItem]) -> (shown: [LodyListVisualItem], more: Int) {
+    let tightest = Set(windows.indices.sorted { a, b in
+      windows[a].fraction == windows[b].fraction ? a < b : windows[a].fraction > windows[b].fraction
+    }.prefix(2))
+    let shown = windows.indices.filter { tightest.contains($0) }.map { windows[$0] }
+    return (shown, windows.count - shown.count)
+  }
+
+  /// Whole percent left in a window.
+  static func remaining(_ window: LodyListVisualItem) -> Int {
+    Int(((1 - min(1, max(0, window.fraction))) * 100).rounded())
+  }
+
+  /// A window at or below a fifth of its allowance reads as a warning.
+  static func quotaWarning(_ window: LodyListVisualItem) -> Bool { remaining(window) <= 20 }
+
+  static func percent(_ value: Int) -> String { String.localizedStringWithFormat(text("quotaPercent"), value) }
+
+  /// "Remaining 5h 82% 7d 40% +1", spoken and shown for a provider's windows; empty without any.
+  static func quotaSummary(_ windows: [LodyListVisualItem]) -> String {
+    guard !windows.isEmpty else { return "" }
+    let compact = compactQuota(windows)
+    var parts = [text("quotaRemaining")] + compact.shown.map { "\($0.shortLabel) \(percent(remaining($0)))" }
+    if compact.more > 0 { parts.append(String.localizedStringWithFormat(text("quotaMore"), compact.more)) }
+    return parts.joined(separator: " ")
+  }
+
+  struct QuotaGroup {
+    var id: String
+    var title: String
+    var windows: [LodyListVisualItem]
+  }
+
+  /// Windows grouped by the quota (bucket or model) that reported them, in reported order. Window ids
+  /// end in their index within the quota, so the prefix names the quota.
+  static func quotaGroups(_ windows: [LodyListVisualItem]) -> [QuotaGroup] {
+    var groups: [QuotaGroup] = []
+    for window in windows {
+      let key = window.id.lastIndex(of: ":").map { String(window.id[..<$0]) } ?? window.id
+      if groups.last?.id == key { groups[groups.count - 1].windows.append(window) }
+      else { groups.append(QuotaGroup(id: key, title: window.group, windows: [window])) }
+    }
+    return groups
   }
 
   static func picker(_ machines: [AgentProviderMachine], selectedID: String?) -> [LodyListSection] {

@@ -140,7 +140,21 @@ let providerSnapshot = AgentProviderSnapshot(
 let providerSections = AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: false, usage: ["m1": subscription])
 precondition(providerSections[0].rows[0].id == "provider-machine-picker")
 precondition(providerSections[1].rows[0].menuActions.map(\.id) == ["edit", "refresh", "delete"])
-precondition(providerSections.first { $0.id == "provider-usage" }?.rows.isEmpty == false, "Provider page preserves subscription quota display")
+precondition(providerSections.map(\.id) == ["provider-machine", "providers"], "Quota windows no longer form a separate section")
+precondition(!providerSections[1].rows[0].accessibilityValue.isEmpty, "A provider with windows carries its compact quota line")
+precondition(AgentProviderSections.make(providerSnapshot, selectedID: "m1", busy: false)[1].rows[0].accessibilityValue.isEmpty, "Rows without quota show no quota line")
+func window(_ id: String, used: Double) -> LodyListVisualItem {
+  var item = LodyListVisualItem()
+  item.id = id
+  item.fraction = used
+  return item
+}
+let quotaWindows = [window("q:a:0", used: 0.5), window("q:a:1", used: 0.9), window("q:b:0", used: 0.1), window("q:b:1", used: 0.85)]
+let compactQuota = AgentProviderSections.compactQuota(quotaWindows)
+precondition(compactQuota.shown.map(\.id) == ["q:a:1", "q:b:1"] && compactQuota.more == 2, "The two tightest windows show inline, in reported order")
+precondition(AgentProviderSections.quotaWarning(window("w", used: 0.8)) && !AgentProviderSections.quotaWarning(window("w", used: 0.79)),
+             "Twenty percent or less left reads as a warning")
+precondition(AgentProviderSections.quotaGroups(quotaWindows).map { $0.windows.count } == [2, 2], "The usage sheet groups windows by their quota")
 let emptyProviderSections = AgentProviderSections.make(providerSnapshot, selectedID: "empty", busy: false)
 precondition(emptyProviderSections[1].rows.map(\.id) == ["providers-empty"], "Read-only empty machines remain selectable without create")
 precondition(AgentProviderSections.picker(providerSnapshot.machines, selectedID: "empty")[0].rows.count == 2)
@@ -162,9 +176,10 @@ var mixedUsage = AgentUsage(configs: [
 ])
 @MainActor func verifyMixedUsage() {
   let sections = AgentProviderSections.make(mixedSnapshot, selectedID: "m1", busy: true, usage: ["m1": mixedUsage])
-  let rows = sections.first { $0.id == "provider-usage" }!.rows
-  precondition(rows.count == 2 && Set(rows.map(\.id)).count == 2)
-  precondition(Set(rows.compactMap(\.progress)) == Set([0.6, 1 - 0.7]), "Each configured account keeps its own quota")
+  let windows = AgentProviderSections.usageWindows(mixedSnapshot, machine: mixedSnapshot.machines[0], usage: mixedUsage, now: now)
+  precondition(windows.count == 2 && Set(windows.values.flatMap { $0 }.map(\.id)).count == 2)
+  precondition(windows["codex-one"]?.map(\.fraction) == [0.4] && windows["codex-two"]?.map(\.fraction) == [0.7],
+               "Each configured account keeps its own quota")
   var snapshot = NSDiffableDataSourceSnapshot<String, String>()
   for section in sections {
     snapshot.appendSections([section.id])

@@ -48,14 +48,18 @@ The application UI and native state run in Swift and UIKit. LodyKit owns navigat
 ## Agent settings
 
 Settings → Agent follows the Web mobile provider page: select a machine in a native
-sheet, then manage that machine’s providers and setup requests. Forms support
-provider names and instructions, custom commands and arguments, preset credentials
-and endpoints, write-only environment patches, Codex authentication profiles,
-runtime paths, and capability-driven title options. Save and test persists changes
-before probing a persisted agent; newly queued setups continue through setup status
-and authentication. Managed-runtime status/install and Pi extension discovery are
-also available while creating a supported provider. Saved providers expose a separate usage refresh;
-quota and pace displays remain sourced from the catalog usage projection.
+sheet, then manage that machine’s providers and setup requests. A provider with
+subscription quotas shows a compact line under its name (the two tightest windows, then
+`+N`); tapping it opens a usage sheet with every window, the shared/offline note and
+Refresh usage. The editor is a header card (quota line, operation status), then Basics
+(type, name), Command (custom only), Account (sign-in, preset key, endpoint and mode,
+Codex authentication), Conversation defaults (system prompt, capability-driven title
+options), Environment variables and Delete. Values are rows that open sheets or menus;
+sheets edit the draft and Save persists it. More holds Refresh capabilities, Save and
+test, and Delete. Save and test persists changes before probing a persisted agent;
+newly queued setups continue through setup status and authentication. Runtime paths,
+managed-runtime status/install, descriptions and Pi extension discovery are not
+edited on mobile and are omitted from saves, so their stored values stay unchanged.
 
 ACP sign-in supports method selection, browser authorization, user codes, consent,
 and typed input requests through the public machine RPC. Pending setups awaiting
@@ -70,7 +74,7 @@ show their specific unavailable capability.
 
 `agents-settings`, `agents-presets`, `agents-pi`, and `agents-auth-methods` are
 independent offline UI verification cases for provider CRUD and failure recovery,
-preset/secret preservation, Pi runtime patches, and method-selection flow identity
+preset/secret preservation, untouched Pi runtime settings, and method-selection flow identity
 plus consent-before-browser behavior. They use production controllers with synthetic
 service boundaries and perform no external sign-in.
 

@@ -69,6 +69,14 @@ def enter(identifier, text, secret=False):
             'Input did not commit: ' + identifier)
 
 
+def edit(identifier, text, secret=False):
+    """Values are rows; each opens a sheet that edits the draft until Done."""
+    tap(identifier)
+    enter(identifier + ':input', text, secret)
+    toolbar('settings.providers.done')
+    ui.wait(lambda items: not any(i.get('AXUniqueId') == identifier + ':input' for i in items), 'Sheet did not close: ' + identifier)
+
+
 def toolbar(key):
     label = catalog.text(key)
     ui.wait(lambda items: any(i.get('AXLabel') == label and i.get('type') == 'Button' for i in items), 'Missing toolbar ' + key)
@@ -105,8 +113,8 @@ tap('provider-add')
 ui.element('provider-name')
 tap('provider-type')
 toolbar('settings.providers.custom')
-enter('provider-command', '/usr/bin/example-acp')
-enter('provider-name', 'Fixture provider')
+edit('provider-command', '/usr/bin/example-acp')
+edit('provider-name', 'Fixture provider')
 toolbar('settings.remote.save')
 created = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or '').startswith('provider:')
                                     and (i.get('AXLabel') or '').startswith('Fixture provider')
@@ -124,11 +132,11 @@ ui.capture('provider-deleted')
 tap('provider-add')
 tap('provider-type')
 toolbar('settings.providers.custom')
-enter('provider-command', '/usr/bin/discarded-command')
+edit('provider-command', '/usr/bin/discarded-command')
 ui.axe('drag', '--start-x', '80', '--start-y', '200', '--end-x', '80', '--end-y', '400', '--duration', '.4')
 tap('provider-type')
 ui.axe('tap', '--label', 'Codex')
-enter('provider-name', 'Switched builtin')
+edit('provider-name', 'Switched builtin')
 toolbar('settings.remote.save')
 ui.wait(lambda items: any((i.get('AXUniqueId') or '').startswith('provider-setup:') and 'Switched builtin' in (i.get('AXLabel') or '') for i in items),
         'Builtin save retained hidden custom launch fields')
@@ -136,18 +144,24 @@ ui.wait(lambda items: any((i.get('AXUniqueId') or '').startswith('provider-setup
 machine('studio')
 tap('provider:codex')
 assert ui.element('provider-prompt')['AXValue'] == 'Keep changes focused.'
-enter('provider-name', 'Codex Personal')
-enter('provider-description', 'Synthetic advanced settings')
+edit('provider-name', 'Codex Personal')
+tap('provider-env-add')
 enter('provider-env-key', 'FIXTURE_OPTION')
 enter('provider-env-value', 'synthetic-value', secret=True)
-tap('provider-env-add')
+toolbar('settings.providers.done')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-env:FIXTURE_OPTION' for i in items), 'Added variable row missing')
 toolbar('settings.remote.save')
 saved_row('provider:codex', 'Codex Personal')
 tap('provider:codex')
-visible('provider-description')
-ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-description' and i.get('AXValue') == 'Synthetic advanced settings' for i in items), 'Description did not persist')
-tap('provider-env-mode:FIXTURE_OPTION')
+visible('provider-env:FIXTURE_OPTION')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-env:FIXTURE_OPTION'
+                          and i.get('AXValue') == catalog.text('settings.providers.envStateSaved') for i in items), 'Variable did not persist')
+tap('provider-env:FIXTURE_OPTION')
+tap('provider-env-mode')
 toolbar('settings.providers.envRemove')
+toolbar('settings.providers.done')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-env:FIXTURE_OPTION'
+                          and i.get('AXValue') == catalog.text('settings.providers.envStateRemoved') for i in items), 'Removal not drafted')
 tap('provider-sign-in')
 tap('provider-auth-method:fixture-sign-in')
 enter('provider-auth-field:code', 'synthetic-code', secret=True)
@@ -155,10 +169,8 @@ tap('provider-auth-submit')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-auth-status' and catalog.text('settings.providers.auth.authenticated') in (i.get('AXLabel') or '') for i in items), 'Sign-in did not complete')
 ui.capture('provider-authenticated')
 tap('provider-auth-done')
-tap('provider-binary-status')
-ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-operation-status' and catalog.text('settings.providers.binary.installed') in (i.get('AXLabel') or '') for i in items), 'Runtime status did not arrive')
-tap('provider-rate-limits-refresh')
-ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-operation-status' and catalog.text('settings.providers.operationComplete') in (i.get('AXLabel') or '') for i in items), 'Quota refresh did not complete')
+ui.wait(lambda items: any(i.get('AXUniqueId') == 'provider-sign-in'
+                          and i.get('AXValue') == catalog.text('settings.providers.auth.authenticated') for i in items), 'Sign-in row did not update')
 ui.capture('provider-advanced')
 toolbar('settings.remote.save')
 saved_row('provider:codex', 'Codex Personal')
@@ -175,7 +187,7 @@ ui.wait(lambda items: not settings_states.has_notice(items), 'Readback did not c
 
 # A failed save keeps the draft and requires a fresh read before another attempt.
 tap('provider:codex')
-enter('provider-name', 'Rejected fixture')
+edit('provider-name', 'Rejected fixture')
 toolbar('settings.remote.save')
 ui.wait(lambda items: any(i.get('AXUniqueId') == 'lody.toast' and catalog.text('settings.providers.writeFailed') in (i.get('AXLabel') or '') for i in items),
         'Unconfirmed save did not show result-check feedback')
@@ -198,6 +210,7 @@ tap('provider:team-codex')
 ui.element('provider-name')
 ui.element('provider-prompt')
 assert not any(i.get('AXLabel') == catalog.text('settings.remote.save') and i.get('type') == 'Button' for i in ui.state()), 'Read-only provider offered Save'
-visible('provider-env-key')
+visible('provider-env-add')
+assert not any(i.get('AXUniqueId') == 'provider-more' for i in ui.state()), 'Read-only provider offered More'
 ui.capture('readonly-provider')
 print('PASS: machine picker, creation, custom switch, edit/delete, refresh/auth/failure, failed save, setup retry/delete and read-only editor')

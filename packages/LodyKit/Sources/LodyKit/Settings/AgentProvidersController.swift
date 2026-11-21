@@ -47,6 +47,11 @@ final class AgentProvidersController: UIViewController {
   private var pendingMachines: Set<String> = []
   /// Whether the shown list came from a live read this session; a cached list never authorizes writes.
   private var live = false
+  /// Provider rows with a quota line; registered before the first cell is asked for.
+  private lazy var quotaRowRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, AgentProviderRowContent> { cell, _, content in
+    cell.contentConfiguration = content
+    cell.accessories = [.disclosureIndicator(options: .init(tintColor: .lodyTertiary))]
+  }
   private var store: SettingsSnapshotStore<AgentProviderSnapshot> {
     SettingsSnapshotStore(kind: "agent-providers", userId: scope.userId, workspaceId: scope.workspaceId)
   }
@@ -71,6 +76,7 @@ final class AgentProvidersController: UIViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     SettingsPage.host(list, in: self) { [weak self] name, body in self?.event(name, body) }
+    _ = quotaRowRegistration
     list.setRefreshEnabled(true)
     scope.watch(self) { [weak self] in
       guard let self else { return }
@@ -191,11 +197,59 @@ final class AgentProvidersController: UIViewController {
     ), to: list)
     list.setRefreshing(false)
     list.setPlaceholder(snapshot?.machines.isEmpty == true ? AgentProviderSections.text("noMachines") : "")
-    list.setSections(snapshot.map {
-      AgentProviderSections.make($0, selectedID: selectedID, busy: busy || !live,
-                                 usage: RemoteSettingsContext.current().agentUsage, refreshing: refreshing)
+    list.setSections(snapshot.map { snapshot -> [LodyListSection] in
+      let usage = RemoteSettingsContext.current().agentUsage
+      let sections = AgentProviderSections.make(snapshot, selectedID: selectedID, busy: busy || !live, usage: usage, refreshing: refreshing)
+      guard let machine else { return sections }
+      return withQuotaLines(sections, snapshot: snapshot, machine: machine,
+                            windows: AgentProviderSections.usageWindows(snapshot, machine: machine, usage: usage, now: LodyRelativeTime.now()))
     } ?? [])
     renderHeader()
+  }
+
+  /// Draws each provider's quota windows as a compact line under its name; tapping it opens the
+  /// provider's usage sheet. Rows keep their ids, menus and navigation.
+  private func withQuotaLines(_ sections: [LodyListSection], snapshot: AgentProviderSnapshot, machine: AgentProviderMachine,
+                              windows: [String: [LodyListVisualItem]]) -> [LodyListSection] {
+    sections.map { section in
+      guard section.id == "providers" else { return section }
+      var next = section
+      next.rows = section.rows.map { row in
+        guard row.id.hasPrefix("provider:"),
+              let provider = snapshot.providers.first(where: { "provider:\($0.id)" == row.id && $0.machineId == machine.id }),
+              let quota = windows[provider.id], !quota.isEmpty else { return row }
+        var row = row
+        let content = AgentProviderRowContent(
+          title: row.title, subtitle: row.subtitle, asset: row.imageAsset, symbol: row.image, windows: quota,
+          onQuota: { [weak self] in self?.showUsage(provider) }
+        )
+        let registration = quotaRowRegistration
+        let id = row.id, title = row.title, subtitle = row.subtitle, summary = row.accessibilityValue
+        let usageLabel = AgentProviderSections.text("usage")
+        row.customCell = { [weak self] collection, index in
+          let cell = collection.dequeueConfiguredReusableCell(using: registration, for: index, item: content)
+          cell.accessibilityIdentifier = id
+          cell.isAccessibilityElement = true
+          cell.accessibilityLabel = [title, subtitle].filter { !$0.isEmpty }.joined(separator: ", ")
+          cell.accessibilityValue = summary
+          cell.accessibilityTraits = .button
+          cell.accessibilityCustomActions = [UIAccessibilityCustomAction(name: usageLabel) { _ in
+            MainActor.assumeIsolated { self?.showUsage(provider) }
+            return true
+          }]
+          return cell
+        }
+        return row
+      }
+      return next
+    }
+  }
+
+  private func showUsage(_ provider: AgentProviderItem) {
+    guard let machine, machine.id == provider.machineId else { return }
+    let controller = AgentProviderUsageController(machine: machine, item: provider, scope: scope, details: details,
+                                                  canRefresh: live && !busy)
+    LodyShell.shared.presentNative(controller, title: AgentProviderUsageController.sheetTitle(provider), detents: [0.6, 1])
   }
 
   private func renderHeader() {

@@ -90,6 +90,10 @@ struct LodyListVisualItem {
   var tone: String = ""
   var cost: Double? = nil
   var axisLabel: String = ""
+  /// The quota (bucket or model) a usage window belongs to.
+  var group: String = ""
+  /// A compact window name for inline quota lines ("5h", "7d").
+  var shortLabel: String = ""
 }
 
 struct LodyListVisual {
