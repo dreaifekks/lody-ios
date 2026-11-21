@@ -21,6 +21,9 @@ uses a 35-second poll budget. Uploads explicitly set `uploadTimeoutMs` because
 Streams Client 0.12+ otherwise defaults to 60 seconds, beyond native command
 budgets. An unconfirmed append remains an unknown outcome and is not replayed.
 
+An open session waiting for its history route checks the in-memory workspace
+metadata every 250 ms. Network read failures use exponential backoff.
+
 Run `pnpm --filter @lody/cloud-runtime typecheck`. Existing behavioral fixtures
 under `apps/ios/tests` now load these shared production sources, retaining
 protocol, write ordering, uncertain delivery and recovery checks.

@@ -1299,6 +1299,7 @@ export async function openSession(
           )
         )
           target = { backend: 'loro' };
+        // The catalog watcher owns network retries. This lookup reads local metadata.
         if (!target)
           target = await retrySessionRead(
             controller.signal,
@@ -1307,7 +1308,12 @@ export async function openSession(
               if (!value) throw new Error('metadata_not_ready');
               return value;
             },
-            retrying,
+            (error) => {
+              const reason =
+                error instanceof Error ? error.message : 'sync_failed';
+              if (reason !== state.reason) event('syncing', reason);
+            },
+            { fixedDelayMs: 250 },
           );
       }
       if (!target) throw new Error('metadata_not_ready');
