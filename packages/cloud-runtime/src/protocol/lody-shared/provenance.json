@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/LodyAI/Lody",
   "branch": "main",
-  "commit": "bffe2726210557e2849478ea9f7b0d862ecc8c5f",
+  "commit": "6f27d1ba544252cdb7ae14f3bca3d8e2a1d99a75",
   "license": "AGPL-3.0-only (fractional index: MIT, see its header)",
   "files": [
     {
@@ -47,7 +47,7 @@
     {
       "path": "status-view/tiers.ts",
       "upstream": "packages/shared/src/status-view/tiers.ts",
-      "sha256": "6b45540edaf0726e63e8a35a7e6fc27368ee504daa1931ece8c2c20cb9b00986",
+      "sha256": "08a7474e7130544171c4576dd1e47f8fcc3c1051a40b86a94a9782bc0c3ee2e4",
       "adapt": []
     },
     {
@@ -59,7 +59,7 @@
     {
       "path": "status-view/layout.ts",
       "upstream": "packages/shared/src/status-view/layout.ts",
-      "sha256": "fd8d20fb81d7e46697f4795ae7c194e8dac698a930cbd13dccea68403ead0f9e",
+      "sha256": "fc3c9343e11fedef8d3c736f1742ff65b1891840f118df651fc19a7e23bd32cc",
       "adapt": [
         [
           "from '../pinned-sections';",
@@ -78,7 +78,7 @@
     {
       "path": "status-view/command.ts",
       "upstream": "packages/shared/src/status-view/command.ts",
-      "sha256": "a0fc6749c9a7ad946b9e89ad2ec01444296e53d8e788ea906e046421802815f5",
+      "sha256": "fe57f2d052bd70a0ca6a02c363266f375d5eb521af42b5c28b9aefe52370667d",
       "adapt": [
         [
           "from '../pinned-sections';",
@@ -101,13 +101,13 @@
     {
       "path": "status-view/vectors/layout.json",
       "upstream": "packages/shared/src/status-view/vectors/layout.json",
-      "sha256": "b4b0a96313cd0456202018b306a39e4986c3bf9ba890e905ff284be3de461067",
+      "sha256": "3cff970373a17625fb741510914699873d98c237dcc60d0d2fd782b0c2bcec7f",
       "adapt": []
     },
     {
       "path": "status-view/vectors/commands.json",
       "upstream": "packages/shared/src/status-view/vectors/commands.json",
-      "sha256": "598ad7bd9c601f3a0e9b8c8422b7032f7891b7f825e5960d9d4bc335b66ac296",
+      "sha256": "e2d2c2f6470bef8fc6717124d1ebe0167ee97d218a03925e9ae488b3e45c78e3",
       "adapt": []
     }
   ]

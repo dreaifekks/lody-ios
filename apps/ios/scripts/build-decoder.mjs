@@ -11,7 +11,7 @@ const result = await build({
   bundle: true,
   format: 'esm',
   platform: 'browser',
-  target: 'safari17',
+  target: 'safari16.4',
   write: false,
 });
 const output = root + '.generated/Resources';
@@ -28,7 +28,7 @@ const markdownRepair = await build({
   bundle: true,
   format: 'iife',
   platform: 'browser',
-  target: 'safari17',
+  target: 'safari16.4',
   write: false,
 });
 await writeFile(

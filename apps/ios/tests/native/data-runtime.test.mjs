@@ -911,3 +911,233 @@ test('bundled DataRuntime permits secure WS and retains the script and default C
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// iOS 16.4–17.3 WebKit has no AbortSignal.any; the runtime entry installs a
+// fallback before any module runs. Drive catalog sync's combined HEAD signal.
+test('catalog sync combines and cancels signals on a WebKit without AbortSignal.any', async (t) => {
+  const nativeAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+  const previousFetch = globalThis.fetch;
+  const previousBroadcastChannel = globalThis.BroadcastChannel;
+  t.after(() => {
+    Object.defineProperty(AbortSignal, 'any', nativeAny);
+    globalThis.fetch = previousFetch;
+    globalThis.BroadcastChannel = previousBroadcastChannel;
+    delete globalThis.webkit;
+    delete globalThis.__anyClient;
+    delete globalThis.dataRuntime;
+  });
+  delete AbortSignal.any;
+  assert.equal(AbortSignal.any, undefined);
+  globalThis.BroadcastChannel = undefined;
+  globalThis.fetch = async () => {
+    throw new Error('network_disabled');
+  };
+
+  const meta = new Flock('meta');
+  meta.set(['e', 'machine-m1'], true);
+  meta.set(['m', 'machine-m1'], { name: 'Mac', ownerUserId: 'u1' });
+  const metaVersion = meta.version();
+  const metaSnapshot = meta.exportFile();
+  const machine = new Flock('machine');
+  machine.set(['localProject', 'p1'], { name: 'app', rootPath: '/a' });
+  const machineSnapshot = machine.exportFile();
+  const head = Promise.withResolvers();
+  const metaRead = Promise.withResolvers();
+  let machineReads = 0;
+  let metaReads = 0;
+  globalThis.__anyClient = class {
+    constructor({ url }) {
+      this.stream = decodeURIComponent(url.split('/ds/lody/')[1]);
+    }
+    async bootstrap() {
+      const body = {
+        'w1:meta': metaSnapshot,
+        'w1:mf:m1': machineSnapshot,
+        'w1:wf:workspace': new Flock('workspace').exportFile(),
+      }[this.stream];
+      if (!body) return { ok: false, result: { code: 'not_found' } };
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '1',
+          nextOffset: '1',
+          upToDate: true,
+          snapshot: { body },
+          updates: [],
+        },
+      };
+    }
+    readOnce() {
+      if (this.stream === 'w1:meta')
+        return metaReads++ === 0 ? metaRead.promise : new Promise(() => {});
+      // A caught-up machine reports a backlog: the runtime asks HEAD whether a
+      // fresh snapshot is cheaper, with its watcher signal plus a timeout.
+      if (this.stream === 'w1:mf:m1' && machineReads++ === 0)
+        return Promise.resolve({
+          ok: true,
+          result: { nextOffset: '2', upToDate: false },
+        });
+      return new Promise(() => {});
+    }
+    head({ signal }) {
+      head.resolve(signal);
+      return new Promise((_, reject) =>
+        signal.addEventListener('abort', () => reject(signal.reason)),
+      );
+    }
+  };
+  const replies = new Map();
+  globalThis.webkit = {
+    messageHandlers: {
+      dataRuntime: {
+        postMessage(event) {
+          if (event.type !== 'envelope') return;
+          const message = JSON.parse(event.envelope);
+          replies.get(message.id)?.(message);
+          if (message.kind === 'request' && message.method === 'grant')
+            queueMicrotask(() =>
+              globalThis.dataRuntime.receive(
+                JSON.stringify({
+                  v: 1,
+                  gen: message.gen,
+                  kind: 'result',
+                  id: message.id,
+                  method: 'grant',
+                  payload: {
+                    token: 'synthetic',
+                    gatewayBaseUrl: 'https://example.invalid',
+                    expiresIn: 3600,
+                  },
+                }),
+              ),
+            );
+        },
+      },
+    },
+  };
+  const root = new URL('../../../../', import.meta.url).pathname;
+  const bundle = await build({
+    absWorkingDir: root,
+    entryPoints: ['packages/cloud-runtime/src/runtime/index.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    plugins: [
+      {
+        name: 'abort-any-streams',
+        setup(build) {
+          build.onResolve({ filter: /^loro-crdt$/ }, () =>
+            build.resolve('loro-crdt/base64', {
+              resolveDir: root,
+              kind: 'import-statement',
+            }),
+          );
+          build.onResolve({ filter: /^@loro-dev\/streams-client$/ }, () => ({
+            path: 'client',
+            namespace: 'abort-any',
+          }));
+          build.onResolve(
+            { filter: /^@loro-dev\/streams-crdt\/loro$/ },
+            () => ({ path: 'presence', namespace: 'abort-any' }),
+          );
+          build.onLoad({ filter: /.*/, namespace: 'abort-any' }, (args) => ({
+            contents:
+              args.path === 'client'
+                ? 'export const StreamsClient = globalThis.__anyClient;'
+                : 'export const EphemeralStoreAdaptor = s => s; export class EphemeralStreamCrdt { async join() { return { ok: true, value: { unsubscribe() {} } }; } async close() {} }',
+          }));
+        },
+      },
+    ],
+  });
+  // A distinct module URL: never reuse another test's initialized runtime.
+  await import(
+    `data:text/javascript;base64,${Buffer.from(`${bundle.outputFiles[0].text}\n// abort-signal-any`).toString('base64')}`
+  );
+  assert.equal(typeof AbortSignal.any, 'function', 'the entry installs it');
+  let next = 0;
+  const call = (method, payload = {}) => {
+    const id = `call-${++next}`;
+    const reply = new Promise((resolve) => replies.set(id, resolve));
+    globalThis.dataRuntime.receive(
+      JSON.stringify({ v: 1, gen: 1, kind: 'request', id, method, payload }),
+    );
+    return reply;
+  };
+  await call('hello', { protocol: 1, gen: 1 });
+  await call('start', { workspaceId: 'w1', userId: 'u1', active: false });
+
+  const signal = await head.promise;
+  assert.equal(signal.aborted, false);
+  // The machine leaves the workspace: its watcher stops, and the combined
+  // signal handed to HEAD must abort with the watcher's reason.
+  meta.set(['e', 'machine-m1'], false);
+  const update = new TextEncoder().encode(
+    JSON.stringify(meta.exportJson(metaVersion)),
+  );
+  const body = new Uint8Array(update.length + 4);
+  new DataView(body.buffer).setUint32(0, update.length, false);
+  body.set(update, 4);
+  const aborted = new Promise((resolve) =>
+    signal.addEventListener('abort', resolve, { once: true }),
+  );
+  metaRead.resolve({
+    ok: true,
+    result: {
+      nextOffset: '2',
+      upToDate: true,
+      payload: { body },
+    },
+  });
+  await aborted;
+  assert.equal(signal.aborted, true);
+  assert.equal(signal.reason?.name, 'AbortError');
+});
+
+test('the AbortSignal.any fallback follows the standard', async () => {
+  const { abortSignalAny, installAbortSignalAny } =
+    await import('../../../../packages/cloud-runtime/src/runtime/abort-signal-any.ts');
+  // An already-aborted input yields an aborted signal with its reason.
+  const done = new AbortController();
+  done.abort('first');
+  const early = abortSignalAny([new AbortController().signal, done.signal]);
+  assert.equal(early.aborted, true);
+  assert.equal(early.reason, 'first');
+
+  // The first input to abort decides the reason; listeners leave every input.
+  const inputs = [new AbortController(), new AbortController()];
+  const attached = new Set();
+  for (const { signal } of inputs) {
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = (type, listener, options) => {
+      attached.add(listener);
+      add(type, listener, options);
+    };
+    signal.removeEventListener = (type, listener, options) => {
+      attached.delete(listener);
+      remove(type, listener, options);
+    };
+  }
+  const combined = abortSignalAny(inputs.map((c) => c.signal));
+  assert.equal(combined.aborted, false);
+  assert.equal(attached.size, 2);
+  const reason = new Error('scope_changed');
+  inputs[1].abort(reason);
+  assert.equal(combined.aborted, true);
+  assert.equal(combined.reason, reason);
+  assert.equal(attached.size, 0);
+  inputs[0].abort('late');
+  assert.equal(combined.reason, reason);
+  assert.equal(abortSignalAny([]).aborted, false);
+
+  // A platform that has it keeps its own.
+  const native = function any() {};
+  const target = { any: native };
+  assert.equal(installAbortSignalAny(target), false);
+  assert.equal(target.any, native);
+  const bare = {};
+  assert.equal(installAbortSignalAny(bare), true);
+  assert.equal(bare.any, abortSignalAny);
+});

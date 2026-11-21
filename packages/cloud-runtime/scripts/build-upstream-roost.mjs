@@ -13,7 +13,7 @@ export async function buildUpstreamRoost(check = true) {
     bundle: true,
     platform: 'browser',
     format: 'esm',
-    target: 'safari17',
+    target: 'safari16.4',
     minifyWhitespace: true,
     write: false,
     metafile: true,
