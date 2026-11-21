@@ -162,7 +162,7 @@ function projectRef(
 
 /** A machine as schedules see it: owner, clock and schedule protocol support. */
 export function scheduleMachine(meta: Flock, machineId: string) {
-  const fields = machineMeta(meta, `machine-${machineId}`);
+  const fields = machineMeta(meta, machineId);
   const capabilities = fields.protocolCapabilities;
   const version =
     capabilities && typeof capabilities === 'object'
