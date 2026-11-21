@@ -24,3 +24,4 @@ Read before changing login, the data runtime, the offscreen WebView and watchdog
 - The trusted DataRuntime HTML permits `https:` and `wss:` connections; its other
   CSP directives remain restrictive. CSP permission alone does not enable the
   Streams WebSocket transport.
+- The Status view layout and its writes come only from the shared Lody planner vendored verbatim in `packages/cloud-runtime/src/protocol/lody-shared` (hash-checked, golden vectors run in `apps/ios/tests/cloud/status-view.test.mjs`); refresh it from upstream, never edit or reimplement it, and never sort or classify those lists in Swift ([details](../../packages/cloud-runtime/README.md#status-view)).

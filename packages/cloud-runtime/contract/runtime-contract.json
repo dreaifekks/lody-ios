@@ -262,7 +262,17 @@
       "result": "Empty",
       "timeoutMs": 45000
     },
+    "snoozePresets": {
+      "params": "Empty",
+      "result": "SnoozePresetsResult",
+      "timeoutMs": 10000
+    },
     "start": { "params": "StartParams", "result": "Empty", "timeoutMs": 10000 },
+    "statusViewCommand": {
+      "params": "StatusViewCommandParams",
+      "result": "StatusViewCommandResult",
+      "timeoutMs": 45000
+    },
     "turnDiff": {
       "params": "TurnDiffParams",
       "result": "DiffResult",
@@ -1330,6 +1340,16 @@
         }
       },
       "required": ["catalog", "revision"]
+    },
+    "CatalogStatusView": {
+      "type": "object",
+      "properties": {
+        "mine": { "$ref": "StatusViewLayout" },
+        "team": { "$ref": "StatusViewLayout" },
+        "nowMs": { "type": "number" },
+        "sectionsLoaded": { "type": "boolean" }
+      },
+      "required": ["mine", "team", "nowMs", "sectionsLoaded"]
     },
     "CheckTurnQuotaParams": {
       "type": "object",
@@ -2480,6 +2500,15 @@
       "type": "object",
       "properties": { "sessionId": { "type": "string", "minLength": 1 } },
       "required": ["sessionId"]
+    },
+    "PinSection": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "orderKey": { "type": "string", "minLength": 1 }
+      },
+      "required": ["id", "name", "orderKey"]
     },
     "PinSessionParams": {
       "type": "object",
@@ -4187,6 +4216,27 @@
       "properties": { "value": {} },
       "required": ["value"]
     },
+    "SnoozePreset": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "SnoozePresetId" },
+        "until": { "type": "number" },
+        "countdown": { "type": "string" }
+      },
+      "required": ["id", "until", "countdown"]
+    },
+    "SnoozePresetId": {
+      "type": "string",
+      "enum": ["oneHour", "laterToday", "tomorrowMorning", "nextWeek"]
+    },
+    "SnoozePresetsResult": {
+      "type": "object",
+      "properties": {
+        "nowMs": { "type": "number" },
+        "presets": { "type": "array", "items": { "$ref": "SnoozePreset" } }
+      },
+      "required": ["nowMs", "presets"]
+    },
     "StartParams": {
       "type": "object",
       "properties": {
@@ -4197,9 +4247,213 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "type": "string" }
-        }
+        },
+        "workspaceReadOnly": { "type": "boolean" }
       },
       "required": ["workspaceId", "userId", "active"]
+    },
+    "StatusViewCommand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "snooze" },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "until": { "type": "number" },
+            "includeOpened": { "type": "boolean" }
+          },
+          "required": ["type", "sessionId", "until", "includeOpened"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "settle" },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "includeOpened": { "type": "boolean" }
+          },
+          "required": ["type", "sessionId", "includeOpened"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "moveToFocus" },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "includeOpened": { "type": "boolean" }
+          },
+          "required": ["type", "sessionId", "includeOpened"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "setPinned" },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "pinned": { "type": "boolean" }
+          },
+          "required": ["type", "sessionId", "pinned"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "move" },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "to": { "$ref": "StatusViewMoveTarget" },
+            "beforeId": {
+              "anyOf": [
+                { "type": "string", "minLength": 1, "maxLength": 200 },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["type", "sessionId", "to", "beforeId"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "createSection" },
+            "sectionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 100 }
+          },
+          "required": ["type", "sectionId", "name"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "renameSection" },
+            "sectionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 100 }
+          },
+          "required": ["type", "sectionId", "name"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "deleteSection" },
+            "sectionId": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          "required": ["type", "sectionId"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "moveSection" },
+            "sectionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "beforeId": {
+              "anyOf": [
+                { "type": "string", "minLength": 1, "maxLength": 200 },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["type", "sectionId", "beforeId"]
+        }
+      ]
+    },
+    "StatusViewCommandParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "command": { "$ref": "StatusViewCommand" },
+        "scope": { "type": "string", "enum": ["mine", "team"] }
+      },
+      "required": ["workspaceId", "command"]
+    },
+    "StatusViewCommandResult": {
+      "type": "object",
+      "properties": {
+        "writes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["writes"]
+    },
+    "StatusViewLayout": {
+      "type": "object",
+      "properties": {
+        "pinned": {
+          "type": "array",
+          "items": { "$ref": "StatusViewPinnedSection" }
+        },
+        "focus": { "type": "array", "items": { "$ref": "StatusViewRow" } },
+        "later": { "type": "array", "items": { "$ref": "StatusViewRow" } },
+        "settled": { "type": "array", "items": { "$ref": "StatusViewRow" } },
+        "canManageSections": { "type": "boolean" },
+        "nextChangeAt": { "type": ["number", "null"] }
+      },
+      "required": [
+        "pinned",
+        "focus",
+        "later",
+        "settled",
+        "canManageSections",
+        "nextChangeAt"
+      ]
+    },
+    "StatusViewMoveTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "area": { "type": "string", "const": "focus" } },
+          "required": ["area"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "area": { "type": "string", "const": "pinned" },
+            "sectionId": {
+              "anyOf": [
+                { "type": "string", "minLength": 1, "maxLength": 200 },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["area", "sectionId"]
+        }
+      ]
+    },
+    "StatusViewPinnedSection": {
+      "type": "object",
+      "properties": {
+        "sectionId": { "type": ["string", "null"] },
+        "name": { "type": ["string", "null"] },
+        "rows": { "type": "array", "items": { "$ref": "StatusViewRow" } },
+        "hiddenCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["sectionId", "name", "rows", "hiddenCount"]
+    },
+    "StatusViewRow": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "tier": { "$ref": "StatusViewTier" },
+        "children": { "type": "array", "items": { "$ref": "StatusViewRow" } },
+        "activityAt": { "type": "number" },
+        "unread": { "type": "boolean" },
+        "snoozedUntil": { "type": ["number", "null"] },
+        "woken": { "type": "boolean" },
+        "canManage": { "type": "boolean" },
+        "canPrefer": { "type": "boolean" }
+      },
+      "required": [
+        "id",
+        "tier",
+        "children",
+        "activityAt",
+        "unread",
+        "snoozedUntil",
+        "woken",
+        "canManage",
+        "canPrefer"
+      ]
+    },
+    "StatusViewTier": {
+      "type": "string",
+      "enum": ["pinned", "focus", "later", "settled"]
     },
     "SyncedEvent": {
       "type": "object",

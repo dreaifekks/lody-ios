@@ -25,3 +25,4 @@ packages/lody-core/.swiftpm/
 packages/cloud-runtime/vendor/upstream-roost/
 packages/cloud-runtime/src/runtime/upstream-roost.js
 apps/macos/Resources/Generated/
+packages/cloud-runtime/src/protocol/lody-shared/

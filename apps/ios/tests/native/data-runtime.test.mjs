@@ -11,6 +11,11 @@ import { runtimeCalls } from '../../../../packages/cloud-runtime/src/contract/me
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
   const previousBroadcastChannel = globalThis.BroadcastChannel;
   globalThis.BroadcastChannel = undefined;
+  const previousFetch = globalThis.fetch;
+  // The runtime calibrates its server clock on start; no test reaches the network.
+  globalThis.fetch = async () => {
+    throw new Error('network_disabled');
+  };
   const flock = new Flock('synthetic');
   flock.set(['e', 'session-s1'], true, 1);
   flock.set(['e', 'machine-m1'], true, 1);
@@ -463,6 +468,7 @@ test('persistent runtime applies live increments to the existing replica and adv
   delete globalThis.__runtimeTestClient;
   delete globalThis.dataRuntime;
   globalThis.BroadcastChannel = previousBroadcastChannel;
+  globalThis.fetch = previousFetch;
 });
 
 // Exercise the production contract channel and handlers. Only remote provider

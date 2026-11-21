@@ -17,6 +17,7 @@ import {
   setSessionOwner,
 } from '../archive-session';
 import { creationOptions, createSession } from '../create-session';
+import { planCommand } from '../status-view.ts';
 import { readWorkspaceProjects } from '../project-groups';
 import { sessionMcpSelection } from '../mcp';
 import { expandMentions } from '../mention-expansion';
@@ -250,12 +251,20 @@ export function registerSessions(
         replica.flock,
         state.machineReplicas,
       );
+      const sources = ctx.statusSources?.();
+      const [order] = sources
+        ? planCommand(sources, {
+            type: 'newSessionOrder',
+            sessionId: args.sessionId,
+          })
+        : [];
       const result = await createSession(
         group ? { ...args, projectId: undefined } : args,
         options,
         replica,
         getGrant,
         group,
+        order?.type === 'session' ? order.patch.orderKey : undefined,
       );
       if (result.state === 'created') republish(replica);
       return result;

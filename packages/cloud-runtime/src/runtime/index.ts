@@ -24,6 +24,16 @@ import {
   catalogBootstrapSlots,
 } from './catalog-sync';
 import { watchMachinePresence } from './machine-presence';
+import {
+  catalogStatusView,
+  pinSectionRows,
+  planCommand,
+  setSessionPatch,
+  statusViewNextChangeAt,
+  WORKSPACE_STREAM,
+  type StatusViewSources,
+} from './status-view.ts';
+import { serverClock } from './server-clock.ts';
 import { unknownPresence } from '../models/machines.ts';
 import type {
   Grant,
@@ -42,6 +52,7 @@ import { registerSettings } from './handlers/settings.ts';
 import { registerSchedules } from './handlers/schedules.ts';
 import { registerProposals } from './handlers/proposals.ts';
 import { registerSharing } from './handlers/sharing.ts';
+import { registerStatusView } from './handlers/status-view.ts';
 const host = (globalThis as any).webkit.messageHandlers.dataRuntime;
 const send = (message: object) => host.postMessage(message);
 const channel = createChannel(
@@ -108,12 +119,15 @@ const delay = (ms: number, signal: AbortSignal) =>
 const state: RuntimeState = {
   workspace: '',
   userId: '',
+  workspaceReadOnly: false,
   metaReplica: undefined,
   presence: unknownPresence,
   knownProjects: [],
   machineReplicas: new Map(),
   catalogs: new Map(),
   unhealthy: new Set(),
+  workspaceReplica: undefined,
+  pinSections: { sections: [], loaded: false },
 };
 const { machineReplicas, catalogs, unhealthy } = state;
 let stopPresence: (() => void) | undefined;
@@ -125,10 +139,40 @@ function startPresence() {
   });
 }
 
+/** What the Status view layout and planner read, at the server clock's now. */
+function statusSources(): StatusViewSources | undefined {
+  const meta = catalogs.get('meta');
+  if (!meta) return undefined;
+  const machineCatalogs = new Map(
+    meta.machineIds.flatMap((id) => {
+      const catalog = catalogs.get(id);
+      return catalog ? [[id, catalog] as const] : [];
+    }),
+  );
+  return {
+    catalog: meta,
+    machineCatalogs,
+    userId: state.userId,
+    readOnly: state.workspaceReadOnly,
+    sections: state.pinSections.sections,
+    sectionsLoaded: state.pinSections.loaded,
+    nowMs: serverClock.now(),
+  };
+}
+
 async function markDispatch(sessionId: string, turnId: string, queued = false) {
   if (!state.metaReplica) throw new Error('metadata_not_ready');
   const { flock, client } = state.metaReplica;
   const version = flock.version();
+  // A sent message brings a Later or Settled conversation back (`touchOnSend`),
+  // in the same append as the dispatch pointer.
+  const sources = statusSources();
+  if (sources)
+    for (const write of planCommand(sources, {
+      type: 'touchOnSend',
+      sessionId,
+    }))
+      if (write.type === 'session') setSessionPatch(flock, write);
   if (queued) {
     const key = ['m', `session-${sessionId}`, 'messageQueueUpdatedAt'];
     const previous = flock.get(key);
@@ -241,6 +285,22 @@ const acquireCatalogBootstrap = catalogBootstrapSlots(2);
 let revision = 0;
 let lastPublished = '';
 let publishTimer: ReturnType<typeof setTimeout> | undefined;
+let statusTimer: ReturnType<typeof setTimeout> | undefined;
+let foreground = false;
+/**
+ * Republishes when the Status view changes by time alone (wake-up, auto-settle).
+ * Only in the foreground: becoming active republishes anyway.
+ */
+function scheduleStatusRefresh(at: number | null) {
+  if (statusTimer !== undefined) clearTimeout(statusTimer);
+  statusTimer = undefined;
+  if (at === null || !foreground) return;
+  const delay = Math.min(2 ** 31 - 1, Math.max(0, at - serverClock.now()) + 50);
+  statusTimer = setTimeout(() => {
+    statusTimer = undefined;
+    publish();
+  }, delay);
+}
 function publish() {
   if (publishTimer !== undefined) return;
   // Read the current scope at flush time; never retain an old catalog payload.
@@ -252,7 +312,7 @@ function publish() {
 function publishNow() {
   const meta = catalogs.get('meta');
   if (!meta) return;
-  const expected = new Set(['meta', ...meta.machineIds]);
+  const expected = new Set(['meta', WORKSPACE_STREAM, ...meta.machineIds]);
   for (const [id, controller] of watchers)
     if (!expected.has(id)) {
       controller.abort();
@@ -263,6 +323,7 @@ function publishNow() {
     }
   for (const machine of meta.machineIds)
     if (!watchers.has(machine)) watch(machine);
+  if (!watchers.has(WORKSPACE_STREAM)) watch(WORKSPACE_STREAM);
   refreshSessionUsage();
   channel.emit('creationOptionsChanged', {});
   if (unhealthy.has('meta')) return;
@@ -303,14 +364,36 @@ function publishNow() {
     { projects: state.knownProjects },
   );
   state.knownProjects = merged.projects;
-  const catalog = JSON.stringify(merged);
-  if (catalog !== lastPublished) {
-    lastPublished = catalog;
-    channel.emit('catalog', { catalog, revision: ++revision });
+  const sources = statusSources();
+  const statusView = sources && catalogStatusView(sources);
+  scheduleStatusRefresh(statusView ? statusViewNextChangeAt(statusView) : null);
+  const published = {
+    ...merged,
+    pinSections: state.pinSections.sections,
+    ...(statusView ? { statusView } : {}),
+  };
+  // The computation instant alone is not a change worth a new revision.
+  const signature = JSON.stringify({
+    ...published,
+    ...(statusView ? { statusView: { ...statusView, nowMs: 0 } } : {}),
+  });
+  if (signature !== lastPublished) {
+    lastPublished = signature;
+    channel.emit('catalog', {
+      catalog: JSON.stringify(published),
+      revision: ++revision,
+    });
   }
   channel.emit('synced', { revision, streams: watchers.size });
 }
 function watch(mode: string) {
+  // The workspace settings stream only feeds pin sections: its health never
+  // gates machines, files or the catalog (`unhealthy`), and it keeps the last
+  // sections through failures.
+  const workspaceStream = mode === WORKSPACE_STREAM;
+  const markUnhealthy = () => {
+    if (!workspaceStream) unhealthy.add(mode);
+  };
   const controller = new AbortController();
   watchers.set(mode, controller);
   const { signal } = controller;
@@ -340,7 +423,9 @@ function watch(mode: string) {
         const stream =
           mode === 'meta'
             ? `${state.workspace}:meta`
-            : `${state.workspace}:mf:${mode}`;
+            : workspaceStream
+              ? `${state.workspace}:wf:workspace`
+              : `${state.workspace}:mf:${mode}`;
         const client = new StreamsClient({
           url: `${authorization.gatewayBaseUrl.replace(/\/$/, '')}/ds/lody/${encodeURIComponent(stream)}`,
           auth: async () => (await getGrant()).token,
@@ -352,7 +437,7 @@ function watch(mode: string) {
             pollTimeoutMs: 35000,
           },
         });
-        if (mode !== 'meta')
+        if (mode !== 'meta' && !workspaceStream)
           releaseBootstrap = await acquireCatalogBootstrap(signal);
         const checkpoint = catalogImportCheckpoint(signal);
         channel.emit('diagnostic', { stage: 'bootstrap', stream: mode });
@@ -365,6 +450,13 @@ function watch(mode: string) {
           stream: mode,
         });
         if (!initial.ok) {
+          if (initial.result.code === 'not_found' && workspaceStream) {
+            state.workspaceReplica = undefined;
+            state.pinSections = { sections: [], loaded: true };
+            publish();
+            await delay(30000, signal);
+            continue;
+          }
           if (initial.result.code === 'not_found' && mode !== 'meta') {
             unhealthy.delete(mode);
             catalogs.set(mode, { projects: [], sessions: [], machineIds: [] });
@@ -405,7 +497,24 @@ function watch(mode: string) {
         let pages = 0;
         let checkedWindow = false;
         while (!signal.aborted) {
-          if (upToDate) {
+          if (upToDate && workspaceStream) {
+            // A scope change mid-loop must not publish another workspace's sections.
+            if (stream !== `${state.workspace}:wf:workspace`)
+              throw new Error('workspace_changed');
+            caughtUp = true;
+            if (state.workspaceReplica?.flock !== flock)
+              state.workspaceReplica = { flock, client };
+            await checkpoint();
+            state.pinSections = {
+              sections: pinSectionRows(flock.scan({ prefix: ['pinSection'] })),
+              loaded: true,
+            };
+            publish();
+            checkedWindow = false;
+            failures = 0;
+            pages = 0;
+            size = 0;
+          } else if (upToDate) {
             caughtUp = true;
             if (mode === 'meta') {
               const first = !state.metaReplica;
@@ -474,7 +583,7 @@ function watch(mode: string) {
               return result;
             },
             (error) => {
-              unhealthy.add(mode);
+              markUnhealthy();
               channel.emit('creationOptionsChanged', {});
               reportError('network_or_auth');
               if (!(
@@ -504,7 +613,7 @@ function watch(mode: string) {
               throw new Error('catalog_rebootstrap');
             }
           }
-          if (next.payload?.body.length || !next.upToDate) unhealthy.add(mode);
+          if (next.payload?.body.length || !next.upToDate) markUnhealthy();
           if (next.payload) {
             size += next.payload.body.length;
             if (size > 16 * 1024 * 1024) throw new Error('catalog_limit');
@@ -524,8 +633,9 @@ function watch(mode: string) {
         releaseBootstrap();
         if (signal.aborted) return;
         if (mode === 'meta') state.metaReplica = undefined;
+        else if (workspaceStream) state.workspaceReplica = undefined;
         else machineReplicas.delete(mode);
-        unhealthy.add(mode);
+        markUnhealthy();
         channel.emit('creationOptionsChanged', {});
         const reason = error instanceof Error ? error.message : 'sync_failed';
         if (
@@ -570,6 +680,12 @@ const ctx: RuntimeContext = {
   publishSubscriptions,
   emitSession,
   markDispatch,
+  statusSources,
+  syncClock: () => serverClock.sync(),
+  setForeground(active) {
+    foreground = active;
+    if (!active) scheduleStatusRefresh(null);
+  },
   watch,
   startPresence,
   stopPresence: () => {
@@ -584,6 +700,7 @@ registerProjects(ctx);
 registerSchedules(ctx);
 registerProposals(ctx);
 registerSharing(ctx);
+registerStatusView(ctx);
 registerContent(ctx);
 registerSessions(ctx, getMentions);
 registerDebug(ctx);

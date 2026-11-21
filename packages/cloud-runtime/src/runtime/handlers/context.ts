@@ -2,6 +2,7 @@ import type { Flock } from '@loro-dev/flock-wasm/base64';
 import type { StreamsClient } from '@loro-dev/streams-client';
 import type { Catalog, Project } from '../../models/catalog.ts';
 import type { MachinePresence } from '../../models/machines.ts';
+import type { PinSection } from '../../contract/status-view.ts';
 import type {
   Grant,
   SessionRuntimeEvent,
@@ -17,12 +18,18 @@ export type MetaReplica = { flock: Flock; client: StreamsClient };
 export type RuntimeState = {
   workspace: string;
   userId: string;
+  /** From `start`: the member cannot write the workspace (viewer). */
+  workspaceReadOnly: boolean;
   metaReplica: MetaReplica | undefined;
   presence: MachinePresence;
   knownProjects: Pick<Project, 'id' | 'repoFullName'>[];
   readonly machineReplicas: Map<string, Flock>;
   readonly catalogs: Map<string, Catalog>;
   readonly unhealthy: Set<string>;
+  /** Live `${workspace}:wf:workspace` replica, written by Status view commands. */
+  workspaceReplica: MetaReplica | undefined;
+  /** Last read `pinSection` rows; `loaded` is false until the first read. */
+  pinSections: { sections: PinSection[]; loaded: boolean };
 };
 
 export type RuntimeContext = {
@@ -38,6 +45,13 @@ export type RuntimeContext = {
     turnId: string,
     queued?: boolean,
   ) => Promise<void>;
+  /** Status view inputs from the current replicas; undefined before metadata. */
+  statusSources: () =>
+    import('../status-view.ts').StatusViewSources | undefined;
+  /** One server-clock calibration sample; resolves whether it was accepted. */
+  syncClock?: () => Promise<boolean>;
+  /** The host is active; time-based Status view republishing runs only then. */
+  setForeground?: (active: boolean) => void;
   watch: (mode: string) => void;
   startPresence: () => void;
   stopPresence: () => void;

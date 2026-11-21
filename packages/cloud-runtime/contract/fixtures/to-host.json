@@ -1298,5 +1298,58 @@
     "id": "forget-input-1",
     "method": "forgetPendingInput",
     "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-status-move",
+    "method": "statusViewCommand",
+    "payload": {
+      "writes": 1
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-status-section",
+    "method": "statusViewCommand",
+    "error": {
+      "code": "workspace_not_ready",
+      "retryable": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-snooze-presets",
+    "method": "snoozePresets",
+    "payload": {
+      "nowMs": 1763712000000,
+      "presets": [
+        {
+          "id": "oneHour",
+          "until": 1763715600000,
+          "countdown": "1h"
+        },
+        {
+          "id": "laterToday",
+          "until": 1763722800000,
+          "countdown": "3h"
+        },
+        {
+          "id": "tomorrowMorning",
+          "until": 1763773200000,
+          "countdown": "17h"
+        },
+        {
+          "id": "nextWeek",
+          "until": 1764032400000,
+          "countdown": "4d"
+        }
+      ]
+    }
   }
 ]

@@ -102,7 +102,8 @@ export function projectRows(
     machineOs: Record<string, string> = {},
     machineSimulators: NonNullable<Catalog['machineSimulators']> = {},
     machineEmulators: NonNullable<Catalog['machineEmulators']> = {},
-    machineCapabilities: NonNullable<Catalog['machineCapabilities']> = {};
+    machineCapabilities: NonNullable<Catalog['machineCapabilities']> = {},
+    machineOwners: NonNullable<Catalog['machineOwners']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -152,6 +153,8 @@ export function projectRows(
       if (name) machineNames[machineId] = name;
       const os = text(value.os);
       if (os) machineOs[machineId] = os;
+      const owner = text(value.ownerUserId);
+      if (owner) machineOwners[machineId] = owner;
       const caps = object(value.protocolCapabilities);
       const numericCaps: Record<string, number> = {};
       for (const [capKey, capValue] of Object.entries(caps)) {
@@ -223,6 +226,11 @@ export function projectRows(
       archived: value.isArchived === true,
       isTabClosed: value.isTabClosed === true,
       pinned: value.isPinned === true,
+      pinSectionId: text(value.pinSectionId).trim() || undefined,
+      orderKey: text(value.orderKey) || undefined,
+      snoozedUntil: stamp(value.snoozedUntil),
+      settledAt: stamp(value.settledAt),
+      focusRestoredAt: stamp(value.focusRestoredAt),
       userId: text(value.userId) || undefined,
       agentConfigId: text(value.agentConfigId) || undefined,
       projectId,
@@ -296,6 +304,7 @@ export function projectRows(
     machineSimulators,
     machineEmulators,
     machineCapabilities,
+    machineOwners,
     agentUsage,
   };
 }

@@ -220,6 +220,45 @@ After changing this canonical package, Android must review and export a new
 whole-package vendor snapshot with updated source provenance and file hashes;
 do not patch the Android vendor copy by hand.
 
+## Status view
+
+The catalog snapshot carries `pinSections` (the workspace Flock's `pinSection`
+rows in render order) and `statusView: { mine, team, nowMs, sectionsLoaded }`,
+two `StatusViewLayout`s computed by the shared Lody planner vendored in
+`src/protocol/lody-shared` (see its README). Native hosts render the pinned
+sections and the Focus / Later / Settled rows in the given order and never sort
+or classify them. Layout and rows arrive in one catalog event and restore with
+the catalog cache.
+
+`src/runtime/status-view.ts` builds the planner input the way the native lists
+group today: Tabs and side chats never list and lend their running / waiting
+state to their conversation (side chats and other machines excluded); rows nest
+under `openedBySessionId`, then `openedByRootSessionId`, resolved through Tabs;
+My tasks keeps whole families that contain the user's conversations and counts
+the pinned rows it hid. Working and waiting come from durable status
+(`status`, `awaitingUserSince`), not live presence. `canManage` ports the web
+`isSessionEditableToUser`: the machine's `ownerUserId` is the user, or its
+machine stream was readable (and, for a local project, lists that project).
+`canPrefer` also admits the session's author. Read grants on another member's
+machine are not discoverable here and are refused. `start({ workspaceReadOnly })`
+removes every status, pin and section action.
+
+The workspace Flock is read live beside `:meta` and `:mf:<id>`; its failures are
+diagnostics, never `syncError`, and keep the last sections. Time is the server
+clock: the `/api/time` round-trip midpoint (Lody `time-sync.ts`), recalibrated
+on start and foreground, the device clock until a sample succeeds. The runtime
+republishes at the layouts' `nextChangeAt` while the host is active and on
+every foreground.
+
+`statusViewCommand({ workspaceId, command, scope? })` plans against the current
+replicas (`scope` names the list a `move` happened in, default `team`) and
+writes session fields to the meta Flock and sections to the workspace Flock,
+one append each; it returns `{ writes }`, 0 when the planner refused.
+`snoozePresets()` resolves the four presets on the server clock. Sending a turn
+clears Later / Settled in the dispatch append (`touchOnSend`), and a new
+top-level conversation gets the top Focus `orderKey` (`newSessionOrder`).
+`contract/fixtures/catalog-status-view.json` is a decoded catalog with both.
+
 ## Catalog recovery
 
 Each bootstrap/catch-up window has a 16 MiB input and 100-page catch-up budget.
