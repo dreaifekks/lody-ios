@@ -1882,7 +1882,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         self.onComposerOptionChange?(["modelId": self.composerOptions.modelId, "effort": self.composerOptions.effort, "permissionId": option.id])
       }
     })
-    let hasRunConfig = cardStyle && onRunConfig != nil && composerOptions.agentName?.isEmpty == false
+    // Whenever the collapsed mark opens the run config, the expanded chip must too.
+    let hasRunConfig = cardStyle && onRunConfig != nil
+      && (composerOptions.agentName?.isEmpty == false || composerOptions.agentAsset != nil)
     modelButton.isHidden = !composerExpanded || (composerOptions.models.isEmpty && !hasRunConfig)
     modelButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
     // Web's run-config chip: assistant mark, model · effort, and a fast bolt, in one line.
@@ -1890,7 +1892,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let dot = NSAttributedString(string: "  ·  ", attributes: [.foregroundColor: UIColor.tertiaryLabel])
     var triggerTitle = composerOptions.modelTitle
     if hasRunConfig && composerOptions.models.isEmpty {
-      triggerTitle = composerOptions.agentName ?? triggerTitle
+      triggerTitle = composerOptions.agentName.flatMap { $0.isEmpty ? nil : $0 } ?? triggerTitle
     }
     let title = NSMutableAttributedString(string: triggerTitle, attributes: [.foregroundColor: UIColor.label])
     if !composerOptions.efforts.isEmpty || !composerOptions.effort.isEmpty {

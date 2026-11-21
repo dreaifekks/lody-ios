@@ -123,6 +123,8 @@ final class SessionComposerModel {
     capabilityTask = Task { [weak self] in
       let options = try? await service.options(workspaceId, projectId)
       guard let self, !Task.isCancelled, self.capabilityKey == key else { return }
+      // A failed read (runtime not ready, computer unreachable) is retried on the next render.
+      if options == nil { self.capabilityKey = nil }
       self.capability = options.flatMap {
         CreateLogic.capability(
           in: $0.capabilities, machineId: session.machineId, configId: session.agentConfigId,
@@ -205,7 +207,7 @@ final class SessionComposerModel {
     // No options: the row shows the conversation's agent and cannot be opened.
     rows.append(CreatePicker(
       id: "agent", glyph: Self.agentGlyph(agentKind.cliType, agentKind.agentType),
-      title: agentName ?? text("create.row.selectAgent"), placeholder: agentName == nil))
+      title: displayAgentName ?? text("create.row.selectAgent"), placeholder: displayAgentName == nil))
     guard let capability else { return rows }
     if !capability.models.isEmpty {
       let current = capability.models.first { $0.id == value.modelId }
@@ -249,6 +251,13 @@ final class SessionComposerModel {
       changed?()
     default: break
     }
+  }
+
+  /// The conversation's agent name, falling back to its provider's name before (or without) the
+  /// computer's options, as the collapsed mark already shows the agent from the session alone.
+  private var displayAgentName: String? {
+    if let agentName, !agentName.isEmpty { return agentName }
+    return agentKind.agentType.isEmpty ? nil : RemoteSettingsSections.agentName(agentKind.agentType)
   }
 
   private static func agentGlyph(_ cliType: String, _ agentType: String) -> CreateGlyph {
@@ -296,7 +305,7 @@ final class SessionComposerModel {
     ]
     options["fast"] = CreateLogic.fastMode(capability, value)?.enabled
     options["agentAsset"] = agentAsset
-    options["agentName"] = agentName
+    options["agentName"] = displayAgentName
     if let role = activeRole {
       options["roleEmoji"] = role.glyph
       options["roleName"] = role.role.name
