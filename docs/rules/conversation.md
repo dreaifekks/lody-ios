@@ -16,6 +16,8 @@ Read before changing the conversation page: the transcript and its turns, header
 
 - Process summary and duration rows put their chevron right after the text, not at the row's edge.
 
+- A context compaction tool call (runtime `activityKind: context_compaction`, web `isProcessStatusToolCall`) is a standalone one-line row, never part of a tool group or its counts: "Compacting context" shines while it is pending or in progress, then reads "Context compacted" or "Context compaction failed" without a warning mark.
+
 - Message footers expose copy, turn information and fork as visible 44 pt buttons (`ChatMessageActionsCell`), with prose-aligned glyphs, 32 pt spacing and time 12 pt after Fork. No More menu. Do not repeat model or reasoning metadata above the buttons. User messages collapse to six measured lines and have no inline action row: long-press offers Copy, plus Edit only for `editableMessageID`, with eligibility rechecked when Edit is selected. Copy uses `ChatMessageShare` for visible answer text and gives inline checkmark feedback. Fork revalidates the exact completed provider turn through `forkSession` and creates a new Tab sharing the working directory; uncertain requests are not replayed. Keep source-session identity checks and native scope ownership when opening action sheets.
 
 - Delivery progress and unconfirmed-send actions appear below the user's complete message, after its attachments and bubble, and align with the bubble's trailing edge. Measure the sender header within the user row so the bubble keeps its bottom spacing. History takeover and confirmation dismissal preserve this placement, and sending anchors the user message rather than the delivery line.

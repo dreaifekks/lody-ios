@@ -249,6 +249,9 @@ struct ChatItem: Decodable {
   var isBackgrounded: Bool? = nil
   var skipTranscript: Bool? = nil
   var processDurationMs: Int? = nil
+  /// Web `isProcessStatusToolCall`: `context_compaction` reads as a one-line status, not a tool.
+  var activityKind: String? = nil
+  var isContextCompaction: Bool { type == "tool_call" && activityKind == "context_compaction" }
   var isProcess: Bool { operation == nil && proposal == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   var hidesFromTranscript: Bool {
     if let operation { return operation.cards.isEmpty && operation.notices.isEmpty }
@@ -682,7 +685,7 @@ struct ChatTranscript {
           let toolGroup = entry.items[start].type == "tool_call"
           let end = entry.items.indices.dropFirst(start + 1).first {
             let item = entry.items[$0]
-            if toolGroup { return item.type != "tool_call" || item.kind == "switch_mode" }
+            if toolGroup { return item.type != "tool_call" || item.kind == "switch_mode" || item.isContextCompaction }
             return item.type == "text" || item.type == "proposed_plan" || item.isAttachment
           } ?? entry.items.endIndex
           visible = Array(start..<end).filter { entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && !entry.items[$0].hidesFromTranscript }
@@ -717,7 +720,7 @@ struct ChatTranscript {
               groups[index] = [index]
               visible.append(index)
             }
-          } else if item.type == "tool_call", item.kind != "switch_mode" {
+          } else if item.type == "tool_call", item.kind != "switch_mode", !item.isContextCompaction {
             thoughtStart = nil
             if let start = toolStart {
               groups[start, default: []].append(index)
@@ -864,6 +867,17 @@ struct ChatTranscript {
           }
         case "text": break
         case "thought": row.symbol = "brain"
+        case "tool_call" where item.isContextCompaction:
+          // Web `ToolCallBlock` compaction status: live while pending, then its outcome.
+          let compacting = item.status == "pending" || item.status == "in_progress"
+          let key: String
+          if compacting { key = "native.chat.transcript.compacting" }
+          else if item.status == "failed" { key = "native.chat.transcript.compactionFailed" }
+          else { key = "native.chat.transcript.compacted" }
+          row.text = String(localized: String.LocalizationValue(key), bundle: .lody)
+          row.symbol = "arrow.down.right.and.arrow.up.left"
+          row.running = entry.isRunning && compacting
+          row.actionable = false
         case "tool_call":
           row.symbol = ["read": "doc.text.magnifyingglass", "search": "magnifyingglass", "edit": "square.and.pencil",
             "write": "square.and.pencil", "execute": "terminal", "bash": "terminal", "fetch": "globe"][item.kind ?? ""] ?? "wrench.and.screwdriver"
@@ -1076,7 +1090,7 @@ enum ChatProcessSummary {
         hasThought = true
         continue
       }
-      guard item.type == "tool_call" else { continue }
+      guard item.type == "tool_call", !item.isContextCompaction else { continue }
       switch item.kind {
       case "execute", "bash":
         commands += 1

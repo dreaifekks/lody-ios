@@ -8549,6 +8549,57 @@
         }
       }
     },
+    "native.chat.transcript.compacting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compacting context"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在压缩上下文"
+          }
+        }
+      }
+    },
+    "native.chat.transcript.compacted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context compacted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文已压缩"
+          }
+        }
+      }
+    },
+    "native.chat.transcript.compactionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Context compaction failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上下文压缩失败"
+          }
+        }
+      }
+    },
     "native.chat.transcript.pending": {
       "extractionState": "manual",
       "localizations": {
