@@ -85,8 +85,16 @@ extension SessionController {
     // At rest one line (+, prompt, agent mark ⌄, Send); the card opens while editing.
     chat.composer.restsCollapsed = true
     chat.composer.onRunConfig = { [weak self] in self?.presentRunConfig() }
+    // Quotes need the conversation's computer to advertise `messageQuotes` (web gate).
+    chat.composer.quotesSupported = { [weak self] in self?.supportsMessageQuotes == true }
     chat.onStop = { [weak self] _ in self?.controlTurn("stop") }
     chat.onSteer = { [weak self] body in self?.controlTurn("steer", messageId: body["id"] as? String) }
+  }
+
+  var supportsMessageQuotes: Bool {
+    let catalog = source.state.catalog
+    guard let session = catalog.session(sessionId) else { return false }
+    return catalog.supportsMessageQuotes(machineId: session.machineId)
   }
 
   private func retryPendingInput(_ id: String) {

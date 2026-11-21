@@ -21,6 +21,8 @@ class EditMessageController: UIViewController {
     symbol: "xmark", label: String(localized: "common.cancel", bundle: .lody)
   ) { [weak self] in self?.close() }
   var onFinish: ((String) -> Void)?
+  /// Whether the conversation's computer delivers message quotes; restored cards send only then.
+  var quotesSupported: () -> Bool = { false }
 
   init(sessionId: String, entryId: String, service: EditMessageService = .live) {
     scope = EditMessageScope(sessionId: sessionId, expectedUserTurnId: entryId)
@@ -67,6 +69,7 @@ class EditMessageController: UIViewController {
       retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
     ])
     composer.sendHandoff = false
+    composer.quotesSupported = { [weak self] in self?.quotesSupported() == true }
     composer.setInputIdentifier("edit-message-input")
     composer.onHeightChange = { [weak self] height in self?.hostHeight.constant = height }
     composer.onSend = { [weak self] payload in
@@ -100,6 +103,7 @@ class EditMessageController: UIViewController {
         draft = value
         phase = .ready
         composer.setInitialDraft(value.text)
+        composer.setInitialQuotes(value.quotes ?? [])
         composer.setInitialAttachments(String(decoding: try JSONEncoder().encode(value.attachments), as: UTF8.self))
         render()
         composer.autoFocus = true

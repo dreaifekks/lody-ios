@@ -1842,6 +1842,10 @@
                 "propertyNames": { "type": "string" },
                 "additionalProperties": {}
               }
+            },
+            "quotes": {
+              "type": "array",
+              "items": { "$ref": "MessageQuoteInput" }
             }
           },
           "required": [
@@ -1862,6 +1866,10 @@
             "state": { "type": "string", "const": "ready" },
             "id": { "type": "string" },
             "text": { "type": "string" },
+            "quotes": {
+              "type": "array",
+              "items": { "$ref": "MessageQuoteInput" }
+            },
             "attachments": {
               "type": "array",
               "items": { "$ref": "EditAttachment" }
@@ -2458,6 +2466,15 @@
         "agentType": { "type": "string" }
       },
       "required": ["workspaceId", "userId", "category"]
+    },
+    "MessageQuoteInput": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "comment": { "type": "string" }
+      },
+      "required": ["id", "text"]
     },
     "OpenSessionParams": {
       "type": "object",
@@ -3483,6 +3500,7 @@
             "additionalProperties": {}
           }
         },
+        "quotes": { "type": "array", "items": { "$ref": "MessageQuoteInput" } },
         "cliType": { "type": "string" },
         "agentType": { "type": "string" },
         "resume": { "type": "string" },

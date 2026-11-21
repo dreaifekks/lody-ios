@@ -239,6 +239,11 @@ struct SessionCatalog: Equatable, Sendable {
     (machineCapabilities[machineId]?["previewStopProcess"] ?? 0) >= 1
   }
 
+  /// Web `machineSupportsMessageQuotes`: the computer's CLI reads message quote spans.
+  func supportsMessageQuotes(machineId: String) -> Bool {
+    (machineCapabilities[machineId]?[ChatMessageQuote.capability] ?? 0) >= 1
+  }
+
   func supportsDeviceShutdown(_ platform: DevicePlatform, machineId: String) -> Bool {
     let key = platform == .android ? "androidEmulatorShutdown" : "iosSimulatorShutdown"
     return (machineCapabilities[machineId]?[key] ?? 0) >= 1

@@ -13,6 +13,11 @@ import UIKit
     for reference in references.sorted(by: { $0.start < $1.start }) {
       guard reference.start >= cursor, reference.end > reference.start, reference.end <= source.length else { continue }
       result.append(decorate(source.attributedSubstring(from: NSRange(location: cursor, length: reference.start - cursor)), repository: repository, traits: traits))
+      if reference.kind == "message_quote", let quote = reference.quote {
+        result.append(quoteBlock(quote, attributes: source.attributes(at: reference.start, effectiveRange: nil)))
+        cursor = reference.end
+        continue
+      }
       let label = NSMutableAttributedString(attributedString: source.attributedSubstring(from: NSRange(location: reference.start, length: reference.end - reference.start)))
       label.addAttributes([.foregroundColor: UIColor.lodyAccent, .lodyReferenceChip: ChatReferenceNode.chipFill],
         range: NSRange(location: 0, length: label.length))
@@ -24,6 +29,28 @@ import UIKit
     }
     result.append(decorate(source.attributedSubstring(from: NSRange(location: cursor, length: source.length - cursor)), repository: repository, traits: traits))
     return result
+  }
+
+  /// Lines of a sent quote shown in the bubble; the full snapshot opens on tap.
+  static let quoteLines = 3
+  private static let quoteCharacters = 240
+
+  /// A sent quote (a valid `message_quote` span) drawn as web's quote block: secondary ink
+  /// indented past a leading bar, clipped to a few lines, opening the full snapshot on tap.
+  static func quoteBlock(_ quote: String, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+    let lines = quote.components(separatedBy: "\n")
+    var shown = lines.prefix(quoteLines).joined(separator: "\n")
+    if shown.count > quoteCharacters { shown = String(shown.prefix(quoteCharacters)) }
+    if shown.count < quote.count { shown = shown.trimmingCharacters(in: .whitespaces) + "…" }
+    var style = attributes
+    let paragraph = ((attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+    paragraph.firstLineHeadIndent = 12
+    paragraph.headIndent = 12
+    style[.paragraphStyle] = paragraph
+    style[.foregroundColor] = UIColor.secondaryLabel
+    style[.lodyQuoteBar] = true
+    style[.link] = ChatQuoteLink.prefix + quote
+    return NSAttributedString(string: shown, attributes: style)
   }
 
   static func decorate(_ source: NSAttributedString, repository: String, traits: UITraitCollection) -> NSAttributedString {

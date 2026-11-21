@@ -1170,10 +1170,19 @@ extension ChatPendingSend {
           running: failed != true && reconnect != true && !["accepted", "uploaded", "unknown"].contains(phase ?? ""),
           attachments: media, uploadProgress: uploadProgress ?? [:]))
       }
-      let body = displayText ?? text
+      var body = displayText ?? text
+      var shown: [ChatTextReference] = displayText == nil ? [] : references ?? []
+      // Quote cards follow the text as the runtime will send them, drawn as history draws them.
+      for quote in quotes ?? [] {
+        if !body.isEmpty { body += "\n\n" }
+        let start = (body as NSString).length
+        body += quote.text
+        shown.append(ChatTextReference(start: start, end: (body as NSString).length, kind: "message_quote", target: quote.id, quote: quote.text))
+        if !quote.comment.isEmpty { body += "\n\n" + quote.comment }
+      }
       if !body.isEmpty {
         result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body,
-          references: displayText == nil ? [] : references ?? []))
+          references: shown))
       }
       // A local send in flight is the signed-in user's own turn; its first row carries the header.
       if !result.isEmpty {

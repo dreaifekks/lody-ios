@@ -1,3 +1,8 @@
+import {
+  appendMessageQuotes,
+  type MessageQuote,
+} from '../protocol/message-quotes.ts';
+
 type RecordValue = Record<string, any>;
 
 function inputBlock(item: RecordValue): RecordValue {
@@ -117,6 +122,7 @@ export function replacementInput(
   text: string,
   retainedIds: string[],
   added: RecordValue[],
+  quotes: readonly MessageQuote[] = [],
 ) {
   if (
     typeof text !== 'string' ||
@@ -163,12 +169,22 @@ export function replacementInput(
     attachments.filter((item) => item.type === 'file').length > 8
   )
     throw new Error('attachment_limit');
-  if (!text.trim() && !attachments.length) throw new Error('empty_message');
+  // Restored quote cards follow the main text, as on a fresh send.
+  const composed = appendMessageQuotes(text.trim(), [], quotes);
+  if (!composed.text && !attachments.length) throw new Error('empty_message');
   return {
     ...turn.inputConfig,
-    prompt: text.trim(),
+    prompt: composed.text,
     inputBlocks: [
-      ...(text.trim() ? [{ type: 'text', text: text.trim() }] : []),
+      ...(composed.text
+        ? [
+            {
+              type: 'text',
+              text: composed.text,
+              ...(composed.spans.length ? { spans: composed.spans } : {}),
+            },
+          ]
+        : []),
       ...attachments,
       ...(turn.items ?? [])
         .filter((item: RecordValue) =>

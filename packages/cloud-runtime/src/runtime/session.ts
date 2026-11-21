@@ -1,5 +1,11 @@
 import type { SessionUsage } from '../protocol/session-usage.ts';
 import type { MessageReference } from '../protocol/message-references.ts';
+import {
+  appendMessageQuotes,
+  messageQuotes,
+  splitMessageQuotes,
+  type MessageQuoteSpan,
+} from '../protocol/message-quotes.ts';
 import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
@@ -1523,6 +1529,8 @@ export async function sendTurn(
     userId?: string;
     text: string;
     attachmentBlocks?: Record<string, any>[];
+    /** Composer quote cards, appended after the rewritten text (web message quotes). */
+    quotes?: unknown;
     cliType?: string;
     agentType?: string;
     resume?: string;
@@ -1579,6 +1587,8 @@ export async function sendTurn(
   if (quota.state === 'not_sent') return quota;
   if (typeof args.text !== 'string')
     return { state: 'not_sent', reason: 'invalid_message' };
+  const quotes = messageQuotes(args.quotes);
+  if (!quotes) return { state: 'not_sent', reason: 'invalid_message' };
   let text = args.text.trim();
   if (
     args.configOptionValues !== undefined &&
@@ -1626,7 +1636,7 @@ export async function sendTurn(
   )
     return { state: 'not_sent', reason: '附件信息无效，请重新选择' };
   if (
-    (!text && !attachments.length) ||
+    (!text && !attachments.length && !quotes.length) ||
     text.length > 32000 ||
     !args.userId ||
     !args.machineId ||
@@ -1655,10 +1665,15 @@ export async function sendTurn(
   try {
     const expanded = await expand(text);
     text = typeof expanded === 'string' ? expanded : expanded.text;
-    const spans = typeof expanded === 'string' ? undefined : expanded.spans;
+    let spans: (MessageReference | MessageQuoteSpan)[] | undefined =
+      typeof expanded === 'string' ? undefined : expanded.spans;
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     if (text.length > 32000) throw new Error('invalid_message');
+    if (quotes.length) {
+      // Web order: the rewritten main text, then each quote block and its comment.
+      ({ text, spans } = appendMessageQuotes(text, spans ?? [], quotes));
+    }
     const previous =
       (snapshot(state).history as any[] | undefined)?.findLast(
         (entry) => entry.role === 'user',
@@ -2425,6 +2440,7 @@ export async function editSession(
     text?: string;
     retainedIds?: string[];
     attachmentBlocks?: Record<string, any>[];
+    quotes?: unknown;
     userId: string;
     billingEntitlement?: BillingEntitlement | null;
   },
@@ -2442,16 +2458,32 @@ export async function editSession(
   const turn = editableUserTurn(history, meta, capability);
   if (!turn || turn.id !== args.expectedUserTurnId)
     return { state: 'not_sent', reason: 'message_no_longer_editable' };
-  if (args.action === 'read')
+  if (args.action === 'read') {
+    // Quote spans restore into composer cards; the rest is the main text.
+    let joined = '';
+    const spans: Record<string, any>[] = [];
+    for (const item of (turn.items ?? []) as any[]) {
+      if (item.type !== 'text') continue;
+      if (joined) joined += '\n\n';
+      const offset = joined.length;
+      for (const span of Array.isArray(item.spans) ? item.spans : [])
+        if (span && typeof span === 'object')
+          spans.push({
+            ...span,
+            start: span.start + offset,
+            end: span.end + offset,
+          });
+      joined += item.text ?? '';
+    }
+    const restored = splitMessageQuotes(joined, spans);
     return {
       state: 'ready',
       id: turn.id,
-      text: (turn.items ?? [])
-        .filter((item: any) => item.type === 'text')
-        .map((item: any) => item.text ?? '')
-        .join('\n\n'),
+      text: restored.text,
+      ...(restored.quotes.length ? { quotes: restored.quotes } : {}),
       attachments: editAttachments(turn),
     };
+  }
   if (
     !args.id ||
     args.id === turn.id ||
@@ -2461,6 +2493,8 @@ export async function editSession(
     return { state: 'not_sent', reason: 'invalid_message' };
   const quota = checkTurnQuota(args);
   if (quota.state === 'not_sent') return quota;
+  const quotes = messageQuotes(args.quotes);
+  if (!quotes) return { state: 'not_sent', reason: 'invalid_message' };
   let inputConfig;
   try {
     inputConfig = replacementInput(
@@ -2468,6 +2502,7 @@ export async function editSession(
       args.text,
       args.retainedIds ?? [],
       args.attachmentBlocks ?? [],
+      quotes,
     );
   } catch {
     return { state: 'not_sent', reason: 'invalid_message' };

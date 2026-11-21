@@ -3253,7 +3253,8 @@ extension RuntimeContract {
     public var text: String?
     public var retainedIds: [String]?
     public var attachmentBlocks: [[String: JSONValue]]?
-    public init(sessionId: String, expectedUserTurnId: String, id: String? = nil, userId: String, billingEntitlement: BillingEntitlement?, backgroundTaskId: String? = nil, text: String? = nil, retainedIds: [String]? = nil, attachmentBlocks: [[String: JSONValue]]? = nil) {
+    public var quotes: [MessageQuoteInput]?
+    public init(sessionId: String, expectedUserTurnId: String, id: String? = nil, userId: String, billingEntitlement: BillingEntitlement?, backgroundTaskId: String? = nil, text: String? = nil, retainedIds: [String]? = nil, attachmentBlocks: [[String: JSONValue]]? = nil, quotes: [MessageQuoteInput]? = nil) {
       self.sessionId = sessionId
       self.expectedUserTurnId = expectedUserTurnId
       self.id = id
@@ -3263,6 +3264,7 @@ extension RuntimeContract {
       self.text = text
       self.retainedIds = retainedIds
       self.attachmentBlocks = attachmentBlocks
+      self.quotes = quotes
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -3275,6 +3277,7 @@ extension RuntimeContract {
       self.text = try c.decodeIfPresent(String.self, forKey: Key("text"))
       self.retainedIds = try c.decodeIfPresent([String].self, forKey: Key("retainedIds"))
       self.attachmentBlocks = try c.decodeIfPresent([[String: JSONValue]].self, forKey: Key("attachmentBlocks"))
+      self.quotes = try c.decodeIfPresent([MessageQuoteInput].self, forKey: Key("quotes"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
@@ -3287,6 +3290,7 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.text, forKey: Key("text"))
       try c.encodeIfPresent(self.retainedIds, forKey: Key("retainedIds"))
       try c.encodeIfPresent(self.attachmentBlocks, forKey: Key("attachmentBlocks"))
+      try c.encodeIfPresent(self.quotes, forKey: Key("quotes"))
     }
   }
 
@@ -3318,22 +3322,26 @@ extension RuntimeContract {
   public struct EditSessionResultReady: Codable, Sendable, Equatable {
     public var id: String
     public var text: String
+    public var quotes: [MessageQuoteInput]?
     public var attachments: [EditAttachment]
-    public init(id: String, text: String, attachments: [EditAttachment]) {
+    public init(id: String, text: String, quotes: [MessageQuoteInput]? = nil, attachments: [EditAttachment]) {
       self.id = id
       self.text = text
+      self.quotes = quotes
       self.attachments = attachments
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.id = try c.decode(String.self, forKey: Key("id"))
       self.text = try c.decode(String.self, forKey: Key("text"))
+      self.quotes = try c.decodeIfPresent([MessageQuoteInput].self, forKey: Key("quotes"))
       self.attachments = try c.decode([EditAttachment].self, forKey: Key("attachments"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.id, forKey: Key("id"))
       try c.encode(self.text, forKey: Key("text"))
+      try c.encodeIfPresent(self.quotes, forKey: Key("quotes"))
       try c.encode(self.attachments, forKey: Key("attachments"))
     }
   }
@@ -4791,6 +4799,29 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.agentConfigId, forKey: Key("agentConfigId"))
       try c.encodeIfPresent(self.cliType, forKey: Key("cliType"))
       try c.encodeIfPresent(self.agentType, forKey: Key("agentType"))
+    }
+  }
+
+  public struct MessageQuoteInput: Codable, Sendable, Equatable {
+    public var id: String
+    public var text: String
+    public var comment: String?
+    public init(id: String, text: String, comment: String? = nil) {
+      self.id = id
+      self.text = text
+      self.comment = comment
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.id = try c.decode(String.self, forKey: Key("id"))
+      self.text = try c.decode(String.self, forKey: Key("text"))
+      self.comment = try c.decodeIfPresent(String.self, forKey: Key("comment"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.id, forKey: Key("id"))
+      try c.encode(self.text, forKey: Key("text"))
+      try c.encodeIfPresent(self.comment, forKey: Key("comment"))
     }
   }
 
@@ -6885,6 +6916,7 @@ extension RuntimeContract {
     public var userId: String?
     public var text: String
     public var attachmentBlocks: [[String: JSONValue]]?
+    public var quotes: [MessageQuoteInput]?
     public var cliType: String?
     public var agentType: String?
     public var resume: String?
@@ -6895,7 +6927,7 @@ extension RuntimeContract {
     public var configOptionValues: [String: JSONValue]?
     public var agentRoleId: ClearableString?
     public var billingEntitlement: BillingEntitlement?
-    public init(sessionId: String, id: String? = nil, backgroundTaskId: String? = nil, queue: Bool? = nil, guide: Bool? = nil, machineId: String, userId: String? = nil, text: String, attachmentBlocks: [[String: JSONValue]]? = nil, cliType: String? = nil, agentType: String? = nil, resume: String? = nil, modelId: ClearableString? = nil, modeId: String? = nil, reasoningEffort: ClearableString? = nil, reasoningEffortConfigId: String? = nil, configOptionValues: [String: JSONValue]? = nil, agentRoleId: ClearableString? = nil, billingEntitlement: BillingEntitlement?) {
+    public init(sessionId: String, id: String? = nil, backgroundTaskId: String? = nil, queue: Bool? = nil, guide: Bool? = nil, machineId: String, userId: String? = nil, text: String, attachmentBlocks: [[String: JSONValue]]? = nil, quotes: [MessageQuoteInput]? = nil, cliType: String? = nil, agentType: String? = nil, resume: String? = nil, modelId: ClearableString? = nil, modeId: String? = nil, reasoningEffort: ClearableString? = nil, reasoningEffortConfigId: String? = nil, configOptionValues: [String: JSONValue]? = nil, agentRoleId: ClearableString? = nil, billingEntitlement: BillingEntitlement?) {
       self.sessionId = sessionId
       self.id = id
       self.backgroundTaskId = backgroundTaskId
@@ -6905,6 +6937,7 @@ extension RuntimeContract {
       self.userId = userId
       self.text = text
       self.attachmentBlocks = attachmentBlocks
+      self.quotes = quotes
       self.cliType = cliType
       self.agentType = agentType
       self.resume = resume
@@ -6927,6 +6960,7 @@ extension RuntimeContract {
       self.userId = try c.decodeIfPresent(String.self, forKey: Key("userId"))
       self.text = try c.decode(String.self, forKey: Key("text"))
       self.attachmentBlocks = try c.decodeIfPresent([[String: JSONValue]].self, forKey: Key("attachmentBlocks"))
+      self.quotes = try c.decodeIfPresent([MessageQuoteInput].self, forKey: Key("quotes"))
       self.cliType = try c.decodeIfPresent(String.self, forKey: Key("cliType"))
       self.agentType = try c.decodeIfPresent(String.self, forKey: Key("agentType"))
       self.resume = try c.decodeIfPresent(String.self, forKey: Key("resume"))
@@ -6949,6 +6983,7 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.userId, forKey: Key("userId"))
       try c.encode(self.text, forKey: Key("text"))
       try c.encodeIfPresent(self.attachmentBlocks, forKey: Key("attachmentBlocks"))
+      try c.encodeIfPresent(self.quotes, forKey: Key("quotes"))
       try c.encodeIfPresent(self.cliType, forKey: Key("cliType"))
       try c.encodeIfPresent(self.agentType, forKey: Key("agentType"))
       try c.encodeIfPresent(self.resume, forKey: Key("resume"))

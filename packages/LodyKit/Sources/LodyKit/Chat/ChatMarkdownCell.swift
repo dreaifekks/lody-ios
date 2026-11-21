@@ -116,7 +116,7 @@ extension LodyChatView: TextSelectionGroupDelegate {
       runs[key, default: []].append(contentsOf: cell.selectionLabels)
       previous = index
     }
-    runs = runs.filter { $0.value.count > 1 }
+    // A lone label joins a group of one too, so every agent passage offers Quote in its menu.
     for (key, group) in markdownSelections where runs[key] == nil {
       group.labels = []
       markdownSelections[key] = nil
@@ -137,5 +137,19 @@ extension LodyChatView: TextSelectionGroupDelegate {
 
   func textSelectionGroup(_ group: TextSelectionGroup, didDragSelectionIn label: TextLabelView, at location: CGPoint) {
     ChatTableViewport.markdown(from: label)?.textLabelView(label, didDragSelectionAt: location)
+  }
+
+  /// The system selection menu with Quote beside Copy (web message quotes). The selected text
+  /// is read from the group, never through the pasteboard.
+  func textSelectionGroup(_ group: TextSelectionGroup, editMenuForSuggestedActions suggestedActions: [UIMenuElement]) -> UIMenu? {
+    guard composer.canQuote else { return nil }
+    let quote = UIAction(title: String(localized: "native.chat.quote.action", bundle: .lody), image: UIImage(systemName: "quote.opening")) { [weak self, weak group] _ in
+      guard let self, let group, let text = group.selectedPlainText() else { return }
+      group.clearSelection()
+      self.composer.beginQuote(text)
+    }
+    var children = suggestedActions
+    children.insert(quote, at: min(1, children.count))
+    return UIMenu(children: children)
   }
 }

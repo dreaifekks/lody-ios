@@ -735,6 +735,11 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private let attachmentBar = ChatAttachmentBar()
   private let attachmentStack = ChatComposerAttachmentStack()
   private var attachments: [ChatAttachment] = []
+  /// Quote cards (web message quotes), in insertion order after the attachments.
+  private var quotes: [ChatMessageQuote] = []
+  /// Whether the conversation's computer delivers quotes (`protocolCapabilities.messageQuotes`).
+  /// Unset means no: a card is never created or sent, so a quote is never sent as plain text.
+  var quotesSupported: (() -> Bool)?
   private let filePicker = ChatAttachmentPicker()
   private let libraryPicker = ChatPhotoLibraryPicker()
   private var inputHeight: NSLayoutConstraint!
@@ -785,7 +790,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private var dragStart: CGFloat = 0
   private var dragDistance: CGFloat = 1
   private let fullScreenDim = UIView()
-  private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?)?
+  private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?, quotes: [ChatMessageQuote])?
   private var sentStates: [String: String] = [:]
   var sendHandoff = true
   /// A pushed creation host keeps its keyboard edge until the destination replaces it.
@@ -977,15 +982,22 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     filePicker.onPick = { [weak self] picked in self?.addAttachments(picked) }
     libraryPicker.onPick = { [weak self] picked in self?.addAttachments(picked) }
     attachmentBar.onPreview = { [weak self] id in
+      if let quote = self?.quotes.first(where: { ChatAttachmentBar.quoteID($0) == id }) {
+        self?.presentQuoteSheet(quote, editing: true)
+        return
+      }
       guard let self, let index = self.attachments.firstIndex(where: { $0.id == id }), let controller = self.presenter() else { return }
       controller.present(ChatAttachmentPreview(self.attachments, index: index), animated: true)
     }
     attachmentBar.onRemove = { [weak self] id in
       guard let self else { return }
       self.attachments.removeAll { $0.id == id }
-      self.attachmentBar.render(self.attachments, animatedRemoval: true)
+      let removedQuote = self.quotes.contains { ChatAttachmentBar.quoteID($0) == id }
+      self.quotes.removeAll { ChatAttachmentBar.quoteID($0) == id }
+      self.attachmentBar.render(self.attachments, quotes: self.quotes, animatedRemoval: true)
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       self.updateComposer()
+      if removedQuote { self.saveDraft() }
     }
     notice.titleLabel?.font = .dynamic(of: 13)
     notice.titleLabel?.numberOfLines = 0
@@ -1145,14 +1157,42 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     saveDraft()
   }
   func setStoredDraft(_ text: String) {
-    guard !text.isEmpty, input.text.isEmpty else { return }
-    input.restoreDraft(text)
+    guard !text.isEmpty, input.text.isEmpty, quotes.isEmpty else { return }
+    // Quote cards ride the draft envelope beside the editor state (`draftValue`).
+    if let data = text.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       object["v"] as? Int == 1, object["quotes"] != nil {
+      quotes = ChatMessageQuote.decode(object["quotes"])
+      if object["lexical"] != nil { input.restoreDraft(text) }
+      else if let plain = object["text"] as? String { input.text = plain }
+    } else {
+      input.restoreDraft(text)
+    }
     updateComposer()
+  }
+  /// Restores an edited message's quotes as cards (the edit page).
+  func setInitialQuotes(_ restored: [ChatMessageQuote]) {
+    guard quotes.isEmpty, pendingDraft == nil else { return }
+    quotes = restored
+    updateComposer()
+  }
+  private var draftValue: String {
+    let base = input.draftEnvelope
+    guard !quotes.isEmpty else { return base }
+    var envelope: [String: Any] = ["v": 1]
+    if let data = base.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       object["v"] as? Int == 1 {
+      envelope = object
+    } else if !base.isEmpty {
+      envelope["text"] = base
+    }
+    envelope["quotes"] = quotes.map(\.json)
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope), let value = String(data: data, encoding: .utf8) else { return base }
+    return value
   }
   private func saveDraft() {
     draftSave?.cancel()
     draftSave = nil
-    onDraftChange?(input.draftEnvelope)
+    onDraftChange?(draftValue)
   }
   /// Typing persists shortly after it pauses, so a draft survives the app being killed
   /// while the page is open, not only leaving the page or the app.
@@ -1225,13 +1265,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     ChatSendHandoff.cancel(id: id)
     pendingSendID = nil
     if let draft = pendingDraft {
-      if !sendHandoff || ((input.text ?? "").isEmpty && attachments.isEmpty) {
+      if !sendHandoff || ((input.text ?? "").isEmpty && attachments.isEmpty && quotes.isEmpty) {
         if draft.state.map({ input.restore(state: $0) }) != true { input.text = draft.text }
         attachments = draft.attachments
+        // A rejected send keeps its cards exactly as they were.
+        quotes = draft.quotes
       } else {
         failedDraft = ChatPendingSend(id: id, text: draft.text, attachments: draft.attachments.map { item in
           ChatPendingSend.Attachment(id: item.id, name: item.name, uri: item.url.absoluteString, kind: item.isImage ? "image" : "file")
-        }, status: "", failed: true)
+        }, status: "", failed: true, quotes: draft.quotes)
       }
       pendingDraft = nil
     }
@@ -1255,18 +1297,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     pendingDraft = (pending.text, pending.attachments.compactMap { item in
       guard let url = URL(string: item.uri), url.isFileURL else { return nil }
       return ChatAttachment(id: item.id, name: item.name, url: url, isImage: item.kind == "image")
-    }, sentStates[pending.id])
+    }, sentStates[pending.id], pending.quotes ?? [])
     updateComposer()
   }
 
   private func takeDraft() {
     dictator.cancel()
     guard pendingDraft == nil else { return }
-    pendingDraft = (input.markdown, attachments, input.serializedState)
+    pendingDraft = (input.markdown, attachments, input.serializedState, quotes)
     // Cross-container creation keeps its draft visible while its host dismisses.
     guard sendHandoff else { return }
     input.text = ""
     attachments = []
+    quotes = []
   }
   #if LODY_SHARE_EXTENSION
   private func presentAttachmentCamera() {
@@ -1458,6 +1501,45 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     saveDraft()
   }
+  /// Whether this composer takes quote cards: the conversation composer while editable.
+  var canQuote: Bool { quotesSupported != nil && state.editable }
+
+  /// Quotes a selected passage (the transcript's Quote action): checks the limits and the
+  /// computer's support, then opens the comment sheet; Add puts the card in the strip.
+  func beginQuote(_ selection: String) {
+    guard state.editable, !state.sending, pendingDraft == nil else { return }
+    let snapshot: String
+    switch ChatMessageQuote.snapshot(of: selection) {
+    case .success(let value): snapshot = value
+    case .failure(.empty): return
+    case .failure(.tooLong):
+      LodyToastOverlay.shared.show(message: ChatMessageQuote.tooLongMessage, kind: .warning)
+      return
+    }
+    guard quotesSupported?() == true else {
+      LodyToastOverlay.shared.show(message: ChatMessageQuote.upgradeMessage, kind: .warning)
+      return
+    }
+    presentQuoteSheet(ChatMessageQuote(text: snapshot), editing: false)
+  }
+
+  private func presentQuoteSheet(_ quote: ChatMessageQuote, editing: Bool) {
+    guard let controller = presenter(), controller.presentedViewController == nil else { return }
+    let sheet = ChatQuoteSheetController(quote: quote, editing: editing, onCommit: { [weak self] next in
+      guard let self, self.pendingDraft == nil else { return }
+      if let index = self.quotes.firstIndex(where: { $0.id == next.id }) { self.quotes[index] = next }
+      else if !editing { self.quotes.append(next) }
+      self.updateComposer()
+      self.saveDraft()
+    }, onRemove: { [weak self] in
+      guard let self, self.pendingDraft == nil else { return }
+      self.quotes.removeAll { $0.id == quote.id }
+      self.updateComposer()
+      self.saveDraft()
+    })
+    controller.present(sheet, animated: true)
+  }
+
   private func presenter() -> UIViewController? {
     owningController().map { $0.presentedViewController ?? $0 } ?? window?.rootViewController
   }
@@ -1645,16 +1727,17 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attach.alpha = attach.isEnabled ? 1 : 0.5
     #endif
     attachmentBar.isUserInteractionEnabled = state.editable && !sending
-    attachmentBar.render(attachments)
+    attachmentBar.render(attachments, quotes: quotes)
     attachmentBar.isHidden = !expanded
     let showsAttachmentRow = expanded && attachmentBar.hasVisiblePills
     attachmentHeight.constant = showsAttachmentRow ? ChatAttachmentBar.tileSide : 0
     attachmentTop.constant = showsAttachmentRow ? 8 : 0
-    attachmentStack.render(attachments)
-    attachmentStack.isHidden = expanded || attachments.isEmpty
-    hint.text = attachments.isEmpty ? state.placeholder : String(localized: "native.chat.composer.addMessage", bundle: .lody)
+    attachmentStack.render(attachments, quotes: quotes)
+    attachmentStack.isHidden = expanded || (attachments.isEmpty && quotes.isEmpty)
+    hint.text = attachments.isEmpty && quotes.isEmpty ? state.placeholder : String(localized: "native.chat.composer.addMessage", bundle: .lody)
     hint.isHidden = !input.text.isEmpty
-    let hasContent = !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+    // A quote card alone is a message: Send is enabled without main text.
+    let hasContent = !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty || !quotes.isEmpty
     let stop = !hasContent && state.running == true
     let loading = sending || state.stopping == true
     let blocked = failedDraft != nil || displayError != nil || !state.editable || state.controlling == true
@@ -2126,7 +2209,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   /// Return never stops a running turn: with nothing to send, Send is Stop, and only a tap means it.
   private func submitFromKeyboard() {
-    guard hasDraftText || !attachments.isEmpty else { return }
+    guard hasDraftText || !attachments.isEmpty || !quotes.isEmpty else { return }
     submit()
   }
 
@@ -2145,8 +2228,13 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       break
     }
     if previewBeforeSubmit?() == true { return }
-    if state.running == true && input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty {
+    if state.running == true && input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && quotes.isEmpty {
       onStop?()
+      return
+    }
+    // Never send quotes as plain text to a computer that cannot read them; keep the draft.
+    if !quotes.isEmpty && quotesSupported?() != true {
+      LodyToastOverlay.shared.show(message: ChatMessageQuote.upgradeMessage, kind: .warning)
       return
     }
     sendFeedback.impactOccurred(intensity: 0.85)
@@ -2155,7 +2243,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let guiding = guidesSubmission
     let id = UUID().uuidString.lowercased()
     let body = input.markdown
-    let payload: [String: Any] = [
+    var payload: [String: Any] = [
       "id": id, "queue": queued, "guide": guiding, "text": body, "displayText": input.text ?? body,
       "references": input.text == nil ? [] : input.chipReferences,
       "startedAt": Date().timeIntervalSince1970 * 1000,
@@ -2163,6 +2251,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         ["id": $0.id, "name": $0.name, "uri": $0.url.absoluteString, "kind": $0.isImage ? "image" : "file"]
       },
     ]
+    if !quotes.isEmpty { payload["quotes"] = quotes.map(\.json) }
     if relaying || prepareSend?(payload) == true { return }
     commitSend(payload)
     onSend?(payload)
@@ -2197,6 +2286,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       guard let url = URL(string: item.uri), url.isFileURL else { continue }
       attachments.append(ChatAttachment(id: item.id, name: item.name, url: url, isImage: item.kind == "image"))
     }
+    for quote in failed.quotes ?? [] where !quotes.contains(where: { $0.id == quote.id }) { quotes.append(quote) }
     restoredSendID = failed.id
     failedDraft = nil
     updateComposer()

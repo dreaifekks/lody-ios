@@ -501,7 +501,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       cell.onInteraction = { [weak self] in self?.pauseTracking() }
       cell.canEdit = { [weak self] in self?.editableMessageID == row.entryID && row.kind == "user" }
       cell.onEdit = { [weak self] in self?.onEditMessage(["entryId": row.entryID]) }
-      cell.label.onLink = row.kind == "user" ? { [weak self] in self?.openMessageLink($0) } : nil
+      cell.label.onLink = row.kind == "user" ? { [weak self] in self?.openUserMessageLink($0) } : nil
       cell.onToggle = { [weak self] in self?.toggleExpansion(row) }
       cell.onActivate = { [weak self] in
         guard let self, let index = self.dataSource.indexPath(for: row.id) else { return }
@@ -833,6 +833,14 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   }
 
   @objc private func dismissKeyboard() { endEditing(true) }
+  /// A user bubble's links: its sent quotes open in full, other links as in any message.
+  func openUserMessageLink(_ href: String) {
+    guard let quote = ChatQuoteLink.snapshot(href) else { openMessageLink(href); return }
+    guard let controller = presenter(), controller.presentedViewController == nil else { return }
+    pauseTracking()
+    controller.present(ChatQuoteViewerController(snapshot: quote), animated: true)
+  }
+
   func openMessageLink(_ href: String) {
     pauseTracking()
     if let target = ChatFileLink(href) {
@@ -1031,6 +1039,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     incoming.fullScreenTopInset = old.fullScreenTopInset
     // The conversation's run config, not the creation page's, answers the chip from here on.
     incoming.onRunConfig = old.onRunConfig
+    incoming.quotesSupported = old.quotesSupported
     incoming.cardStyle = old.cardStyle
     incoming.restsCollapsed = old.restsCollapsed
     incoming.setInputIdentifier("session-input")

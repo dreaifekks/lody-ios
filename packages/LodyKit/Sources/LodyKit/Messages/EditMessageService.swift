@@ -16,7 +16,9 @@ struct EditMessageDraft: Decodable {
     let kind: String
   }
   let state: String
+  /// The main text; the message's quotes, when it has any, are restored as `quotes` cards.
   let text: String
+  var quotes: [ChatMessageQuote]? = nil
   let attachments: [Attachment]
 }
 
@@ -24,6 +26,7 @@ struct EditMessageSubmission: Codable {
   let id: String
   let text: String
   let attachments: [EditMessageDraft.Attachment]
+  var quotes: [ChatMessageQuote]? = nil
 
   func payload(scope: EditMessageScope, originals: Set<String>) throws -> String {
     struct Request: Encodable {
@@ -34,11 +37,13 @@ struct EditMessageSubmission: Codable {
       let text: String
       let retainedIds: [String]
       let attachments: [EditMessageDraft.Attachment]
+      let quotes: [ChatMessageQuote]?
     }
     return String(decoding: try JSONEncoder().encode(Request(
       sessionId: scope.sessionId, expectedUserTurnId: scope.expectedUserTurnId, id: id, text: text,
       retainedIds: attachments.filter { originals.contains($0.id) }.map(\.id),
-      attachments: attachments.filter { !originals.contains($0.id) }
+      attachments: attachments.filter { !originals.contains($0.id) },
+      quotes: quotes?.isEmpty == false ? quotes : nil
     )), as: UTF8.self)
   }
 }

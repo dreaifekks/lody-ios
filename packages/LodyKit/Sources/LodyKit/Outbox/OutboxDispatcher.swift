@@ -278,7 +278,7 @@ final class OutboxDispatcher {
     ]
     payload["sessionId"] = session["id"]
     for key in ["machineId", "cliType", "agentType", "resume"] { payload[key] = session[key] }
-    for key in ["id", "text", "attachments", "agentRoleId"] { payload[key] = send[key] }
+    for key in ["id", "text", "attachments", "agentRoleId", "quotes"] { payload[key] = send[key] }
     let choice = send["choice"]?.object ?? [:]
     for (from, to) in [("modelId", "modelId"), ("modeId", "modeId"), ("effort", "reasoningEffort"),
                        ("reasoningEffortConfigId", "reasoningEffortConfigId"), ("configOptionValues", "configOptionValues")] {
