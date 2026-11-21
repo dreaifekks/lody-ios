@@ -9,6 +9,7 @@ import type {
 } from '../../contract/methods.ts';
 import type { createChannel } from '../channel.ts';
 import type { FileContext } from '../files';
+import { sessionFileRootMounts } from '../../protocol/session-file-roots.ts';
 
 export type RuntimeChannel = ReturnType<typeof createChannel>;
 export type MetaReplica = { flock: Flock; client: StreamsClient };
@@ -95,17 +96,21 @@ export function machineFor(
     throw new Error('metadata_not_ready');
   if (typeof path !== 'string' || path.length > 32768 || path.includes('\0'))
     throw new Error('invalid_path');
-  const session = state.catalogs
-    .get('meta')
-    ?.sessions.find((item) => item.id === sessionId);
+  const sessions = state.catalogs.get('meta')?.sessions;
+  const session = sessions?.find((item) => item.id === sessionId);
   if (!session || !state.machineReplicas.has(session.machineId))
     throw new Error('machine_unavailable');
   const localPrefix = `${session.machineId}:local:`;
+  // File roots belong to the owner: a child Tab reads its parent's Project group.
+  const owner = session.parentSessionId
+    ? sessions?.find((item) => item.id === session.parentSessionId)
+    : session;
   return {
     workspaceId: state.workspace,
     machineId: session.machineId,
     // Code Collab ownership lives in workspace Meta Flock, not the session doc.
     ownerSessionId: session.parentSessionId ?? session.id,
+    mounts: sessionFileRootMounts((owner ?? session).projectRun),
     localProjectId: session.projectId.startsWith(localPrefix)
       ? session.projectId.slice(localPrefix.length)
       : undefined,
