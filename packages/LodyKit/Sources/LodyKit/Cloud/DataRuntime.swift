@@ -38,6 +38,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   var backgrounded = false
   private var phase = "stopped"
   private var reason = ""
+  private var restartLimitReached: Bool { phase == "failed" && reason == "restart_limit" }
   private var lastStartReason = ""
   private var acknowledgements = 0
   var backgroundProbe = false
@@ -56,7 +57,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       MainActor.assumeIsolated {
         guard let self, self.workspace != nil else { return }
         self.backgrounded = true
-        self.health.suspend()
+        self.health.suspend(at: self.now)
         self.publishPresenceUnknown()
         self.dispatch(RuntimeContract.Calls.SetActive.self, .init(active: false))
       }
@@ -78,8 +79,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       "handshakeDeferred": String(handshakeDeferred),
     ])
     health.resume(at: now)
-    if webView == nil { build(reason: "foreground") }
-    else {
+    if webView == nil {
+      guard !restartLimitReached else { return }
+      if health.startupExpired(at: now) { publish("failed", reason: "restart_limit"); return }
+      build(reason: "foreground")
+    } else {
       dispatch(RuntimeContract.Calls.SetActive.self, .init(active: true))
       if handshakeDeferred, let view = webView {
         handshakeDeferred = false
@@ -241,6 +245,15 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     let payload = fits ? session : #"{"v":1,"overflow":true}"#
     emitStatus(["sessionId": id, "session": payload])
   }
+  func reconnectSession(_ id: String) {
+    if restartLimitReached {
+      guard !backgrounded, sessionId == id else { return }
+      health = RuntimeHealth()
+      build(reason: "manual_retry")
+      return
+    }
+    openSession(id)
+  }
   func openSession(_ id: String) {
     if sessionId != id { sessionSnapshot = nil; overflowReported = nil }
     sessionId = id
@@ -252,6 +265,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   func watchSession(_ id: String) {
     sessionWatchers.retain(id)
     openSession(id)
+    if restartLimitReached { emitStatus() }
   }
   // A replaced chat page can deinit after its successor opened the same session.
   func unwatchSession(_ id: String) {
@@ -313,6 +327,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       let started = (try? await channel.call(RuntimeContract.Calls.Start.self, params)) != nil
       guard let self, let view, self.webView === view, self.channel === channel else { return }
       guard started else { self.recover("start_failed"); return }
+      self.health.startupCompleted()
       let current = self.sessionId.flatMap { $0.isEmpty ? nil : $0 }
       self.dispatch(RuntimeContract.Calls.RestoreSessions.self, .init(
         ids: self.retainedSessions, current: current, reserved: self.reservedSessions))

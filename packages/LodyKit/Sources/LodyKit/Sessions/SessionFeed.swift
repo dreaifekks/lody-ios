@@ -52,7 +52,7 @@ struct SessionFeedService {
         runtime?.unwatchSession(sessionId)
       }
     },
-    reconnect: { DataRuntime.current?.openSession($0) },
+    reconnect: { DataRuntime.current?.reconnectSession($0) },
     cached: { userId, workspaceId, sessionId in
       guard let data = try? JSONSerialization.data(withJSONObject: [userId, workspaceId, sessionId], options: .withoutEscapingSlashes)
       else { return nil }
