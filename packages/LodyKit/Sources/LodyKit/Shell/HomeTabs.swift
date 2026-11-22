@@ -89,35 +89,12 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
 
   func install(navigation: @escaping (HomeTab) -> UINavigationController) {
     // Restore roots moved into the regular-width detail column even when UIKit has
-    // already resolved a tab's provider. Each navigation keeps its original tab.
+    // already resolved a tab's provider. Each navigation keeps its original tab:
+    // UIKit rejects a controller resolved by one UITab being handed to another, so a
+    // second compact install (folding an iPhone Duo again) must reuse the first tabs.
     let navigations = HomeTab.allCases.map { ($0, navigation($0)) }
     if #available(iOS 18.0, *) {
-      var built = navigations.map { destination, controller in
-        let tab = UITab(title: destination.title, image: destination.icon.uiImage,
-          identifier: "home-tab-\(destination)") { _ in controller }
-        tab.accessibilityIdentifier = tab.identifier
-        return tab
-      }
-      if #available(iOS 26.0, *), floatingCreate == nil {
-        let create: UITab
-        if #available(iOS 27.0, *) {
-          create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
-            identifier: Self.createID) { _ in UIViewController() }
-        } else {
-          let search = UISearchTab { _ in UIViewController() }
-          search.automaticallyActivatesSearch = true
-          search.title = String(localized: "tabs.newSession", bundle: .lody)
-          search.image = LodyIcon.compose.uiImage
-          create = search
-        }
-        create.accessibilityIdentifier = Self.createID
-        create.isEnabled = canCreate
-        createTabIdentifier = create.identifier
-        built.append(create)
-      }
-      tabs = built
-      // iOS 27 supports a separate prominent action without misrepresenting it as Search.
-      if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
+      if tabs.isEmpty { installTabs(navigations) }
     } else if viewControllers == nil {
       // Classic tab bar items carry the same titles, icons and identifiers.
       for (index, (destination, controller)) in navigations.enumerated() {
@@ -133,6 +110,36 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
         controller.additionalSafeAreaInsets.bottom = destination == .settings ? 0 : Self.floatingSize + Self.floatingMargin
       }
     }
+  }
+
+  @available(iOS 18.0, *)
+  private func installTabs(_ navigations: [(HomeTab, UINavigationController)]) {
+    var built = navigations.map { destination, controller in
+      let tab = UITab(title: destination.title, image: destination.icon.uiImage,
+        identifier: "home-tab-\(destination)") { _ in controller }
+      tab.accessibilityIdentifier = tab.identifier
+      return tab
+    }
+    if #available(iOS 26.0, *), floatingCreate == nil {
+      let create: UITab
+      if #available(iOS 27.0, *) {
+        create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
+          identifier: Self.createID) { _ in UIViewController() }
+      } else {
+        let search = UISearchTab { _ in UIViewController() }
+        search.automaticallyActivatesSearch = true
+        search.title = String(localized: "tabs.newSession", bundle: .lody)
+        search.image = LodyIcon.compose.uiImage
+        create = search
+      }
+      create.accessibilityIdentifier = Self.createID
+      create.isEnabled = canCreate
+      createTabIdentifier = create.identifier
+      built.append(create)
+    }
+    tabs = built
+    // iOS 27 supports a separate prominent action without misrepresenting it as Search.
+    if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
   }
 
   func show(_ destination: HomeTab) {
