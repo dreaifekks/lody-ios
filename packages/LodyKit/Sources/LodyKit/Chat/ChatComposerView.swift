@@ -1630,7 +1630,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     let changes = {
       self.fullScreenDim.alpha = value ? 1 : 0
-      layoutRoot.layoutIfNeeded()
+      self.layoutRoot.layoutIfNeeded()
       self.input.scrollRangeToVisible(self.input.selectedRange)
     }
     let finish = { (_: Bool) in

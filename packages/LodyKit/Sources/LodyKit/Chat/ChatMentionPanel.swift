@@ -179,8 +179,8 @@ final class ChatMentionPanel: UIView {
     let text = text as NSString
     guard selection.length == 0, selection.location > 0, selection.location <= text.length else { return nil }
     let prefix = text.substring(to: selection.location)
-    guard let token = prefix.range(of: "(?:^|\\s)[@$][^\\s@$]*$|^/[^\\s/]*$", options: .regularExpression),
-          let at = prefix[token].firstIndex(where: { "@$/".contains($0) }) else { return nil }
+    guard let token = prefix.range(of: "(?:^|\\s)[@$￥¥][^\\s@$￥¥]*$|^/[^\\s/]*$", options: .regularExpression),
+          let at = prefix[token].firstIndex(where: { "@$￥¥/".contains($0) }) else { return nil }
     return NSRange(at..<prefix.endIndex, in: prefix)
   }
 
@@ -202,7 +202,7 @@ final class ChatMentionPanel: UIView {
     query = ((input.text ?? "") as NSString).substring(with: NSRange(location: range.location + 1, length: range.length - 1))
     let trigger = ((input.text ?? "") as NSString).substring(with: NSRange(location: range.location, length: 1))
     scoped = nil
-    if trigger == "$" { scoped = "skill" }
+    if ["$", "￥", "¥"].contains(trigger) { scoped = "skill" }
     if trigger == "/" { scoped = "cmd" }
     if trigger == "@", let colon = query.firstIndex(of: ":") {
       let namespace = String(query[..<colon])

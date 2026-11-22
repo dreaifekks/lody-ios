@@ -1077,6 +1077,8 @@ assert(ChatMentionPanel.activeRange(text: "@auth ", selection: NSRange(location:
 assert(ChatMentionPanel.activeRange(text: "@auth", selection: NSRange(location: 1, length: 3)) == nil)
 
 assert(ChatMentionPanel.activeRange(text: "😀 $auth", selection: NSRange(location: 8, length: 0)) == NSRange(location: 3, length: 5))
+assert(ChatMentionPanel.activeRange(text: "😀 ￥auth", selection: NSRange(location: 8, length: 0)) == NSRange(location: 3, length: 5))
+assert(ChatMentionPanel.activeRange(text: "price¥5", selection: NSRange(location: 7, length: 0)) == nil)
 assert(ChatMentionPanel.activeRange(text: "/compact", selection: NSRange(location: 8, length: 0)) == NSRange(location: 0, length: 8))
 assert(ChatMentionPanel.activeRange(text: "read /tmp", selection: NSRange(location: 9, length: 0)) == nil)
 assert(ChatMentionPanel.activeRange(text: "/tmp/file", selection: NSRange(location: 9, length: 0)) == nil)
@@ -1141,6 +1143,14 @@ referencePanel.update(input: referenceInput, items: [skill, command])
 precondition(referenceList.numberOfItems(inSection: 0) == 1, "Dollar must open skills directly")
 referenceList.delegate!.collectionView!(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
 precondition(referenceInput.text == "$auth-review ")
+for sign in ["￥", "¥"] {
+  referenceInput.text = sign
+  referenceInput.selectedRange = NSRange(location: 1, length: 0)
+  referencePanel.update(input: referenceInput, items: [skill, command])
+  precondition(referenceList.numberOfItems(inSection: 0) == 1, "\(sign) must open skills directly")
+  referenceList.delegate!.collectionView!(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
+  precondition(referenceInput.text == "$auth-review ")
+}
 
 referenceText("@")
 referencePanel.removeFromSuperview()
