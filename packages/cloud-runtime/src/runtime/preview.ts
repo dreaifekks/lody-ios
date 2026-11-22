@@ -10,6 +10,7 @@ export type PreviewTarget = {
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const TOKEN_PARAM = '__lody_preview_token';
+const DEFAULT_PREVIEW_LINK_TTL_MS = 60 * 60_000;
 
 function target(value: unknown): PreviewTarget | undefined {
   const item = value as Record<string, unknown> | undefined;
@@ -92,7 +93,30 @@ type ControlArgs = {
   rpc: (method: string, params: object, timeoutMs: number) => Promise<RpcReply>;
   mintToken: (intent: object) => Promise<unknown>;
 };
-type ControlResult = { url?: string; error?: string; message?: string };
+type ControlResult = {
+  url?: string;
+  expiresAt?: number;
+  active?: boolean;
+  error?: string;
+  message?: string;
+  status?: number;
+};
+
+function resolveExpiresAt(result: Record<string, any> | undefined): number {
+  if (
+    typeof result?.expiresAt === 'number' &&
+    Number.isFinite(result.expiresAt) &&
+    result.expiresAt > 0
+  ) {
+    return result.expiresAt;
+  }
+  const updatedAt = result?.connection?.updatedAt;
+  const base =
+    typeof updatedAt === 'number' && Number.isFinite(updatedAt) && updatedAt > 0
+      ? updatedAt
+      : Date.now();
+  return base + DEFAULT_PREVIEW_LINK_TTL_MS;
+}
 
 async function proof(args: ControlArgs, operation: object) {
   // Older CLIs drop unknown methods without replying, so silence means unsupported.
@@ -198,18 +222,21 @@ function simulatorViewerUrl(value: string) {
   return url.href;
 }
 
-export async function iosSimulatorControl(
+/** One signed device-preview lifecycle call; the viewer URL is decrypted only for this request. */
+async function deviceControl(
   args: ControlArgs & { command: { action: string } },
+  platform: 'ios-simulator' | 'android-emulator',
 ) {
+  const method = `${platform}/control`;
   const recipient = await responseRecipient();
   const signed = await proof(args, {
-    action: 'ios-simulator',
+    action: platform,
     command: args.command,
     responseKey: recipient.key,
   });
   if (!signed.proof) return signed;
   const reply = await args.rpc(
-    'ios-simulator/control',
+    method,
     {
       sessionId: args.sessionId,
       requestedByUserId: args.userId,
@@ -225,7 +252,7 @@ export async function iosSimulatorControl(
   const { viewerUrlEnvelope, ...preview } = result.preview;
   if (!viewerUrlEnvelope) return { ...result, preview };
   const context = JSON.stringify([
-    'ios-simulator/control',
+    method,
     args.workspaceId,
     args.machineId,
     args.sessionId,
@@ -237,6 +264,18 @@ export async function iosSimulatorControl(
   return { ...result, preview: { ...preview, viewerUrl } };
 }
 
+export function iosSimulatorControl(
+  args: ControlArgs & { command: { action: string } },
+) {
+  return deviceControl(args, 'ios-simulator');
+}
+
+export function androidEmulatorControl(
+  args: ControlArgs & { command: { action: string } },
+) {
+  return deviceControl(args, 'android-emulator');
+}
+
 function failure(reply: RpcReply): ControlResult {
   const result = reply.result as Record<string, any> | undefined;
   return {
@@ -246,49 +285,87 @@ function failure(reply: RpcReply): ControlResult {
 }
 
 export async function createPreview(
-  args: ControlArgs & { target: PreviewTarget },
+  args: ControlArgs & { target: PreviewTarget; restart?: boolean },
 ): Promise<ControlResult> {
+  const restart = args.restart === true;
   const signed = await proof(args, {
     action: 'create',
     target: args.target,
-    restart: false,
+    restart,
   });
   if (!signed.proof) return signed;
-  const reply = await args.rpc(
-    'session/preview-create',
-    {
-      sessionId: args.sessionId,
-      requestedByUserId: args.userId,
-      proof: signed.proof,
+  const params: Record<string, unknown> = {
+    sessionId: args.sessionId,
+    requestedByUserId: args.userId,
+    proof: signed.proof,
+    target: args.target,
+    approval: {
+      source: 'browser_address',
+      targetClass: 'loopback',
       target: args.target,
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: args.target,
-        confirmedByUserId: args.userId,
-        confirmedAt: Date.now(),
-      },
+      confirmedByUserId: args.userId,
+      confirmedAt: Date.now(),
     },
-    290_000,
-  );
+  };
+  if (restart) params.restart = true;
+  const reply = await args.rpc('session/preview-create', params, 290_000);
   const result = reply.result as Record<string, any> | undefined;
   const url = viewerUrl(result?.connection?.publicUrl, args.target.path);
-  if (result?.success === true && url) return { url };
+  if (result?.success === true && url) {
+    return { url, expiresAt: resolveExpiresAt(result), active: true };
+  }
   return failure(reply);
 }
 
-export async function revokePreview(args: ControlArgs): Promise<ControlResult> {
-  const signed = await proof(args, { action: 'revoke' });
+export async function statusPreview(
+  args: ControlArgs & { target?: PreviewTarget },
+): Promise<ControlResult> {
+  const signed = await proof(args, { action: 'status' });
   if (!signed.proof) return signed;
   const reply = await args.rpc(
-    'session/preview-revoke',
+    'session/preview-status',
     {
       sessionId: args.sessionId,
       requestedByUserId: args.userId,
       proof: signed.proof,
     },
-    35_000,
+    20_000,
   );
+  const result = reply.result as Record<string, any> | undefined;
+  if (result?.success !== true) return failure(reply);
+  if (result.connection?.status === 'active') {
+    const path =
+      args.target?.path ??
+      (typeof result.connection?.target?.path === 'string' &&
+      result.connection.target.path.startsWith('/')
+        ? result.connection.target.path
+        : '/');
+    const url = viewerUrl(result.connection?.publicUrl, path);
+    if (url) {
+      return { url, expiresAt: resolveExpiresAt(result), active: true };
+    }
+  }
+  return { active: false };
+}
+
+export async function revokePreview(
+  args: ControlArgs & { stopProcess?: boolean },
+): Promise<ControlResult> {
+  const stopProcess = args.stopProcess === true;
+  const signed = await proof(
+    args,
+    stopProcess
+      ? { action: 'revoke', stopProcess: true }
+      : { action: 'revoke' },
+  );
+  if (!signed.proof) return signed;
+  const params: Record<string, unknown> = {
+    sessionId: args.sessionId,
+    requestedByUserId: args.userId,
+    proof: signed.proof,
+  };
+  if (stopProcess) params.stopProcess = true;
+  const reply = await args.rpc('session/preview-revoke', params, 35_000);
   if ((reply.result as Record<string, unknown> | undefined)?.success === true)
     return {};
   return failure(reply);

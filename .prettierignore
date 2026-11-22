@@ -2,15 +2,15 @@ packages/dom-webview/build/
 packages/dom-webview/LICENSE
 packages/dom-webview/README.md
 pnpm-lock.yaml
-Lody.xcodeproj/
-.generated/
+apps/ios/Lody.xcodeproj/
+apps/ios/.generated/
 node_modules/
 .expo/
 dist/
-verification/kit/chat/throw-tuner.html
+apps/ios/verification/kit/chat/throw-tuner.html
 
 .acceptances/
-vendor
+apps/ios/vendor
 .artifacts/
 packages/lexical-swift/Fixtures/haklex/
 packages/lexical-swift/Fixtures/html/
@@ -22,6 +22,7 @@ packages/lexical-swift/Sources/Lexical/Documentation.docc/
 
 packages/lody-core/.build/
 packages/lody-core/.swiftpm/
-
-# Bundled third-party Mermaid renderer; preserve the distributed artifact.
-iOS/Resources/Mermaid/pele.js
+packages/cloud-runtime/vendor/upstream-roost/
+packages/cloud-runtime/src/runtime/upstream-roost.js
+apps/macos/Resources/Generated/
+packages/cloud-runtime/src/protocol/lody-shared/

@@ -1,3 +1,6 @@
+// First: later modules use Web APIs newer than the oldest supported WebView.
+import './platform-fallbacks.ts';
+import { sessionQuotaProjection } from '../protocol/session-usage.ts';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { decompress } from 'fzstd';
@@ -8,12 +11,37 @@ import {
   sessionDoc,
   appendOnce,
   reservedSessionIds,
+  resumeAcceptedInputs,
   retainedSessionIds,
   setSessionTraceSink,
+  setSessionUsageReader,
+  setSessionSendObserver,
+  refreshSessionUsage,
 } from './session';
 import { machineRpc } from './machine-rpc';
-import { decodeFrames, encodeFrame } from '../frames';
+import { retrySessionRead } from './session-read';
+import { providerRows } from './provider-settings';
+import { encodeFrame } from '../frames';
+import {
+  catalogImportCheckpoint,
+  importCatalogUpdates,
+  readCatalogRefresh,
+  catalogBootstrapSlots,
+} from './catalog-sync';
 import { watchMachinePresence } from './machine-presence';
+import {
+  applyStatusViewWrites,
+  catalogStatusView,
+  conversationOf,
+  pinSectionRows,
+  planCommand,
+  setSessionPatch,
+  type StatusViewDirtyReplica,
+  statusViewNextChangeAt,
+  WORKSPACE_STREAM,
+  type StatusViewSources,
+} from './status-view.ts';
+import { serverClock } from './server-clock.ts';
 import { unknownPresence } from '../models/machines.ts';
 import type {
   Grant,
@@ -30,7 +58,10 @@ import { registerMentions } from './handlers/mentions.ts';
 import { registerProjects } from './handlers/projects.ts';
 import { registerSessions } from './handlers/sessions.ts';
 import { registerSettings } from './handlers/settings.ts';
+import { registerSchedules } from './handlers/schedules.ts';
+import { registerProposals } from './handlers/proposals.ts';
 import { registerSharing } from './handlers/sharing.ts';
+import { registerStatusView } from './handlers/status-view.ts';
 const host = (globalThis as any).webkit.messageHandlers.dataRuntime;
 const send = (message: object) => host.postMessage(message);
 const channel = createChannel(
@@ -97,6 +128,7 @@ const delay = (ms: number, signal: AbortSignal) =>
 const state: RuntimeState = {
   workspace: '',
   userId: '',
+  workspaceReadOnly: false,
   metaReplica: undefined,
   metaReadAt: 0,
   presence: unknownPresence,
@@ -104,6 +136,8 @@ const state: RuntimeState = {
   machineReplicas: new Map(),
   catalogs: new Map(),
   unhealthy: new Set(),
+  workspaceReplica: undefined,
+  pinSections: { sections: [], loaded: false },
 };
 const { machineReplicas, catalogs, unhealthy } = state;
 let stopPresence: (() => void) | undefined;
@@ -115,12 +149,89 @@ function startPresence() {
   });
 }
 
+/** What the Status view layout and planner read, at the server clock's now. */
+function statusSources(): StatusViewSources | undefined {
+  const meta = catalogs.get('meta');
+  if (!meta) return undefined;
+  const machineCatalogs = new Map(
+    meta.machineIds.flatMap((id) => {
+      const catalog = catalogs.get(id);
+      return catalog ? [[id, catalog] as const] : [];
+    }),
+  );
+  return {
+    catalog: meta,
+    machineCatalogs,
+    userId: state.userId,
+    readOnly: state.workspaceReadOnly,
+    sections: state.pinSections.sections,
+    sectionsLoaded: state.pinSections.loaded,
+    nowMs: serverClock.now(),
+  };
+}
+
+/**
+ * A failed append left a local commit the server never accepted. Drop that
+ * replica and bootstrap it again so the commit is neither shown nor replayed.
+ * A newer replica (the stream already reconnected) is left alone.
+ */
+function discardReplica(replica: StatusViewDirtyReplica, flock: Flock) {
+  const current =
+    replica === 'meta' ? state.metaReplica : state.workspaceReplica;
+  if (current?.flock !== flock) return;
+  const mode = replica === 'meta' ? 'meta' : WORKSPACE_STREAM;
+  watchers.get(mode)?.abort();
+  watchers.delete(mode);
+  if (replica === 'meta') state.metaReplica = undefined;
+  else state.workspaceReplica = undefined;
+  channel.emit('diagnostic', { stage: 'replica_discarded', stream: mode });
+  watch(mode);
+}
+
+/** The Status view plans for the conversation a Tab or side chat belongs to. */
+function touchWrites(sessionId: string) {
+  const sources = statusSources();
+  return sources
+    ? planCommand(sources, {
+        type: 'touchOnSend',
+        sessionId: conversationOf(sources.catalog.sessions, sessionId),
+      })
+    : [];
+}
+
+/** A send outside the dispatch pointer (guide, edit and resend): `touchOnSend` alone. */
+async function touchOnSend(sessionId: string) {
+  const meta = state.metaReplica;
+  if (!meta || state.unhealthy.has('meta')) return;
+  const writes = touchWrites(sessionId);
+  if (!writes.length) return;
+  await applyStatusViewWrites(writes, meta, undefined, (replica) =>
+    discardReplica(replica, meta.flock),
+  );
+  if (state.metaReplica === meta) {
+    catalogs.set('meta', projectRows(meta.flock.scan(), 'meta'));
+    publish();
+  }
+}
+setSessionSendObserver((sessionId) => {
+  void touchOnSend(sessionId).catch(() =>
+    channel.emit('diagnostic', {
+      stage: 'touch_on_send_failed',
+      stream: 'meta',
+    }),
+  );
+});
+
 async function markDispatch(sessionId: string, turnId: string, queued = false) {
   if (!state.metaReplica) throw new Error('metadata_not_ready');
   const { flock, client } = state.metaReplica;
   const staged = new Flock(`lody-ios-dispatch-${crypto.randomUUID()}`);
   staged.importFile(flock.exportFile());
   const version = staged.version();
+  // A sent message brings a Later or Settled conversation back (`touchOnSend`),
+  // in the same append as the dispatch pointer.
+  for (const write of touchWrites(sessionId))
+    if (write.type === 'session') setSessionPatch(staged, write);
   if (queued) {
     const key = ['m', `session-${sessionId}`, 'messageQueueUpdatedAt'];
     const previous = staged.get(key);
@@ -155,7 +266,7 @@ async function markDispatch(sessionId: string, turnId: string, queued = false) {
   flock.importJson(update);
 }
 const STALL_GRACE_MS = 15_000;
-const CATALOG_LIMIT = 8 * 1024 * 1024;
+const CATALOG_LIMIT = 16 * 1024 * 1024;
 const watchers = new Map<string, AbortController>();
 const broker = async (operation: string, args: object) => {
   try {
@@ -215,12 +326,57 @@ function askGitState(project: Project) {
     ),
   );
 }
+setSessionUsageReader((sessionId, modelId) => {
+  const meta = catalogs.get('meta');
+  const session = meta?.sessions.find((s) => s.id === sessionId);
+  const machine =
+    session && catalogs.get(session.machineId)?.agentUsage?.[session.machineId];
+  return sessionQuotaProjection(
+    session,
+    session
+      ? {
+          configs: machine?.configs ?? [],
+          quotas: mergeAgentQuotas(
+            meta?.agentUsage?.[session.machineId]?.quotas ?? [],
+            machine?.quotas ?? [],
+          ),
+        }
+      : undefined,
+    modelId,
+  );
+});
+const acquireCatalogBootstrap = catalogBootstrapSlots(2);
 let revision = 0;
 let lastPublished = '';
+let publishTimer: ReturnType<typeof setTimeout> | undefined;
+let statusTimer: ReturnType<typeof setTimeout> | undefined;
+let foreground = false;
+/**
+ * Republishes when the Status view changes by time alone (wake-up, auto-settle).
+ * Only in the foreground: becoming active republishes anyway.
+ */
+function scheduleStatusRefresh(at: number | null) {
+  if (statusTimer !== undefined) clearTimeout(statusTimer);
+  statusTimer = undefined;
+  if (at === null || !foreground) return;
+  const delay = Math.min(2 ** 31 - 1, Math.max(0, at - serverClock.now()) + 50);
+  statusTimer = setTimeout(() => {
+    statusTimer = undefined;
+    publish();
+  }, delay);
+}
 function publish() {
+  if (publishTimer !== undefined) return;
+  // Read the current scope at flush time; never retain an old catalog payload.
+  publishTimer = setTimeout(() => {
+    publishTimer = undefined;
+    publishNow();
+  }, 16);
+}
+function publishNow() {
   const meta = catalogs.get('meta');
   if (!meta) return;
-  const expected = new Set(['meta', ...meta.machineIds]);
+  const expected = new Set(['meta', WORKSPACE_STREAM, ...meta.machineIds]);
   for (const [id, controller] of watchers)
     if (!expected.has(id)) {
       controller.abort();
@@ -231,10 +387,13 @@ function publish() {
     }
   for (const machine of meta.machineIds)
     if (!watchers.has(machine)) watch(machine);
-  if (unhealthy.size || meta.machineIds.some((id) => !catalogs.has(id))) return;
+  if (!watchers.has(WORKSPACE_STREAM)) watch(WORKSPACE_STREAM);
+  refreshSessionUsage();
+  channel.emit('creationOptionsChanged', {});
+  if (unhealthy.has('meta')) return;
   const projects = new Map(meta.projects.map((p) => [p.id, p]));
   for (const id of meta.machineIds)
-    for (const p of catalogs.get(id)!.projects)
+    for (const p of catalogs.get(id)?.projects ?? [])
       projects.set(p.id, { ...projects.get(p.id), ...p });
   for (const [id, p] of projects) {
     const repo = gitRepos.get(id);
@@ -269,49 +428,116 @@ function publish() {
     { projects: state.knownProjects },
   );
   state.knownProjects = merged.projects;
-  const catalog = JSON.stringify(merged);
-  if (catalog !== lastPublished) {
-    lastPublished = catalog;
-    channel.emit('catalog', { catalog, revision: ++revision });
+  const sources = statusSources();
+  const statusView = sources && catalogStatusView(sources);
+  scheduleStatusRefresh(statusView ? statusViewNextChangeAt(statusView) : null);
+  const published = {
+    ...merged,
+    pinSections: state.pinSections.sections,
+    ...(statusView ? { statusView } : {}),
+  };
+  // The computation instant alone is not a change worth a new revision, but a
+  // new server-clock calibration is: hosts learn the offset from `nowMs`.
+  const signature = JSON.stringify({
+    ...published,
+    ...(statusView ? { statusView: { ...statusView, nowMs: 0 } } : {}),
+    clockOffset: serverClock.offset(),
+  });
+  if (signature !== lastPublished) {
+    lastPublished = signature;
+    channel.emit('catalog', {
+      catalog: JSON.stringify(published),
+      revision: ++revision,
+    });
   }
   channel.emit('synced', { revision, streams: watchers.size });
 }
-function apply(flock: Flock, bytes: Uint8Array) {
-  for (const frame of decodeFrames(bytes))
-    flock.importJson(JSON.parse(new TextDecoder().decode(frame)));
-}
 function watch(mode: string) {
+  // The workspace settings stream only feeds pin sections: its health never
+  // gates machines, files or the catalog (`unhealthy`), and it keeps the last
+  // sections through failures.
+  const workspaceStream = mode === WORKSPACE_STREAM;
+  const markUnhealthy = () => {
+    if (!workspaceStream) unhealthy.add(mode);
+  };
   const controller = new AbortController();
   watchers.set(mode, controller);
   const { signal } = controller;
+  const reportError = (
+    reason:
+      'catalog_limit' | 'stream_closed' | 'stalled_cursor' | 'network_or_auth',
+  ) => {
+    // Native hosts interpret syncError as workspace unavailability. A machine
+    // failure only removes that machine's readiness, not the meta directory.
+    if (mode === 'meta') channel.emit('syncError', { reason, stream: mode });
+    else
+      channel.emit('diagnostic', {
+        stage: `sync_error:${reason}`,
+        stream: mode,
+      });
+  };
   void (async () => {
     let failures = 0;
+    let providerSignature = '';
+    let preparedBootstrap: Awaited<ReturnType<typeof readCatalogRefresh>>;
     while (!signal.aborted) {
+      let caughtUp = false;
+      let releaseBootstrap = () => {};
       try {
         const authorization = await getGrant();
         if (signal.aborted) return;
         const stream =
           mode === 'meta'
             ? `${state.workspace}:meta`
-            : `${state.workspace}:mf:${mode}`;
+            : workspaceStream
+              ? `${state.workspace}:wf:workspace`
+              : `${state.workspace}:mf:${mode}`;
         const client = new StreamsClient({
           url: `${authorization.gatewayBaseUrl.replace(/\/$/, '')}/ds/lody/${encodeURIComponent(stream)}`,
           auth: async () => (await getGrant()).token,
           retry: { maxAttempts: 1 },
-          timeout: { connectTimeoutMs: 15000, pollTimeoutMs: 35000 },
+          // Keep writes within the native command budget; SDK 0.12+ defaults uploads to 60s.
+          timeout: {
+            connectTimeoutMs: 15000,
+            uploadTimeoutMs: 15000,
+            pollTimeoutMs: 35000,
+          },
         });
+        if (mode !== 'meta' && !workspaceStream)
+          releaseBootstrap = await acquireCatalogBootstrap(signal);
+        const checkpoint = catalogImportCheckpoint(signal);
         channel.emit('diagnostic', { stage: 'bootstrap', stream: mode });
         let readAt = Date.now();
-        const initial = await client.bootstrap({ signal });
+        const initial = preparedBootstrap
+          ? { ok: true as const, result: preparedBootstrap }
+          : await client.bootstrap({ signal });
+        preparedBootstrap = undefined;
         channel.emit('diagnostic', {
           stage: initial.ok ? 'bootstrap_ok' : initial.result.code,
           stream: mode,
         });
         if (!initial.ok) {
+          if (initial.result.code === 'not_found' && workspaceStream) {
+            // No settings stream yet: sections are known to be empty, and the
+            // first section write creates the stream (`missing`). A replica
+            // that has just created it keeps its rows until a read returns them.
+            if (!state.workspaceReplica || state.workspaceReplica.missing) {
+              state.workspaceReplica = {
+                flock: new Flock(`lody-ios-${crypto.randomUUID()}`),
+                client,
+                missing: true,
+              };
+              state.pinSections = { sections: [], loaded: true };
+            }
+            publish();
+            await delay(30000, signal);
+            continue;
+          }
           if (initial.result.code === 'not_found' && mode !== 'meta') {
             unhealthy.delete(mode);
             catalogs.set(mode, { projects: [], sessions: [], machineIds: [] });
             publish();
+            releaseBootstrap();
             await delay(30000, signal);
             continue;
           }
@@ -319,11 +545,13 @@ function watch(mode: string) {
         }
         const flock = new Flock(`lody-ios-${crypto.randomUUID()}`);
         const data = initial.result;
+        const snapshotBytes = data.snapshot?.body.length ?? 0;
         let size = 0;
         if (data.snapshotOffset !== '-1' && data.snapshot) {
           const bytes = data.snapshot.body;
           size += bytes.length;
           if (size > CATALOG_LIMIT) throw new Error('catalog_limit');
+          await checkpoint(true);
           flock.importFile(
             bytes[0] === 0x28 &&
               bytes[1] === 0xb5 &&
@@ -333,111 +561,202 @@ function watch(mode: string) {
               : bytes,
           );
         }
+        await checkpoint();
         for (const part of data.updates) {
           size += part.body.length;
           if (size > CATALOG_LIMIT) throw new Error('catalog_limit');
-          apply(flock, part.body);
+          await importCatalogUpdates(flock, part.body, checkpoint);
         }
         let offset = data.nextOffset,
           cursor = data.cursor,
           upToDate = data.upToDate;
         let pages = 0;
-        let stalled = 0;
+        let checkedWindow = false;
         let stalledSince = 0;
-        let live = false;
         while (!signal.aborted) {
-          if (upToDate && !stalled) {
-            live = true;
-            if (mode === 'meta') {
-              state.metaReplica = { flock, client };
-              state.metaReadAt = readAt;
-            } else machineReplicas.set(mode, flock);
-            unhealthy.delete(mode);
-            catalogs.set(mode, projectRows(flock.scan(), mode));
+          if (upToDate && workspaceStream) {
+            // A scope change mid-loop must not publish another workspace's sections.
+            if (stream !== `${state.workspace}:wf:workspace`)
+              throw new Error('workspace_changed');
+            caughtUp = true;
+            if (state.workspaceReplica?.flock !== flock)
+              state.workspaceReplica = { flock, client };
+            await checkpoint();
+            state.pinSections = {
+              sections: pinSectionRows(flock.scan({ prefix: ['pinSection'] })),
+              loaded: true,
+            };
             publish();
+            checkedWindow = false;
             failures = 0;
             pages = 0;
-          }
-          const issuedAt = Date.now();
-          let response;
-          try {
-            response = await client.readOnce({
-              offset,
-              cursor,
-              signal,
-              ...(upToDate ? { live: 'long-poll' as const } : {}),
-            });
-          } catch {
-            signal.throwIfAborted();
-            response = {
-              ok: false as const,
-              result: { code: 'network_error' as const },
-            };
-          }
-          if (signal.aborted) return;
-          if (!response.ok) {
-            const { code } = response.result;
-            if (code !== 'timeout' && code !== 'network_error')
-              throw new Error(code);
-            // Keep this replica and retry exactly its tail cursor on transport failures.
-            stalledSince ||= Date.now();
-            if (
-              !unhealthy.has(mode) &&
-              Date.now() - stalledSince >= STALL_GRACE_MS
-            ) {
-              unhealthy.add(mode);
-              channel.emit('syncError', {
-                reason: 'network_or_auth',
-                stream: mode,
-              });
+            size = 0;
+          } else if (upToDate) {
+            caughtUp = true;
+            if (mode === 'meta') {
+              const first = !state.metaReplica;
+              // Keep the replica's identity across polls: in-flight calls
+              // compare it to detect a reconnect, not a routine update.
+              if (state.metaReplica?.flock !== flock)
+                state.metaReplica = { flock, client };
+              state.metaReadAt = readAt;
+              if (first) resumeAcceptedInputs();
+            } else machineReplicas.set(mode, flock);
+            unhealthy.delete(mode);
+            await checkpoint();
+            const rows = flock.scan();
+            catalogs.set(mode, projectRows(rows, mode));
+            if (mode !== 'meta') {
+              const nextSignature = JSON.stringify(
+                providerRows(flock, mode, false, rows),
+              );
+              if (nextSignature !== providerSignature) {
+                providerSignature = nextSignature;
+                channel.emit('agentProvidersChanged', { machineId: mode });
+              }
             }
-            await delay(
-              Math.min(30000, 500 * 2 ** Math.min(stalled++, 6)),
+            releaseBootstrap();
+            publish();
+            checkedWindow = false;
+            failures = 0;
+            pages = 0;
+            // Bootstrap includes its snapshot. Each later live/catch-up window
+            // gets a fresh budget, retained across transient read retries.
+            size = 0;
+          }
+          // A failed read has not imported bytes or advanced the cursor. Keep
+          // that verified replica through transport loss and host suspension.
+          // Protocol/cursor failures still leave this loop for a fresh bootstrap.
+          let issuedAt = Date.now();
+          const response = await retrySessionRead(
+            signal,
+            async () => {
+              issuedAt = Date.now();
+              let result;
+              try {
+                result = await client.readOnce({
+                  offset,
+                  cursor,
+                  signal,
+                  ...(upToDate ? { live: 'long-poll' as const } : {}),
+                });
+              } catch (cause) {
+                signal.throwIfAborted();
+                throw new Error('network_error', { cause });
+              }
+              if (!result.ok) {
+                const error = result.result;
+                const aborted =
+                  error.code === 'unknown' &&
+                  (error.cause instanceof Error ||
+                    error.cause instanceof DOMException) &&
+                  error.cause.name === 'AbortError';
+                const suspended =
+                  aborted && error.cause.message === 'runtime_suspended';
+                if (
+                  [
+                    'network_error',
+                    'timeout',
+                    'unauthorized',
+                    'forbidden',
+                    'rate_limited',
+                  ].includes(error.code) ||
+                  aborted ||
+                  (error.code === 'unknown' && (error.status ?? 0) >= 500)
+                )
+                  throw new Error(suspended ? 'runtime_suspended' : error.code);
+              }
+              return result;
+            },
+            (error) => {
+              const transient =
+                error instanceof Error &&
+                ['network_error', 'timeout', 'runtime_suspended'].includes(
+                  error.message,
+                );
+              if (transient) {
+                stalledSince ||= Date.now();
+                if (Date.now() - stalledSince < STALL_GRACE_MS) return;
+              }
+              markUnhealthy();
+              channel.emit('creationOptionsChanged', {});
+              reportError('network_or_auth');
+              if (!(
+                error instanceof Error && error.message === 'runtime_suspended'
+              ))
+                grant = undefined;
+            },
+          );
+          if (!response.ok) throw new Error(response.result.code);
+          stalledSince = 0;
+          readAt = issuedAt;
+          const next = response.result;
+          if (signal.aborted) return;
+          if (
+            caughtUp &&
+            !checkedWindow &&
+            (!next.upToDate || (next.payload?.body.length ?? 0) >= 256 * 1024)
+          ) {
+            checkedWindow = true;
+            const refreshed = await readCatalogRefresh(
+              client,
+              offset,
+              snapshotBytes,
+              CATALOG_LIMIT,
               signal,
             );
-            continue;
+            if (refreshed) {
+              preparedBootstrap = refreshed;
+              throw new Error('catalog_rebootstrap');
+            }
           }
-          stalled = 0;
-          stalledSince = 0;
-          const next = response.result;
-          readAt = issuedAt;
+          if (next.payload?.body.length || !next.upToDate) markUnhealthy();
           if (next.payload) {
             size += next.payload.body.length;
-            if (size > CATALOG_LIMIT && live) {
-              // The old catalog remains visible, but no longer proves a live stream.
-              unhealthy.add(mode);
-              channel.emit('syncError', {
-                reason: 'catalog_limit',
-                stream: mode,
-              });
-              break;
+            if (size > CATALOG_LIMIT) {
+              if (caughtUp) reportError('catalog_limit');
+              throw new Error('catalog_limit');
             }
-            if (size > CATALOG_LIMIT) throw new Error('catalog_limit');
-            apply(flock, next.payload.body);
+            await importCatalogUpdates(flock, next.payload.body, checkpoint);
           }
           if (next.nextOffset === offset && !next.upToDate)
             throw new Error('stalled_cursor');
           if (++pages > 100 && !next.upToDate) throw new Error('catalog_limit');
+          readAt = issuedAt;
           offset = next.nextOffset;
           cursor = next.cursor;
           upToDate = next.upToDate;
+          if (mode === 'meta' && upToDate) state.metaReadAt = readAt;
           if (next.closed) throw new Error('stream_closed');
           // Empty responses may arrive immediately; avoid a hot polling loop.
           if (!next.payload?.body.length && upToDate) await delay(1000, signal);
         }
       } catch (error) {
+        releaseBootstrap();
         if (signal.aborted) return;
         if (mode === 'meta') state.metaReplica = undefined;
+        else if (workspaceStream) state.workspaceReplica = undefined;
         else machineReplicas.delete(mode);
-        unhealthy.add(mode);
+        markUnhealthy();
+        channel.emit('creationOptionsChanged', {});
         const reason = error instanceof Error ? error.message : 'sync_failed';
-        channel.emit('syncError', {
-          reason:
-            (
-              ['catalog_limit', 'stream_closed', 'stalled_cursor'] as const
-            ).find((known) => known === reason) ?? 'network_or_auth',
-          stream: mode,
-        });
+        if (
+          reason === 'catalog_rebootstrap' ||
+          (reason === 'catalog_limit' && caughtUp)
+        ) {
+          // An old replica can have an arbitrarily long backlog. Discard it
+          // and try the server's compacted snapshot before declaring a limit.
+          channel.emit('diagnostic', {
+            stage: 'catalog_rebootstrap',
+            stream: mode,
+          });
+          continue;
+        }
+        reportError(
+          (['catalog_limit', 'stream_closed', 'stalled_cursor'] as const).find(
+            (known) => known === reason,
+          ) ?? 'network_or_auth',
+        );
         grant = undefined;
         // A compacted snapshot can bring an oversized update tail back below the limit.
         try {
@@ -448,6 +767,8 @@ function watch(mode: string) {
         } catch {
           return;
         }
+      } finally {
+        releaseBootstrap();
       }
     }
   })();
@@ -461,6 +782,18 @@ const ctx: RuntimeContext = {
   publishSubscriptions,
   emitSession,
   markDispatch,
+  statusSources,
+  discardReplica,
+  refreshWorkspace() {
+    watchers.get(WORKSPACE_STREAM)?.abort();
+    watchers.delete(WORKSPACE_STREAM);
+    watch(WORKSPACE_STREAM);
+  },
+  syncClock: () => serverClock.sync(),
+  setForeground(active) {
+    foreground = active;
+    if (!active) scheduleStatusRefresh(null);
+  },
   watch,
   startPresence,
   stopPresence: () => {
@@ -473,7 +806,10 @@ registerLan(ctx);
 registerSettings(ctx);
 const getMentions = registerMentions(ctx);
 registerProjects(ctx);
+registerSchedules(ctx);
+registerProposals(ctx);
 registerSharing(ctx);
+registerStatusView(ctx);
 registerContent(ctx);
 registerSessions(ctx, getMentions);
 registerDebug(ctx);

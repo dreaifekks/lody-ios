@@ -26,11 +26,11 @@
 
 ## 当前实现与调查入口
 
-- [SettingsScreen](../../../apps/mobile/src/screens/SettingsScreen.tsx)：账户、远程设置、连接、外观、通知、聊天行为、关于、历史与归档入口。
-- [LodyGroupedList](../../../apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift) 与 [NativeList](../../../apps/mobile/modules/lody-kit/src/list/NativeList.ts)：原生 inset grouped section、标题／footer、说明、菜单、当前值和导航箭头。
-- [RemoteSettingsScreen](../../../apps/mobile/src/screens/RemoteSettingsScreen.tsx)、[remote-settings](../../../apps/mobile/src/features/settings/remote-settings.ts) 与 [runtime/settings](../../../packages/cloud-runtime/src/runtime/settings.ts)：机器／Agent／MCP 的读取、有限编辑、缓存、权限及错误恢复。
-- [WorkspaceEditorScreen](../../../apps/mobile/src/screens/WorkspaceEditorScreen.tsx)：已有工作区名称和图标编辑；不是完整生命周期管理。
-- [UI Verify](../../../apps/mobile/verification/ui/README.md)：已有离线页面场景、模拟器池、英文浅色／深色验证和证据规则。
+- `SettingsScreen`：账户、远程设置、连接、外观、通知、聊天行为、关于、历史与归档入口。
+- `LodyGroupedList` 与 `NativeList`：原生 inset grouped section、标题／footer、说明、菜单、当前值和导航箭头。
+- `RemoteSettingsScreen`、`remote-settings` 与 [runtime/settings](../../../packages/cloud-runtime/src/runtime/settings.ts)：机器／Agent／MCP 的读取、有限编辑、缓存、权限及错误恢复。
+- `WorkspaceEditorScreen`：已有工作区名称和图标编辑；不是完整生命周期管理。
+- `UI Verify`：已有离线页面场景、模拟器池、英文浅色／深色验证和证据规则。
 
 2026-10-16 改动前的首页登录态顺序为：账户 → 会话 → 工作区 → 连接 → 外观 → 通知 → 聊天 → 关于 → 开发。2026-10-18 源码核对的当前顺序为：账户 → 个人 → 工作区 → 会话与记录 → 其他 → 开发。工作区依次为通用、机器、Agents、Agent 角色、MCP、记忆、Prompt Shortcuts、项目、GitHub、AI 用量、已发布分享；无工作区时隐藏这些操作，离线恢复行仍归工作区。报告 Bug 没有占位入口。
 
@@ -103,7 +103,7 @@
 | 项目             | 已支持约定范围：自有注册项目团队可见性                           | 不包含机器目录删除；未验团队在线消费                    | [SET-14](2026-10-16-settings/14-project-visibility-management.md)                                                      |
 | GitHub           | 部分支持：身份、仓库启停、安装网页和返回刷新                     | 个人授权在官方网页完成，无 iOS OAuth 回调               | [SET-15](2026-10-16-settings/15-github-integration-settings.md)                                                        |
 | AI 用量          | 部分支持：工作区汇总／趋势、四种时间范围                         | USD 为预估；无成员明细或真实账单对账                    | [SET-16](2026-10-16-settings/16-ai-usage.md)                                                                           |
-| 分享             | 已支持约定范围：已发布列表／详情、原生打开／复制、确认撤销       | 不含设置内发布／更新／重置；沿用会话分享表单            | [SET-17](2026-10-16-settings/17-published-shares-management.md)                                                        |
+| 分享             | 已移除（2026-11-11）：设置不再提供已发布分享入口                 | 会话分享表单保留；移动端不再提供列表／撤销              | [SET-17](2026-10-16-settings/17-published-shares-management.md)                                                        |
 | 关于             | 已支持约定范围：版本、构建、许可                                 | 未新增远程更新服务                                      | [SET-04](2026-10-16-settings/04-about-page.md)                                                                         |
 | 报告 Bug         | 未实施，用户跳过                                                 | 诊断导出保留，不等于报告已提交                          | [SET-18](2026-10-16-settings/18-bug-reporting.md)                                                                      |
 

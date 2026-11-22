@@ -6,7 +6,7 @@
 
 > 评审后的前置验证：**点击发送立即向 Cloud 提交**是硬要求，且第三方客户端不能修改 Cloud。
 > 因此下文「扩展只写 inbox、主 App 消费发送」不再是选定方案，「扩展不跑 WebView」也待重新验证。
-> 先用 [Share transport probe](../../../apps/mobile/modules/lody-kit/share-probe/README.md)
+> 先用 `Share transport probe`
 > 在真实 Share Extension 中复用现有认证、Streams / CRDT 与 Machine RPC，验证主 App 未运行时新建 Chat 并发送纯文本。
 > 只有拿到真实机器 ACK、核对首句及扩展内存后，才继续迁移完整表单与附件；以下保留原稿供后续修订，不能作为已通过的实现规格。
 

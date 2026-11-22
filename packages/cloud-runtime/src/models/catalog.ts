@@ -4,9 +4,39 @@ export type Project = {
   name: string;
   rootPath: string;
   repoFullName?: string;
+  /** A multi-repository project's GitHub members (`projectRun`), in member order. */
+  repositories?: string[];
+};
+/** One repository or folder of a multi-repository (Project group) conversation. */
+export type ProjectRunMember = {
+  id: string;
+  /** Path under the conversation's directory, e.g. `api/proto`. */
+  path: string;
+  kind: 'github' | 'local';
+  /** Nesting depth in the placement forest; roots are 0. */
+  depth: number;
+  submodule: boolean;
+  /** `additional` / `link`: a local folder used in place, with no branch or PR. */
+  access?: 'worktree' | 'additional' | 'link';
+  repoFullName?: string;
+  branch?: string;
+  diff?: { add: number; del: number; files?: number };
+  dirty?: boolean;
+  unpushed?: boolean;
+  /** The member repository's current PR: the last one recorded for it. */
+  pullRequest?: import('./pull-request').PullRequestReference;
+};
+/** The frozen Project group snapshot of a conversation (session meta `projectRun`). */
+export type ProjectRun = {
+  id: string;
+  name: string;
+  /** Placement order: each root followed by its submodules. */
+  members: ProjectRunMember[];
 };
 export type Session = {
   lastModel?: { modelId?: string; name?: string } | null;
+  /** Session meta `contextWindowUsage`, written by the owner CLI (web composer usage). */
+  contextWindowUsage?: { size: number; used: number };
   cliType?: string;
   agentType?: string;
   resume?: string;
@@ -16,9 +46,25 @@ export type Session = {
   openedBySessionId?: string;
   openedByRootSessionId?: string;
   parentSessionId?: string;
+  childSessionPlacement?: string;
   status: string;
   archived: boolean;
+  isTabClosed?: boolean;
   pinned: boolean;
+  /** Pin section of a pinned session (session meta `pinSectionId`); missing means the default section. */
+  pinSectionId?: string;
+  /** Fractional index shared by pin sections and Status Focus (session meta `orderKey`). */
+  orderKey?: string;
+  /** Epoch ms the session is snoozed in Later until (session meta `snoozedUntil`). */
+  snoozedUntil?: number;
+  /** Epoch ms the user settled the session (session meta `settledAt`). */
+  settledAt?: number;
+  /** Epoch ms the user moved an inactive session back to Focus (session meta `focusRestoredAt`). */
+  focusRestoredAt?: number;
+  /** The Lody user who owns the session (session meta `userId`). */
+  userId?: string;
+  /** The agent config (ACP provider) the session runs; picks its model capability. */
+  agentConfigId?: string;
   projectId: string;
   createdAt: string;
   latestUserMsgId?: string;
@@ -26,10 +72,25 @@ export type Session = {
   lastReadAt?: number;
   lastRunningSeen?: number;
   awaitingUserSince?: number;
+  /** Latest user turn the machine finished (session meta `lastHandledUserMsgId`). */
+  lastHandledUserMsgId?: string;
+  /**
+   * Latest user turn that ended in failure (session meta `lastFailedUserMsgId`). The
+   * conversation is failed only while it equals `lastHandledUserMsgId`.
+   */
+  lastFailedUserMsgId?: string;
   branchName?: string;
+  /** Web `session.baseBranch || project.branch`: the branch the session started from. */
+  baseBranch?: string;
   iosSimulatorPreviewRequestId?: string;
+  androidEmulatorPreviewRequestId?: string;
   pullRequests?: import('./pull-request').PullRequestReference[];
-  diff?: { add: number; del: number };
+  diff?: { add: number; del: number; files?: number };
+  /** Uncommitted changes / local commits the remote lacks; drive the action bar's Commit & Push. */
+  workspaceDirty?: boolean;
+  workspaceUnpushed?: boolean;
+  /** Present for Project group conversations. */
+  projectRun?: ProjectRun;
 };
 export type Catalog = {
   agentUsage?: Record<string, import('./agent-usage.ts').AgentUsage>;
@@ -39,9 +100,21 @@ export type Catalog = {
   machineNames?: Record<string, string>;
   /** Where each LAN member accepts terminal connections; absent off a LAN. */
   machineTerminals?: Record<string, LanTerminalEndpoint>;
+  /** Each computer's OS (`darwin` / `win32` / `linux`), for its icon. */
+  machineOs?: Record<string, string>;
   machineSimulators?: Record<string, 'available' | 'upgrade-required'>;
   /** LAN members whose simulators this device previews through them; absent off a LAN. */
   machineLanSimulators?: Record<string, 'available' | 'upgrade-required'>;
+  /** Machines whose CLI advertises Android emulator preview (`androidEmulator: 1`), on any OS. */
+  machineEmulators?: Record<string, 'available'>;
+  /** Per-machine numeric protocol capability versions advertised by the CLI. */
+  machineCapabilities?: Record<string, Record<string, number>>;
+  /** Each machine's owner (machine meta `ownerUserId`). */
+  machineOwners?: Record<string, string>;
+  /** Workspace pin sections (`wf:workspace` `pinSection` rows) in render order. */
+  pinSections?: import('../contract/status-view.ts').PinSection[];
+  /** Status view layouts computed by the shared planner; native clients only render them. */
+  statusView?: import('../contract/status-view.ts').CatalogStatusView;
 };
 export type LanTerminalEndpoint = { host: string; port: number };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };

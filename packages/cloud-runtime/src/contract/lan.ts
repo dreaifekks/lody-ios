@@ -45,32 +45,3 @@ export const LanFileTargetResult = z
     protocolCapabilities: z.record(z.string(), z.number()).optional(),
   })
   .meta({ id: 'LanFileTargetResult' });
-export const VoiceAgent = z
-  .object({ configId: z.string(), machineId: z.string() })
-  .meta({ id: 'VoiceAgent' });
-export const VoiceAgentsParams = z
-  .object({ workspaceId: z.string().min(1) })
-  .meta({ id: 'VoiceAgentsParams' });
-export const VoiceAgentsResult = z
-  .object({
-    shared: VoiceAgent.nullable(),
-    agents: z.array(
-      VoiceAgent.extend({
-        name: z.string(),
-        machineName: z.string(),
-        supported: z.boolean(),
-      }),
-    ),
-  })
-  .meta({ id: 'VoiceAgentsResult' });
-export const MachineVoiceParams = z
-  .object({
-    workspaceId: z.string().min(1),
-    request: z.record(z.string(), z.unknown()),
-    agent: VoiceAgent.optional(),
-    machineId: z.string().optional(),
-  })
-  .meta({ id: 'MachineVoiceParams' });
-export const MachineVoiceResult = z
-  .record(z.string(), z.unknown())
-  .meta({ id: 'MachineVoiceResult' });

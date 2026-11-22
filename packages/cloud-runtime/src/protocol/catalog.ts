@@ -1,5 +1,6 @@
 import { projectAgentUsage, legacyAgentQuotas } from './agent-usage.ts';
 import { pullRequestReferences } from './pull-request.ts';
+import { projectRunOf } from './project-run.ts';
 import type { Catalog, Project, Session } from '../models/catalog.ts';
 
 export type { Catalog, Project, Session } from '../models/catalog.ts';
@@ -46,6 +47,18 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const text = (value: unknown): string =>
   typeof value === 'string' ? value : '';
+/** A `projectRun`'s GitHub member repositories, in member order. */
+const runRepositories = (value: unknown): string[] => {
+  const members = Object.values(object(value))
+    .map(object)
+    .sort((a, b) => (stamp(a.o) ?? 0) - (stamp(b.o) ?? 0));
+  const repos = members.flatMap((member) => {
+    const src = object(member.src);
+    const repo = text(src.repoFullName).trim();
+    return src.kind === 'github' && repo ? [repo] : [];
+  });
+  return [...new Set(repos)];
+};
 const stamp = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 const modelOf = (value: unknown): Session['lastModel'] => {
@@ -57,11 +70,20 @@ const modelOf = (value: unknown): Session['lastModel'] => {
     name: text(model.name).trim() || undefined,
   };
 };
+const contextWindowOf = (value: unknown): Session['contextWindowUsage'] => {
+  const usage = object(value);
+  const size = stamp(usage.size);
+  if (size === undefined || size <= 0) return;
+  return { size, used: Math.max(0, stamp(usage.used) ?? 0) };
+};
 const diffOf = (value: unknown) => {
   const change = object(object(value).allChange);
   const add = stamp(change.add) ?? 0,
     del = stamp(change.del) ?? 0;
-  return add || del ? { add, del } : undefined;
+  const files = stamp(change.files);
+  return files !== undefined || add || del
+    ? { add, del, ...(files === undefined ? {} : { files }) }
+    : undefined;
 };
 /** Mirrors Lody's `parseLanTerminalEndpoint`; `undefined` for a version this app cannot reach. */
 export function lanTerminalEndpoint(value: unknown) {
@@ -87,8 +109,12 @@ export function projectRows(
     machineIds = new Set<string>(),
     machineNames: Record<string, string> = {},
     machineTerminals: NonNullable<Catalog['machineTerminals']> = {},
+    machineOs: Record<string, string> = {},
     machineSimulators: NonNullable<Catalog['machineSimulators']> = {},
-    machineLanSimulators: NonNullable<Catalog['machineLanSimulators']> = {};
+    machineLanSimulators: NonNullable<Catalog['machineLanSimulators']> = {},
+    machineEmulators: NonNullable<Catalog['machineEmulators']> = {},
+    machineCapabilities: NonNullable<Catalog['machineCapabilities']> = {},
+    machineOwners: NonNullable<Catalog['machineOwners']> = {};
   if (mode !== 'meta') {
     for (const row of rows) {
       if (row.key[0] !== 'localProject' || row.value === undefined) continue;
@@ -138,17 +164,30 @@ export function projectRows(
       if (name) machineNames[machineId] = name;
       const terminal = lanTerminalEndpoint(value.lanTerminal);
       if (terminal) machineTerminals[machineId] = terminal;
+      const os = text(value.os);
+      if (os) machineOs[machineId] = os;
+      const owner = text(value.ownerUserId);
+      if (owner) machineOwners[machineId] = owner;
+      const caps = object(value.protocolCapabilities);
+      const numericCaps: Record<string, number> = {};
+      for (const [capKey, capValue] of Object.entries(caps)) {
+        if (typeof capValue === 'number' && Number.isFinite(capValue)) {
+          numericCaps[capKey] = capValue;
+        }
+      }
+      if (Object.keys(numericCaps).length > 0) {
+        machineCapabilities[machineId] = numericCaps;
+      }
       if (value.os === 'darwin')
         machineSimulators[machineId] =
-          Number(object(value.protocolCapabilities).iosSimulator) >= 1
-            ? 'available'
-            : 'upgrade-required';
+          Number(caps.iosSimulator) >= 1 ? 'available' : 'upgrade-required';
       // `machineSupportsLanIosSimulator`: a member that serves others its simulators.
       if (terminal && value.os === 'darwin')
         machineLanSimulators[machineId] =
-          Number(object(value.protocolCapabilities).lanIosSimulator) >= 1
-            ? 'available'
-            : 'upgrade-required';
+          Number(caps.lanIosSimulator) >= 1 ? 'available' : 'upgrade-required';
+      // Android preview has no OS gate; an old CLI simply does not offer it.
+      if (Number(caps.androidEmulator) >= 1)
+        machineEmulators[machineId] = 'available';
       // Match the CLI's legacy metadata + machine Flock project merge.
       for (const [localId, item] of Object.entries(
         object(value.localProjects),
@@ -168,14 +207,25 @@ export function projectRows(
       project = object(value.project);
     const localId = text(project.localProjectId),
       repo = text(project.repoFullName) || text(value.repoFullName);
-    const projectId =
-      project.kind === 'local' && localId
+    // A multi-repository project's session lists under its group (web `projectRun.id`),
+    // ahead of the legacy `project` that names only its first member.
+    const run = object(value.projectRun),
+      runId = text(run.id);
+    const projectId = runId
+      ? `group:${runId}`
+      : project.kind === 'local' && localId
         ? `${machineId}:local:${localId}`
         : repo
           ? `github:${repo}`
           : `${machineId}:unassigned`;
+    const pullRequests = pullRequestReferences(
+      value.pullRequests,
+      value.pullRequestState,
+    );
+    const projectRun = runId ? projectRunOf(run, pullRequests) : undefined;
     sessions.push({
       lastModel: modelOf(value.lastModel),
+      contextWindowUsage: contextWindowOf(value.contextWindowUsage),
       cliType: text(value.cliType),
       agentType: text(value.agentType),
       resume: text(value.acpSessionId),
@@ -184,12 +234,22 @@ export function projectRows(
       openedByRootSessionId:
         text(value.openedByRootSessionId).trim() || undefined,
       parentSessionId: text(value.parentSessionId).trim() || undefined,
+      childSessionPlacement:
+        text(value.childSessionPlacement).trim() || undefined,
       machineId,
       title: text(value.title) || labels.untitled,
       status:
         text(value.status) || text(object(value.status).type) || labels.unknown,
       archived: value.isArchived === true,
+      isTabClosed: value.isTabClosed === true,
       pinned: value.isPinned === true,
+      pinSectionId: text(value.pinSectionId).trim() || undefined,
+      orderKey: text(value.orderKey) || undefined,
+      snoozedUntil: stamp(value.snoozedUntil),
+      settledAt: stamp(value.settledAt),
+      focusRestoredAt: stamp(value.focusRestoredAt),
+      userId: text(value.userId) || undefined,
+      agentConfigId: text(value.agentConfigId) || undefined,
       projectId,
       createdAt: text(value.createdAt),
       latestUserMsgId: text(value.latestUserMsgId) || undefined,
@@ -197,16 +257,33 @@ export function projectRows(
       lastReadAt: stamp(value.lastReadAt),
       lastRunningSeen: stamp(value.lastRunningSeen),
       awaitingUserSince: stamp(value.awaitingUserSince),
+      lastHandledUserMsgId: text(value.lastHandledUserMsgId) || undefined,
+      lastFailedUserMsgId: text(value.lastFailedUserMsgId) || undefined,
       branchName: text(value.branchName) || undefined,
+      baseBranch:
+        text(value.baseBranch).trim() ||
+        text(project.branch).trim() ||
+        undefined,
       iosSimulatorPreviewRequestId:
         text(value.iosSimulatorPreviewRequestId) || undefined,
-      pullRequests: pullRequestReferences(
-        value.pullRequests,
-        value.pullRequestState,
-      ),
+      androidEmulatorPreviewRequestId:
+        text(value.androidEmulatorPreviewRequestId) || undefined,
+      pullRequests,
       diff: diffOf(value.diffStats),
+      workspaceDirty: value.workspaceDirty === true || undefined,
+      workspaceUnpushed: value.workspaceUnpushed === true || undefined,
+      ...(projectRun ? { projectRun } : {}),
     });
-    if (localId || repo) {
+    if (runId) {
+      const repositories = runRepositories(run.members);
+      projects.push({
+        id: projectId,
+        machineId,
+        name: text(run.name) || labels.local,
+        rootPath: '',
+        ...(repositories.length ? { repositories } : {}),
+      });
+    } else if (localId || repo) {
       const githubRepo = repo || text(project.githubRepoFullName);
       projects.push({
         id: projectId,
@@ -221,8 +298,19 @@ export function projectRows(
   for (const p of projects) {
     const first = unique.get(p.id);
     if (!first) unique.set(p.id, p);
-    else if (!first.repoFullName && p.repoFullName)
-      unique.set(p.id, { ...first, repoFullName: p.repoFullName });
+    else {
+      // Group sessions may freeze different member sets; the project knows them all.
+      const repositories = [
+        ...new Set([...(first.repositories ?? []), ...(p.repositories ?? [])]),
+      ];
+      unique.set(p.id, {
+        ...first,
+        ...(!first.repoFullName && p.repoFullName
+          ? { repoFullName: p.repoFullName }
+          : {}),
+        ...(repositories.length ? { repositories } : {}),
+      });
+    }
   }
   return {
     projects: [...unique.values()],
@@ -233,7 +321,11 @@ export function projectRows(
     ...(Object.keys(machineLanSimulators).length
       ? { machineLanSimulators }
       : {}),
+    machineOs,
     machineSimulators,
+    machineEmulators,
+    machineCapabilities,
+    machineOwners,
     agentUsage,
   };
 }

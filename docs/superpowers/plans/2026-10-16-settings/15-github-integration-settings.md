@@ -20,9 +20,9 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/cloud/github/pullRequests.ts](../../../../apps/mobile/src/cloud/github/pullRequests.ts)
-- [apps/mobile/src/screens/PullRequestScreen.tsx](../../../../apps/mobile/src/screens/PullRequestScreen.tsx)
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
+- `apps/mobile/src/cloud/github/pullRequests.ts`
+- `apps/mobile/src/screens/PullRequestScreen.tsx`
+- `apps/mobile/src/screens/SettingsScreen.tsx`
 - [packages/cloud-runtime/src/models/pull-request.ts](../../../../packages/cloud-runtime/src/models/pull-request.ts)
 
 ## 工作内容

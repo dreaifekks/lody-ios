@@ -20,11 +20,11 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/features/settings/quick-replies.tsx](../../../../apps/mobile/src/features/settings/quick-replies.tsx)
-- [apps/mobile/src/features/settings/quickReplies.ts](../../../../apps/mobile/src/features/settings/quickReplies.ts)
-- [apps/mobile/src/screens/QuickRepliesScreen.tsx](../../../../apps/mobile/src/screens/QuickRepliesScreen.tsx)
+- `apps/mobile/src/features/settings/quick-replies.tsx`
+- `apps/mobile/src/features/settings/quickReplies.ts`
+- `apps/mobile/src/screens/QuickRepliesScreen.tsx`
 - [packages/cloud-runtime/src/models/mentions.ts](../../../../packages/cloud-runtime/src/models/mentions.ts)
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
 
 ## 工作内容
 

@@ -20,13 +20,13 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/lib/i18n/index.ts](../../../../apps/mobile/src/lib/i18n/index.ts)
-- [apps/mobile/src/lib/i18n/boot.ts](../../../../apps/mobile/src/lib/i18n/boot.ts)
-- [apps/mobile/src/lib/theme/appearance.tsx](../../../../apps/mobile/src/lib/theme/appearance.tsx)
-- [apps/mobile/src/screens/NotificationSettingsScreen.tsx](../../../../apps/mobile/src/screens/NotificationSettingsScreen.tsx)
-- [apps/mobile/modules/lody-kit/ios/Chat/ChatMarkdownTheme.swift](../../../../apps/mobile/modules/lody-kit/ios/Chat/ChatMarkdownTheme.swift)
-- [apps/mobile/locales/en.json](../../../../apps/mobile/locales/en.json)
-- [apps/mobile/locales/zh-Hans.json](../../../../apps/mobile/locales/zh-Hans.json)
+- `apps/mobile/src/lib/i18n/index.ts`
+- `apps/mobile/src/lib/i18n/boot.ts`
+- `apps/mobile/src/lib/theme/appearance.tsx`
+- `apps/mobile/src/screens/NotificationSettingsScreen.tsx`
+- `apps/mobile/modules/lody-kit/ios/Chat/ChatMarkdownTheme.swift`
+- `apps/mobile/locales/en.json`
+- `apps/mobile/locales/zh-Hans.json`
 
 ## 工作内容
 

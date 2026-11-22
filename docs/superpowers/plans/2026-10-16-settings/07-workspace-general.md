@@ -20,10 +20,10 @@ WorkspaceEditorScreen 已有名称和图标修改，使用 AuthProvider 的更�
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/WorkspaceEditorScreen.tsx](../../../../apps/mobile/src/screens/WorkspaceEditorScreen.tsx)
-- [apps/mobile/src/cloud/auth/AuthProvider.tsx](../../../../apps/mobile/src/cloud/auth/AuthProvider.tsx)
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
-- [apps/mobile/verification/ui/home.py](../../../../apps/mobile/verification/ui/home.py)
+- `apps/mobile/src/screens/WorkspaceEditorScreen.tsx`
+- `apps/mobile/src/cloud/auth/AuthProvider.tsx`
+- `apps/mobile/src/screens/SettingsScreen.tsx`
+- `apps/mobile/verification/ui/home.py`
 
 ## 工作内容
 
@@ -57,8 +57,8 @@ WorkspaceEditorScreen 已有名称和图标修改，使用 AuthProvider 的更�
 
 ## 实现与验证边界
 
-- [SettingsScreen](../../../../apps/mobile/src/screens/SettingsScreen.tsx) 新增 `workspace-general` 行，未登录或没有当前工作区时不显示；标题为“通用”，说明为“名称与图标”。
-- 直接复用 [WorkspaceEditorScreen](../../../../apps/mobile/src/screens/WorkspaceEditorScreen.tsx)，该文件和 AuthProvider／接口实现均未改动。图标沿用选择后立即上传的既有语义，名称沿用 Save；表单行属于临时操作，打开时立即取消列表选择。
+- `SettingsScreen` 新增 `workspace-general` 行，未登录或没有当前工作区时不显示；标题为“通用”，说明为“名称与图标”。
+- 直接复用 `WorkspaceEditorScreen`，该文件和 AuthProvider／接口实现均未改动。图标沿用选择后立即上传的既有语义，名称沿用 Save；表单行属于临时操作，打开时立即取消列表选择。
 - 复用既有 HomePreviewProviders，离线检查正式设置入口、系统图标选择、名称保存读回、原有首页同步显示、取消以及切换后新入口目标；不重跑完整 home 用例。
 - 接口检查确认显式 `organizationId` 及 403 错误；未真实授权、上传或修改工作区，未新增本地角色判断。
 - 本轮不运行 iPad、聊天、模型、Share Extension 或生命周期检查。

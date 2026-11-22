@@ -20,15 +20,15 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
-- [apps/mobile/src/screens/AccountScreen.tsx](../../../../apps/mobile/src/screens/AccountScreen.tsx)
-- [apps/mobile/src/screens/ArchivedSessionsScreen.tsx](../../../../apps/mobile/src/screens/ArchivedSessionsScreen.tsx)
-- [apps/mobile/src/screens/ProjectHistoryScreen.tsx](../../../../apps/mobile/src/screens/ProjectHistoryScreen.tsx)
-- [apps/mobile/src/cloud/catalog/CatalogProvider.tsx](../../../../apps/mobile/src/cloud/catalog/CatalogProvider.tsx)
-- [apps/mobile/src/cloud/catalog/connection.ts](../../../../apps/mobile/src/cloud/catalog/connection.ts)
-- [apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift](../../../../apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift)
-- [apps/mobile/verification/ui/home.py](../../../../apps/mobile/verification/ui/home.py)
-- [apps/mobile/verification/ui/project-history-entry.py](../../../../apps/mobile/verification/ui/project-history-entry.py)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
+- `apps/mobile/src/screens/AccountScreen.tsx`
+- `apps/mobile/src/screens/ArchivedSessionsScreen.tsx`
+- `apps/mobile/src/screens/ProjectHistoryScreen.tsx`
+- `apps/mobile/src/cloud/catalog/CatalogProvider.tsx`
+- `apps/mobile/src/cloud/catalog/connection.ts`
+- `apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift`
+- `apps/mobile/verification/ui/home.py`
+- `apps/mobile/verification/ui/project-history-entry.py`
 
 ## 工作内容
 
@@ -65,7 +65,7 @@
 - 验证与证据：pnpm check、pnpm bundle 已通过；设置范围的英文浅深色 UI 检查已通过，证据位于 `.artifacts/settings-reorder/`。
 - 未解决问题：不运行聊天、模型、Share Extension 或目标页面的完整业务流程；本轮只验实际迁移影响。
 
-- 实现：[SettingsScreen](../../../../apps/mobile/src/screens/SettingsScreen.tsx) 按账户、个人、工作区、会话与记录、其他、开发顺序构造 section。账户卡片取消重复标题；首页移除外观／通知／聊天具体选项及许可直达行。
+- 实现：`SettingsScreen` 按账户、个人、工作区、会话与记录、其他、开发顺序构造 section。账户卡片取消重复标题；首页移除外观／通知／聊天具体选项及许可直达行。
 - 工作区入口与会话记录同时要求登录且存在当前工作区。无工作区只显示说明；正常与同步状态使用工作区 footer，离线提供真实 refresh 动作，并在存在同步时间时提示缓存。
 - `settings-baseline` 复用既有六个离线上下文，直接检查本次新排版、迁移入口、原生返回及缓存重试；不冻结内部 section 数组。
 - 本轮未操作实际工作区切换器、云端登录／退出或后端故障重连；账户／工作区可见条件以离线边界和源码核对证明。对应服务与选择机制没有改动。

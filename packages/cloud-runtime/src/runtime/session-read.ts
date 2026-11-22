@@ -3,8 +3,9 @@ export async function retrySessionRead<T>(
   signal: AbortSignal,
   read: () => Promise<T>,
   onRetry: (error: unknown) => void,
+  { fixedDelayMs }: { fixedDelayMs?: number } = {},
 ): Promise<T> {
-  let delay = 1000;
+  let delay = fixedDelayMs ?? 1000;
   for (;;) {
     signal.throwIfAborted();
     try {
@@ -26,7 +27,7 @@ export async function retrySessionRead<T>(
         }, delay);
         signal.addEventListener('abort', abort, { once: true });
       });
-      delay = Math.min(delay * 2, 30000);
+      delay = fixedDelayMs ?? Math.min(delay * 2, 30000);
     }
   }
 }

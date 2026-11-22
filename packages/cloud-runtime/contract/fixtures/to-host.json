@@ -81,22 +81,6 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
-    "id": "req-share",
-    "method": "shareRequest",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "operation": "management",
-      "args": {
-        "workspaceId": "workspace-1",
-        "action": "list",
-        "cursor": null
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
     "id": "req-share-revoke",
     "method": "shareRequest",
     "payload": {
@@ -301,7 +285,6 @@
           "id": "shortcut-1",
           "workspaceId": "workspace-1",
           "ownerUserId": "user-1",
-          "visibility": "workspace",
           "name": "Summarize",
           "slug": "summarize",
           "scope": {},
@@ -323,47 +306,12 @@
     "payload": {
       "settings": [
         {
-          "kind": "mcp",
-          "id": "mcp-2",
-          "name": "Search",
-          "readOnly": false,
-          "detail": "stdio",
-          "enabledByDefault": true,
-          "configured": true
+          "kind": "machine",
+          "id": "machine-1",
+          "name": "Studio",
+          "readOnly": false
         }
       ]
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
-    "id": "req-memory",
-    "method": "memorySettings",
-    "payload": {
-      "machines": [
-        {
-          "id": "machine-1",
-          "name": "Studio"
-        }
-      ],
-      "machineId": "machine-1",
-      "entries": [
-        {
-          "machineId": "machine-1",
-          "providerId": "nowledge-mem",
-          "memoryId": "memory-1",
-          "name": "Work"
-        }
-      ],
-      "identities": [
-        {
-          "id": "memory-1",
-          "name": "Work"
-        }
-      ],
-      "status": "ready",
-      "cached": false
     }
   },
   {
@@ -410,38 +358,6 @@
     "v": 1,
     "gen": 3,
     "kind": "result",
-    "id": "req-shares",
-    "method": "publishedShares",
-    "payload": {
-      "outcome": "page",
-      "workspaceId": "workspace-1",
-      "userId": "user-1",
-      "page": [
-        {
-          "shareId": "share-1",
-          "rootSessionId": "session-1",
-          "publisherUserId": "user-1",
-          "status": "active",
-          "title": "Launch notes",
-          "revision": 2,
-          "credentialVersion": 1,
-          "createdAt": 1700000000000,
-          "updatedAt": 1700000000000,
-          "totalBytes": 2048,
-          "conversationCount": 1,
-          "canManage": true,
-          "canRevoke": true,
-          "hasLocalLink": false
-        }
-      ],
-      "isDone": false,
-      "continueCursor": "cursor-2"
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
     "id": "req-mentions",
     "method": "mentionCatalog",
     "payload": {
@@ -471,7 +387,6 @@
         "id": "shortcut-2",
         "workspaceId": "workspace-1",
         "ownerUserId": "user-1",
-        "visibility": "workspace",
         "name": "Review",
         "slug": "review",
         "scope": {
@@ -500,33 +415,11 @@
   {
     "v": 1,
     "gen": 3,
-    "kind": "result",
-    "id": "req-shares-denied",
-    "method": "publishedShares",
-    "payload": {
-      "outcome": "failed",
-      "error": "shares_forbidden"
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
     "kind": "error",
     "id": "req-settings",
     "method": "remoteSettings",
     "error": {
       "code": "setting_read_only",
-      "retryable": false
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "error",
-    "id": "req-memory",
-    "method": "memorySettings",
-    "error": {
-      "code": "memory_forbidden",
       "retryable": false
     }
   },
@@ -676,53 +569,6 @@
     "v": 1,
     "gen": 3,
     "kind": "result",
-    "id": "req-projects-history",
-    "method": "localProjects",
-    "payload": {
-      "outcome": "history",
-      "sessions": [
-        {
-          "acpSessionId": "acp-1",
-          "title": "Fix login",
-          "status": "imported",
-          "importedSessionId": "session-9"
-        }
-      ],
-      "failures": [
-        {
-          "acpSessionId": "acp-2",
-          "message": "missing transcript"
-        }
-      ]
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
-    "id": "req-projects-targets",
-    "method": "localProjects",
-    "payload": {
-      "outcome": "targets",
-      "targets": [
-        {
-          "machineId": "machine-1",
-          "machineName": "Studio",
-          "localProjectId": "p1",
-          "projectName": "App",
-          "rootPath": "/Users/dev/app",
-          "provider": {
-            "cliType": "builtin",
-            "agentType": "claude"
-          }
-        }
-      ]
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
     "id": "req-projects-add",
     "method": "localProjects",
     "payload": {
@@ -858,6 +704,37 @@
     "error": {
       "code": "metadata_not_ready",
       "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-emulator",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "type": "android-emulator/control_response",
+      "sessionId": "session-1",
+      "success": true,
+      "preview": {
+        "operationId": "op-2",
+        "id": "Pixel_8",
+        "phase": "booting",
+        "transport": "remote"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-emulator-old",
+    "method": "androidEmulatorControl",
+    "payload": {
+      "error": "unsupported",
+      "capabilities": {
+        "previewControl": 1
+      }
     }
   },
   {
@@ -1412,6 +1289,67 @@
     "error": {
       "code": "metadata_not_ready",
       "retryable": false
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "forget-input-1",
+    "method": "forgetPendingInput",
+    "payload": {}
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-status-move",
+    "method": "statusViewCommand",
+    "payload": {
+      "writes": 1
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "error",
+    "id": "req-status-section",
+    "method": "statusViewCommand",
+    "error": {
+      "code": "workspace_not_ready",
+      "retryable": true
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "result",
+    "id": "req-snooze-presets",
+    "method": "snoozePresets",
+    "payload": {
+      "nowMs": 1763712000000,
+      "presets": [
+        {
+          "id": "oneHour",
+          "until": 1763715600000,
+          "countdown": "1h"
+        },
+        {
+          "id": "laterToday",
+          "until": 1763722800000,
+          "countdown": "3h"
+        },
+        {
+          "id": "tomorrowMorning",
+          "until": 1763773200000,
+          "countdown": "17h"
+        },
+        {
+          "id": "nextWeek",
+          "until": 1764032400000,
+          "countdown": "4d"
+        }
+      ]
     }
   }
 ]

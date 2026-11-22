@@ -1,6 +1,9 @@
+import { machineMeta } from '../create-session';
 import {
+  downloadFileChunk,
   fileDiff,
   listDir,
+  listSessionDir,
   readFile,
   turnDiff,
   workspaceChanges,
@@ -35,10 +38,29 @@ export function registerContent(ctx: RuntimeContext) {
   channel.handle('readFile', (args) =>
     readFile(machineFor(ctx, args.sessionId, args.path), args),
   );
-  channel.handle('listDir', (args) => {
+  channel.handle('downloadFileChunk', (args) => {
+    const files = machineFor(ctx, args.sessionId, args.path);
+    if (
+      args.attachment &&
+      !supportsLocalAttachmentDownload(state, files.machineId)
+    ) {
+      return { status: 'error' as const, code: 'unsupported_protocol' };
+    }
+    return downloadFileChunk(files, args);
+  });
+  channel.handle('listDir', async (args) => {
     if (args.workspaceId !== state.workspace)
       throw new Error('metadata_not_ready');
     const files = machineFor(ctx, args.sessionId, args.relativePath);
+    // The session's own folder (its worktree) when the machine can list it, so the
+    // list matches what readFile opens; older machines list the project folder.
+    if (listsSessionFolders(state, files.machineId)) {
+      const listing = await listSessionDir(files, {
+        sessionId: args.sessionId,
+        relativePath: args.relativePath,
+      });
+      if (listing) return listing;
+    }
     if (!files.localProjectId) throw new Error('project_unavailable');
     return listDir(files, {
       localProjectId: files.localProjectId,
@@ -46,4 +68,34 @@ export function registerContent(ctx: RuntimeContext) {
       userId: args.userId,
     });
   });
+}
+
+/** Machine meta `protocolCapabilities.sessionDirectoryListing` >= 1; missing means unsupported. */
+export function listsSessionFolders(
+  state: RuntimeContext['state'],
+  machineId: string,
+): boolean {
+  const flock = state.metaReplica?.flock;
+  if (!flock) return false;
+  const capabilities = machineMeta(flock, machineId).protocolCapabilities;
+  if (!capabilities || typeof capabilities !== 'object') return false;
+  return (
+    Number((capabilities as Record<string, unknown>).sessionDirectoryListing) >=
+    1
+  );
+}
+
+/** Machine meta `protocolCapabilities.localAttachmentDownload` >= 1; missing means unsupported. */
+export function supportsLocalAttachmentDownload(
+  state: RuntimeContext['state'],
+  machineId: string,
+): boolean {
+  const flock = state.metaReplica?.flock;
+  if (!flock) return false;
+  const capabilities = machineMeta(flock, machineId).protocolCapabilities;
+  if (!capabilities || typeof capabilities !== 'object') return false;
+  return (
+    Number((capabilities as Record<string, unknown>).localAttachmentDownload) >=
+    1
+  );
 }

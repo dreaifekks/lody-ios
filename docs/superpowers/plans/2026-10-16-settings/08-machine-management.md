@@ -20,21 +20,21 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/RemoteSettingsScreen.tsx](../../../../apps/mobile/src/screens/RemoteSettingsScreen.tsx)
-- [apps/mobile/src/screens/RemoteSettingEditorScreen.tsx](../../../../apps/mobile/src/screens/RemoteSettingEditorScreen.tsx)
-- [apps/mobile/src/ui/Screen.tsx](../../../../apps/mobile/src/ui/Screen.tsx)
-- [apps/mobile/src/screens/WorkspaceEditorScreen.tsx](../../../../apps/mobile/src/screens/WorkspaceEditorScreen.tsx)
-- [apps/mobile/src/screens/QuickReplyEditorScreen.tsx](../../../../apps/mobile/src/screens/QuickReplyEditorScreen.tsx)
-- [apps/mobile/src/features/settings/remote-settings.ts](../../../../apps/mobile/src/features/settings/remote-settings.ts)
+- `apps/mobile/src/screens/RemoteSettingsScreen.tsx`
+- `apps/mobile/src/screens/RemoteSettingEditorScreen.tsx`
+- `apps/mobile/src/ui/Screen.tsx`
+- `apps/mobile/src/screens/WorkspaceEditorScreen.tsx`
+- `apps/mobile/src/screens/QuickReplyEditorScreen.tsx`
+- `apps/mobile/src/features/settings/remote-settings.ts`
 - [packages/cloud-runtime/src/runtime/settings.ts](../../../../packages/cloud-runtime/src/runtime/settings.ts)
 - [packages/cloud-runtime/src/models/settings.ts](../../../../packages/cloud-runtime/src/models/settings.ts)
 - [packages/cloud-runtime/src/runtime/machine-presence.ts](../../../../packages/cloud-runtime/src/runtime/machine-presence.ts)
-- [apps/mobile/src/cloud/catalog/machines.ts](../../../../apps/mobile/src/cloud/catalog/machines.ts)
-- [apps/mobile/tests/native/settings.test.mjs](../../../../apps/mobile/tests/native/settings.test.mjs)
-- [apps/mobile/tests/settings/remote-settings.test.mjs](../../../../apps/mobile/tests/settings/remote-settings.test.mjs)
-- [apps/mobile/src/screens/debug/MachineSettingsPreviewScreen.tsx](../../../../apps/mobile/src/screens/debug/MachineSettingsPreviewScreen.tsx)
-- [apps/mobile/verification/ui/machine-settings.py](../../../../apps/mobile/verification/ui/machine-settings.py)
-- [apps/mobile/verification/ui/settings-form-backgrounds.py](../../../../apps/mobile/verification/ui/settings-form-backgrounds.py)
+- `apps/mobile/src/cloud/catalog/machines.ts`
+- `apps/mobile/tests/native/settings.test.mjs`
+- `apps/mobile/tests/settings/remote-settings.test.mjs`
+- `apps/mobile/src/screens/debug/MachineSettingsPreviewScreen.tsx`
+- `apps/mobile/verification/ui/machine-settings.py`
+- `apps/mobile/verification/ui/settings-form-backgrounds.py`
 
 ## 工作内容
 

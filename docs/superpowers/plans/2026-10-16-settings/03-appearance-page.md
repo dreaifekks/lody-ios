@@ -20,12 +20,12 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
-- [apps/mobile/src/screens/AppIconScreen.tsx](../../../../apps/mobile/src/screens/AppIconScreen.tsx)
-- [apps/mobile/src/lib/theme/appearance.tsx](../../../../apps/mobile/src/lib/theme/appearance.tsx)
-- [apps/mobile/modules/lody-kit/ios/LodyAppearanceView.swift](../../../../apps/mobile/modules/lody-kit/ios/LodyAppearanceView.swift)
-- [apps/mobile/verification/ui/appearance.py](../../../../apps/mobile/verification/ui/appearance.py)
-- [apps/mobile/src/screens/debug/AppIconFailurePreviewScreen.tsx](../../../../apps/mobile/src/screens/debug/AppIconFailurePreviewScreen.tsx)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
+- `apps/mobile/src/screens/AppIconScreen.tsx`
+- `apps/mobile/src/lib/theme/appearance.tsx`
+- `apps/mobile/modules/lody-kit/ios/LodyAppearanceView.swift`
+- `apps/mobile/verification/ui/appearance.py`
+- `apps/mobile/src/screens/debug/AppIconFailurePreviewScreen.tsx`
 
 ## 工作内容
 
@@ -59,7 +59,7 @@
 - 验证与证据：pnpm check、pnpm bundle 已通过；设置范围的英文浅深色 UI 检查已通过，证据位于 `.artifacts/settings-reorder/`。
 - 未解决问题：不运行聊天、模型、Share Extension 或目标页面的完整业务流程；本轮只验实际迁移影响。
 
-- 实现：[AppearanceScreen](../../../../apps/mobile/src/screens/AppearanceScreen.tsx) 接管首页原有三行、菜单处理和 App 活跃订阅；现有 `appearance.py` 同步增加首页到二级页的跳转。
+- 实现：`AppearanceScreen` 接管首页原有三行、菜单处理和 App 活跃订阅；现有 `appearance.py` 同步增加首页到二级页的跳转。
 - 本轮复用既有签名 Debug app，通过 Metro 加载新页面；没有新增原生代码，不重复原生构建或实际切换系统图标。
 
 - 完成日期：2026-10-17。`settings-baseline` 英文浅色／深色各覆盖六个状态及本次迁移入口，检查耗时分别为 257.65 秒／256.33 秒；截图与导航视频在 `.artifacts/settings-reorder/ui/`。

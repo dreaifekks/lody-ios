@@ -12,6 +12,13 @@ export type RoleTarget = {
   machineName: string;
   agentName: string;
   state: 'configured' | 'machineUnavailable' | 'agentUnavailable';
+  runConfig?: RoleRunConfig;
+};
+export type RoleRunConfig = {
+  modelId?: string;
+  modeId?: string;
+  /** Strings or booleans when the runtime lists them; typed as the wire carries them. */
+  configOptionValues?: Record<string, unknown>;
 };
 export type AgentRoleItem = {
   id: string;
@@ -20,6 +27,7 @@ export type AgentRoleItem = {
   name: string;
   description: string;
   promptPrefix: string;
+  emoji?: string;
   revision: number;
   updatedAt: number;
   targets: RoleTarget[];
@@ -28,7 +36,7 @@ export type AgentRoleSnapshot = { roles: AgentRoleItem[]; agents: RoleAgent[] };
 export type RoleFields = Pick<
   AgentRoleItem,
   'name' | 'description' | 'promptPrefix' | 'visibility'
->;
+> & { emoji?: string };
 export type AgentRoleRequest = { workspaceId: string } & (
   | { action: 'list' }
   | {

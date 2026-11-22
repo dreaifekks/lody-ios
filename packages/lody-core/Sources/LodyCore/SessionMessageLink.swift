@@ -5,13 +5,14 @@ public struct SessionLink: Equatable, Sendable {
   public let sessionId: String
   public let workspaceId: String?
   public let tabSessionId: String?
+  public let turnId: String?
 
   public init?(_ raw: String) {
     guard raw.utf16.count <= 8192,
       raw.range(of: #"[\s\\%]"#, options: .regularExpression) == nil else { return nil }
     if raw.range(of: #"^session://[A-Za-z0-9_-]+/?$"#, options: .regularExpression) != nil {
       sessionId = String(raw.dropFirst("session://".count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-      workspaceId = nil; tabSessionId = nil
+      workspaceId = nil; tabSessionId = nil; turnId = nil
       return
     }
     // Validate before URLComponents can normalize a path or authority.
@@ -24,17 +25,18 @@ public struct SessionLink: Equatable, Sendable {
     for field in (url.percentEncodedQuery ?? "").split(separator: "&") {
       let pair = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
       let key = String(pair[0])
-      guard pair.count == 2, ["workspace", "tab"].contains(key), query[key] == nil,
-        String(pair[1]).range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { return nil }
+      guard pair.count == 2, ["workspace", "tab", "turn"].contains(key), query[key] == nil else { return nil }
+      let pattern = key == "turn" ? #"^[A-Za-z0-9_.:-]+$"# : #"^[A-Za-z0-9_-]+$"#
+      guard String(pair[1]).range(of: pattern, options: .regularExpression) != nil else { return nil }
       query[key] = String(pair[1])
     }
     sessionId = String(url.path.dropFirst())
-    workspaceId = query["workspace"]; tabSessionId = query["tab"]
+    workspaceId = query["workspace"]; tabSessionId = query["tab"]; turnId = query["turn"]
   }
 }
 
 public enum SessionMessageLink: Equatable, Sendable {
-  case session(String)
+  case session(String, turnId: String? = nil)
   case missingSession
   case url(URL)
   case loopback
@@ -44,7 +46,7 @@ public enum SessionMessageLink: Equatable, Sendable {
     if let link = SessionLink(href) {
       if let workspace = link.workspaceId, workspace != workspaceId { return .missingSession }
       let id = link.tabSessionId ?? link.sessionId
-      return sessionIds.contains(id) ? .session(id) : .missingSession
+      return sessionIds.contains(id) ? .session(id, turnId: link.turnId) : .missingSession
     }
     let value = href.trimmingCharacters(in: .whitespacesAndNewlines)
     let loopback = #"(?i)^(https?)://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:[0-9]{1,5})?([/?#].*)?$"#

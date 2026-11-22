@@ -14,23 +14,31 @@ export async function machineRpc(
   params: unknown,
   getGrant: Grant,
   signal: AbortSignal,
+  onProgress?: (progress: Record<string, unknown>) => void,
+  timeoutMs = 30000,
   /** Called as the request leaves, after its reply stream exists. */
   onSend?: () => void,
 ): Promise<RpcReply> {
+  const grant = async () => {
+    signal.throwIfAborted();
+    const value = await getGrant();
+    signal.throwIfAborted();
+    return value;
+  };
   const replyTo = `${workspaceId}:rpc:res:${machineId}:${crypto.randomUUID()}`;
-  const response = await clientFor(replyTo, getGrant);
+  const response = await clientFor(replyTo, grant);
+  signal.throwIfAborted();
   const created = await response.create({
     contentType: 'application/json',
-    ttlSeconds: 300,
+    ttlSeconds: Math.max(300, Math.ceil(timeoutMs / 1000) + 60),
   });
   if (!created.ok) throw new Error(created.result.code);
   signal.throwIfAborted();
-  const client = await clientFor(
-    `${workspaceId}:rpc:req:${machineId}`,
-    getGrant,
-  );
+  const client = await clientFor(`${workspaceId}:rpc:req:${machineId}`, grant);
+  signal.throwIfAborted();
   const id = crypto.randomUUID(),
     now = Date.now();
+  signal.throwIfAborted();
   onSend?.();
   const sent = await client.append({
     part: {
@@ -43,7 +51,7 @@ export async function machineRpc(
         machineId,
         replyTo,
         sentAt: now,
-        expiresAt: now + 30000,
+        expiresAt: now + timeoutMs,
         method,
         params,
       }),
@@ -60,7 +68,22 @@ export async function machineRpc(
       new TextDecoder().decode(read.result.payload.body),
     );
     for (const reply of Array.isArray(parsed) ? parsed : [parsed])
-      if (reply.id === id) return reply as RpcReply;
+      if (reply.id === id) {
+        if (
+          (reply.result?.type === 'machine/acp-binary-progress' &&
+            [
+              'machine/acp-capabilities-refresh',
+              'machine/acp-binary-install',
+              'machine/acp-binary-status',
+            ].includes(method)) ||
+          (method === 'machine/acp-authenticate' &&
+            reply.result?.type === 'machine/acp-authentication-progress')
+        ) {
+          onProgress?.(reply.result);
+          continue;
+        }
+        return reply as RpcReply;
+      }
   }
   throw new Error('cancelled');
 }

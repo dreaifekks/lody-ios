@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 env:
-  IOS_DIR: .
+  IOS_DIR: apps/ios
   APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || 'KAMM5N88X3' }}
   LODY_APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || 'KAMM5N88X3' }}
   LODY_BUNDLE_ID: ${{ vars.LODY_BUNDLE_ID || 'app.innei.lody' }}
@@ -43,6 +43,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: true
+
+      - name: Provide Lody mobile shared files
+        run: /bin/bash .github/scripts/link-lody-mobile.sh
 
       - name: Record Xcode and SDK versions
         run: |
@@ -192,7 +195,7 @@ jobs:
           jq -e \
             --arg team "$APPLE_TEAM_ID" \
             --argjson profiles "$IOS_PROFILE_MAP" \
-            -f .github/scripts/verify-signing-settings.jq \
+            -f ../../.github/scripts/verify-signing-settings.jq \
             "$RUNNER_TEMP/signing-settings.json"
 
       - name: Archive

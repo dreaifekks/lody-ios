@@ -22,8 +22,8 @@ runtime/agent-roles.ts 已读取 agentRole，按 private／workspace 可见性�
 
 - [packages/cloud-runtime/src/runtime/agent-roles.ts](../../../../packages/cloud-runtime/src/runtime/agent-roles.ts)
 - [packages/cloud-runtime/src/models/mentions.ts](../../../../packages/cloud-runtime/src/models/mentions.ts)
-- [apps/mobile/modules/lody-kit/ios/CreateSession/CreateSessionController.swift](../../../../apps/mobile/modules/lody-kit/ios/CreateSession/CreateSessionController.swift)
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
+- `apps/mobile/modules/lody-kit/ios/CreateSession/CreateSessionController.swift`
+- `apps/mobile/src/screens/SettingsScreen.tsx`
 
 ## 工作内容
 

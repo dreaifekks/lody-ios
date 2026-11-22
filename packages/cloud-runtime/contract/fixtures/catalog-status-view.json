@@ -1,0 +1,345 @@
+{
+  "projects": [],
+  "sessions": [
+    {
+      "id": "session-1",
+      "machineId": "machine-1",
+      "title": "Chat session-1",
+      "status": "idle",
+      "archived": false,
+      "pinned": true,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "orderKey": "80"
+    },
+    {
+      "id": "session-2",
+      "machineId": "machine-1",
+      "title": "Chat session-2",
+      "status": "idle",
+      "archived": false,
+      "pinned": true,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "pinSectionId": "section-a",
+      "orderKey": "80"
+    },
+    {
+      "id": "session-3",
+      "machineId": "machine-1",
+      "title": "Chat session-3",
+      "status": "idle",
+      "archived": false,
+      "pinned": false,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "snoozedUntil": 1763730000000
+    },
+    {
+      "id": "session-4",
+      "machineId": "machine-1",
+      "title": "Chat session-4",
+      "status": "idle",
+      "archived": false,
+      "pinned": false,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "snoozedUntil": 1763705000000,
+      "orderKey": "7F"
+    },
+    {
+      "id": "session-5",
+      "machineId": "machine-1",
+      "title": "Chat session-5",
+      "status": "idle",
+      "archived": false,
+      "pinned": false,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "openedBySessionId": "session-4"
+    },
+    {
+      "id": "session-6",
+      "machineId": "machine-1",
+      "title": "Chat session-6",
+      "status": "idle",
+      "archived": false,
+      "pinned": false,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "focusRestoredAt": 1763600000000
+    },
+    {
+      "id": "session-7",
+      "machineId": "machine-1",
+      "title": "Chat session-7",
+      "status": "idle",
+      "archived": false,
+      "pinned": false,
+      "userId": "user-1",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000,
+      "settledAt": 1763700000000
+    },
+    {
+      "id": "session-8",
+      "machineId": "machine-2",
+      "title": "Chat session-8",
+      "status": "idle",
+      "archived": false,
+      "pinned": false,
+      "userId": "user-2",
+      "projectId": "machine-1:unassigned",
+      "createdAt": "2026-11-20T10:00:00.000Z",
+      "lastMessageAt": 1763700000000
+    }
+  ],
+  "machineIds": ["machine-1", "machine-2"],
+  "machineOwners": {
+    "machine-1": "user-1",
+    "machine-2": "user-2"
+  },
+  "pinSections": [
+    {
+      "id": "section-a",
+      "name": "Release",
+      "orderKey": "80"
+    }
+  ],
+  "statusView": {
+    "mine": {
+      "pinned": [
+        {
+          "sectionId": null,
+          "name": null,
+          "rows": [
+            {
+              "id": "session-1",
+              "tier": "pinned",
+              "children": [],
+              "activityAt": 1763700000000,
+              "unread": false,
+              "snoozedUntil": null,
+              "woken": false,
+              "canManage": true,
+              "canPrefer": true
+            }
+          ],
+          "hiddenCount": 0
+        },
+        {
+          "sectionId": "section-a",
+          "name": "Release",
+          "rows": [
+            {
+              "id": "session-2",
+              "tier": "pinned",
+              "children": [],
+              "activityAt": 1763700000000,
+              "unread": false,
+              "snoozedUntil": null,
+              "woken": false,
+              "canManage": false,
+              "canPrefer": true
+            }
+          ],
+          "hiddenCount": 1
+        }
+      ],
+      "focus": [
+        {
+          "id": "session-4",
+          "tier": "focus",
+          "children": [
+            {
+              "id": "session-5",
+              "tier": "focus",
+              "children": [],
+              "activityAt": 1763700000000,
+              "unread": false,
+              "snoozedUntil": null,
+              "woken": false,
+              "canManage": true,
+              "canPrefer": true
+            }
+          ],
+          "activityAt": 1763710000000,
+          "unread": true,
+          "snoozedUntil": null,
+          "woken": true,
+          "canManage": true,
+          "canPrefer": true
+        },
+        {
+          "id": "session-6",
+          "tier": "focus",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": null,
+          "woken": false,
+          "canManage": true,
+          "canPrefer": true
+        }
+      ],
+      "later": [
+        {
+          "id": "session-3",
+          "tier": "later",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": 1763730000000,
+          "woken": false,
+          "canManage": true,
+          "canPrefer": true
+        }
+      ],
+      "settled": [
+        {
+          "id": "session-7",
+          "tier": "settled",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": null,
+          "woken": false,
+          "canManage": true,
+          "canPrefer": true
+        }
+      ],
+      "canManageSections": true,
+      "nextChangeAt": 1763730000000
+    },
+    "team": {
+      "pinned": [
+        {
+          "sectionId": null,
+          "name": null,
+          "rows": [
+            {
+              "id": "session-1",
+              "tier": "pinned",
+              "children": [],
+              "activityAt": 1763700000000,
+              "unread": false,
+              "snoozedUntil": null,
+              "woken": false,
+              "canManage": true,
+              "canPrefer": true
+            }
+          ],
+          "hiddenCount": 0
+        },
+        {
+          "sectionId": "section-a",
+          "name": "Release",
+          "rows": [
+            {
+              "id": "session-2",
+              "tier": "pinned",
+              "children": [],
+              "activityAt": 1763700000000,
+              "unread": false,
+              "snoozedUntil": null,
+              "woken": false,
+              "canManage": false,
+              "canPrefer": true
+            }
+          ],
+          "hiddenCount": 1
+        }
+      ],
+      "focus": [
+        {
+          "id": "session-4",
+          "tier": "focus",
+          "children": [
+            {
+              "id": "session-5",
+              "tier": "focus",
+              "children": [],
+              "activityAt": 1763700000000,
+              "unread": false,
+              "snoozedUntil": null,
+              "woken": false,
+              "canManage": true,
+              "canPrefer": true
+            }
+          ],
+          "activityAt": 1763710000000,
+          "unread": true,
+          "snoozedUntil": null,
+          "woken": true,
+          "canManage": true,
+          "canPrefer": true
+        },
+        {
+          "id": "session-6",
+          "tier": "focus",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": null,
+          "woken": false,
+          "canManage": true,
+          "canPrefer": true
+        },
+        {
+          "id": "session-8",
+          "tier": "focus",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": null,
+          "woken": false,
+          "canManage": false,
+          "canPrefer": false
+        }
+      ],
+      "later": [
+        {
+          "id": "session-3",
+          "tier": "later",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": 1763730000000,
+          "woken": false,
+          "canManage": true,
+          "canPrefer": true
+        }
+      ],
+      "settled": [
+        {
+          "id": "session-7",
+          "tier": "settled",
+          "children": [],
+          "activityAt": 1763700000000,
+          "unread": false,
+          "snoozedUntil": null,
+          "woken": false,
+          "canManage": true,
+          "canPrefer": true
+        }
+      ],
+      "canManageSections": true,
+      "nextChangeAt": 1763730000000
+    },
+    "nowMs": 1763712000000,
+    "sectionsLoaded": true
+  }
+}

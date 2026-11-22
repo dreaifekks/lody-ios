@@ -4,6 +4,57 @@ public enum CreateLogic {
   public static let chatTarget = "chat"
   public static let fullAccessModes = ["agent-full-access", "danger-full-access", "bypassPermissions", "yolo", "always-approve"]
 
+  /// Permission tier matching Lody's shared `permission-tier.ts`.
+  public enum PermissionTier: String, Equatable, Sendable {
+    case ask
+    case edit
+    case auto
+    case full
+  }
+
+  private static let modeTiers: [String: PermissionTier] = [
+    // Claude Code
+    "default": .ask,
+    "plan": .ask,
+    "acceptEdits": .edit,
+    "auto": .auto,
+    "dontAsk": .ask,
+    "bypassPermissions": .full,
+    // Codex
+    "agent": .edit,
+    "read-only": .ask,
+    "agent-auto-review": .auto,
+    "agent-full-access": .full,
+    "danger-full-access": .full,
+    // DeepSeek Harness
+    "workspace-write": .edit,
+    // Google Antigravity / agy CLI / Gemini / Kimi
+    "auto_edit": .edit,
+    "accept-edits": .edit,
+    "auto_review": .auto,
+    "yolo": .full,
+    // Grok
+    "ask": .ask,
+    "always-approve": .full,
+  ]
+
+  public static func permissionTier(for modeId: String?) -> PermissionTier? {
+    guard let modeId else { return nil }
+    return modeTiers[modeId.trimmingCharacters(in: .whitespacesAndNewlines)]
+  }
+
+  /// LAN fork: Lody's former Antigravity Auto Review (`auto_review`) was removed;
+  /// sessions, Roles and remembered choices saved with it run in agy's own `auto`.
+  public static func normalizedModeId(_ modeId: String?) -> String? {
+    guard let modeId else { return nil }
+    return modeId == "auto_review" ? "auto" : modeId
+  }
+
+  public static func normalizedConfigValue(_ value: ConfigValue?, optionId: String) -> ConfigValue? {
+    if optionId == "mode", value == .string("auto_review") { return .string("auto") }
+    return value
+  }
+
   // `lw_` is the LAN workspace identity, also present in the credential-free
   // Share catalog. No credential or network access is needed to resolve this policy.
   public static func typedBranch(_ query: String, workspaceId: String, listed: [String]) -> String? {
@@ -40,7 +91,7 @@ public enum CreateLogic {
     return capability?.configOptions?.first(where: isThoughtLevel)?.options.map(\.id) ?? []
   }
 
-  // Resolve presentation values without turning an inherited choice into an override.
+  // Display-only: an inherited Agent value must never be persisted or sent as an override.
   public static func resolvedModelId(_ capability: Capability?, modelId: String? = nil) -> String? {
     if let modelId, !modelId.isEmpty, modelId.lowercased() != "default" { return modelId }
     if case .string(let current)? = capability?.configOptions?.first(where: { $0.type == "select" && $0.category == "model" })?.currentValue,
@@ -58,12 +109,27 @@ public enum CreateLogic {
 
   public static func capabilityFor(_ options: CreationOptions?, _ agent: CreationAgent?) -> Capability? {
     guard let options, let agent else { return nil }
-    return options.capabilities.first {
-      $0.machineId == agent.machineId && $0.cliType == agent.cliType && $0.agentType == agent.agentType
+    return capability(in: options.capabilities, machineId: agent.machineId, configId: agent.id, cliType: agent.cliType, agentType: agent.agentType)
+  }
+
+  /// The capability probed for this agent config (ACP provider); runtimes that predate per-config
+  /// capabilities only key them by agent type, so fall back to that.
+  public static func capability(
+    in capabilities: [Capability], machineId: String, configId: String?, cliType: String, agentType: String
+  ) -> Capability? {
+    if let configId, !configId.isEmpty,
+      let exact = capabilities.first(where: { $0.machineId == machineId && $0.agentConfigId == configId }) {
+      return exact
+    }
+    return capabilities.first {
+      $0.machineId == machineId && $0.agentConfigId == nil && $0.cliType == cliType && $0.agentType == agentType
     }
   }
 
   public static func fastMode(_ capability: Capability?, _ choice: ModelChoice) -> (id: String, enabled: Bool)? {
+    var model = choice.modelId
+    if model == nil, case .string(let current)? = capability?.configOptions?.first(where: { $0.category == "model" })?.currentValue { model = current }
+    if let model, capability?.fastModes?[model] == false { return nil }
     guard let option = capability?.configOptions?.first(where: { ["fast-mode", "fast"].contains($0.id) && $0.type == "boolean" })
     else { return nil }
     let value = choice.configOptionValues?[option.id] ?? option.currentValue
@@ -77,6 +143,42 @@ public enum CreateLogic {
     return next
   }
 
+  /// A combined reset is one change; a Fast-only toggle preserves model and effort.
+  public static func applyingComposerChange(_ capability: Capability?, _ choice: ModelChoice, body: [String: Any]) -> ModelChoice {
+    if let permission = body["permissionId"] as? String {
+      return withPermissionMode(capability, choice, value: permission)
+    }
+    var next = choice
+    let fast = body["fast"] as? Bool
+    if let fast { next = withFastMode(capability, next, enabled: fast) }
+    if fast == nil || body["modelId"] != nil || body["effort"] != nil {
+      next.modelId = (body["modelId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+      next.effort = (body["effort"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+    return next
+  }
+
+  /// Web's Plan switch (`isAcpPlanModeConfigOption`): Lody's boolean `plan_mode`, or a
+  /// collaboration mode whose `plan` value turns it on and `default` off.
+  public static func planMode(_ capability: Capability?, _ choice: ModelChoice) -> (id: String, enabled: Bool)? {
+    guard let option = capability?.configOptions?.first(where: { option in
+      (option.id == "plan_mode" && option.type == "boolean")
+        || ((option.id == "collaboration_mode" || option.category == "collaboration_mode") && option.type == "select"
+          && option.options.contains { $0.id == "plan" })
+    }) else { return nil }
+    let value = choice.configOptionValues?[option.id] ?? option.currentValue
+    return (option.id, value == .bool(true) || value == .string("plan"))
+  }
+
+  public static func withPlanMode(_ capability: Capability?, _ choice: ModelChoice, enabled: Bool) -> ModelChoice {
+    guard let mode = planMode(capability, choice),
+          let option = capability?.configOptions?.first(where: { $0.id == mode.id }) else { return choice }
+    let value: ConfigValue = option.type == "boolean" ? .bool(enabled) : .string(enabled ? "plan" : "default")
+    var next = choice
+    next.configOptionValues = (choice.configOptionValues ?? [:]).merging([mode.id: value]) { $1 }
+    return next
+  }
+
   // Same precedence as OSS resolvePermissionModeFace and the chat projection.
   public static func permissionMode(_ capability: Capability?, _ choice: ModelChoice)
     -> (options: [CapabilityChoice], value: String?, configId: String?)?
@@ -84,13 +186,13 @@ public enum CreateLogic {
     let selectors = (capability?.configOptions ?? []).filter { $0.type == "select" }
     var option = selectors.first { $0.id == "permission_mode" || $0.category == "_permission" }
     if option == nil, let modes = capability?.legacyModes ?? capability?.modes, !modes.isEmpty {
-      return (modes, choice.modeId, nil)
+      return (modes, normalizedModeId(choice.modeId), nil)
     }
     if option == nil {
       option = selectors.first { $0.category == "mode" && $0.id != "interaction_mode" && !isThoughtLevel($0) }
     }
     guard let option, !option.options.isEmpty else { return nil }
-    let selected = choice.configOptionValues?[option.id]
+    let selected = normalizedConfigValue(choice.configOptionValues?[option.id], optionId: option.id)
     let current = validConfigValue(option, selected) ? selected : option.currentValue
     var value: String?
     if case .string(let id) = current { value = id }
@@ -138,14 +240,14 @@ public enum CreateLogic {
     let remembered = prefs?.modelChoices?[modelKey(agentKey, modelId)]
     let saved = remembered ?? (legacy?.agentKey == agentKey && legacy?.modelId == modelId ? legacy?.choice : nil)
     let effort = saved?.effort.flatMap { effortsFor(capability, modelId: modelId).contains($0) ? $0 : nil }
-    var modeId = saved?.modeId
+    var modeId = normalizedModeId(saved?.modeId)
     if (remembered == nil && modeId == nil) || (modeId != nil && capability?.modes.contains { $0.id == modeId } != true) {
       modeId = capability?.modes.first { fullAccessModes.contains($0.id) }?.id
     }
     var values: [String: ConfigValue] = [:]
     // Mode config values selected by the composer must survive reopening too.
     for option in capability?.configOptions ?? [] where option.category != "model" && !isThoughtLevel(option) {
-      let value = saved?.configOptionValues?[option.id]
+      let value = normalizedConfigValue(saved?.configOptionValues?[option.id], optionId: option.id)
       if validConfigValue(option, value) { values[option.id] = value }
     }
     return ModelChoice(modelId: modelId, effort: effort, modeId: modeId, configOptionValues: values.isEmpty ? nil : values)
@@ -161,7 +263,72 @@ public enum CreateLogic {
     var projects = next.projects ?? [:]
     projects[target] = selection
     next.projects = projects
+    if let machineId = selection.machineId, !machineId.isEmpty {
+      var machines = next.machines ?? [:]
+      machines[machineId] = selection
+      next.machines = machines
+    }
     return next
+  }
+
+  /// The agent and choice to show when a computer is picked: the last ones used there, while
+  /// that agent is still offered, else its first agent with that agent's remembered choice.
+  public static func restoreMachine(_ prefs: CreatePrefs?, machineId: String, options: CreationOptions?)
+    -> (agentKey: String, choice: ModelChoice)
+  {
+    let agents = (options?.agents ?? []).filter { $0.machineId == machineId }
+    let saved = prefs?.machines?[machineId]
+    let agent = agents.first { $0.key == saved?.agentKey } ?? agents.first
+    let capability = capabilityFor(options, agent)
+    let legacy = saved?.agentKey == agent?.key ? saved : nil
+    let modelId = capability?.models.contains { $0.id == legacy?.modelId } == true ? legacy?.modelId : nil
+    return (
+      agent?.key ?? "",
+      rememberedModelChoice(prefs, agentKey: agent?.key ?? "", capability: capability, modelId: modelId, legacy: legacy)
+    )
+  }
+
+  // MARK: Recently used run configurations (web `lib/recent-run-configs.ts`)
+
+  /// Stored deeper than shown, so one one-off run cannot evict a combination used every day.
+  public static let maxStoredRecents = 12
+  public static let maxVisibleRecents = 3
+
+  private struct RecentIdentity: Encodable {
+    let agentKey: String
+    let choice: ModelChoice
+    let agentRoleId: String?
+  }
+
+  /// Two runs are the same configuration only when every value matches.
+  public static func recentKey(agentKey: String, choice: ModelChoice, agentRoleId: String?) -> String {
+    CreateJSON.encode(RecentIdentity(agentKey: agentKey, choice: choice, agentRoleId: agentRoleId))
+  }
+
+  public static func recentKey(_ record: RecentRunConfig) -> String {
+    recentKey(agentKey: record.agentKey, choice: record.choice, agentRoleId: record.agentRoleId)
+  }
+
+  /// Most recent first, deduplicated by identity, capped.
+  public static func withRecent(_ prefs: CreatePrefs?, _ record: RecentRunConfig) -> CreatePrefs {
+    var next = prefs ?? CreatePrefs()
+    let key = recentKey(record)
+    next.recents = Array(([record] + (next.recents ?? []).filter { recentKey($0) != key }).prefix(maxStoredRecents))
+    return next
+  }
+
+  /// A recorded choice limited to what the agent offers now: a model, effort, mode or option
+  /// it dropped is left out rather than forced back in.
+  public static func applicableChoice(_ saved: ModelChoice, capability: Capability?) -> ModelChoice {
+    let modelId = capability?.models.contains { $0.id == saved.modelId } == true ? saved.modelId : nil
+    let effort = saved.effort.flatMap { effortsFor(capability, modelId: modelId).contains($0) ? $0 : nil }
+    let modeId = normalizedModeId(saved.modeId).flatMap { id in capability?.modes.contains { $0.id == id } == true ? id : nil }
+    var values: [String: ConfigValue] = [:]
+    for option in capability?.configOptions ?? [] where option.category != "model" && !isThoughtLevel(option) {
+      let value = normalizedConfigValue(saved.configOptionValues?[option.id], optionId: option.id)
+      if validConfigValue(option, value) { values[option.id] = value }
+    }
+    return ModelChoice(modelId: modelId, effort: effort, modeId: modeId, configOptionValues: values.isEmpty ? nil : values)
   }
 }
 

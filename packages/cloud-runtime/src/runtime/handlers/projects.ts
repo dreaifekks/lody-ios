@@ -1,17 +1,36 @@
 import type { CreationOptions as CreationOptionsWire } from '../../contract/methods.ts';
 import { projectRows } from '../../protocol/catalog.ts';
 import { creationOptions } from '../create-session';
+import { createCapabilityRefresh } from '../capability-refresh';
+import { machineRpc } from '../machine-rpc';
 import {
   directoryResult,
   projectControl,
   registerProject,
 } from '../local-projects';
 import { availableCreationOptions } from '../machine-presence';
-import { projectHistory } from '../project-history';
+import { readWorkspaceProjects } from '../project-groups';
+import { projectGroupItems } from '../../protocol/project-groups.ts';
 import type { RuntimeContext } from './context.ts';
 
 export function registerProjects(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
+  const refreshMissing = createCapabilityRefresh(
+    (owner, agent, signal) =>
+      machineRpc(
+        owner,
+        agent.machineId,
+        'machine/acp-capabilities-refresh',
+        { configId: agent.id },
+        async () => {
+          if (state.workspace !== owner) throw new Error('workspace_changed');
+          return getGrant();
+        },
+        signal,
+      ),
+    () => state.workspace,
+    () => ctx.publish(),
+  );
   const browsers = new Map<string, AbortController>();
   let registering = false;
   function browserSignal(browserId: string) {
@@ -26,18 +45,49 @@ export function registerProjects(ctx: RuntimeContext) {
     if (
       args.workspaceId !== state.workspace ||
       !state.metaReplica ||
-      state.unhealthy.size
+      state.unhealthy.has('meta')
     )
       throw new Error('metadata_not_ready');
     const options = creationOptions(
       args.projectId,
       state.metaReplica.flock,
-      state.machineReplicas,
+      new Map(
+        [...state.machineReplicas].filter(([id]) => !state.unhealthy.has(id)),
+      ),
+      refreshMissing.rows(state.workspace),
     );
-    return availableCreationOptions(
+    if (args.includeOffline) return options as CreationOptionsWire;
+    const available = availableCreationOptions(
       options,
       state.presence,
     ) as CreationOptionsWire;
+    if (args.agentConfigId)
+      refreshMissing(state.workspace, {
+        ...available,
+        agents: available.agents.filter(
+          (agent) => agent.id === args.agentConfigId,
+        ),
+      });
+    return available;
+  });
+  // The workspace's multi-repository projects for the new-chat picker (a fresh read).
+  channel.handle('projectGroups', async (args) => {
+    const workspace = state.workspace;
+    if (args.workspaceId !== workspace) throw new Error('metadata_not_ready');
+    const projects = await readWorkspaceProjects(
+      workspace,
+      getGrant,
+      AbortSignal.timeout(30000),
+    );
+    if (state.workspace !== workspace) throw new Error('workspace_changed');
+    const names = (machineId: string, localProjectId: string) => {
+      const row = state.machineReplicas
+        .get(machineId)
+        ?.get(['localProject', localProjectId]) as
+        Record<string, unknown> | undefined;
+      return typeof row?.name === 'string' && row.name ? row.name : undefined;
+    };
+    return { groups: projectGroupItems(projects, names) };
   });
   channel.handle('localProjects', async (args) => {
     const { workspace, machineReplicas } = state;
@@ -49,23 +99,6 @@ export function registerProjects(ctx: RuntimeContext) {
     }
     if (!state.metaReplica || state.unhealthy.size)
       throw new Error('metadata_not_ready');
-    if (args.action === 'history') {
-      const value = await projectHistory(
-        args.history,
-        workspace,
-        args.userId,
-        state.metaReplica.flock,
-        machineReplicas,
-        getGrant,
-        AbortSignal.any([
-          browserSignal(args.browserId),
-          AbortSignal.timeout(120000),
-        ]),
-      );
-      return Array.isArray(value)
-        ? { outcome: 'targets', targets: value }
-        : { outcome: 'history', ...value };
-    }
     if (args.action === 'machines') {
       const meta = state.metaReplica.flock;
       return {

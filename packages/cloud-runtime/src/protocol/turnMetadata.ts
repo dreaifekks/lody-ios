@@ -1,3 +1,8 @@
+import {
+  migrateLegacyAntigravityModeId,
+  migrateLegacyAntigravityModeOption,
+} from './capability.ts';
+
 export type TurnTokenUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -41,10 +46,13 @@ export function readTurnMetadata(entry: any): TurnMetadata {
   )
     tokenUsage.costUSD = usage.costUSD;
   const input = entry?.inputConfig;
-  const modeId =
+  const rawModeId =
     typeof input?.modeId === 'string' ? input.modeId.trim() : undefined;
+  const modeId = rawModeId
+    ? migrateLegacyAntigravityModeId(rawModeId)
+    : undefined;
   const options = input?.configOptionValues;
-  const configOptionValues =
+  const filteredOptions =
     options && typeof options === 'object' && !Array.isArray(options)
       ? (Object.fromEntries(
           Object.entries(options).filter(
@@ -56,6 +64,9 @@ export function readTurnMetadata(entry: any): TurnMetadata {
           ),
         ) as Record<string, string | boolean>)
       : undefined;
+  const configOptionValues = filteredOptions
+    ? migrateLegacyAntigravityModeOption(filteredOptions)
+    : undefined;
   return {
     tokenUsage,
     inputConfig:

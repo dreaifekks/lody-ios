@@ -126,7 +126,6 @@ const shortcutSummary = {
   id: shortcutIdentifier,
   workspaceId: shortcutIdentifier,
   ownerUserId: shortcutIdentifier,
-  visibility: ShortcutVisibility,
   name: z.string().min(1),
   emoji: z.string().optional(),
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
@@ -160,7 +159,12 @@ const shortcutScope = {
 
 export const PromptShortcutsParams = z
   .discriminatedUnion('action', [
-    z.object({ ...shortcutScope, action: z.literal('list') }),
+    z.object({
+      ...shortcutScope,
+      action: z.literal('list'),
+      /** Re-read the workspace index and legacy access directory instead of reusing cached state. */
+      fresh: z.boolean().optional(),
+    }),
     z.object({
       ...shortcutScope,
       action: z.literal('read'),
