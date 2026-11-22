@@ -292,7 +292,7 @@ extension SessionController {
     if connectingShown { return "connecting" }
     if connectingTask == nil {
       connectingTask = Task { @MainActor [weak self] in
-        do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
+        do { try await Task.sleep(for: .milliseconds(4000)) } catch { return }
         guard let self else { return }
         self.connectingTask = nil
         self.connectingShown = true
