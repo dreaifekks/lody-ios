@@ -32285,13 +32285,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Later today"
+            "value": "In 3 hours"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今天稍后"
+            "value": "3 小时后"
           }
         }
       }
