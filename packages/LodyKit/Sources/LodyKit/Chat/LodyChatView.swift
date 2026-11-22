@@ -115,6 +115,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var measurements: [String: (width: CGFloat, text: NSAttributedString, height: CGFloat)] = [:]
   let store = ChatMarkdownStore(traits: .current)
   var markdownSelections: [String: TextSelectionGroup] = [:]
+  private lazy var selectionTap = UITapGestureRecognizer(target: self, action: #selector(clearMarkdownSelections(_:)))
   let findBar = ChatFindBar()
   var findPresented = false
   var lastFindRequest = ""
@@ -352,6 +353,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     tap.cancelsTouchesInView = false
     tap.delegate = self
     collection.addGestureRecognizer(tap)
+    selectionTap.cancelsTouchesInView = false
+    selectionTap.delegate = self
+    collection.addGestureRecognizer(selectionTap)
     collection.contentInsetAdjustmentBehavior = .automatic
     collection.delegate = self
     collection.selectionDidLayout = { [weak self] in self?.refreshMarkdownSelections() }
@@ -854,6 +858,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
   }
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if gestureRecognizer === selectionTap { return true }
     // Row actions own their tap. Dismissing the keyboard first moves the row
     // before UICollectionView can deliver selection (notably Retry).
     if let index = collection.indexPathForItem(at: touch.location(in: collection)),

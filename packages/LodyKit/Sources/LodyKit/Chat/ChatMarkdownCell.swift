@@ -131,6 +131,15 @@ extension LodyChatView: TextSelectionGroupDelegate {
     }
   }
 
+  /// Litext clears a selection only for taps on its own labels; a tap anywhere else in the
+  /// transcript (another row, the gaps between rows) clears it too. Taps on the selection keep it.
+  @objc func clearMarkdownSelections(_ tap: UITapGestureRecognizer) {
+    for group in markdownSelections.values where group.hasSelection
+      && !group.labels.contains(where: { $0.window != nil && $0.selectionContains(tap.location(in: $0)) }) {
+      group.clearSelection()
+    }
+  }
+
   func textSelectionGroupDidChangeSelection(_ group: TextSelectionGroup) {
     if group.hasSelection { pauseTracking() }
   }
