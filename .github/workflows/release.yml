@@ -208,6 +208,7 @@ jobs:
             -scheme Lody \
             -configuration Release \
             -destination 'generic/platform=iOS' \
+            -skipPackagePluginValidation \
             -archivePath "$RUNNER_TEMP/Lody.xcarchive" \
             archive \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
