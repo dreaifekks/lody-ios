@@ -59,7 +59,8 @@ reports a Roost session as live. A failed read clears that reader's readiness
 while the other reader continues. After a history subscription failure, live
 readiness requires a fresh owner checkpoint that the transcript has loaded.
 With the control stream caught up and a readable history window installed, Stop
-and Steer can target the known turn while the subscription reconnects. Sending
+and Steer can target the known turn and permission requests can be answered
+while the subscription reconnects. Sending
 also requires the session's history metadata. These commands keep their existing
 owner checks. The host displays the sync status independently of command readiness.
 

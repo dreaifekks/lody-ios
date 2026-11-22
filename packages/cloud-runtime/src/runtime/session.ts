@@ -2695,7 +2695,7 @@ export async function respondPermission(args: {
   answers?: unknown;
 }) {
   const state = active;
-  if (!state || state.id !== args.sessionId || !state.ready)
+  if (!state || state.id !== args.sessionId || !sessionControlsReady(state))
     throw new Error('session_not_ready');
   if (!targetIsCurrent(state)) throw new Error('workspace_changed');
   const item = locateItem(args.entryId, args.itemId);

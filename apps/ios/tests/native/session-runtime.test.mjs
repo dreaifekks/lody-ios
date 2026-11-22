@@ -229,7 +229,7 @@ test(
 );
 
 test(
-  'Roost subscription loss clears live but keeps commands on the installed transcript',
+  'Roost subscription loss clears live but keeps commands and permission answers on the installed transcript',
   { timeout: 8000 },
   async (t) => {
     const loseHistory = Promise.withResolvers();
@@ -240,13 +240,26 @@ test(
     const firstSync = Promise.withResolvers();
     const events = [];
     const stopped = [];
+    const permissions = [];
     let openings = 0;
     const turn = (finished) => ({
       id: 'assistant-1',
       role: 'assistant',
       timestamp: '2026-01-01T00:00:00Z',
       finished,
-      items: [{ type: 'text', text: finished ? 'Finished' : 'Working' }],
+      items: finished
+        ? [{ type: 'text', text: 'Finished' }]
+        : [
+            { type: 'text', text: 'Working' },
+            {
+              type: 'tool_call',
+              toolCallId: 'tool',
+              permissionRequest: {
+                requestId: 'request',
+                options: [{ optionId: 'yes', kind: 'allow_once' }],
+              },
+            },
+          ],
     });
     const fixture = await openTestSession({
       target: { backend: 'roost', machineId: 'm1' },
@@ -286,7 +299,20 @@ test(
           stopped.push(request.params.turnId);
           return { result: { success: true } };
         }
-        const { query } = await runtime.openPayload(request.params);
+        const params = await runtime.openPayload(request.params);
+        if (request.method === 'session/history-write') {
+          permissions.push(params);
+          return {
+            result: await runtime.sealPayload('s1', {
+              type: 'session/history-write_response',
+              sessionId: 's1',
+              success: true,
+              operation: params.operation,
+              result: true,
+            }),
+          };
+        }
+        const { query } = params;
         const read = {
           type: 'session/history-read_response',
           sessionId: 's1',
@@ -369,6 +395,29 @@ test(
     await assert.rejects(stop('unobserved-turn'), /stale_turn/);
     assert.deepEqual(await stop('assistant-1'), { state: 'stopped' });
     assert.deepEqual(stopped, ['assistant-1']);
+    assert.deepEqual(
+      await fixture.runtime.respondPermission({
+        sessionId: 's1',
+        entryId: 'assistant-1',
+        itemId: 'tool',
+        requestId: 'request',
+        optionId: 'yes',
+      }),
+      { state: 'accepted' },
+    );
+    assert.deepEqual(
+      permissions.map(({ operation, payload }) => ({ operation, payload })),
+      [
+        {
+          operation: 'respond_permission',
+          payload: {
+            requestId: 'request',
+            outcome: { outcome: 'selected', optionId: 'yes' },
+            options: { turnId: 'assistant-1' },
+          },
+        },
+      ],
+    );
     assert.ok(events.slice(beforeLoss).every(({ synced }) => !synced));
     allowCatchUp.resolve();
     await caughtUp.promise;
