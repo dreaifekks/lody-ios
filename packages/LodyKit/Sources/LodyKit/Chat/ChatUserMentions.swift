@@ -10,12 +10,20 @@ import UIKit
     guard !references.isEmpty else { return decorate(source, repository: repository, traits: traits) }
     let result = NSMutableAttributedString(string: "")
     var cursor = 0
-    for reference in references.sorted(by: { $0.start < $1.start }) {
+    let sorted = references.sorted(by: { $0.start < $1.start })
+    let text = source.string as NSString
+    for (index, reference) in sorted.enumerated() {
       guard reference.start >= cursor, reference.end > reference.start, reference.end <= source.length else { continue }
       result.append(decorate(source.attributedSubstring(from: NSRange(location: cursor, length: reference.start - cursor)), repository: repository, traits: traits))
       if reference.kind == "message_quote", let quote = reference.quote {
         result.append(quoteBlock(quote, attributes: source.attributes(at: reference.start, effectiveRange: nil)))
         cursor = reference.end
+        let nextQuote = sorted.dropFirst(index + 1).first { $0.kind == "message_quote" && $0.quote != nil }
+        if cursor + 2 <= text.length, text.substring(with: NSRange(location: cursor, length: 2)) == "\n\n",
+           nextQuote?.start != cursor + 2 {
+          result.append(source.attributedSubstring(from: NSRange(location: cursor, length: 1)))
+          cursor += 2
+        }
         continue
       }
       let label = NSMutableAttributedString(attributedString: source.attributedSubstring(from: NSRange(location: reference.start, length: reference.end - reference.start)))

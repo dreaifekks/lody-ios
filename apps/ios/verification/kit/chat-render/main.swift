@@ -37,6 +37,16 @@ mentionView.setText(ChatUserMentions.decorate(NSAttributedString(string: longPat
 let mentionSize = mentionView.sizeThatFits(CGSize(width: 180, height: 1000))
 precondition(mentionSize.width <= 181 && mentionSize.height > 44, "Long file references wrap within the message width")
 print("User mentions: rich labels, file and GitHub targets, VoiceOver actions, wrapping and literal-text boundaries passed")
+let quoted = "Intro\n\nfirst passage\n\nfirst comment\n\nsecond passage\n\nthird passage\n\nlast comment"
+func quoteReference(_ passage: String) -> ChatTextReference {
+  let range = (quoted as NSString).range(of: passage)
+  return ChatTextReference(start: range.location, end: NSMaxRange(range), kind: "message_quote", target: nil, quote: passage)
+}
+let quoteBlocks = ChatUserMentions.decorate(NSAttributedString(string: quoted),
+  references: ["first passage", "second passage", "third passage"].map(quoteReference), repository: "", traits: .current)
+precondition(quoteBlocks.string == "Intro\n\nfirst passage\nfirst comment\n\nsecond passage\n\nthird passage\nlast comment",
+  "A comment sits directly under its quote; separate blocks keep the blank line between them")
+print("Message quotes: comments attach to their quote, blocks stay separated passed")
 
 struct LodyListRow {
   var parent = false
