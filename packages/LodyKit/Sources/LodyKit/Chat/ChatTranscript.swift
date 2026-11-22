@@ -881,7 +881,7 @@ struct ChatTranscript {
         case "tool_call":
           row.symbol = ["read": "doc.text.magnifyingglass", "search": "magnifyingglass", "edit": "square.and.pencil",
             "write": "square.and.pencil", "execute": "terminal", "bash": "terminal", "fetch": "globe"][item.kind ?? ""] ?? "wrench.and.screwdriver"
-          row.text = item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody)
+          row.text = ChatTranscript.compactParentHops(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody))
           if item.permission?.pending == true { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.pending", bundle: .lody), String(describing: row.text)) }
           else if item.status == "failed" { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.failed", bundle: .lody), String(describing: row.text)) }
           // Web `PermissionRequestBlock`: an answered plan approval reads as the chosen option.
@@ -930,6 +930,10 @@ struct ChatTranscript {
 }
 
 extension ChatTranscript {
+  static func compactParentHops(_ text: String) -> String {
+    text.replacingOccurrences(of: #"(?:\.\./){2,}"#, with: "…/", options: .regularExpression)
+  }
+
   /// Images of one turn that only tool work separates (an agent uploading several images, one
   /// image group, or repeated upload calls) become ONE fanned `imageStack` row instead of a long
   /// column of photos. The stack sits where its first image was; the process rows between its

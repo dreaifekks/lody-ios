@@ -519,7 +519,7 @@ extension LodyChatView {
     // Process summaries sit close together (32 pt rows, the whole width taps); other actionable
     // rows keep the 44 pt floor.
     if row.kind == "summary" { return max(ChatCell.summaryHeight, measuredHeight) }
-    let tapFloor = row.actionable || row.kind == "pending"
+    let tapFloor = row.actionable || row.kind == "pending" || row.kind == "tool_call"
     if tapFloor { return max(44, measuredHeight) }
     if row.kind == "delivery" {
       return max(ChatCell.messageFont(for: row, compatibleWith: traitCollection).lineHeight, measuredHeight)
