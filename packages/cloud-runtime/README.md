@@ -258,8 +258,8 @@ The workspace Flock is read live beside `:meta` and `:mf:<id>`; its failures are
 diagnostics, never `syncError`, and keep the last sections. A workspace without
 that stream has no sections; the first section write creates the stream, as Agent
 Role saves do, and the read restarts at once. Time is the server clock: the
-`/api/time` round-trip midpoint (Lody `time-sync.ts`), recalibrated on start and
-foreground, the device clock until a sample succeeds. The runtime republishes at
+`/api/time` round-trip midpoint (Lody `time-sync.ts`), using the device clock until a sample succeeds. A foreground return reuses a
+calibration younger than a minute if wall and monotonic elapsed time still agree. The runtime republishes at
 the layouts' `nextChangeAt` while the host is active, on every foreground, and
 whenever a calibration changes the offset, since hosts learn it from `nowMs`.
 

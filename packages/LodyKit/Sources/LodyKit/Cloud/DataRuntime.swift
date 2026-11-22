@@ -23,6 +23,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   var attachmentTasks: [String: Task<Void, Never>] = [:]
   var attachmentAttempts: [String: UUID] = [:]
   var grantTask: URLSessionDataTask?
+  var prefetchedGrant: (value: RuntimeContract.Grant, requestedAt: ContinuousClock.Instant)?
   var grantWaiters: [String] = []
   var channel: RuntimeChannel?
   var contractReady = false
@@ -63,26 +64,29 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     observers.add(NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
       MainActor.assumeIsolated { ContentStore.shared.clearAll() }
     })
-    observers.add(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self, self.workspace != nil, self.backgrounded else { return }
-        self.backgrounded = false
-        self.recordRuntime("runtime_resume", phase: self.phase, reason: self.reason, extra: [
-          "hasView": String(self.webView != nil), "contractReady": String(self.contractReady),
-          "handshakeDeferred": String(self.handshakeDeferred),
-        ])
-        self.health.resume(at: self.now)
-        if self.webView == nil { self.build(reason: "foreground") }
-        else {
-          self.dispatch(RuntimeContract.Calls.SetActive.self, .init(active: true))
-          if self.handshakeDeferred, let view = self.webView {
-            self.handshakeDeferred = false
-            self.handshake(view)
-          }
-          self.tick()
-        }
+    for notification in [UIApplication.willEnterForegroundNotification, UIApplication.didBecomeActiveNotification] {
+      observers.add(NotificationCenter.default.addObserver(forName: notification, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.resumeFromBackground() }
+      })
+    }
+  }
+  private func resumeFromBackground() {
+    guard workspace != nil, backgrounded else { return }
+    backgrounded = false
+    recordRuntime("runtime_resume", phase: phase, reason: reason, extra: [
+      "hasView": String(webView != nil), "contractReady": String(contractReady),
+      "handshakeDeferred": String(handshakeDeferred),
+    ])
+    health.resume(at: now)
+    if webView == nil { build(reason: "foreground") }
+    else {
+      dispatch(RuntimeContract.Calls.SetActive.self, .init(active: true))
+      if handshakeDeferred, let view = webView {
+        handshakeDeferred = false
+        handshake(view)
       }
-    })
+      tick()
+    }
   }
   func start(workspace: String, owner: String, userId: String) {
     guard WorkspaceModePins.shared.mode(workspace) == .plaintext else { stop(); return }
@@ -147,6 +151,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
     do {
       try RuntimeDocument.load(in: view, bundle: Bundle.main)
+      fetchGrant()
     } catch { disposeView(); publish("failed", reason: "missing_resource") }
   }
   private func disposeView() {
@@ -155,7 +160,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     attachmentTasks.removeAll()
     attachmentAttempts.removeAll()
     timer?.invalidate(); timer = nil
-    grantTask?.cancel(); grantTask = nil; grantWaiters.removeAll()
+    grantTask?.cancel(); grantTask = nil; grantWaiters.removeAll(); prefetchedGrant = nil
     channel?.close("runtime_replaced"); channel = nil; contractReady = false; handshakeDeferred = false
     githubTasks.values.forEach { $0.cancel() }; githubTasks.removeAll()
     shareTasks.values.forEach { $0.cancel() }; shareTasks.removeAll()

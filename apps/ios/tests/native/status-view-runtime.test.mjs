@@ -483,7 +483,9 @@ test(
       );
       assert.ok(first.statusView.nowMs - Date.now() < 11 * 60_000);
       offset = 20 * 60_000;
-      // Foregrounding samples the clock again; the layouts stay the same.
+      // A device clock adjustment invalidates the recent calibration on resume.
+      const wallNow = Date.now.bind(Date);
+      t.mock.method(Date, 'now', () => wallNow() + 5_000);
       await runtime.call('setActive', { active: true });
       const second = await runtime.catalog(
         (c) => c.statusView && c.statusView.nowMs - Date.now() > 19 * 60_000,

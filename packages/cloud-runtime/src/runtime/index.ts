@@ -758,7 +758,7 @@ const ctx: RuntimeContext = {
     watchers.delete(WORKSPACE_STREAM);
     watch(WORKSPACE_STREAM);
   },
-  syncClock: () => serverClock.sync(),
+  syncClock: () => serverClock.sync(undefined, 60_000),
   setForeground(active) {
     foreground = active;
     if (!active) scheduleStatusRefresh(null);
