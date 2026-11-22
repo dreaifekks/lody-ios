@@ -11,6 +11,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var environment: SessionSendEnvironment
   private let feedService: SessionFeedService
   private let findQuery: String
+  private let initialTurnID: String?
   private lazy var actions = SessionActions(source: source)
   /// Later / Settle / Move to Focus in the More menu, from the runtime's Status view layout.
   lazy var statusActions = StatusViewActions(source: source)
@@ -83,7 +84,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   /// Read receipts already sent from this page, by session, so each render does not resend them.
   private var sentReadReceipts: [String: Double] = [:]
 
-  init(sessionId: String, findQuery: String = "", choice: ModelChoice? = nil, source: SessionSource = .live,
+  init(sessionId: String, findQuery: String = "", choice: ModelChoice? = nil, targetTurnID: String? = nil, source: SessionSource = .live,
        feed: SessionFeedService = .live, environment: SessionSendEnvironment = .live, permission: PermissionService = .live,
        itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil, emulator: SimulatorService? = nil,
        pullRequest: @escaping @MainActor (SessionPullRequest, SessionListState) -> PullRequestController = SessionController.livePullRequest,
@@ -96,6 +97,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     self.sessionId = sessionId
     self.findQuery = findQuery
+    self.initialTurnID = targetTurnID
     self.source = source
     self.environment = environment
     permissionService = permission
@@ -153,6 +155,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     installPageHeader()
     wireEvents()
     find(query: findQuery, keyboard: false)
+    if let initialTurnID, !initialTurnID.isEmpty { chat.targetTurnID = initialTurnID }
     wireSendEvents()
     wireDecisionEvents()
     wireRouteEvents()
@@ -242,13 +245,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     markViewed()
     prepareSimulator(state, session)
+    chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"
     startFeed(state)
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
     if chat.proposalUserID != state.userId {
       chat.proposalUserID = state.userId
       chat.applyRows()
     }
-    chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"
     chat.setNavigationTitle(session.title)
     let tabs = DirectoryTabs.sessions(current: session, all: state.catalog.sessions)
     chat.setDirectoryTabs("", symbol: "")
@@ -318,9 +321,11 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     chat.setTabClosed(false)
     renderComposer(session, state)
     renderPermission()
+    chat.transcriptLive = state.status == "live"
     chat.setEmptyText(String(localized: String.LocalizationValue(state.status == "live" ? "chat.empty.prompt" : "chat.empty.loading"), bundle: .lody))
     guard state.entriesJSON != renderedEntries else {
       if pagingChanged { chat.scheduleUpdate() }
+      if state.status == "live" { chat.scrollToTargetTurn() }
       return
     }
     renderedEntries = state.entriesJSON
@@ -329,6 +334,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     updateDetails(state.entriesJSON)
     chat.setEntries(state.entriesJSON, animate: state.isLiveUpdate)
     chat.scheduleUpdate()
+  }
+
+  func scrollToTurn(_ turnId: String) {
+    chat.targetTurnID = turnId
   }
 
   private func projectName(_ session: SessionItem, catalog: SessionCatalog) -> String {

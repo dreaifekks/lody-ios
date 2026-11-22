@@ -35,7 +35,7 @@ final class MessageLinksPreviewController: SessionController {
       }, reconnect: { _ in }, cached: { _, _, _ in envelope }),
       environment: environment,
       messageLinks: .init(isLAN: { scenario != "cloud-localhost" },
-        openSession: { id, _, controller in fixture.record("session", id, from: controller) },
+        openSession: { id, turnId, _, controller in fixture.record("session", turnId.map { "\(id)#\($0)" } ?? id, from: controller) },
         openURL: { url in fixture.record("url", url.absoluteString) },
         openFile: { id, path, line, controller in fixture.record("file", "\(id):\(path):\(line)", from: controller) },
         notice: { text, controller in fixture.record("notice", text, from: controller) }))
@@ -116,6 +116,7 @@ private final class MessageLinksFixture {
     self.scenario = scenario
     let samples: [String: String] = [
       "session": "lody://session/target?workspace=links_ws",
+      "turn": "lody://session/target?workspace=links_ws&turn=assistant:inbox:completion:12",
       "legacy": "session://target",
       "streaming": "session://target",
       "tab": "[Legacy tab](lody://session/base?workspace=links_ws&tab=tab)",
@@ -157,7 +158,10 @@ private final class MessageLinksFixture {
 
   var state: SessionListState {
     SessionListState(userId: "links-user", workspaceId: "links_ws", catalog: SessionCatalog(
-      sessions: [SessionItem(id: "origin", title: "Message links", machineId: scenario == "nohost" ? "missing-machine" : "machine-b"),
+      sessions: [SessionItem(id: "origin", title: "Message links",
+        machineId: scenario == "nohost" ? "missing-machine" : "machine-b",
+        cliType: scenario.hasPrefix("process") ? "builtin" : "",
+        agentType: scenario.hasPrefix("process") ? "deepseek" : ""),
         SessionItem(id: "target", title: "Target"), SessionItem(id: "base", title: "Base"), SessionItem(id: "tab", title: "Tab"),
         SessionItem(id: "different-id", title: "missing")],
       machineTerminals: ["machine-a": .init(host: "192.0.2.10", port: 9000), "machine-b": .init(host: "192.0.2.42", port: 9000)]))

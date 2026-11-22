@@ -105,6 +105,37 @@ public enum LanSessionFiles {
     return destination
   }
 
+  /// Fetches a local-first image kept on the execution machine under
+  /// `fileId = "image-<localImageId>"` (`session-file-blob-store.ts`).
+  public static func downloadLocalImage(invite: LanInvite, machine: Machine, session: String,
+                                        localImageId: String, fileName: String,
+                                        sizeBytes: Int?, directory: URL) async throws -> URL {
+    let maxImageBytes = 20 * 1024 * 1024
+    guard !session.isEmpty, UUID(uuidString: localImageId) != nil else {
+      throw SessionAttachments.error(String(localized: "native.attachment.error.invalid", bundle: .lody))
+    }
+    if let sizeBytes {
+      guard sizeBytes > 0 else {
+        throw SessionAttachments.error(String(localized: "native.attachment.error.invalid", bundle: .lody))
+      }
+      guard sizeBytes <= maxImageBytes else {
+        throw SessionAttachments.error(String(localized: "native.attachment.error.tooLarge", bundle: .lody))
+      }
+    }
+    let channel = try channel(invite: invite, machine: machine)
+    defer { channel.close() }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let destination = directory.appendingPathComponent(LanFileProtocol.headerFileName(fileName))
+    do {
+      try await channel.open()
+      try await channel.read(sessionId: session, fileId: "image-\(localImageId)", sizeBytes: sizeBytes,
+                             sha256: nil, maxBytes: maxImageBytes, to: destination)
+    } catch let failure as LanFileChannel.Failure {
+      throw SessionAttachments.error(String.localizedStringWithFormat(String(localized: "native.attachment.error.lanRead", bundle: .lody), machine.name, failure.message))
+    }
+    return destination
+  }
+
   private static func channel(invite: LanInvite, machine: Machine) throws -> LanFileChannel {
     guard let endpoint = machine.endpoint, machine.takesFiles else {
       throw SessionAttachments.error(String.localizedStringWithFormat(String(localized: "native.attachment.error.lanMachine", bundle: .lody), machine.name))

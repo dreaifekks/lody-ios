@@ -204,6 +204,24 @@ reader.close()
 let fetchedBytes = try Data(contentsOf: fetched)
 check(fetchedBytes == photoBytes)
 
+// Local-first images kept at `image-<localImageId>` read back without a precomputed sha256.
+let localImageId = "11111111-2222-4333-8444-555555555555"
+let localImageBytes = Data("local-image-png-bytes".utf8)
+member.kept["image-\(localImageId)"] = localImageBytes
+let localReader = channel()
+try await localReader.open()
+let fetchedLocal = directory.appendingPathComponent("local.png")
+try await localReader.read(sessionId: "s1", fileId: "image-\(localImageId)", sizeBytes: nil, sha256: nil, maxBytes: 20 * 1024 * 1024, to: fetchedLocal)
+localReader.close()
+let fetchedLocalBytes = try Data(contentsOf: fetchedLocal)
+check(fetchedLocalBytes == localImageBytes)
+let oversizeLocal = await failure {
+  let link = channel(); defer { link.close() }
+  try await link.open()
+  try await link.read(sessionId: "s1", fileId: "image-\(localImageId)", sizeBytes: nil, sha256: nil, maxBytes: 4, to: directory.appendingPathComponent("oversize.png"))
+}
+check(oversizeLocal?.code == "invalid_file", "\(String(describing: oversizeLocal))")
+
 // Damaged bytes are refused and removed; a missing file is the member's refusal.
 let damaged = directory.appendingPathComponent("damaged")
 let broken = await failure {

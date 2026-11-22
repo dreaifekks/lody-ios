@@ -4,6 +4,57 @@ public enum CreateLogic {
   public static let chatTarget = "chat"
   public static let fullAccessModes = ["agent-full-access", "danger-full-access", "bypassPermissions", "yolo", "always-approve"]
 
+  /// Permission tier matching Lody's shared `permission-tier.ts`.
+  public enum PermissionTier: String, Equatable, Sendable {
+    case ask
+    case edit
+    case auto
+    case full
+  }
+
+  private static let modeTiers: [String: PermissionTier] = [
+    // Claude Code
+    "default": .ask,
+    "plan": .ask,
+    "acceptEdits": .edit,
+    "auto": .auto,
+    "dontAsk": .full,
+    "bypassPermissions": .full,
+    // Codex
+    "agent": .ask,
+    "read-only": .ask,
+    "agent-auto-review": .auto,
+    "agent-full-access": .full,
+    "danger-full-access": .full,
+    // DeepSeek Harness
+    "workspace-write": .edit,
+    // Google Antigravity / agy CLI / Gemini / Kimi
+    "auto_edit": .edit,
+    "accept-edits": .edit,
+    "auto_review": .auto,
+    "yolo": .full,
+    // Grok
+    "ask": .ask,
+    "always-approve": .full,
+  ]
+
+  public static func permissionTier(for modeId: String?) -> PermissionTier? {
+    guard let modeId else { return nil }
+    return modeTiers[modeId.trimmingCharacters(in: .whitespacesAndNewlines)]
+  }
+
+  /// LAN fork: Lody's former Antigravity Auto Review (`auto_review`) was removed;
+  /// sessions, Roles and remembered choices saved with it run in agy's own `auto`.
+  public static func normalizedModeId(_ modeId: String?) -> String? {
+    guard let modeId else { return nil }
+    return modeId == "auto_review" ? "auto" : modeId
+  }
+
+  public static func normalizedConfigValue(_ value: ConfigValue?, optionId: String) -> ConfigValue? {
+    if optionId == "mode", value == .string("auto_review") { return .string("auto") }
+    return value
+  }
+
   // `lw_` is the LAN workspace identity, also present in the credential-free
   // Share catalog. No credential or network access is needed to resolve this policy.
   public static func typedBranch(_ query: String, workspaceId: String, listed: [String]) -> String? {
@@ -135,13 +186,13 @@ public enum CreateLogic {
     let selectors = (capability?.configOptions ?? []).filter { $0.type == "select" }
     var option = selectors.first { $0.id == "permission_mode" || $0.category == "_permission" }
     if option == nil, let modes = capability?.legacyModes ?? capability?.modes, !modes.isEmpty {
-      return (modes, choice.modeId, nil)
+      return (modes, normalizedModeId(choice.modeId), nil)
     }
     if option == nil {
       option = selectors.first { $0.category == "mode" && $0.id != "interaction_mode" && !isThoughtLevel($0) }
     }
     guard let option, !option.options.isEmpty else { return nil }
-    let selected = choice.configOptionValues?[option.id]
+    let selected = normalizedConfigValue(choice.configOptionValues?[option.id], optionId: option.id)
     let current = validConfigValue(option, selected) ? selected : option.currentValue
     var value: String?
     if case .string(let id) = current { value = id }
@@ -189,14 +240,14 @@ public enum CreateLogic {
     let remembered = prefs?.modelChoices?[modelKey(agentKey, modelId)]
     let saved = remembered ?? (legacy?.agentKey == agentKey && legacy?.modelId == modelId ? legacy?.choice : nil)
     let effort = saved?.effort.flatMap { effortsFor(capability, modelId: modelId).contains($0) ? $0 : nil }
-    var modeId = saved?.modeId
+    var modeId = normalizedModeId(saved?.modeId)
     if (remembered == nil && modeId == nil) || (modeId != nil && capability?.modes.contains { $0.id == modeId } != true) {
       modeId = capability?.modes.first { fullAccessModes.contains($0.id) }?.id
     }
     var values: [String: ConfigValue] = [:]
     // Mode config values selected by the composer must survive reopening too.
     for option in capability?.configOptions ?? [] where option.category != "model" && !isThoughtLevel(option) {
-      let value = saved?.configOptionValues?[option.id]
+      let value = normalizedConfigValue(saved?.configOptionValues?[option.id], optionId: option.id)
       if validConfigValue(option, value) { values[option.id] = value }
     }
     return ModelChoice(modelId: modelId, effort: effort, modeId: modeId, configOptionValues: values.isEmpty ? nil : values)
@@ -271,10 +322,10 @@ public enum CreateLogic {
   public static func applicableChoice(_ saved: ModelChoice, capability: Capability?) -> ModelChoice {
     let modelId = capability?.models.contains { $0.id == saved.modelId } == true ? saved.modelId : nil
     let effort = saved.effort.flatMap { effortsFor(capability, modelId: modelId).contains($0) ? $0 : nil }
-    let modeId = saved.modeId.flatMap { id in capability?.modes.contains { $0.id == id } == true ? id : nil }
+    let modeId = normalizedModeId(saved.modeId).flatMap { id in capability?.modes.contains { $0.id == id } == true ? id : nil }
     var values: [String: ConfigValue] = [:]
     for option in capability?.configOptions ?? [] where option.category != "model" && !isThoughtLevel(option) {
-      let value = saved.configOptionValues?[option.id]
+      let value = normalizedConfigValue(saved.configOptionValues?[option.id], optionId: option.id)
       if validConfigValue(option, value) { values[option.id] = value }
     }
     return ModelChoice(modelId: modelId, effort: effort, modeId: modeId, configOptionValues: values.isEmpty ? nil : values)

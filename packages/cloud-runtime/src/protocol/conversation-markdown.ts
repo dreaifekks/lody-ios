@@ -1263,13 +1263,15 @@ const sessionUri = new RegExp(
   'gu',
 );
 const LINK_ID = /^[A-Za-z0-9_-]+$/u;
+const TURN_ID = /^[A-Za-z0-9_.:-]+$/u;
 
-/** Web `parseSessionLink` + `buildSessionLink`: one portable `lody://session/<id>?workspace=` form. */
+/** Web `parseSessionLink` + `buildSessionLink`: one portable `lody://session/<id>?workspace=&turn=` form. */
 function portableSessionLink(raw: string, workspaceId?: string): string | null {
   if (raw.length > 8192 || /[\s\\%]/u.test(raw)) return null;
   const legacy = /^session:\/\/([A-Za-z0-9_-]+)\/?$/u.exec(raw);
   let sessionId: string | undefined;
   let workspace: string | undefined;
+  let turnId: string | undefined;
   if (legacy) sessionId = legacy[1];
   else {
     if (!/^[a-zA-Z.-]+:\/\/session\/[A-Za-z0-9_-]+(?:\?[^#]*)?$/u.test(raw))
@@ -1288,10 +1290,23 @@ function portableSessionLink(raw: string, workspaceId?: string): string | null {
     sessionId = tab && LINK_ID.test(tab) ? tab : id;
     const ws = url.searchParams.get('workspace');
     if (ws && LINK_ID.test(ws)) workspace = ws;
+    const turn = url.searchParams.get('turn');
+    if (
+      turn &&
+      url.searchParams.getAll('turn').length === 1 &&
+      TURN_ID.test(turn)
+    )
+      turnId = turn;
   }
   workspace ??=
     workspaceId && LINK_ID.test(workspaceId) ? workspaceId : undefined;
-  return `lody://session/${sessionId}${workspace ? `?workspace=${workspace}` : ''}`;
+  const search = [
+    workspace ? `workspace=${workspace}` : '',
+    turnId ? `turn=${turnId}` : '',
+  ]
+    .filter(Boolean)
+    .join('&');
+  return `lody://session/${sessionId}${search ? `?${search}` : ''}`;
 }
 
 /**

@@ -99,8 +99,10 @@ export function mentionPrompt(item: MentionItem, workspaceId?: string): string {
   if (item.kind === 'role') {
     const [id, machineId, targetId] = item.path.split('@');
     const name = item.roleName ?? item.name;
+    if (targetId && machineId)
+      return `[Agent Role: ${name} (agentRoleId: ${id}, agentRoleMachineId: ${machineId}, agentRoleInstanceId: ${targetId})]`;
     if (targetId)
-      return `use lody mcp to create a session with agent role[id: ${id}, agentRoleMachineId: ${machineId}, agentRoleInstanceId: ${targetId}, name: ${name}]`;
+      return `[Agent Role: ${name} (agentRoleId: ${id}, agentRoleInstanceId: ${targetId})]`;
     if (machineId)
       return `[Agent Role: ${name} (agentRoleId: ${id}, agentRoleMachineId: ${machineId})]`;
     return `[Agent Role: ${name} (agentRoleId: ${id})]`;

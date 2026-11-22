@@ -452,6 +452,16 @@ test('a LAN Role retains same-machine v2 target identities in mentions', () => {
   );
   assert.equal(
     mentions.expandMentionText('@role:review@mac@sol', items),
-    'use lody mcp to create a session with agent role[id: review, agentRoleMachineId: mac, agentRoleInstanceId: sol, name: Review]',
+    '[Agent Role: Review (agentRoleId: review, agentRoleMachineId: mac, agentRoleInstanceId: sol)]',
+  );
+  assert.equal(
+    mentions.mentionPrompt({
+      kind: 'role',
+      name: 'Review · Sol',
+      roleName: 'Review',
+      path: 'review@@sol',
+      insertText: '@role:review@@sol',
+    }),
+    '[Agent Role: Review (agentRoleId: review, agentRoleInstanceId: sol)]',
   );
 });

@@ -83,15 +83,21 @@ final class LanFileChannel: @unchecked Sendable {
     } onCancel: { close() }
   }
 
-  /// Writes a file the member keeps to `destination`, which must not exist,
-  /// once its size and digest are those of the block. A damaged file is removed.
-  func read(sessionId: String, fileId: String, sizeBytes: Int, sha256: String, to destination: URL,
+  /// Writes a file the member keeps to `destination`, which must not exist.
+  /// When `sizeBytes` or `sha256` is supplied, verifies an exact match;
+  /// otherwise verifies the announced byte count up to `maxBytes`. A damaged
+  /// or incomplete file is removed.
+  func read(sessionId: String, fileId: String, sizeBytes: Int? = nil, sha256: String? = nil,
+            maxBytes: Int = LanFileProtocol.maxSize, to destination: URL,
             onProgress: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }) async throws {
     try await withTaskCancellationHandler {
       try await member.writeLine(["type": "read", "sessionId": sessionId, "fileId": fileId])
       let answer = try await readAnswer()
       guard answer["type"] as? String == "content", let size = answer["sizeBytes"] as? Int else { throw Self.unexpected }
-      guard size == sizeBytes, size > 0, size <= LanFileProtocol.maxSize else {
+      if let expectedSize = sizeBytes, size != expectedSize {
+        throw Failure(code: "invalid_file", message: "the machine keeps another file under that name")
+      }
+      guard size > 0, size <= maxBytes, size <= LanFileProtocol.maxSize else {
         throw Failure(code: "invalid_file", message: "the machine keeps another file under that name")
       }
       guard !FileManager.default.fileExists(atPath: destination.path),
@@ -109,13 +115,15 @@ final class LanFileChannel: @unchecked Sendable {
       while received < Int64(size) {
         try Task.checkCancellation()
         let chunk = try await member.readChunk(limit: size - Int(received))
-        hash.update(data: chunk)
+        if sha256 != nil { hash.update(data: chunk) }
         try handle.write(contentsOf: chunk)
         received += Int64(chunk.count)
         onProgress(received, Int64(size))
       }
-      guard Self.hex(hash.finalize()) == sha256.lowercased() else {
-        throw Failure(code: "invalid_file", message: "the file arrived damaged")
+      if let expectedDigest = sha256 {
+        guard Self.hex(hash.finalize()) == expectedDigest.lowercased() else {
+          throw Failure(code: "invalid_file", message: "the file arrived damaged")
+        }
       }
       complete = true
     } onCancel: { close() }

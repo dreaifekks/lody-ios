@@ -1125,3 +1125,83 @@ for (const deliveryStarted of [false, true]) {
     }
   });
 }
+
+test('downloadFileChunk sends file/download-chunk with attachment and revision and validates error codes', async () => {
+  const attachment = {
+    type: 'local_attachment',
+    machineId: 'm1',
+    path: '/Users/dev/notes.txt',
+    kind: 'file',
+    fileName: 'notes.txt',
+    mimeType: 'text/plain',
+    sizeBytes: 10,
+  };
+  const revision = 'a'.repeat(64);
+  const calls = machine(async (method, params) => {
+    assert.equal(method, 'file/download-chunk');
+    assert.deepEqual(params.attachment, attachment);
+    if (params.offset === 0) {
+      return {
+        result: {
+          status: 'ok',
+          path: 'notes.txt',
+          revision,
+          sizeBytes: 10,
+          offset: 0,
+          data: Buffer.from('hello').toString('base64'),
+        },
+      };
+    }
+    if (params.revision === 'b'.repeat(64)) {
+      return { result: { status: 'error', code: 'file_changed' } };
+    }
+    return {
+      result: {
+        status: 'ok',
+        path: 'notes.txt',
+        revision,
+        sizeBytes: 10,
+        offset: 5,
+        data: Buffer.from('world').toString('base64'),
+      },
+    };
+  });
+
+  const first = await runtime.downloadFileChunk(ctx(), {
+    sessionId: 's1',
+    path: attachment.path,
+    attachment,
+    offset: 0,
+  });
+  assert.equal(first.status, 'ok');
+  assert.equal(first.revision, revision);
+  assert.equal(Buffer.from(first.data, 'base64').toString('utf8'), 'hello');
+
+  const second = await runtime.downloadFileChunk(ctx(), {
+    sessionId: 's1',
+    path: attachment.path,
+    attachment,
+    offset: 5,
+    revision,
+  });
+  assert.equal(second.status, 'ok');
+  assert.equal(Buffer.from(second.data, 'base64').toString('utf8'), 'world');
+
+  const changed = await runtime.downloadFileChunk(ctx(), {
+    sessionId: 's1',
+    path: attachment.path,
+    attachment,
+    offset: 5,
+    revision: 'b'.repeat(64),
+  });
+  assert.deepEqual(changed, { status: 'error', code: 'file_changed' });
+
+  const missingRevision = await runtime.downloadFileChunk(ctx(), {
+    sessionId: 's1',
+    path: attachment.path,
+    attachment,
+    offset: 5,
+  });
+  assert.deepEqual(missingRevision, { status: 'error', code: 'invalid_path' });
+  assert.equal(calls.length, 3);
+});

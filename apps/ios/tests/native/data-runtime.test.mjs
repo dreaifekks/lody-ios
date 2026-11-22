@@ -165,6 +165,9 @@ test('persistent runtime applies live increments to the existing replica and adv
                 status: 'error', path: args.path,
                 code: ctx.ownerSessionId, message: args.sessionId,
               });
+              export const downloadFileChunk = () => ({
+                status: 'error', code: 'unsupported_protocol',
+              });
               export const fileDiff = (ctx, args) => ({
                 status: 'unavailable', base: 'current', path: args.path,
                 reason: ctx.ownerSessionId, message: args.sessionId,

@@ -9,6 +9,9 @@ function inputBlock(item: RecordValue): RecordValue {
   const fields: Record<string, string[]> = {
     image: [
       'imageId',
+      'transport',
+      'machineId',
+      'localImageId',
       'mimeType',
       'fileName',
       'sizeBytes',
@@ -28,6 +31,14 @@ function inputBlock(item: RecordValue): RecordValue {
       'machineId',
       'uploadedAt',
       'storageSessionId',
+    ],
+    local_attachment: [
+      'machineId',
+      'path',
+      'kind',
+      'fileName',
+      'mimeType',
+      'sizeBytes',
     ],
     comment_reference: [
       'source',
@@ -65,8 +76,27 @@ function inputBlock(item: RecordValue): RecordValue {
  * the machine that runs the session keeps them (`transport: 'local'`).
  */
 export function isAttachmentBlock(block: RecordValue): boolean {
-  if (!block || !['image', 'file'].includes(block.type)) return false;
-  const id = block[block.type === 'image' ? 'imageId' : 'fileId'];
+  if (!block || !['image', 'file', 'local_attachment'].includes(block.type))
+    return false;
+  if (block.type === 'local_attachment') {
+    return (
+      typeof block.machineId === 'string' &&
+      block.machineId.length > 0 &&
+      typeof block.path === 'string' &&
+      block.path.trim().length > 0 &&
+      (block.kind === 'file' || block.kind === 'image') &&
+      typeof block.fileName === 'string' &&
+      block.fileName.trim().length > 0 &&
+      typeof block.mimeType === 'string' &&
+      block.mimeType.trim().length > 0 &&
+      Number.isInteger(block.sizeBytes) &&
+      block.sizeBytes >= 0
+    );
+  }
+  const id =
+    block.type === 'image'
+      ? (block.imageId ?? block.localImageId)
+      : block.fileId;
   if (
     typeof id !== 'string' ||
     !id ||
@@ -99,12 +129,21 @@ export function validAttachmentBlocks(
     blocks.some((block) => !isAttachmentBlock(block))
   )
     return false;
-  const limit = blocks.some((block) => block.transport === 'local') ? 8 : 16;
-  return (
-    blocks.length <= limit &&
-    blocks.filter((block) => block.type === 'image').length <= 8 &&
-    blocks.filter((block) => block.type === 'file').length <= 8
+  const isLocal = blocks.some(
+    (block) => block.transport === 'local' || block.type === 'local_attachment',
   );
+  const limit = isLocal ? 8 : 16;
+  const imageCount = blocks.filter(
+    (block) =>
+      block.type === 'image' ||
+      (block.type === 'local_attachment' && block.kind === 'image'),
+  ).length;
+  const fileCount = blocks.filter(
+    (block) =>
+      block.type === 'file' ||
+      (block.type === 'local_attachment' && block.kind === 'file'),
+  ).length;
+  return blocks.length <= limit && imageCount <= 8 && fileCount <= 8;
 }
 
 export function editableUserTurn(
@@ -148,19 +187,27 @@ export function editableUserTurn(
   return turn;
 }
 
-export function editAttachments(
-  turn: RecordValue,
-): (RecordValue & { type: 'image' | 'file'; editId: string })[] {
+export type EditableAttachmentBlock =
+  | (RecordValue & { type: 'image'; editId: string })
+  | (RecordValue & { type: 'file'; editId: string })
+  | (RecordValue & { type: 'local_attachment'; editId: string });
+
+export function editAttachments(turn: RecordValue): EditableAttachmentBlock[] {
   return (turn.items ?? [])
     .flatMap((item: RecordValue) => {
       if (item.type === 'image_group') return item.images ?? [];
-      if (item.type === 'image' || item.type === 'file') return [item];
+      if (
+        item.type === 'image' ||
+        item.type === 'file' ||
+        item.type === 'local_attachment'
+      )
+        return [item];
       return [];
     })
     .map((item: RecordValue, index: number) => ({
       ...inputBlock({ ...item, type: item.type ?? 'image' }),
       editId: `original:${index}`,
-    }));
+    })) as EditableAttachmentBlock[];
 }
 
 export function replacementInput(

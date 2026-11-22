@@ -368,3 +368,110 @@ export async function readFile(
     bytes: response.sizeBytes,
   };
 }
+
+export const FILE_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024;
+export const FILE_DOWNLOAD_CHUNK_BYTES = 512 * 1024;
+
+export type LocalAttachmentDownloadRef = {
+  type: 'local_attachment';
+  machineId: string;
+  path: string;
+  kind: 'file' | 'image';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export type DownloadFileChunkResult =
+  | {
+      status: 'ok';
+      path: string;
+      revision: string;
+      sizeBytes: number;
+      offset: number;
+      data: string;
+    }
+  | { status: 'error'; code: string };
+
+/**
+ * Reads one bounded chunk (up to 512 KiB) of a file or local attachment through
+ * Machine RPC `file/download-chunk`. Callers loop from `offset: 0` and pass the
+ * returned `revision` on every subsequent chunk (`offset > 0`).
+ */
+export async function downloadFileChunk(
+  ctx: FileContext,
+  args: {
+    sessionId: string;
+    path: string;
+    attachment?: LocalAttachmentDownloadRef;
+    offset: number;
+    revision?: string;
+  },
+): Promise<DownloadFileChunkResult> {
+  if (
+    !Number.isInteger(args.offset) ||
+    args.offset < 0 ||
+    args.offset > FILE_DOWNLOAD_MAX_BYTES ||
+    (args.offset > 0 && !args.revision)
+  ) {
+    return { status: 'error', code: 'invalid_path' };
+  }
+  const attachment = args.attachment
+    ? {
+        type: 'local_attachment' as const,
+        machineId: args.attachment.machineId,
+        path: args.attachment.path,
+        kind: args.attachment.kind,
+        fileName: args.attachment.fileName,
+        mimeType: args.attachment.mimeType,
+        sizeBytes: args.attachment.sizeBytes,
+      }
+    : undefined;
+  const payload = {
+    sessionId: args.sessionId,
+    path: args.path,
+    ...(attachment ? { attachment } : {}),
+    offset: args.offset,
+    ...(args.revision !== undefined ? { revision: args.revision } : {}),
+  };
+  const response = (await sealedRpc(
+    ctx.workspaceId,
+    ctx.machineId,
+    'file/download-chunk',
+    ctx.ownerSessionId,
+    payload,
+    ctx.getGrant,
+    ctx.signal,
+  )) as DownloadFileChunkResult;
+  if (!response || typeof response !== 'object') {
+    return { status: 'error', code: 'transient_io' };
+  }
+  if (response.status !== 'ok') {
+    const code =
+      typeof response.code === 'string' && response.code
+        ? response.code
+        : 'transient_io';
+    return { status: 'error', code };
+  }
+  if (
+    typeof response.path !== 'string' ||
+    typeof response.revision !== 'string' ||
+    !response.revision ||
+    !Number.isInteger(response.sizeBytes) ||
+    response.sizeBytes < 0 ||
+    response.sizeBytes > FILE_DOWNLOAD_MAX_BYTES ||
+    !Number.isInteger(response.offset) ||
+    response.offset !== args.offset ||
+    typeof response.data !== 'string'
+  ) {
+    return { status: 'error', code: 'decode_error' };
+  }
+  return {
+    status: 'ok',
+    path: response.path,
+    revision: response.revision,
+    sizeBytes: response.sizeBytes,
+    offset: response.offset,
+    data: response.data,
+  };
+}

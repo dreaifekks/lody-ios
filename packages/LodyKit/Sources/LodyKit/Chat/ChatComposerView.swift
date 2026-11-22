@@ -2018,12 +2018,12 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       switch mode.id {
       case "agent", "default": icon = .permissionDefault
       case "read-only": icon = .eye
-      case "acceptEdits": icon = .edit
+      case "acceptEdits", "accept-edits": icon = .edit
       case "plan": icon = .permissionPlan
       case "agent-full-access", "danger-full-access", "dontAsk", "bypassPermissions", "yolo", "always-approve":
         icon = .permissionWarning
         tint = LodyUIColor.warningDefault
-      case "auto", "agent-auto-review":
+      case "auto", "auto_review", "agent-auto-review":
         icon = nil
         title.append(dot)
         title.append(NSAttributedString(string: "Auto", attributes: [.foregroundColor: tint]))

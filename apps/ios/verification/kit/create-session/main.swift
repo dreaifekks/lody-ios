@@ -423,3 +423,22 @@ do {
   check(reset.configOptionValues?["fast"] == .bool(false), "Combined reset also resets Fast")
   check(reset.modeId == "ask" && reset.configOptionValues?["verbosity"] == .string("detailed"), "Unrelated options survive a reset")
 }
+
+// Antigravity legacy auto_review normalization and agy permission tiers.
+do {
+  let agyModes = [
+    CapabilityChoice(id: "default", name: "Default"),
+    CapabilityChoice(id: "accept-edits", name: "Accept Edits"),
+    CapabilityChoice(id: "auto", name: "Auto"),
+    CapabilityChoice(id: "yolo", name: "YOLO"),
+  ]
+  let modeOption = ConfigOption(id: "mode", name: "Mode", category: "mode", type: "select", currentValue: .string("default"), options: agyModes)
+  let agyCap = Capability(machineId: "m1", cliType: "registry", agentType: "antigravity-acp", models: [], modes: agyModes, legacyModes: [], reasoningEfforts: [:], configOptions: [modeOption])
+  let legacyChoice = ModelChoice(modeId: "auto_review", configOptionValues: ["mode": .string("auto_review")])
+  check(CreateLogic.permissionMode(agyCap, legacyChoice)?.value == "auto", "legacy auto_review normalizes to auto in configOptions")
+  let applicable = CreateLogic.applicableChoice(legacyChoice, capability: agyCap)
+  check(applicable.modeId == "auto" && applicable.configOptionValues?["mode"] == .string("auto"), "applicableChoice migrates auto_review to auto")
+  check(CreateLogic.permissionTier(for: "accept-edits") == .edit, "agy accept-edits maps to edit tier")
+  check(CreateLogic.permissionTier(for: "yolo") == .full, "agy yolo maps to full tier")
+  check(CreateLogic.permissionTier(for: "auto") == .auto && CreateLogic.permissionTier(for: "auto_review") == .auto, "auto and auto_review map to auto tier")
+}

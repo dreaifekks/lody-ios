@@ -398,27 +398,28 @@ extension CreateSessionForm {
     for (key, value) in pinned?.configOptionValues ?? [:] {
       switch value {
       case .string(let text) where key == effortKey: effort = text
-      case .string(let text): options[key] = .string(text)
+      case .string(let text): options[key] = CreateLogic.normalizedConfigValue(.string(text), optionId: key)
       case .bool(let flag): options[key] = .bool(flag)
       default: continue
       }
     }
-    return ModelChoice(modelId: pinned?.modelId, effort: effort, modeId: pinned?.modeId, configOptionValues: options.isEmpty ? nil : options)
+    return ModelChoice(modelId: pinned?.modelId, effort: effort, modeId: CreateLogic.normalizedModeId(pinned?.modeId), configOptionValues: options.isEmpty ? nil : options)
   }
 
   /// Runtime `roleRunConfigApplied` on the composer's choice: unpinned values are the agent's
   /// own, and independent Plan toggles keep the Role.
   static func applied(_ pinned: RuntimeContract.AgentRoleItemTargetsItemRunConfig?, to choice: ModelChoice, effortId: String?) -> Bool {
     guard let pinned else { return true }
-    if let mode = pinned.modeId, choice.modeId != mode { return false }
+    if let mode = CreateLogic.normalizedModeId(pinned.modeId), CreateLogic.normalizedModeId(choice.modeId) != mode { return false }
     if let model = pinned.modelId, choice.modelId != model { return false }
     let effortKey = effortId ?? "reasoning_effort"
-    for (key, value) in pinned.configOptionValues ?? [:] {
+    for (key, rawValue) in pinned.configOptionValues ?? [:] {
+      let value: RuntimeContract.JSONValue = key == "mode" && rawValue == .string("auto_review") ? .string("auto") : rawValue
       let selected: RuntimeContract.JSONValue?
       if key == effortKey {
         selected = choice.effort.map { .string($0) }
       } else {
-        switch choice.configOptionValues?[key] {
+        switch CreateLogic.normalizedConfigValue(choice.configOptionValues?[key], optionId: key) {
         case .string(let text): selected = .string(text)
         case .bool(let flag): selected = .bool(flag)
         case nil: selected = nil

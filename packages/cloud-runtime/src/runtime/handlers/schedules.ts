@@ -7,6 +7,10 @@ import type {
   ScheduleRule,
 } from '../../contract/schedules.ts';
 import {
+  migrateLegacyAntigravityModeId,
+  migrateLegacyAntigravityModeOption,
+} from '../../protocol/capability.ts';
+import {
   SCHEDULES_PROMPT_PROTOCOL_VERSION,
   applyScheduleRecurrence,
   describeScheduleState,
@@ -355,7 +359,9 @@ export function registerSchedules(ctx: RuntimeContext) {
       ...(definition.agent.modelId
         ? { modelId: definition.agent.modelId }
         : {}),
-      ...(definition.agent.modeId ? { modeId: definition.agent.modeId } : {}),
+      ...(definition.agent.modeId
+        ? { modeId: migrateLegacyAntigravityModeId(definition.agent.modeId) }
+        : {}),
       ...(wire ? { project: wire } : {}),
     };
   });
@@ -473,10 +479,16 @@ export function draftInput(
   const agent = {
     ...(sameAgent && prior?.agent.memory ? { memory: prior.agent.memory } : {}),
     agentConfigId: draft.agentConfigId,
-    ...(draft.modeId ? { modeId: draft.modeId } : {}),
+    ...(draft.modeId
+      ? { modeId: migrateLegacyAntigravityModeId(draft.modeId) }
+      : {}),
     ...(draft.modelId ? { modelId: draft.modelId } : {}),
     ...(sameAgent && prior?.agent.configOptionValues
-      ? { configOptionValues: prior.agent.configOptionValues }
+      ? {
+          configOptionValues: migrateLegacyAntigravityModeOption(
+            prior.agent.configOptionValues,
+          ),
+        }
       : {}),
   };
   let destination: ScheduleDestination;

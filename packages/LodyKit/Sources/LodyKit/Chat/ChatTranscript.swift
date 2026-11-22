@@ -122,9 +122,26 @@ struct ChatImage: Codable, Equatable, Sendable {
   let storageSessionId: String?
   let width: Double?
   let height: Double?
+  var transport: String? = nil
   var machineId: String? = nil
+  var localImageId: String? = nil
   var sha256: String? = nil
   var sizeBytes: Int? = nil
+  var mimeType: String? = nil
+
+  /// True for images served over the LAN `files` channel (either legacy kept
+  /// file blocks with `sha256` or local-first `image` blocks with `localImageId`).
+  var isLANKept: Bool {
+    if sha256 != nil, machineId != nil { return true }
+    return transport == "local" && localImageId != nil
+  }
+
+  /// Stable disk/notification key inside `LanImageCache`.
+  var lanCacheKey: String? {
+    if let sha256 { return sha256.lowercased() }
+    if transport == "local", let localImageId { return "local-\(localImageId.lowercased())" }
+    return nil
+  }
 }
 
 struct ChatMessageAttachment: Decodable, Equatable, Sendable {
@@ -139,6 +156,12 @@ struct ChatMessageAttachment: Decodable, Equatable, Sendable {
   var mimeType: String? = nil
   var machineId: String? = nil
   var sha256: String? = nil
+  var path: String? = nil
+  var kind: String? = nil
+
+  var isLocalAttachment: Bool {
+    transport == "local_attachment" && path != nil && machineId != nil
+  }
 
   /// A LAN keeps a message's pictures as files; one an agent reads, small
   /// enough to fetch on sight, shows as the picture.
@@ -148,7 +171,7 @@ struct ChatMessageAttachment: Decodable, Equatable, Sendable {
           ["image/png", "image/jpeg", "image/webp", "image/gif"].contains(mimeType ?? "") else { return self }
     var picture = self
     picture.image = ChatImage(id: id, fileName: fileName, storageSessionId: storageSessionId, width: nil, height: nil,
-                              machineId: machineId, sha256: sha256, sizeBytes: sizeBytes)
+                              transport: transport, machineId: machineId, sha256: sha256, sizeBytes: sizeBytes, mimeType: mimeType)
     return picture
   }
 }
@@ -335,7 +358,7 @@ struct ChatItem: Decodable {
   var file: ChatMessageAttachment? = nil
   var images: [ChatImage]? = nil
   var isImage: Bool { type == "image" || type == "image_group" }
-  var isAttachment: Bool { isImage || type == "file" }
+  var isAttachment: Bool { isImage || type == "file" || type == "local_attachment" }
 }
 
 struct ChatSubagentRun: Decodable {
@@ -761,9 +784,16 @@ struct ChatTranscript {
         var result: [ChatRow] = []
         let attachments = entry.items.compactMap { item -> ChatMessageAttachment? in
           if let image = item.image, item.type == "image" {
-            return ChatMessageAttachment(id: image.id, fileName: image.fileName, image: image)
+            return ChatMessageAttachment(
+              id: image.id, fileName: image.fileName, image: image,
+              storageSessionId: image.storageSessionId, transport: image.transport,
+              sizeBytes: image.sizeBytes, mimeType: image.mimeType,
+              machineId: image.machineId, sha256: image.sha256
+            )
           }
-          return item.type == "file" ? item.file?.shownAsImage : nil
+          if item.type == "file" { return item.file?.shownAsImage }
+          if item.type == "local_attachment" { return item.file }
+          return nil
         }
         if !attachments.isEmpty {
           result.append(ChatRow(id: entry.id + ":user", entryID: entry.id, kind: "attachments", text: "", attachments: attachments))
@@ -1011,16 +1041,17 @@ struct ChatTranscript {
           row.kind = "orchestration"
           row.symbol = "person.crop.rectangle"
           row.text = Self.roleProposal(item.meta)
-        case "file":
+        case "file", "local_attachment":
           guard let file = item.file else { continue }
-          if let image = file.shownAsImage.image {
+          if item.type == "file", let image = file.shownAsImage.image {
             result.append(ChatRow(id: entry.id + ":" + item.itemId + ":image:0",
               entryID: entry.id, kind: "image", text: "", itemID: item.itemId, image: image))
             continue
           }
+          row.kind = "file"
           row.file = file
           row.text = file.fileName
-          row.symbol = "doc"
+          row.symbol = file.kind == "image" ? "photo" : "doc"
           row.actionable = true
         case "proposed_plan":
           row.text = item.markdown ?? ""

@@ -1,5 +1,10 @@
 // Lody agent-role.ts: v1 inline / fork instances and v2 targets wire shapes.
 // Keep the stored row intact: mobile edits shared metadata, not run configuration.
+import {
+  migrateLegacyAntigravityModeId,
+  migrateLegacyAntigravityModeOption,
+} from './capability.ts';
+
 type RecordValue = Record<string, unknown>;
 export const record = (value: unknown): value is RecordValue =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -171,7 +176,8 @@ export type RoleRunConfig = {
 export function roleRunConfig(value: unknown): RoleRunConfig {
   if (!record(value)) return {};
   const modelId = typeof value.modelId === 'string' ? value.modelId.trim() : '';
-  const modeId = typeof value.modeId === 'string' ? value.modeId.trim() : '';
+  const rawModeId = typeof value.modeId === 'string' ? value.modeId.trim() : '';
+  const modeId = rawModeId ? migrateLegacyAntigravityModeId(rawModeId) : '';
   const options: Record<string, string | boolean> = {};
   if (record(value.configOptionValues))
     for (const [raw, entry] of Object.entries(value.configOptionValues)) {
@@ -180,11 +186,14 @@ export function roleRunConfig(value: unknown): RoleRunConfig {
       if (typeof entry === 'string' || typeof entry === 'boolean')
         options[key] = entry;
     }
+  const normalizedOptions = migrateLegacyAntigravityModeOption(options);
   const memory = record(value.memory) ? value.memory : undefined;
   return {
     ...(modelId ? { modelId } : {}),
     ...(modeId ? { modeId } : {}),
-    ...(Object.keys(options).length ? { configOptionValues: options } : {}),
+    ...(Object.keys(normalizedOptions).length
+      ? { configOptionValues: normalizedOptions }
+      : {}),
     ...(memory &&
     typeof memory.providerId === 'string' &&
     typeof memory.memoryId === 'string'
@@ -208,11 +217,24 @@ export function roleRunConfigApplied(
     configOptionValues?: Record<string, unknown>;
   },
 ): boolean {
-  if (pinned.modeId && selection.modeId !== pinned.modeId) return false;
+  const pinnedMode = pinned.modeId
+    ? migrateLegacyAntigravityModeId(pinned.modeId)
+    : undefined;
+  const selectedMode =
+    typeof selection.modeId === 'string'
+      ? migrateLegacyAntigravityModeId(selection.modeId)
+      : selection.modeId;
+  if (pinnedMode && selectedMode !== pinnedMode) return false;
   if (pinned.modelId && selection.modelId !== pinned.modelId) return false;
   const plan = (value: unknown) => value === 'plan' || value === 'default';
-  for (const [key, value] of Object.entries(pinned.configOptionValues ?? {})) {
-    const selected = selection.configOptionValues?.[key];
+  const pinnedOptions = pinned.configOptionValues
+    ? migrateLegacyAntigravityModeOption(pinned.configOptionValues)
+    : {};
+  const selectedOptions = selection.configOptionValues
+    ? migrateLegacyAntigravityModeOption(selection.configOptionValues)
+    : undefined;
+  for (const [key, value] of Object.entries(pinnedOptions)) {
+    const selected = selectedOptions?.[key];
     if (
       key === 'plan_mode' &&
       typeof value === 'boolean' &&

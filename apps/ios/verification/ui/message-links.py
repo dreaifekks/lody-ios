@@ -13,13 +13,13 @@ def probe(items=None):
 def enter(scenario):
     if probe():
         buttons = ui.wait(lambda items: [i for i in items
-            if i.get('AXUniqueId') == 'message-links-close' and i.get('type') == 'Button'
+            if i.get('AXUniqueId') in ('message-links-close', 'BackButton') and i.get('type') == 'Button'
             and i['frame']['height'] > 0
             and screen['y'] <= i['frame']['y'] + i['frame']['height'] / 2 < screen['y'] + screen['height']],
             'Missing fixture close button')
-        # The presenting chat stays visible above a half-height process sheet.
-        # Its bar item shares this fixture action; tap the foreground sheet's copy.
-        frame = max(buttons, key=lambda item: item['frame']['y'])['frame']
+        # The presenting chat owns BackButton and stays visible above a half-height
+        # process/subagent sheet; prefer the foreground sheet's message-links-close.
+        frame = max(buttons, key=lambda item: (item.get('AXUniqueId') == 'message-links-close', item['frame']['y']))['frame']
         ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.4')
         ui.wait(lambda items: not probe(items), 'Previous fixture did not close')
     ui.open_case('message-links-' + scenario)
@@ -37,11 +37,14 @@ def tap_target(href, expected, host='session'):
     # A later layout must not dispatch the same tap again.
     assert probe()['events'] == events
 
-for scenario, href in [('session', 'lody://session/target?workspace=links_ws'), ('legacy', 'session://target'), ('streaming', 'session://target'),
+for scenario, href in [('session', 'lody://session/target?workspace=links_ws'),
+                       ('turn', 'lody://session/target?workspace=links_ws&turn=assistant:inbox:completion:12'),
+                       ('legacy', 'session://target'), ('streaming', 'session://target'),
                        ('tab', 'lody://session/base?workspace=links_ws&tab=tab')]:
     enter(scenario)
     assert ui.element('links:body').get('custom_actions'), 'Session link has no VoiceOver action'
-    tap_target(href, ('session', 'tab' if scenario == 'tab' else 'target'))
+    expected_targets = {'tab': 'tab', 'turn': 'target#assistant:inbox:completion:12'}
+    tap_target(href, ('session', expected_targets.get(scenario, 'target')))
     ui.capture(scenario)
 
 for scenario, href in [('workspace', 'lody://session/target?workspace=other'),
@@ -76,11 +79,22 @@ for scenario in ['nohost', 'cloud-localhost']:
     tap_target('http://localhost:5173/', ('notice', 'This address is on the computer running the session, and that computer has no LAN address to reach it by'))
 
 systems = [('http', 'http://example.invalid/path?q=1#frag'), ('https', 'https://example.invalid/path?q=1#frag'),
-           ('file-url', 'file:///tmp/report%20one.md#L12'), ('tg', 'tg://resolve?domain=lody'),
+           ('tg', 'tg://resolve?domain=lody'),
            ('mailto', 'mailto:reader@example.invalid'), ('tel', 'tel:+15550100')]
-for scenario, href in systems + [('bare-' + name, href) for name, href in systems if name in ('file-url', 'tg', 'mailto', 'tel')]:
+for scenario, href in systems + [('bare-' + name, href) for name, href in systems if name in ('tg', 'mailto', 'tel')]:
     enter(scenario)
     tap_target(href, ('url', href), host='system')
+# Upstream ChatFileLink routes file:// paths on the session machine to the native file preview.
+for scenario in ('file-url', 'bare-file-url'):
+    enter(scenario)
+    tap_target('file:///tmp/report%20one.md#L12', ('file', 'origin:/tmp/report one.md:12'), host='session')
+
+def open_child(row, host):
+    if host == 'subagent':
+        ui.axe('tap', '--id', 'links:tasks', '--post-delay', '.4')
+        ui.element(row)
+    ui.axe('tap', '--id', row)
+    ui.wait(lambda items: probe(items).get('host') == host, 'Child transcript did not open: ' + host)
 
 for scenario, row, host, href, expected in [
     ('process', 'links:process', 'process', 'session://target', ('session', 'target')),
@@ -88,18 +102,16 @@ for scenario, row, host, href, expected in [
     ('process-file', 'links:process', 'process', 'src/child.swift:4', ('file', 'origin:src/child.swift:4')),
     ('subagent-file', 'links:task', 'subagent', 'src/child.swift:4', ('file', 'origin:src/child.swift:4')),
     ('process-url', 'links:process', 'process', 'http://localhost:5173/a%20b?x=1&y=2#frag', ('url', rewritten)),
-    ('subagent-url', 'links:task', 'subagent', 'file:///tmp/report%20one.md#L12', ('url', 'file:///tmp/report%20one.md#L12')),
+    ('subagent-url', 'links:task', 'subagent', 'file:///tmp/report%20one.md#L12', ('file', 'origin:/tmp/report one.md:12')),
 ]:
     enter(scenario)
-    ui.axe('tap', '--id', row)
-    ui.wait(lambda items: probe(items).get('host') == host, 'Child transcript did not open: ' + host)
+    open_child(row, host)
     tap_target(href, expected, host=host if expected[0] in ('session', 'file') else 'system')
     ui.capture(scenario)
 for scenario, row, host, result in [('process-code', 'links:process', 'process', 'links:thought'),
                                     ('subagent-code', 'links:task', 'subagent', 'subagent-detail-result')]:
     enter(scenario)
-    ui.axe('tap', '--id', row)
-    ui.wait(lambda items: probe(items).get('host') == host, 'Code host did not open')
+    open_child(row, host)
     assert probe()['parsedLinks'] == [] and probe()['targets'] == [], probe()
     frame = ui.element(result)['frame']
     ui.axe('tap', '-x', str(frame['x'] + frame['width'] / 2), '-y', str(frame['y'] + frame['height'] / 2), '--post-delay', '.6')

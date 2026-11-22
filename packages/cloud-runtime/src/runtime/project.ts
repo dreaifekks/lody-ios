@@ -1,3 +1,4 @@
+import { migrateLegacyAntigravityModeId } from '../protocol/capability.ts';
 import {
   proposalOf,
   type ProposalPresentation,
@@ -658,30 +659,92 @@ function summarizeItem(
     const images = (Array.isArray(sources) ? sources : [])
       .filter(
         (image: any) =>
-          typeof image?.imageId === 'string' && image.imageId.length > 0,
+          (typeof image?.imageId === 'string' && image.imageId.length > 0) ||
+          (typeof image?.localImageId === 'string' &&
+            image.localImageId.length > 0),
       )
-      .map((raw: any) => ({
-        id: String(raw.imageId ?? ''),
-        fileName: String(raw.fileName ?? '图片'),
-        storageSessionId:
-          typeof raw.storageSessionId === 'string'
-            ? raw.storageSessionId
-            : undefined,
-        width:
-          typeof raw.width === 'number' && raw.width > 0
-            ? raw.width
-            : undefined,
-        height:
-          typeof raw.height === 'number' && raw.height > 0
-            ? raw.height
-            : undefined,
-      }));
+      .map((raw: any) => {
+        const localImageId =
+          typeof raw.localImageId === 'string' && raw.localImageId.length > 0
+            ? raw.localImageId
+            : undefined;
+        const id =
+          typeof raw.imageId === 'string' && raw.imageId.length > 0
+            ? raw.imageId
+            : (localImageId ?? '');
+        return {
+          id,
+          fileName: String(raw.fileName ?? '图片'),
+          storageSessionId:
+            typeof raw.storageSessionId === 'string'
+              ? raw.storageSessionId
+              : undefined,
+          width:
+            typeof raw.width === 'number' && raw.width > 0
+              ? raw.width
+              : undefined,
+          height:
+            typeof raw.height === 'number' && raw.height > 0
+              ? raw.height
+              : undefined,
+          ...(typeof raw.transport === 'string'
+            ? { transport: raw.transport }
+            : {}),
+          ...(typeof raw.machineId === 'string' && raw.machineId.length > 0
+            ? { machineId: raw.machineId }
+            : {}),
+          ...(localImageId ? { localImageId } : {}),
+          ...(Number.isSafeInteger(raw.sizeBytes) && raw.sizeBytes > 0
+            ? { sizeBytes: raw.sizeBytes }
+            : {}),
+          ...(typeof raw.mimeType === 'string' && raw.mimeType.length <= 255
+            ? { mimeType: raw.mimeType }
+            : {}),
+        };
+      });
     const media = type === 'image' ? { image: images[0] } : { images };
     return {
       itemId,
       rev: bump(projection, key, JSON.stringify(media)),
       type,
       ...media,
+    } as ItemSummary;
+  }
+  if (type === 'local_attachment') {
+    const path = typeof raw.path === 'string' ? raw.path.trim() : '';
+    const machineId =
+      typeof raw.machineId === 'string' ? raw.machineId.trim() : '';
+    if (!path || !machineId) return { itemId, rev: 1, type };
+    const fileName =
+      typeof raw.fileName === 'string' && raw.fileName.trim()
+        ? raw.fileName.trim()
+        : '附件';
+    const mimeType =
+      typeof raw.mimeType === 'string' &&
+      raw.mimeType.trim() &&
+      raw.mimeType.length <= 255
+        ? raw.mimeType.trim()
+        : 'application/octet-stream';
+    const kind = raw.kind === 'image' ? 'image' : 'file';
+    const sizeBytes =
+      Number.isSafeInteger(raw.sizeBytes) && raw.sizeBytes >= 0
+        ? raw.sizeBytes
+        : undefined;
+    const file = {
+      id: `local:${machineId}:${path}`,
+      fileName,
+      mimeType,
+      transport: 'local_attachment',
+      machineId,
+      path,
+      kind,
+      ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+    };
+    return {
+      itemId,
+      rev: bump(projection, key, JSON.stringify(file)),
+      type,
+      file,
     } as ItemSummary;
   }
   if (type === 'file') {
@@ -935,7 +998,13 @@ function summarizeEntry(
     container && typeof (container as any).get === 'function'
       ? ((container as any).get('items') as LoroList | undefined)
       : undefined;
-  const list = Array.isArray(entry?.items) ? entry.items : [];
+  let list: any[] = [];
+  if (Array.isArray(entry?.items)) list = entry.items;
+  else if (
+    entry?.role === 'user' &&
+    Array.isArray(entry?.inputConfig?.inputBlocks)
+  )
+    list = entry.inputConfig.inputBlocks;
   const summarizedItems: ItemSummary[] = list.map((item: any, i: number) =>
     summarizeItem(
       projection,
@@ -1293,7 +1362,7 @@ function project(
               ? { modelId: input.modelId }
               : {}),
             ...(typeof input.modeId === 'string'
-              ? { modeId: input.modeId }
+              ? { modeId: migrateLegacyAntigravityModeId(input.modeId) }
               : {}),
             ...(typeof effort === 'string' ? { effort } : {}),
             ...(Object.keys(composerValues).length

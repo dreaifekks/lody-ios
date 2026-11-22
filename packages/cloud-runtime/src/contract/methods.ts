@@ -95,6 +95,8 @@ import {
 import {
   DirectoryListing,
   DiffResult,
+  DownloadFileChunkParams,
+  DownloadFileChunkResult,
   FileContent,
   FileDiffParams,
   ListDirParams,
@@ -328,6 +330,11 @@ export const runtimeCalls = {
     timeoutMs: 45_000,
   },
   readFile: { params: ReadFileParams, result: FileContent, timeoutMs: 45_000 },
+  downloadFileChunk: {
+    params: DownloadFileChunkParams,
+    result: DownloadFileChunkResult,
+    timeoutMs: 45_000,
+  },
   listDir: {
     params: ListDirParams,
     result: DirectoryListing,

@@ -1,5 +1,54 @@
 import type { Capability, ModelChoice, ConfigOption } from '../models/send.ts';
 
+/**
+ * LAN fork: Lody's former Antigravity Auto Review (`auto_review`) was removed;
+ * sessions, Roles and schedules saved with it run in agy's own `auto`.
+ */
+export function migrateLegacyAntigravityModeId(modeId: string): string {
+  return modeId === 'auto_review' ? 'auto' : modeId;
+}
+
+export function migrateLegacyAntigravityModeOption<
+  T extends Record<string, unknown>,
+>(values: T): T {
+  return values.mode === 'auto_review' ? { ...values, mode: 'auto' } : values;
+}
+
+export type PermissionTier = 'ask' | 'edit' | 'auto' | 'full';
+
+const MODE_TIERS: Readonly<Record<string, PermissionTier>> = {
+  // Claude Code
+  default: 'ask',
+  plan: 'ask',
+  acceptEdits: 'edit',
+  auto: 'auto',
+  dontAsk: 'full',
+  bypassPermissions: 'full',
+  // Codex
+  agent: 'ask',
+  'read-only': 'ask',
+  'agent-auto-review': 'auto',
+  'agent-full-access': 'full',
+  'danger-full-access': 'full',
+  // DeepSeek Harness
+  'workspace-write': 'edit',
+  // Google Antigravity / agy CLI / Gemini / Kimi
+  auto_edit: 'edit',
+  'accept-edits': 'edit',
+  auto_review: 'auto',
+  yolo: 'full',
+  // Grok
+  ask: 'ask',
+  'always-approve': 'full',
+};
+
+export function permissionTierOf(
+  modeId: string | null | undefined,
+): PermissionTier | null {
+  if (!modeId) return null;
+  return MODE_TIERS[modeId.trim()] ?? null;
+}
+
 export const isThoughtLevel = (option: ConfigOption) =>
   option.type === 'select' &&
   (option.category === 'thought_level' || option.id === 'reasoning_effort');
@@ -72,7 +121,9 @@ export function permissionModeFor(
   if (!option && modes.length) {
     return {
       options: modes,
-      value: choice.modeId,
+      value: choice.modeId
+        ? migrateLegacyAntigravityModeId(choice.modeId)
+        : undefined,
       configId: undefined,
     };
   }
@@ -83,7 +134,11 @@ export function permissionModeFor(
       !isThoughtLevel(item),
   );
   if (!option?.options.length) return undefined;
-  const selected = choice.configOptionValues?.[option.id];
+  const rawSelected = choice.configOptionValues?.[option.id];
+  const selected =
+    option.id === 'mode' && typeof rawSelected === 'string'
+      ? migrateLegacyAntigravityModeId(rawSelected)
+      : rawSelected;
   const value = validConfigValue(option, selected)
     ? selected
     : option.currentValue;

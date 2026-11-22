@@ -17,6 +17,28 @@ final class SessionMessageLinkTests: XCTestCase {
     XCTAssertEqual(resolve("session://missing"), .missingSession)
   }
 
+  func testTurnQueryParameterWithColonsAndDots() {
+    let turn = "assistant:inbox:completion:12.v1_a-b"
+    let link = SessionLink("lody://session/base?workspace=workspace&turn=\(turn)")
+    XCTAssertEqual(link?.sessionId, "base")
+    XCTAssertEqual(link?.workspaceId, "workspace")
+    XCTAssertEqual(link?.turnId, turn)
+    XCTAssertEqual(resolve("lody://session/base?workspace=workspace&turn=\(turn)"), .session("base", turnId: turn))
+    XCTAssertEqual(resolve("lody://session/base?workspace=workspace&tab=tab&turn=\(turn)"), .session("tab", turnId: turn))
+    XCTAssertEqual(resolve("lody://session/base?turn=\(turn)"), .session("base", turnId: turn))
+    for rejected in [
+      "lody://session/base?turn=",
+      "lody://session/base?turn=a&turn=b",
+      "lody://session/base?turn=assistant%3Ainbox",
+      "lody://session/base?turn=a/b",
+      "lody://session/base?turn=a+b",
+      "lody://session/base?turn=a?b",
+    ] {
+      XCTAssertNil(SessionLink(rejected), rejected)
+      XCTAssertEqual(resolve(rejected), .none, rejected)
+    }
+  }
+
   func testMalformedSessionLinksNeverOpenOrGuessAnID() {
     for raw in ["SESSION://base", "session://base?workspace=workspace", "lody://session/base/", "lody://session/base#x",
       "lody://session/a/../base", "lody://session/%62ase", "lody://session/base?workspace=a&workspace=b",

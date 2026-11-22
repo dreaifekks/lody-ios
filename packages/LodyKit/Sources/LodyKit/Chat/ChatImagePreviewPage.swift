@@ -97,7 +97,7 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
       layoutImage()
       return
     }
-    if item.image.machineId != nil {
+    if item.image.isLANKept {
       let requestID = self.requestID
       let workspace = self.workspace, session = self.session
       let service = keptImages
@@ -153,6 +153,15 @@ final class ChatImagePreviewPage: UIView, UIScrollViewDelegate {
     guard let item else { completion(shown); return }
     if let uri = item.localURI, let url = URL(string: uri), url.isFileURL {
       completion(UIImage(contentsOfFile: url.path) ?? shown)
+      return
+    }
+    if item.image.isLANKept {
+      if let shown { completion(shown); return }
+      let workspace = self.workspace, session = self.session, service = self.keptImages
+      Task { @MainActor in
+        let url = try? await service.file(item.image, workspace, session)
+        completion(url.flatMap { UIImage(contentsOfFile: $0.path) })
+      }
       return
     }
     let url: URL?

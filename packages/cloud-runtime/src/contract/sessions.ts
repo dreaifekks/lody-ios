@@ -280,6 +280,9 @@ export const EditAttachment = z
       ...stored,
       type: z.literal('image'),
       imageId: z.string().optional(),
+      transport: z.string().optional(),
+      machineId: z.string().optional(),
+      localImageId: z.string().optional(),
       width: z.number().optional(),
       height: z.number().optional(),
     }),
@@ -293,6 +296,13 @@ export const EditAttachment = z
       transport: z.string().optional(),
       machineId: z.string().optional(),
       uploadedAt: z.number().optional(),
+    }),
+    z.object({
+      ...stored,
+      type: z.literal('local_attachment'),
+      machineId: z.string().optional(),
+      path: z.string().optional(),
+      kind: z.enum(['file', 'image']).optional(),
     }),
   ])
   .meta({ id: 'EditAttachment' });

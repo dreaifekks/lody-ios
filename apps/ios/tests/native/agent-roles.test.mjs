@@ -628,11 +628,28 @@ test('fork v1 instances retain every machine and same-machine identity through d
     '@role:fork@m1@nuc-sol',
     c.mentions,
   );
-  assert.match(
+  assert.equal(
     expanded,
-    /id: fork, agentRoleMachineId: m1, agentRoleInstanceId: nuc-sol, name: Changed on iOS/,
+    '[Agent Role: Changed on iOS (agentRoleId: fork, agentRoleMachineId: m1, agentRoleInstanceId: nuc-sol)]',
   );
   c.put('inline', { targetId: 'stable-primary' });
   const inline = (await c.list()).roles.find((role) => role.id === 'inline');
   assert.equal(inline.targets[0].id, 'stable-primary');
+});
+
+test('Role runConfig migrates legacy Antigravity auto_review to auto', async () => {
+  const c = catalog();
+  c.put('agy-role', {
+    runConfig: {
+      modelId: 'gemini-3.8-flash',
+      modeId: 'auto_review',
+      configOptionValues: { mode: 'auto_review', thought_level: 'high' },
+    },
+  });
+  const listed = (await c.list()).roles.find((role) => role.id === 'agy-role');
+  assert.deepEqual(listed.targets[0].runConfig, {
+    modelId: 'gemini-3.8-flash',
+    modeId: 'auto',
+    configOptionValues: { mode: 'auto', thought_level: 'high' },
+  });
 });

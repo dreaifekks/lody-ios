@@ -40,6 +40,10 @@ import {
 import { retrySessionRead } from './session-read';
 import { resolveTurnRole, type TurnRole } from './agent-roles';
 import { record, roleRunConfigApplied } from '../protocol/agent-roles';
+import {
+  migrateLegacyAntigravityModeId,
+  migrateLegacyAntigravityModeOption,
+} from '../protocol/capability.ts';
 import type {
   CheckTurnQuotaResult,
   ControlTurnResult,
@@ -335,8 +339,21 @@ export function startAcceptedInputs(options: {
     workspaceId: options.workspaceId,
     runtime: runtimeForDelivery(),
     runtimeForDelivery,
-    async validateLocalAttachments() {
-      throw new Error('local_attachment_unsupported');
+    async validateLocalAttachments(send) {
+      const config = send.entry.inputConfig as
+        { inputBlocks?: unknown } | undefined;
+      const blocks = Array.isArray(config?.inputBlocks)
+        ? config.inputBlocks
+        : [];
+      const invalid = blocks.some(
+        (block: any) =>
+          block?.type === 'local_attachment' &&
+          (!send.targetMachineId ||
+            block.machineId !== send.targetMachineId ||
+            typeof block.path !== 'string' ||
+            !block.path.trim()),
+      );
+      if (invalid) throw new Error('local_attachment_unsupported');
     },
     async visible(send) {
       return (
@@ -1827,14 +1844,14 @@ export async function sendTurn(
     const roleTurn = configs.find(
       (config) => config?.agentRoleId !== undefined,
     );
-    const configOptionValues = {
+    const configOptionValues = migrateLegacyAntigravityModeOption({
       ...(previous.configOptionValues &&
       typeof previous.configOptionValues === 'object' &&
       !Array.isArray(previous.configOptionValues)
         ? previous.configOptionValues
         : {}),
       ...args.configOptionValues,
-    };
+    });
     if (args.reasoningEffort !== undefined) {
       const id = args.reasoningEffortConfigId || 'reasoning_effort';
       if (args.reasoningEffort === null) delete configOptionValues[id];
@@ -1842,7 +1859,11 @@ export async function sendTurn(
     }
     // An explicit pick wins; otherwise the turn inherits what the session
     // already used, and an unset value leaves the machine on its default.
-    const modeId = args.modeId ?? previous.modeId;
+    const rawModeId = args.modeId ?? previous.modeId;
+    const modeId =
+      typeof rawModeId === 'string'
+        ? migrateLegacyAntigravityModeId(rawModeId)
+        : rawModeId;
     const modelId =
       args.modelId === null ? undefined : (args.modelId ?? previous.modelId);
     // A Role runs a turn only while every value it pins is what will run (web). Any turn

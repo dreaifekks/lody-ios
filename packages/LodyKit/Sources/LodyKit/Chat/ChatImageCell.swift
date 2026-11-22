@@ -53,11 +53,11 @@ final class ChatImageCell: UICollectionViewCell {
     accessibilityTraits = [.image, .button]
     accessibilityHint = String(localized: "native.chat.image.openPreview", bundle: .lody)
     cacheObserver = NotificationCenter.default.addObserver(forName: LanKeptImages.didCache, object: nil, queue: .main) { [weak self] event in
-      let digest = event.userInfo?["sha256"] as? String
+      let key = (event.userInfo?["key"] as? String) ?? (event.userInfo?["sha256"] as? String)
       let identity = event.userInfo?["scope"] as? String
       MainActor.assumeIsolated {
         guard let self, let image = self.image, self.photo.image == nil,
-          digest == image.sha256?.lowercased(),
+          let expectedKey = image.lanCacheKey, key == expectedKey,
           identity == self.keptImages.identity() else { return }
         self.loadKeptImage(image)
       }
@@ -107,7 +107,7 @@ final class ChatImageCell: UICollectionViewCell {
       photo.image = nil; spinner.stopAnimating(); failure.isHidden = false
       return
     }
-    if image.machineId != nil {
+    if image.isLANKept {
       loadKeptImage(image)
       return
     }

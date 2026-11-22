@@ -7,8 +7,9 @@ final class ProcessController: UIViewController {
   var onFile: ((String, Int) -> Void)?
   var onLink: ((String) -> Void)?
 
-  init(entryId: String, startItemId: String) {
+  init(entryId: String, startItemId: String, showsThoughts: Bool = false) {
     super.init(nibName: nil, bundle: nil)
+    chat.showsThoughts = showsThoughts
     chat.setProcessEntryID(entryId)
     chat.setProcessStartID(startItemId)
     chat.setComposerState("{}")

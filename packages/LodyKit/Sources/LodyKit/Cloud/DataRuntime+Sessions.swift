@@ -57,21 +57,49 @@ extension DataRuntime {
         let downloads = AttachmentDownloadBatch()
         // ponytail: download at most 16 originals for the shared local-file composer; use lazy remote previews if large attachments make editing slow.
         for block in originals {
-          let image = block["type"] as? String == "image"
-          guard let id = block[image ? "imageId" : "fileId"] as? String,
-                let editID = block["editId"] as? String else { throw SessionAttachments.error("Invalid attachment") }
-          let name = block["fileName"] as? String ?? (image ? "image.jpg" : "file")
+          guard let editID = block["editId"] as? String else {
+            throw SessionAttachments.error(String(localized: "native.attachment.error.invalid", bundle: .lody))
+          }
+          let blockType = block["type"] as? String ?? ""
           let directory = downloads.makeDirectory()
-          let local = block["transport"] as? String == "local"
-          var file = ChatMessageAttachment(id: id, fileName: name,
-            image: image ? ChatImage(id: id, fileName: name, storageSessionId: nil, width: nil, height: nil) : nil,
-            storageSessionId: block["storageSessionId"] as? String, transport: block["transport"] as? String,
-            sizeBytes: block["sizeBytes"] as? Int, mimeType: block["mimeType"] as? String,
-            machineId: block["machineId"] as? String, sha256: block["sha256"] as? String)
-          if local { file = file.shownAsImage }
+          var file: ChatMessageAttachment
+          if blockType == "local_attachment" {
+            guard let machineId = block["machineId"] as? String, !machineId.isEmpty,
+                  let path = block["path"] as? String, !path.isEmpty else {
+              throw SessionAttachments.error(String(localized: "native.attachment.error.invalid", bundle: .lody))
+            }
+            let name = block["fileName"] as? String ?? "file"
+            file = ChatMessageAttachment(
+              id: "local:\(machineId):\(path)", fileName: name,
+              transport: "local_attachment",
+              sizeBytes: block["sizeBytes"] as? Int, mimeType: block["mimeType"] as? String,
+              machineId: machineId, path: path, kind: block["kind"] as? String
+            )
+          } else {
+            let image = blockType == "image"
+            let rawId = image ? (block["imageId"] as? String ?? block["localImageId"] as? String) : (block["fileId"] as? String)
+            guard let id = rawId, !id.isEmpty else {
+              throw SessionAttachments.error(String(localized: "native.attachment.error.invalid", bundle: .lody))
+            }
+            let name = block["fileName"] as? String ?? (image ? "image.jpg" : "file")
+            let local = block["transport"] as? String == "local"
+            let chatImage: ChatImage? = image ? ChatImage(
+              id: id, fileName: name, storageSessionId: block["storageSessionId"] as? String,
+              width: nil, height: nil, transport: block["transport"] as? String,
+              machineId: block["machineId"] as? String, localImageId: block["localImageId"] as? String,
+              sha256: block["sha256"] as? String, sizeBytes: block["sizeBytes"] as? Int,
+              mimeType: block["mimeType"] as? String
+            ) : nil
+            file = ChatMessageAttachment(id: id, fileName: name, image: chatImage,
+              storageSessionId: block["storageSessionId"] as? String, transport: block["transport"] as? String,
+              sizeBytes: block["sizeBytes"] as? Int, mimeType: block["mimeType"] as? String,
+              machineId: block["machineId"] as? String, sha256: block["sha256"] as? String)
+            if local { file = file.shownAsImage }
+          }
           let url = try await self.downloadAttachment(file, workspace: workspace, session: session, directory: directory)
           guard self.generation == generation, self.sessionId == session, self.attachmentScope == scope else { throw CancellationError() }
-          attachments.append(["id": editID, "name": name, "uri": url.absoluteString, "kind": file.image != nil ? "image" : "file"])
+          let kind = (file.image != nil || file.kind == "image") ? "image" : "file"
+          attachments.append(["id": editID, "name": file.fileName, "uri": url.absoluteString, "kind": kind])
         }
         guard self.generation == generation, self.sessionId == session, self.attachmentScope == scope else { throw CancellationError() }
         draft["attachments"] = attachments

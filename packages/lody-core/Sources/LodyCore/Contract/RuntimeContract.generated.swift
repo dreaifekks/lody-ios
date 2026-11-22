@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","confirmSessionCreation","confirmSessionTurn","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","iosSimulatorControl","itemDetail","lanFileTarget","listDir","loadOlderSession","localProjects","machineStatus","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","confirmSessionCreation","confirmSessionTurn","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","downloadFileChunk","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","iosSimulatorControl","itemDetail","lanFileTarget","listDir","loadOlderSession","localProjects","machineStatus","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -3218,6 +3218,108 @@ extension RuntimeContract {
     }
   }
 
+  public struct DownloadFileChunkParams: Codable, Sendable, Equatable {
+    public var sessionId: String
+    public var path: String
+    public var attachment: LocalAttachmentRef?
+    public var offset: Int
+    public var revision: String?
+    public init(sessionId: String, path: String, attachment: LocalAttachmentRef? = nil, offset: Int, revision: String? = nil) {
+      self.sessionId = sessionId
+      self.path = path
+      self.attachment = attachment
+      self.offset = offset
+      self.revision = revision
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.path = try c.decode(String.self, forKey: Key("path"))
+      self.attachment = try c.decodeIfPresent(LocalAttachmentRef.self, forKey: Key("attachment"))
+      self.offset = try c.decode(Int.self, forKey: Key("offset"))
+      self.revision = try c.decodeIfPresent(String.self, forKey: Key("revision"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.path, forKey: Key("path"))
+      try c.encodeIfPresent(self.attachment, forKey: Key("attachment"))
+      try c.encode(self.offset, forKey: Key("offset"))
+      try c.encodeIfPresent(self.revision, forKey: Key("revision"))
+    }
+  }
+
+  public struct DownloadFileChunkResultOk: Codable, Sendable, Equatable {
+    public var path: String
+    public var revision: String
+    public var sizeBytes: Int
+    public var offset: Int
+    public var data: String
+    public init(path: String, revision: String, sizeBytes: Int, offset: Int, data: String) {
+      self.path = path
+      self.revision = revision
+      self.sizeBytes = sizeBytes
+      self.offset = offset
+      self.data = data
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.path = try c.decode(String.self, forKey: Key("path"))
+      self.revision = try c.decode(String.self, forKey: Key("revision"))
+      self.sizeBytes = try c.decode(Int.self, forKey: Key("sizeBytes"))
+      self.offset = try c.decode(Int.self, forKey: Key("offset"))
+      self.data = try c.decode(String.self, forKey: Key("data"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.path, forKey: Key("path"))
+      try c.encode(self.revision, forKey: Key("revision"))
+      try c.encode(self.sizeBytes, forKey: Key("sizeBytes"))
+      try c.encode(self.offset, forKey: Key("offset"))
+      try c.encode(self.data, forKey: Key("data"))
+    }
+  }
+
+  public struct DownloadFileChunkResultError: Codable, Sendable, Equatable {
+    public var code: String
+    public init(code: String) {
+      self.code = code
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.code = try c.decode(String.self, forKey: Key("code"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.code, forKey: Key("code"))
+    }
+  }
+
+  public enum DownloadFileChunkResult: Codable, Sendable, Equatable {
+    case ok(DownloadFileChunkResultOk)
+    case error(DownloadFileChunkResultError)
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      let tag = try c.decode(String.self, forKey: Key("status"))
+      switch tag {
+      case "ok": self = .ok(try DownloadFileChunkResultOk(from: decoder))
+      case "error": self = .error(try DownloadFileChunkResultError(from: decoder))
+      default: throw DecodingError.dataCorruptedError(forKey: Key("status"), in: c, debugDescription: "Unknown status \(tag)")
+      }
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      switch self {
+      case .ok(let value):
+        try c.encode("ok", forKey: Key("status"))
+        try value.encode(to: encoder)
+      case .error(let value):
+        try c.encode("error", forKey: Key("status"))
+        try value.encode(to: encoder)
+      }
+    }
+  }
+
   public struct EditAttachmentImage: Codable, Sendable, Equatable {
     public var editId: String
     public var fileName: String?
@@ -3225,15 +3327,21 @@ extension RuntimeContract {
     public var sizeBytes: Double?
     public var storageSessionId: String?
     public var imageId: String?
+    public var transport: String?
+    public var machineId: String?
+    public var localImageId: String?
     public var width: Double?
     public var height: Double?
-    public init(editId: String, fileName: String? = nil, mimeType: String? = nil, sizeBytes: Double? = nil, storageSessionId: String? = nil, imageId: String? = nil, width: Double? = nil, height: Double? = nil) {
+    public init(editId: String, fileName: String? = nil, mimeType: String? = nil, sizeBytes: Double? = nil, storageSessionId: String? = nil, imageId: String? = nil, transport: String? = nil, machineId: String? = nil, localImageId: String? = nil, width: Double? = nil, height: Double? = nil) {
       self.editId = editId
       self.fileName = fileName
       self.mimeType = mimeType
       self.sizeBytes = sizeBytes
       self.storageSessionId = storageSessionId
       self.imageId = imageId
+      self.transport = transport
+      self.machineId = machineId
+      self.localImageId = localImageId
       self.width = width
       self.height = height
     }
@@ -3245,6 +3353,9 @@ extension RuntimeContract {
       self.sizeBytes = try c.decodeIfPresent(Double.self, forKey: Key("sizeBytes"))
       self.storageSessionId = try c.decodeIfPresent(String.self, forKey: Key("storageSessionId"))
       self.imageId = try c.decodeIfPresent(String.self, forKey: Key("imageId"))
+      self.transport = try c.decodeIfPresent(String.self, forKey: Key("transport"))
+      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
+      self.localImageId = try c.decodeIfPresent(String.self, forKey: Key("localImageId"))
       self.width = try c.decodeIfPresent(Double.self, forKey: Key("width"))
       self.height = try c.decodeIfPresent(Double.self, forKey: Key("height"))
     }
@@ -3256,6 +3367,9 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.sizeBytes, forKey: Key("sizeBytes"))
       try c.encodeIfPresent(self.storageSessionId, forKey: Key("storageSessionId"))
       try c.encodeIfPresent(self.imageId, forKey: Key("imageId"))
+      try c.encodeIfPresent(self.transport, forKey: Key("transport"))
+      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
+      try c.encodeIfPresent(self.localImageId, forKey: Key("localImageId"))
       try c.encodeIfPresent(self.width, forKey: Key("width"))
       try c.encodeIfPresent(self.height, forKey: Key("height"))
     }
@@ -3320,15 +3434,65 @@ extension RuntimeContract {
     }
   }
 
+  public enum EditAttachmentLocalAttachmentKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case file = "file"
+    case image = "image"
+  }
+
+  public struct EditAttachmentLocalAttachment: Codable, Sendable, Equatable {
+    public var editId: String
+    public var fileName: String?
+    public var mimeType: String?
+    public var sizeBytes: Double?
+    public var storageSessionId: String?
+    public var machineId: String?
+    public var path: String?
+    public var kind: EditAttachmentLocalAttachmentKind?
+    public init(editId: String, fileName: String? = nil, mimeType: String? = nil, sizeBytes: Double? = nil, storageSessionId: String? = nil, machineId: String? = nil, path: String? = nil, kind: EditAttachmentLocalAttachmentKind? = nil) {
+      self.editId = editId
+      self.fileName = fileName
+      self.mimeType = mimeType
+      self.sizeBytes = sizeBytes
+      self.storageSessionId = storageSessionId
+      self.machineId = machineId
+      self.path = path
+      self.kind = kind
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.editId = try c.decode(String.self, forKey: Key("editId"))
+      self.fileName = try c.decodeIfPresent(String.self, forKey: Key("fileName"))
+      self.mimeType = try c.decodeIfPresent(String.self, forKey: Key("mimeType"))
+      self.sizeBytes = try c.decodeIfPresent(Double.self, forKey: Key("sizeBytes"))
+      self.storageSessionId = try c.decodeIfPresent(String.self, forKey: Key("storageSessionId"))
+      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
+      self.path = try c.decodeIfPresent(String.self, forKey: Key("path"))
+      self.kind = try c.decodeIfPresent(EditAttachmentLocalAttachmentKind.self, forKey: Key("kind"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.editId, forKey: Key("editId"))
+      try c.encodeIfPresent(self.fileName, forKey: Key("fileName"))
+      try c.encodeIfPresent(self.mimeType, forKey: Key("mimeType"))
+      try c.encodeIfPresent(self.sizeBytes, forKey: Key("sizeBytes"))
+      try c.encodeIfPresent(self.storageSessionId, forKey: Key("storageSessionId"))
+      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
+      try c.encodeIfPresent(self.path, forKey: Key("path"))
+      try c.encodeIfPresent(self.kind, forKey: Key("kind"))
+    }
+  }
+
   public enum EditAttachment: Codable, Sendable, Equatable {
     case image(EditAttachmentImage)
     case file(EditAttachmentFile)
+    case localAttachment(EditAttachmentLocalAttachment)
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       let tag = try c.decode(String.self, forKey: Key("type"))
       switch tag {
       case "image": self = .image(try EditAttachmentImage(from: decoder))
       case "file": self = .file(try EditAttachmentFile(from: decoder))
+      case "local_attachment": self = .localAttachment(try EditAttachmentLocalAttachment(from: decoder))
       default: throw DecodingError.dataCorruptedError(forKey: Key("type"), in: c, debugDescription: "Unknown type \(tag)")
       }
     }
@@ -3340,6 +3504,9 @@ extension RuntimeContract {
         try value.encode(to: encoder)
       case .file(let value):
         try c.encode("file", forKey: Key("type"))
+        try value.encode(to: encoder)
+      case .localAttachment(let value):
+        try c.encode("local_attachment", forKey: Key("type"))
         try value.encode(to: encoder)
       }
     }
@@ -4517,6 +4684,50 @@ extension RuntimeContract {
       try c.encode(self.sessionId, forKey: Key("sessionId"))
       try c.encode(self.relativePath, forKey: Key("relativePath"))
       try c.encode(self.userId, forKey: Key("userId"))
+    }
+  }
+
+  public enum LocalAttachmentRefKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case file = "file"
+    case image = "image"
+  }
+
+  public struct LocalAttachmentRef: Codable, Sendable, Equatable {
+    public var type: String
+    public var machineId: String
+    public var path: String
+    public var kind: LocalAttachmentRefKind
+    public var fileName: String
+    public var mimeType: String
+    public var sizeBytes: Int
+    public init(type: String, machineId: String, path: String, kind: LocalAttachmentRefKind, fileName: String, mimeType: String, sizeBytes: Int) {
+      self.type = type
+      self.machineId = machineId
+      self.path = path
+      self.kind = kind
+      self.fileName = fileName
+      self.mimeType = mimeType
+      self.sizeBytes = sizeBytes
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.type = try c.decode(String.self, forKey: Key("type"))
+      self.machineId = try c.decode(String.self, forKey: Key("machineId"))
+      self.path = try c.decode(String.self, forKey: Key("path"))
+      self.kind = try c.decode(LocalAttachmentRefKind.self, forKey: Key("kind"))
+      self.fileName = try c.decode(String.self, forKey: Key("fileName"))
+      self.mimeType = try c.decode(String.self, forKey: Key("mimeType"))
+      self.sizeBytes = try c.decode(Int.self, forKey: Key("sizeBytes"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.type, forKey: Key("type"))
+      try c.encode(self.machineId, forKey: Key("machineId"))
+      try c.encode(self.path, forKey: Key("path"))
+      try c.encode(self.kind, forKey: Key("kind"))
+      try c.encode(self.fileName, forKey: Key("fileName"))
+      try c.encode(self.mimeType, forKey: Key("mimeType"))
+      try c.encode(self.sizeBytes, forKey: Key("sizeBytes"))
     }
   }
 
@@ -9711,6 +9922,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum DownloadFileChunk: RuntimeCall {
+      public typealias Params = RuntimeContract.DownloadFileChunkParams
+      public typealias Result = RuntimeContract.DownloadFileChunkResult
+      public static let method = "downloadFileChunk"
+      public static let timeout: Double = 45
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .downloadFileChunk(let result) = value { return result }
+        return nil
+      }
+    }
     public enum EditSession: RuntimeCall {
       public typealias Params = RuntimeContract.EditSessionParams
       public typealias Result = RuntimeContract.EditSessionResult
@@ -10190,6 +10411,7 @@ extension RuntimeContract {
     case creationOptions(RuntimeContract.CreationOptions)
     case decideProposal(RuntimeContract.DecideProposalResult)
     case deleteSession(RuntimeContract.DeleteSessionResult)
+    case downloadFileChunk(RuntimeContract.DownloadFileChunkResult)
     case editSession(RuntimeContract.EditSessionResult)
     case ensureSession(RuntimeContract.Empty)
     case fileDiff(RuntimeContract.DiffResult)
@@ -10317,6 +10539,7 @@ extension RuntimeContract {
         case "creationOptions": message = .result(id: id, .creationOptions(try c.decode(RuntimeContract.CreationOptions.self, forKey: Key("payload"))))
         case "decideProposal": message = .result(id: id, .decideProposal(try c.decode(RuntimeContract.DecideProposalResult.self, forKey: Key("payload"))))
         case "deleteSession": message = .result(id: id, .deleteSession(try c.decode(RuntimeContract.DeleteSessionResult.self, forKey: Key("payload"))))
+        case "downloadFileChunk": message = .result(id: id, .downloadFileChunk(try c.decode(RuntimeContract.DownloadFileChunkResult.self, forKey: Key("payload"))))
         case "editSession": message = .result(id: id, .editSession(try c.decode(RuntimeContract.EditSessionResult.self, forKey: Key("payload"))))
         case "ensureSession": message = .result(id: id, .ensureSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "fileDiff": message = .result(id: id, .fileDiff(try c.decode(RuntimeContract.DiffResult.self, forKey: Key("payload"))))

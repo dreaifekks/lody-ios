@@ -31,6 +31,8 @@ import UIKit
   assert(paths("file:///tmp/report.md tg://resolve?domain=x mailto:reader@example.com tel:+15550100") == [
     "file:///tmp/report.md", "tg://resolve?domain=x", "mailto:reader@example.com", "tel:+15550100"])
   assert(paths("ai.lody.stable://session/abc?workspace=ws lody-oss://session/def") == ["ai.lody.stable://session/abc?workspace=ws", "lody-oss://session/def"])
+  assert(paths("见lody://session/abc?workspace=ws&turn=assistant:inbox:completion:12。") == ["lody://session/abc?workspace=ws&turn=assistant:inbox:completion:12"])
+  assert(paths("lody://session/abc?turn=a&turn=b lody://session/abc?turn=a%3Ab") == [])
   print("PASS: bare paths and session resources retain settled punctuation and Unicode boundaries")
 }
 

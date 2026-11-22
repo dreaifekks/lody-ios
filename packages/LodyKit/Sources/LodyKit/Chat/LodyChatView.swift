@@ -66,6 +66,21 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     collection.scrollToItem(at: index, at: .top, animated: false)
   }
+  var targetTurnID = "" { didSet { scrollToTargetTurn() } }
+  var transcriptLive = false
+  func scrollToTargetTurn() {
+    guard !targetTurnID.isEmpty, !applying else { return }
+    let items = dataSource.snapshot().itemIdentifiers
+    if let row = items.compactMap({ rows[$0] }).first(where: { $0.entryID == targetTurnID }),
+       let index = dataSource.indexPath(for: row.id) {
+      targetTurnID = ""
+      pauseTracking()
+      collection.scrollToItem(at: index, at: .top, animated: false)
+    } else if transcriptLive, !items.isEmpty {
+      // Quietly stay in the conversation when the linked turn is outside the loaded window.
+      targetTurnID = ""
+    }
+  }
   var onStop: ([String: Any]) -> Void = { _ in }
   var onSteer: ([String: Any]) -> Void = { _ in }
   var onErrorRetry: ([String: Any]) -> Void = { _ in }

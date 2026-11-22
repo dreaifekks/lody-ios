@@ -136,7 +136,8 @@ final class SessionFilePreview: QLPreviewController, QLPreviewControllerDataSour
     if let runtime = DataRuntime.current {
       return try await runtime.downloadAttachment(file, workspace: workspace, session: session, directory: directory)
     }
-    guard !LanInvite.isWorkspace(workspace), !LanComposerPolicy.isLAN, file.transport != "local" else {
+    guard !LanInvite.isWorkspace(workspace), !LanComposerPolicy.isLAN,
+      file.transport != "local", file.transport != "local_attachment" else {
       throw SessionAttachments.error(String(localized: "native.runtime.notConnected", bundle: .lody))
     }
     return try await SessionAttachments.download(workspace: workspace, session: session, fileId: file.id,

@@ -1,6 +1,10 @@
 import type { Flock } from '@loro-dev/flock-wasm/base64';
 import type { AgentRoleItem } from '../../models/agent-roles.ts';
 import {
+  migrateLegacyAntigravityModeId,
+  migrateLegacyAntigravityModeOption,
+} from '../../protocol/capability.ts';
+import {
   readRole,
   readableRole,
   record,
@@ -279,15 +283,18 @@ export function registerProposals(ctx: RuntimeContext) {
       memory?: { providerId: string; memoryId: string };
     };
     if (roleTarget) run = roleRunConfig(roleTarget.runConfig);
-    else if (text(session.agentConfigId) === agent.id)
+    else if (text(session.agentConfigId) === agent.id) {
+      const latestMode = text(latest.modeId);
       run = {
-        modeId: text(latest.modeId) || undefined,
+        modeId: latestMode
+          ? migrateLegacyAntigravityModeId(latestMode)
+          : undefined,
         modelId: text(latest.modelId) || undefined,
         configOptionValues: record(latest.configOptionValues)
-          ? latest.configOptionValues
+          ? migrateLegacyAntigravityModeOption(latest.configOptionValues)
           : undefined,
       };
-    else
+    } else
       run = {
         modeId:
           agent.cliType === 'builtin'

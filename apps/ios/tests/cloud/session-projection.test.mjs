@@ -556,3 +556,137 @@ test('failed board reports remain visible without unused output payloads', () =>
   );
   releaseProjection(doc);
 });
+
+test('projects local_attachment items and transport:local localImageId images in history and queue', () => {
+  const doc = new LoroDoc();
+  const localImageId = '11111111-2222-4333-8444-555555555555';
+  const history = doc.getList('history');
+  const user = setAll(history.pushContainer(new LoroMap()), {
+    id: 'u-local',
+    role: 'user',
+    status: 'handled',
+  });
+  const items = user.setContainer('items', new LoroList());
+  setAll(items.pushContainer(new LoroMap()), {
+    type: 'local_attachment',
+    machineId: 'mac-mini',
+    path: '/Users/dev/docs/spec.pdf',
+    kind: 'file',
+    fileName: 'spec.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 4096,
+  });
+  setAll(items.pushContainer(new LoroMap()), {
+    type: 'local_attachment',
+    machineId: 'mac-mini',
+    path: '/Users/dev/shots/old.png',
+    kind: 'image',
+    fileName: 'old.png',
+    mimeType: 'image/png',
+    sizeBytes: 2048,
+  });
+  setAll(items.pushContainer(new LoroMap()), {
+    type: 'image',
+    transport: 'local',
+    machineId: 'mac-mini',
+    localImageId,
+    fileName: 'paste.png',
+    mimeType: 'image/png',
+    sizeBytes: 1024,
+    width: 320,
+    height: 240,
+  });
+  setAll(items.pushContainer(new LoroMap()), {
+    type: 'text',
+    text: 'Check these attachments',
+  });
+  const mq = doc.getMovableList('mq');
+  mq.push({
+    userTurnId: 'q-local',
+    task: 'Queued local file',
+    acpSessionConfig: {
+      inputBlocks: [
+        {
+          type: 'local_attachment',
+          machineId: 'mac-mini',
+          path: '/Users/dev/queued.txt',
+          kind: 'file',
+          fileName: 'queued.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 12,
+        },
+        { type: 'text', text: 'Queued local file' },
+      ],
+    },
+  });
+  doc.commit();
+
+  const projected = projectSession(doc, 'local-attachments');
+  const userItems = projected.entries[0].items;
+  assert.equal(userItems[0].type, 'local_attachment');
+  assert.deepEqual(userItems[0].file, {
+    id: 'local:mac-mini:/Users/dev/docs/spec.pdf',
+    fileName: 'spec.pdf',
+    mimeType: 'application/pdf',
+    transport: 'local_attachment',
+    machineId: 'mac-mini',
+    path: '/Users/dev/docs/spec.pdf',
+    kind: 'file',
+    sizeBytes: 4096,
+  });
+  assert.equal(userItems[1].type, 'local_attachment');
+  assert.equal(userItems[1].file.kind, 'image');
+  assert.equal(userItems[1].file.path, '/Users/dev/shots/old.png');
+  assert.equal(userItems[2].type, 'image');
+  assert.deepEqual(userItems[2].image, {
+    id: localImageId,
+    fileName: 'paste.png',
+    storageSessionId: undefined,
+    width: 320,
+    height: 240,
+    transport: 'local',
+    machineId: 'mac-mini',
+    localImageId,
+    sizeBytes: 1024,
+    mimeType: 'image/png',
+  });
+
+  const queuedItems = projected.entries[1].items;
+  assert.equal(queuedItems[0].type, 'local_attachment');
+  assert.equal(queuedItems[0].file.fileName, 'queued.txt');
+  assert.equal(queuedItems[0].file.path, '/Users/dev/queued.txt');
+  releaseProjection(doc);
+});
+
+test('normalizes legacy Antigravity auto_review mode to auto in turn metadata and composer', () => {
+  const doc = new LoroDoc();
+  const user = setAll(doc.getList('history').pushContainer(new LoroMap()), {
+    id: 'u-agy',
+    role: 'user',
+    status: 'handled',
+  });
+  setAll(user.setContainer('inputConfig', new LoroMap()), {
+    cliType: 'registry',
+    agentType: 'antigravity-acp',
+    modeId: 'auto_review',
+    configOptionValues: { mode: 'auto_review', thought_level: 'high' },
+  });
+  setAll(
+    user.setContainer('items', new LoroList()).pushContainer(new LoroMap()),
+    { type: 'text', text: 'Run checks' },
+  );
+  doc.commit();
+
+  const projected = projectSession(doc, 'agy-legacy');
+  assert.equal(projected.composer.modeId, 'auto');
+  assert.deepEqual(projected.composer.configOptionValues, {
+    mode: 'auto',
+    thought_level: 'high',
+  });
+  assert.equal(projected.entries[0].inputConfig.modeId, 'auto');
+  assert.deepEqual(projected.entries[0].inputConfig.configOptionValues, {
+    mode: 'auto',
+    thought_level: 'high',
+  });
+  releaseProjection(doc);
+});

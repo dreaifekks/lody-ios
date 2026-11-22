@@ -72,6 +72,7 @@ final class TasksController: UIViewController, UICollectionViewDelegate {
       collection.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       collection.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
+    let entryId = self.entryId
     let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Task> { cell, _, task in
       var content = UIListContentConfiguration.subtitleCell()
       let title = NSMutableAttributedString(string: task.actor, attributes: [.foregroundColor: UIColor.label])
@@ -103,6 +104,7 @@ final class TasksController: UIViewController, UICollectionViewDelegate {
       }
       cell.accessories = accessories
       cell.accessibilityLabel = [task.actor, task.description, detail].filter { !$0.isEmpty }.joined(separator: ", ")
+      cell.accessibilityIdentifier = entryId + ":" + task.itemId
     }
     dataSource = UICollectionViewDiffableDataSource(collectionView: collection) { [weak self] collection, index, id in
       guard let task = self?.byId[id] else { return nil }

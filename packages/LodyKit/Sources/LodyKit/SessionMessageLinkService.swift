@@ -4,22 +4,17 @@ import UIKit
 @MainActor
 struct SessionMessageLinkService {
   var isLAN: () -> Bool
-  var openSession: (String, SessionSource, UIViewController) -> Void
+  var openSession: (String, String?, SessionSource, UIViewController) -> Void
   var openURL: (URL) -> Void
-  var openFile: @MainActor (String, String, Int, UIViewController) async -> Void
+  /// Optional override for offline link fixtures; live sessions use `SessionController.openFile`.
+  var openFile: (@MainActor (String, String, Int, UIViewController) async -> Void)?
   var notice: (String, UIViewController) -> Void
 
   static let live = SessionMessageLinkService(
     isLAN: { AuthSession.shared.snapshot.account?.lan != nil },
-    openSession: { SessionNavigation.openMessageSession($0, source: $1, from: $2) },
+    openSession: { SessionNavigation.openMessageSession($0, turnId: $1, source: $2, from: $3) },
     openURL: { UIApplication.shared.open($0) },
-    openFile: { sessionId, path, line, controller in
-      if let runtime = DataRuntime.current,
-         await FilePreview.open(sessionId: sessionId, path: path, line: line, runtime: runtime, from: controller) { return }
-      guard controller.view.window != nil else { return }
-      let content = LodyNativePages.make("file-content", params: SessionController.json(["sessionId": sessionId, "path": path, "line": line]))!
-      LodyShell.shared.presentDetail(content, title: content.title ?? "", from: controller, push: false, detents: [1])
-    },
+    openFile: nil,
     notice: { message, _ in
       LodyToastOverlay.shared.show(message: message, kind: .neutral)
     }

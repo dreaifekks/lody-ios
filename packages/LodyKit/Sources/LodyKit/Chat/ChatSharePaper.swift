@@ -210,7 +210,7 @@ final class ChatSharePaper: UIView {
 
   private static func loadImage(image: ChatImage?, source: String?, content: ChatMessageShare, imageSession: URLSession) async throws -> UIImage {
     if LodyUIVerify.enabled, image.map({ ChatImageCell.isVerifyImage($0.id) }) == true { return ChatImageCell.verifyBitmap() }
-    if let image, image.machineId != nil {
+    if let image, image.isLANKept {
       let url = try await LanKeptImages.file(image, workspace: content.workspace, session: content.session)
       guard let bitmap = ChatAttachment.thumbnail(url) else { throw Failure.image }
       return bitmap

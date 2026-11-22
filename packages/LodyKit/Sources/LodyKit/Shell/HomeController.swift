@@ -178,20 +178,23 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     layoutColumns()
     if split.isCollapsed { split.show(.primary) }
   }
-  func openSession(_ id: String, query: String = "", choice: ModelChoice? = nil) {
+  func openSession(_ id: String, query: String = "", choice: ModelChoice? = nil, turnId: String? = nil) {
     guard source.state.catalog.session(id) != nil else { return }
     if listInPopover {
-      dismissBookList { [weak self] in self?.openSession(id, query: query, choice: choice) }
+      dismissBookList { [weak self] in self?.openSession(id, query: query, choice: choice, turnId: turnId) }
       return
     }
     leaveSchedulesDetail()
     if session?.sessionId != id {
       closePanel()
-      let next = SessionController(sessionId: id, findQuery: query, choice: choice, source: source)
+      let next = SessionController(sessionId: id, findQuery: query, choice: choice, targetTurnID: turnId, source: source)
       session = next
       secondary.setViewControllers([page(next, title: "")], animated: false)
       updateBookSidebar()
-    } else if !query.isEmpty { session?.find(query: query, keyboard: false) }
+    } else {
+      if !query.isEmpty { session?.find(query: query, keyboard: false) }
+      if let turnId, !turnId.isEmpty { session?.scrollToTurn(turnId) }
+    }
     markListSelection()
     layoutColumns()
     if !folded, !panelOpen { split.show(.secondary) }

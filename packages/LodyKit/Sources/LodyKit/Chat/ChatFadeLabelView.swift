@@ -99,6 +99,8 @@ final class ChatFadeLabelView: TextLabelView {
   private weak var fadeLayout: ChatFadeLayout?
   private var fadeRect: CGRect?
   private var fadeRectSize: CGSize = .zero
+  private var activeTouch: ObjectIdentifier?
+  private var lastEndedTouch: (id: ObjectIdentifier, timestamp: TimeInterval)?
   var isFading: Bool {
     window != nil && !UIAccessibility.isReduceMotionEnabled && fade.isAnimating(at: CACurrentMediaTime())
   }
@@ -176,8 +178,43 @@ final class ChatFadeLabelView: TextLabelView {
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
-    if window == nil { finishAnimation() }
+    if window == nil {
+      activeTouch = nil
+      lastEndedTouch = nil
+      finishAnimation()
+    }
     pokeTimer()
+  }
+
+  // UIScrollView delayed-touch flush on iOS 27 can deliver touchesEnded twice
+  // for a single quick tap (<150ms), causing Litext to dispatch a link twice.
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    if touches.count == 1, let touch = touches.first {
+      let id = ObjectIdentifier(touch)
+      if let last = lastEndedTouch, last.id == id, last.timestamp == touch.timestamp { return }
+      activeTouch = id
+    } else {
+      activeTouch = nil
+    }
+    super.touchesBegan(touches, with: event)
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+    if touches.count == 1, let touch = touches.first {
+      let id = ObjectIdentifier(touch)
+      if let last = lastEndedTouch, last.id == id, last.timestamp == touch.timestamp { return }
+      guard activeTouch == id else { return }
+      activeTouch = nil
+      lastEndedTouch = (id, touch.timestamp)
+    } else {
+      activeTouch = nil
+    }
+    super.touchesEnded(touches, with: event)
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+    activeTouch = nil
+    super.touchesCancelled(touches, with: event)
   }
 
   private func pokeTimer() {

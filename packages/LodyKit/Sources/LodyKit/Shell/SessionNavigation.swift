@@ -79,21 +79,21 @@ enum SessionNavigation {
     return nil
   }
 
-  static func openMessageSession(_ id: String, source: SessionSource, from controller: UIViewController) {
+  static func openMessageSession(_ id: String, turnId: String? = nil, source: SessionSource, from controller: UIViewController) {
     let scope = source.state.key
     guard source.state.catalog.session(id) != nil else { return }
     let navigate: @MainActor @Sendable () -> Void = {
       guard source.state.key == scope, source.state.catalog.session(id) != nil else { return }
-      open(id, source: source)
+      open(id, turnId: turnId, source: source)
     }
     if let modal = controller.navigationController, modal.presentingViewController != nil {
       modal.dismiss(animated: true, completion: navigate)
     } else { navigate() }
   }
 
-  private static func open(_ id: String, query: String = "", choice: ModelChoice? = nil, source: SessionSource) {
-    if let home = HomeController.current { home.openSession(id, query: query, choice: choice); return }
-    let page = SessionController(sessionId: id, findQuery: query, choice: choice, source: source)
+  private static func open(_ id: String, query: String = "", choice: ModelChoice? = nil, turnId: String? = nil, source: SessionSource) {
+    if let home = HomeController.current { home.openSession(id, query: query, choice: choice, turnId: turnId); return }
+    let page = SessionController(sessionId: id, findQuery: query, choice: choice, targetTurnID: turnId, source: source)
     LodyShell.shared.pushRootNative(page, title: "")
   }
 }

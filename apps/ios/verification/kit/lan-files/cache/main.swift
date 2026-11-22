@@ -141,4 +141,24 @@ check(current == joined && currentBytes == Data("new epoch".utf8), "epoch replac
 
 let items = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
 check(!items.contains { $0.lastPathComponent.hasPrefix("fetch-") }, "scratch removed after late failure")
-print("PASS: LAN digest coalescing, recovery/offline disk hits, retry, account and runtime epoch fences")
+
+// Local-first image UUIDs cache independently from sha256 digests and reject non-UUID names.
+let localId = "11111111-2222-4333-8444-555555555555"
+var localLoads = 0
+let localFirst = try await cache.file(localImageId: localId.uppercased(), scope: "account-B", epoch: "runtime-2") { directory in
+  localLoads += 1
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let url = directory.appendingPathComponent("paste.png")
+  try Data("local-image".utf8).write(to: url)
+  return url
+}
+let localSecond = try await cache.file(localImageId: localId, scope: "account-B", epoch: "unavailable") { _ in
+  fatalError("Cached localImageId must hit disk without a runtime")
+}
+check(localFirst == localSecond && localFirst.lastPathComponent == "local-\(localId)" && localLoads == 1, "localImageId disk caching")
+do {
+  _ = try await cache.file(localImageId: "../bad", scope: "account-B") { _ in fatalError("invalid UUID must fail before load") }
+  fatalError("invalid localImageId must throw")
+} catch {}
+
+print("PASS: LAN digest coalescing, localImageId caching, recovery/offline disk hits, retry, account and runtime epoch fences")

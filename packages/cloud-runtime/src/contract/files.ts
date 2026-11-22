@@ -109,3 +109,42 @@ export const DirectoryListing = z
     truncated: z.boolean(),
   })
   .meta({ id: 'DirectoryListing' });
+
+export const LocalAttachmentRef = z
+  .object({
+    type: z.literal('local_attachment'),
+    machineId: z.string().min(1),
+    path: z.string().min(1),
+    kind: z.enum(['file', 'image']),
+    fileName: z.string().min(1),
+    mimeType: z.string().min(1),
+    sizeBytes: z.number().int().nonnegative(),
+  })
+  .meta({ id: 'LocalAttachmentRef' });
+
+export const DownloadFileChunkParams = z
+  .object({
+    sessionId,
+    path: z.string().min(1),
+    attachment: LocalAttachmentRef.optional(),
+    offset: z.number().int().nonnegative(),
+    revision: z.string().optional(),
+  })
+  .meta({ id: 'DownloadFileChunkParams' });
+
+export const DownloadFileChunkResult = z
+  .discriminatedUnion('status', [
+    z.object({
+      status: z.literal('ok'),
+      path: z.string(),
+      revision: z.string(),
+      sizeBytes: z.number().int().nonnegative(),
+      offset: z.number().int().nonnegative(),
+      data: z.string(),
+    }),
+    z.object({
+      status: z.literal('error'),
+      code: z.string(),
+    }),
+  ])
+  .meta({ id: 'DownloadFileChunkResult' });

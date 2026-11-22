@@ -62,7 +62,29 @@ extension DataRuntime {
     guard attachmentAccountMatches, self.workspace == workspace else { throw CancellationError() }
     let scope = attachmentScope
     let url: URL
-    if file.transport == "local" {
+    if file.isLocalAttachment {
+      url = try await LocalAttachmentDownloader.download(
+        sessionId: file.storageSessionId ?? session,
+        attachment: file,
+        directory: directory,
+        isCurrent: { [weak self] in self?.attachmentScope == scope }
+      ) { [weak self] params in
+        guard let self, self.attachmentScope == scope else { throw CancellationError() }
+        return try await self.perform(RuntimeContract.Calls.DownloadFileChunk.self, params)
+      }
+    } else if file.transport == "local", let localImageId = file.image?.localImageId, !localImageId.isEmpty {
+      let targetSession = file.storageSessionId ?? session
+      let machineId = file.machineId.flatMap { $0.isEmpty ? nil : $0 }
+      let (invite, machine) = try await lanFileMachine(
+        sessionId: machineId == nil ? targetSession : nil,
+        machineId: machineId
+      )
+      url = try await LanSessionFiles.downloadLocalImage(
+        invite: invite, machine: machine, session: targetSession,
+        localImageId: localImageId, fileName: file.fileName,
+        sizeBytes: file.sizeBytes, directory: directory
+      )
+    } else if file.transport == "local" {
       let (invite, machine) = try await lanFileMachine(machineId: file.machineId)
       url = try await LanSessionFiles.download(invite: invite, machine: machine, session: file.storageSessionId ?? session,
         fileId: file.id, fileName: file.fileName, sizeBytes: file.sizeBytes, sha256: file.sha256, directory: directory)
