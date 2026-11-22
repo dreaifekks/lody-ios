@@ -172,6 +172,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         MainActor.assumeIsolated {
           if viewsChanged { self?.loadTabViews() }
           self?.render()
+          self?.openCreatedTab()
           if activated { self?.markViewed() }
         }
       }
@@ -344,6 +345,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
 
   private var creatingTab = false
   private var attemptedTab: String?
+  /// The runtime replies before its catalog publish lands; Home opens only cataloged sessions.
+  private var createdTab: String?
   /// The conversation's Tabs (itself first), for the directory panel.
   private var directoryTabs: [SessionItem] = []
   private var closedDirectoryTabs: [SessionItem] = []
@@ -410,7 +413,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private func createTab() {
     guard !creatingTab, let runtime = DataRuntime.current else { return }
     if let attemptedTab {
-      LodyShell.shared.openSessionFromExternal(attemptedTab)
+      createdTab = attemptedTab
+      openCreatedTab()
       return
     }
     let target = UUID().uuidString.lowercased()
@@ -429,7 +433,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         switch result {
         case .created:
           self.attemptedTab = nil
-          LodyShell.shared.openSessionFromExternal(target)
+          self.createdTab = target
+          self.openCreatedTab()
         case .rejected(let rejected):
           self.attemptedTab = nil
           let message = switch rejected.reason {
@@ -445,6 +450,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
       }
     }
+  }
+
+  private func openCreatedTab() {
+    guard let target = createdTab, source.state.catalog.session(target) != nil else { return }
+    createdTab = nil
+    LodyShell.shared.openSessionFromExternal(target)
   }
 
   private func updateMoreMenu(_ session: SessionItem) {
