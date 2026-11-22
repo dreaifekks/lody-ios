@@ -2459,7 +2459,8 @@
               "subtitle": { "type": "string" },
               "insertText": { "type": "string" },
               "roleName": { "type": "string" },
-              "emoji": { "type": "string" }
+              "emoji": { "type": "string" },
+              "revision": { "type": "string" }
             },
             "required": ["path", "name", "kind", "subtitle"]
           }
@@ -2761,6 +2762,16 @@
             "entry": { "$ref": "PromptShortcutIndexEntry" }
           },
           "required": ["workspaceId", "userId", "action", "entry"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "select" },
+            "id": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          "required": ["workspaceId", "userId", "action", "id"]
         },
         {
           "type": "object",

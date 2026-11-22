@@ -35,7 +35,7 @@ export function registerSettings(ctx: RuntimeContext) {
     );
     if (args.action === 'list')
       return { action: 'list', entries: value as PromptShortcutIndexEntry[] };
-    if (args.action === 'read')
+    if (args.action === 'read' || args.action === 'select')
       return { action: 'read', shortcut: value as PromptShortcut };
     return { action: 'save', entry: value as PromptShortcutIndexEntry };
   });

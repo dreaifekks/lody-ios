@@ -38,6 +38,9 @@ private final class PromptShortcutsFixture {
     case .read(let entry):
       guard let value = values.first(where: { $0.id == entry.id }) else { throw CocoaError(.fileReadNoSuchFile) }
       return .read(.init(shortcut: value))
+    case .select(let id):
+      guard let value = values.first(where: { $0.id == id }) else { throw CocoaError(.fileReadNoSuchFile) }
+      return .read(.init(shortcut: value))
     case .save(_, let value, _):
       if failSave {
         failSave = false

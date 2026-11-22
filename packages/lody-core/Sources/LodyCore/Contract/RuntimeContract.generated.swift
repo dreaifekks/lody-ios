@@ -4718,7 +4718,8 @@ extension RuntimeContract {
     public var insertText: String?
     public var roleName: String?
     public var emoji: String?
-    public init(path: String, name: String, kind: MentionCatalogItemsItemKind, subtitle: String, insertText: String? = nil, roleName: String? = nil, emoji: String? = nil) {
+    public var revision: String?
+    public init(path: String, name: String, kind: MentionCatalogItemsItemKind, subtitle: String, insertText: String? = nil, roleName: String? = nil, emoji: String? = nil, revision: String? = nil) {
       self.path = path
       self.name = name
       self.kind = kind
@@ -4726,6 +4727,7 @@ extension RuntimeContract {
       self.insertText = insertText
       self.roleName = roleName
       self.emoji = emoji
+      self.revision = revision
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -4736,6 +4738,7 @@ extension RuntimeContract {
       self.insertText = try c.decodeIfPresent(String.self, forKey: Key("insertText"))
       self.roleName = try c.decodeIfPresent(String.self, forKey: Key("roleName"))
       self.emoji = try c.decodeIfPresent(String.self, forKey: Key("emoji"))
+      self.revision = try c.decodeIfPresent(String.self, forKey: Key("revision"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
@@ -4746,6 +4749,7 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.insertText, forKey: Key("insertText"))
       try c.encodeIfPresent(self.roleName, forKey: Key("roleName"))
       try c.encodeIfPresent(self.emoji, forKey: Key("emoji"))
+      try c.encodeIfPresent(self.revision, forKey: Key("revision"))
     }
   }
 
@@ -5388,6 +5392,29 @@ extension RuntimeContract {
     }
   }
 
+  public struct PromptShortcutsParamsSelect: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var userId: String
+    public var id: String
+    public init(workspaceId: String, userId: String, id: String) {
+      self.workspaceId = workspaceId
+      self.userId = userId
+      self.id = id
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.userId = try c.decode(String.self, forKey: Key("userId"))
+      self.id = try c.decode(String.self, forKey: Key("id"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.userId, forKey: Key("userId"))
+      try c.encode(self.id, forKey: Key("id"))
+    }
+  }
+
   public struct PromptShortcutsParamsSave: Codable, Sendable, Equatable {
     public var workspaceId: String
     public var userId: String
@@ -5422,6 +5449,7 @@ extension RuntimeContract {
   public enum PromptShortcutsParams: Codable, Sendable, Equatable {
     case list(PromptShortcutsParamsList)
     case read(PromptShortcutsParamsRead)
+    case select(PromptShortcutsParamsSelect)
     case save(PromptShortcutsParamsSave)
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
@@ -5429,6 +5457,7 @@ extension RuntimeContract {
       switch tag {
       case "list": self = .list(try PromptShortcutsParamsList(from: decoder))
       case "read": self = .read(try PromptShortcutsParamsRead(from: decoder))
+      case "select": self = .select(try PromptShortcutsParamsSelect(from: decoder))
       case "save": self = .save(try PromptShortcutsParamsSave(from: decoder))
       default: throw DecodingError.dataCorruptedError(forKey: Key("action"), in: c, debugDescription: "Unknown action \(tag)")
       }
@@ -5441,6 +5470,9 @@ extension RuntimeContract {
         try value.encode(to: encoder)
       case .read(let value):
         try c.encode("read", forKey: Key("action"))
+        try value.encode(to: encoder)
+      case .select(let value):
+        try c.encode("select", forKey: Key("action"))
         try value.encode(to: encoder)
       case .save(let value):
         try c.encode("save", forKey: Key("action"))

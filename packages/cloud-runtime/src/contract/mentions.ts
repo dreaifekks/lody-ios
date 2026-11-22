@@ -43,6 +43,8 @@ export const MentionCatalog = z
         roleName: z.string().optional(),
         /** A Role's emoji, shown before its name (as the run-config Role row). */
         emoji: z.string().optional(),
+        /** A prompt shortcut's listed revision, so a body read ahead for it is never reused for an edit. */
+        revision: z.string().optional(),
       }),
     ),
     truncated: z.boolean(),

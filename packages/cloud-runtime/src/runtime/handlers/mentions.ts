@@ -185,6 +185,7 @@ export function registerMentions(ctx: RuntimeContext) {
           kind: 'cmd' as const,
           subtitle: entry.name,
           insertText: `/shortcut:${entry.slug}`,
+          revision: entry.revision,
         }));
       const currentMeta = state.metaReplica;
       if (

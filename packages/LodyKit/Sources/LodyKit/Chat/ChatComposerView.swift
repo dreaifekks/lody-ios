@@ -394,38 +394,75 @@ final class ChatComposerInput: TextView {
   }
 
   /// Inserts a reference chip over `range`. With a `label` the chip shows it and sends `token`.
-  func insertReference(_ token: String, label: String? = nil, replacing range: NSRange) {
-    insertSegments([ChatComposerSegment(text: label ?? token, token: label == nil ? nil : token, reference: true)], replacing: range)
+  @discardableResult
+  func insertReference(_ token: String, label: String? = nil, replacing range: NSRange) -> NodeKey? {
+    insertSegments([ChatComposerSegment(text: label ?? token, token: label == nil ? nil : token, reference: true)], replacing: range).first
   }
 
   /// Inserts text and reference chips over `range` (a prompt shortcut's body, with its references
-  /// as chips), then a space.
-  func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) {
+  /// as chips), then a space. Returns the inserted chips' node keys.
+  @discardableResult
+  func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) -> [NodeKey] {
     selectedRange = range
-    for segment in segments where segment.reference {
-      if let token = segment.token, token != segment.text { labelledReferences[segment.text] = token }
-    }
+    var keys: [NodeKey] = []
     try? editor.update {
       guard let selection = try getSelection() as? RangeSelection else { return }
-      var nodes: [Node] = []
-      for segment in segments where !segment.text.isEmpty {
-        if segment.reference {
-          let node = ChatReferenceNode(text: segment.text, key: nil)
-          node.referenceToken = segment.token ?? segment.text
-          nodes.append(node)
-          continue
-        }
-        // A body's newlines become line breaks.
-        let lines = segment.text.components(separatedBy: "\n")
-        for (index, line) in lines.enumerated() {
-          if index > 0 { nodes.append(createLineBreakNode()) }
-          if !line.isEmpty { nodes.append(createTextNode(text: line)) }
-        }
-      }
-      nodes.append(createTextNode(text: " "))
+      let nodes = try makeNodes(segments) + [createTextNode(text: " ")]
       _ = try selection.insertNodes(nodes: nodes, selectStart: false)
+      keys = nodes.compactMap { ($0 as? ChatReferenceNode)?.key }
     }
     delegate?.textViewDidChange?(self)
+    return keys
+  }
+
+  /// Replaces one chip (still sending `token`) with `segments`, leaving the rest of the prompt
+  /// and the caret where they are. False when the chip is gone (deleted, sent or replaced).
+  @discardableResult
+  func replaceReference(_ key: NodeKey, token: String, with segments: [ChatComposerSegment]) -> Bool {
+    var replaced = false
+    try? editor.update {
+      guard let chip: ChatReferenceNode = getNodeByKey(key: key), chip.referenceToken == token,
+            chip.getParent() != nil else { return }
+      let selection = try getSelection() as? RangeSelection
+      let caretOnChip = selection.map { $0.anchor.key == key || $0.focus.key == key } ?? false
+      let label = chip.getTextContent()
+      let nodes = try makeNodes(segments)
+      guard let first = nodes.first else { return }
+      var last = try chip.replace(replaceWith: first)
+      for node in nodes.dropFirst() { last = try last.insertAfter(nodeToInsert: node) }
+      if caretOnChip { _ = try last.selectNext(anchorOffset: 0, focusOffset: 0) }
+      // The chip's label leaves the draft's references once no chip shows it.
+      var shown = false
+      func find(_ node: Node) {
+        if let reference = node as? ChatReferenceNode, reference.getTextContent() == label { shown = true }
+        (node as? ElementNode)?.getChildren().forEach(find)
+      }
+      getRoot().map(find)
+      if !shown { labelledReferences[label] = nil }
+      replaced = true
+    }
+    if replaced { delegate?.textViewDidChange?(self) }
+    return replaced
+  }
+
+  private func makeNodes(_ segments: [ChatComposerSegment]) throws -> [Node] {
+    var nodes: [Node] = []
+    for segment in segments where !segment.text.isEmpty {
+      if segment.reference {
+        if let token = segment.token, token != segment.text { labelledReferences[segment.text] = token }
+        let node = ChatReferenceNode(text: segment.text, key: nil)
+        node.referenceToken = segment.token ?? segment.text
+        nodes.append(node)
+        continue
+      }
+      // A body's newlines become line breaks.
+      let lines = segment.text.components(separatedBy: "\n")
+      for (index, line) in lines.enumerated() {
+        if index > 0 { nodes.append(createLineBreakNode()) }
+        if !line.isEmpty { nodes.append(createTextNode(text: line)) }
+      }
+    }
+    return nodes
   }
 
   var referenceTokens: [String] {

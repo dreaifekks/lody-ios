@@ -30,6 +30,7 @@ const bundle = await build({
 });
 const {
   forgetShortcuts,
+  listedShortcuts,
   promptShortcuts,
   shortcutAccess,
   expandShortcuts,
@@ -418,4 +419,71 @@ test('Phase 1 dual-read falls back to legacy streams only for unmigrated shortcu
       false,
     )(),
   );
+});
+
+test('a composer choice reads the body against the listing it showed, without re-reading the index', async () => {
+  forgetShortcuts();
+  forgetSettings();
+  const body = new LoroDoc();
+  new PromptShortcutDocument(body).save(value, []);
+  const index = new Flock('fixture-ws-index');
+  new PromptShortcutCatalog(index).put(entry);
+  const parts = new Map([
+    [
+      'w:shortcut-index',
+      [new TextEncoder().encode(JSON.stringify(index.exportJson()))],
+    ],
+    ['w:shortcut:body', [body.export({ mode: 'snapshot' })]],
+  ]);
+  const reads = [];
+  globalThis.__shortcutClient = class {
+    constructor({ url }) {
+      this.id = decodeURIComponent(url.split('/').at(-1));
+    }
+    async bootstrap() {
+      reads.push(this.id);
+      const streamParts = parts.get(this.id);
+      if (!streamParts) return { ok: false, result: { code: 'not_found' } };
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '-1',
+          updates: streamParts.map((bytes) => ({ body: encodeFrame(bytes) })),
+          nextOffset: '1',
+          upToDate: true,
+        },
+      };
+    }
+    async readOnce() {
+      reads.push(this.id);
+      return { ok: true, result: { nextOffset: '1', upToDate: true } };
+    }
+  };
+  const cloud = async (op) => {
+    if (op === 'listAccessibleDocuments') return [];
+    throw new Error(`unexpected cloud op: ${op}`);
+  };
+  const select = (id) =>
+    promptShortcuts(
+      { workspaceId: 'w', action: 'select', id },
+      'owner',
+      workspaceGrant,
+      cloud,
+      AbortSignal.timeout(5000),
+    );
+  const listing = await listedShortcuts('w', 'owner', workspaceGrant, cloud);
+  assert.deepEqual(listing.entries, [entry]);
+  assert.equal((await select('review')).prompt, value.prompt);
+  const before = reads.length;
+  assert.equal((await select('review')).prompt, value.prompt);
+  assert.equal(
+    reads.length,
+    before,
+    'a listed, already read body needs no stream read',
+  );
+  assert.ok(
+    !reads.slice(1).includes('w:shortcut-index'),
+    'choosing never re-reads the index the listing came from',
+  );
+  await assert.rejects(select('missing'), /shortcut_changed/);
 });

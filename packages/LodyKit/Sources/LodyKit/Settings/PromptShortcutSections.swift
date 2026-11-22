@@ -10,6 +10,8 @@ enum PromptShortcutRequest: Sendable {
   /// A listing that re-reads the access directory first (the Settings page).
   case refresh
   case read(PromptShortcutEntry)
+  /// A composer's choice by id, checked against the runtime's last listing (no index read).
+  case select(id: String)
   case save(entry: PromptShortcutEntry?, value: PromptShortcutValue, bodyDocId: String)
 }
 

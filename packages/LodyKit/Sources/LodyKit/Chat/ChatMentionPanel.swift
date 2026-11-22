@@ -10,6 +10,8 @@ struct ChatMentionItem: Decodable, Equatable {
   var insertText: String?
   /// A Role's emoji: it leads the row instead of a symbol (as the run-config Role row).
   var emoji: String?
+  /// A prompt shortcut's listed revision; a body read ahead belongs to exactly this revision.
+  var revision: String?
 
   /// Folders browse with the files; prompt shortcuts (the runtime lists them with the agent's
   /// commands, inserting `/shortcut:<slug>`) are their own category, as web's mention menu.
@@ -96,7 +98,10 @@ final class ChatMentionPanel: UIView {
   /// Reads a prompt shortcut's body by id, so choosing one writes the body (web); without it, or
   /// when the read fails, the `/shortcut:<slug>` token goes in and the runtime expands it at send.
   var loadShortcut: ((String) async throws -> RuntimeContract.PromptShortcut)?
-  private var shortcutLoad: Task<Void, Never>?
+  /// Bodies of the shortcuts this showing of the panel lists, read ahead so choosing one writes
+  /// its body at once; keyed by id and listed revision, and dropped when the panel hides.
+  private var shortcutBodies: [String: RuntimeContract.PromptShortcut] = [:]
+  private var shortcutWarmup: Task<Void, Never>?
   private(set) var panelHeight: CGFloat = 0
 
   override init(frame: CGRect) {
@@ -215,6 +220,7 @@ final class ChatMentionPanel: UIView {
       (controller as? ChatMentionLevelController)?.reload(animated: controller === navigation.topViewController && showing)
     }
     setShowing(true)
+    warmShortcuts()
   }
 
   /// The rows one level shows for the current query.
@@ -271,24 +277,66 @@ final class ChatMentionPanel: UIView {
     return ChatRoleLabel(emoji: role.emoji.flatMap { $0.isEmpty ? nil : $0 } ?? "🪼", name: role.name)
   }
 
-  /// Writes the shortcut's body over the trigger once it is read, if the prompt has not moved on.
+  /// Writes the shortcut's body over the trigger at once when it was read ahead. Otherwise the
+  /// trigger becomes a chip named for the shortcut that sends `/shortcut:<slug>` (the runtime
+  /// expands it at send), and the body replaces that chip alone when it arrives, never the text
+  /// typed meanwhile.
   private func insertShortcut(_ item: ChatMentionItem) {
-    guard let input, let range, let load = loadShortcut else { return insert(item) }
-    let before = input.text ?? ""
-    UISelectionFeedbackGenerator().selectionChanged()
-    shortcutLoad?.cancel()
-    shortcutLoad = Task { @MainActor [weak self] in
-      let body = try? await load(item.path)
-      guard let self, !Task.isCancelled, input.text == before else { return }
-      guard let body, let composer = input as? ChatComposerInput else { return self.insert(item, into: input, range: range) }
-      let segments = ChatShortcutInsertion.segments(prompt: body.prompt, mentions: body.mentions) { self.roleLabel($0) }
-      let length = segments.reduce(0) { $0 + ($1.text as NSString).length }
-      guard NSMaxRange(range) <= (before as NSString).length, (before as NSString).length - range.length + length <= 32000 else { return }
+    guard let input, let range, let load = loadShortcut, let composer = input as? ChatComposerInput,
+          let token = item.insertText else { return insert(item) }
+    let length = ((input.text ?? "") as NSString).length
+    guard NSMaxRange(range) <= length else { return }
+    if let body = shortcutBodies[Self.bodyKey(item)] {
+      let segments = segments(body)
+      guard length - range.length + segments.reduce(1, { $0 + ($1.text as NSString).length }) <= 32000 else { return }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
-      self.applyingEdit = true
-      composer.insertSegments(segments, replacing: range)
-      self.applyingEdit = false
-      self.onChange?()
+      edit { _ = composer.insertSegments(segments, replacing: range) }
+      return
+    }
+    let label = item.subtitle.isEmpty ? token : item.subtitle
+    guard length - range.length + (label as NSString).length + 1 <= 32000 else { return }
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    var chip: String?
+    edit { chip = composer.insertReference(token, label: label == token ? nil : label, replacing: range) }
+    guard let chip else { return }
+    Task { @MainActor [weak self, weak composer] in
+      guard let body = try? await load(item.path), let self, let composer else { return }
+      let segments = self.segments(body)
+      let current = ((composer.text ?? "") as NSString).length
+      guard current - (label as NSString).length + segments.reduce(0, { $0 + ($1.text as NSString).length }) <= 32000 else { return }
+      self.edit { composer.replaceReference(chip, token: token, with: segments) }
+    }
+  }
+
+  private static func bodyKey(_ item: ChatMentionItem) -> String { item.path + "\n" + (item.revision ?? "") }
+
+  private func segments(_ body: RuntimeContract.PromptShortcut) -> [ChatComposerSegment] {
+    ChatShortcutInsertion.segments(prompt: body.prompt, mentions: body.mentions) { self.roleLabel($0) }
+  }
+
+  private func edit(_ change: () -> Void) {
+    applyingEdit = true
+    change()
+    applyingEdit = false
+    onChange?()
+  }
+
+  /// Reads the bodies of the shortcuts the visible level lists, one at a time, while it shows.
+  private func warmShortcuts() {
+    guard shortcutWarmup == nil, let load = loadShortcut else { return }
+    shortcutWarmup = Task { @MainActor [weak self] in
+      var tried: Set<String> = []
+      while let self, self.showing, !Task.isCancelled {
+        let level = (self.navigation.topViewController as? ChatMentionLevelController)?.level ?? .root
+        guard let next = self.rows(for: level).first(where: {
+          $0.category == "shortcut" && self.shortcutBodies[Self.bodyKey($0)] == nil && !tried.contains(Self.bodyKey($0))
+        }) else { break }
+        tried.insert(Self.bodyKey(next))
+        let body = try? await load(next.path)
+        guard !Task.isCancelled else { return }
+        if let body, body.revision == next.revision ?? body.revision { self.shortcutBodies[Self.bodyKey(next)] = body }
+      }
+      if !Task.isCancelled { self?.shortcutWarmup = nil }
     }
   }
 
@@ -332,6 +380,9 @@ final class ChatMentionPanel: UIView {
 
   /// Hide and return to the categories, so the next trigger starts at the top.
   private func reset(animated: Bool) {
+    shortcutWarmup?.cancel()
+    shortcutWarmup = nil
+    shortcutBodies = [:]
     setShowing(false, animated: animated)
     if navigation.viewControllers.count > 1 { navigation.popToRootViewController(animated: false) }
   }
@@ -580,11 +631,19 @@ final class ChatMentionLevelController: UIViewController, UICollectionViewDelega
     case "pr":
       return ##"{"items":[{"path":"pr:12","name":"Review implementation","kind":"pr","subtitle":"LodyAI/Lody #12","insertText":"#12"}],"truncated":false,"incomplete":false}"##
     case "cmd":
-      return ##"{"items":[{"path":"compact","name":"compact","kind":"cmd","subtitle":"Compact this conversation","insertText":"/compact"}],"truncated":false,"incomplete":false}"##
+      return ##"{"items":[{"path":"ui-review-shortcut","name":"/shortcut:review","kind":"cmd","subtitle":"Review","insertText":"/shortcut:review","revision":"r1"},{"path":"compact","name":"compact","kind":"cmd","subtitle":"Compact this conversation","insertText":"/compact"}],"truncated":false,"incomplete":false}"##
     case "file":
       return ##"{"items":[{"path":"src","name":"src","kind":"directory","subtitle":""},{"path":"src/session.ts","name":"session.ts","kind":"file","subtitle":"src","insertText":"@src/session.ts"}],"truncated":true,"incomplete":false}"##
     default:
       return ##"{"items":[],"truncated":false,"incomplete":false}"##
     }
+  }
+
+  /// The listed fixture shortcut's body, so choosing it runs the production insertion offline.
+  static func shortcut(_ id: String) -> RuntimeContract.PromptShortcut? {
+    guard LodyUIVerify.mentions, id == "ui-review-shortcut" else { return nil }
+    return try? JSONDecoder().decode(RuntimeContract.PromptShortcut.self, from: Data(##"""
+    {"v":1,"id":"ui-review-shortcut","workspaceId":"ui-home","ownerUserId":"ui","name":"Review","slug":"review","scope":{},"revision":"r1","createdAt":1,"updatedAt":1,"prompt":"Review the diff","mentions":[]}
+    """##.utf8))
   }
 }
