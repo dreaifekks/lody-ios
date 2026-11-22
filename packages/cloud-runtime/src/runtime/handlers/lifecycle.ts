@@ -11,6 +11,7 @@ import {
   startAcceptedInputs,
   stopSessions,
   resumeAcceptedInputs,
+  resumeSessions,
 } from '../session';
 import type { RuntimeContext } from './context.ts';
 import { sessionActionMeta } from '../fork-session';
@@ -177,6 +178,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       refreshClock();
       ctx.publish();
       ctx.startPresence();
+      resumeSessions();
       traceSessionResume();
       resumeAcceptedInputs();
     } else ctx.stopPresence();

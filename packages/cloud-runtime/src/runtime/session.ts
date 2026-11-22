@@ -34,7 +34,7 @@ import {
   HistoryEntryWriteSchema,
   parseHistoryWrite,
 } from './upstream-roost.js';
-import { retrySessionRead } from './session-read';
+import { retrySessionRead, wakeSessionReads } from './session-read';
 import { resolveTurnRole, type TurnRole } from './agent-roles';
 import { record, roleRunConfigApplied } from '../protocol/agent-roles';
 import type {
@@ -393,6 +393,10 @@ export function startAcceptedInputs(options: {
 }
 export function resumeAcceptedInputs() {
   void acceptedInputs?.resume().catch(() => {});
+}
+export function resumeSessions() {
+  wakeSessionReads();
+  for (const state of sessions.values()) state.roostReader?.wake();
 }
 export async function stopAcceptedInputs() {
   const owner = acceptedInputs;
@@ -1217,6 +1221,11 @@ export async function openSession(
     event('syncing', error instanceof Error ? error.message : 'sync_failed');
   };
   const retryStream = (error: unknown) => {
+    if (
+      error instanceof Error &&
+      (error.message === 'unauthorized' || error.message === 'forbidden')
+    )
+      (state.getGrant as { invalidate?: () => void }).invalidate?.();
     state.streamReady = false;
     retrying(error);
   };
@@ -1384,26 +1393,43 @@ export async function openSession(
         reader.metadataChanged(state.roostMetadata);
         state.historyReady = true;
         void (async () => {
+          const isSuperseded = (error: unknown) =>
+            error instanceof Error &&
+            (error.message === 'history_observation_superseded' ||
+              error.message === 'Roost history observation was superseded' ||
+              error.message === 'Roost cached page cursor needs rebasing');
+          const retryNonSuperseded = async <T>(work: () => Promise<T>) => {
+            for (let attempt = 0; ; attempt++) {
+              try {
+                return await work();
+              } catch (error) {
+                if (!isSuperseded(error) || attempt >= 3) throw error;
+                controller.signal.throwIfAborted();
+              }
+            }
+          };
           try {
             while (!controller.signal.aborted) {
               const next = await retrySessionRead(
                 controller.signal,
-                () => reader.waitForChange(window),
+                () => retryNonSuperseded(() => reader.waitForChange(window)),
                 retryHistory,
               );
               if (sessions.get(id) !== state) return;
               await retrySessionRead(
                 controller.signal,
                 () =>
-                  queueRoostRead(state, async () => {
-                    let retained = await reader.latest();
-                    const start = state.roostWindow?.start ?? next.start;
-                    while (retained.cursor && retained.start > start)
-                      retained = await reader.older(retained);
-                    if (sessions.get(id) !== state) return;
-                    installHistory(state, retained);
-                    window = retained;
-                  }),
+                  queueRoostRead(state, () =>
+                    retryNonSuperseded(async () => {
+                      let retained = await reader.latest();
+                      const start = state.roostWindow?.start ?? next.start;
+                      while (retained.cursor && retained.start > start)
+                        retained = await reader.older(retained);
+                      if (sessions.get(id) !== state) return;
+                      installHistory(state, retained);
+                      window = retained;
+                    }),
+                  ),
                 retryHistory,
               );
               if (reader.metadataChanged(state.roostMetadata))
@@ -1427,26 +1453,28 @@ export async function openSession(
       pages = 0;
       let changed = true;
       while (!controller.signal.aborted) {
-        state.streamReady = upToDate;
-        updateReadiness();
         if (upToDate) {
+          state.streamReady = true;
+          updateReadiness();
           if (changed || state.status !== 'live')
             event(state.ready ? 'live' : 'syncing');
           changed = false;
           pages = 0;
         } else {
-          event('syncing');
+          if (!state.streamReady) event('syncing');
           if (++pages > 100) throw new Error('session_limit');
         }
+        let livePoll = false;
         const next = await retrySessionRead(
           controller.signal,
           () =>
             readAttempt(state, upToDate ? 'poll' : 'catchup', async () => {
+              livePoll = upToDate && state.streamReady === true;
               const result = await state.client.readOnce({
                 offset,
                 cursor,
                 signal: controller.signal,
-                ...(upToDate ? { live: 'long-poll' as const } : {}),
+                ...(livePoll ? { live: 'long-poll' as const } : {}),
               });
               if (!result.ok) throw new Error(result.result.code);
               return result;
@@ -1464,7 +1492,7 @@ export async function openSession(
         cursor = next.result.cursor;
         upToDate = next.result.upToDate;
         if (next.result.closed) throw new Error('stream_closed');
-        if (!next.result.payload?.body.length && upToDate)
+        if (livePoll && !next.result.payload?.body.length && upToDate)
           await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     } catch (error) {

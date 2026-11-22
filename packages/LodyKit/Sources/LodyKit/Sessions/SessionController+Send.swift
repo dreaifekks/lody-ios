@@ -277,9 +277,29 @@ extension SessionController {
   }
 
   private func connection(_ feed: SessionFeedState) -> String {
-    if feed.overflow { return "" }
-    if ["offline", "failed", "stopped"].contains(feed.status) { return "paused" }
-    return feed.status == "live" ? "" : "connecting"
+    if feed.overflow || feed.status == "live" {
+      connectingTask?.cancel()
+      connectingTask = nil
+      connectingShown = false
+      return ""
+    }
+    if ["offline", "failed", "stopped"].contains(feed.status) {
+      connectingTask?.cancel()
+      connectingTask = nil
+      connectingShown = false
+      return "paused"
+    }
+    if connectingShown { return "connecting" }
+    if connectingTask == nil {
+      connectingTask = Task { @MainActor [weak self] in
+        do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
+        guard let self else { return }
+        self.connectingTask = nil
+        self.connectingShown = true
+        self.renderComposer()
+      }
+    }
+    return ""
   }
 
   private func placeholder(_ session: SessionItem, locked: Bool) -> String {

@@ -629,6 +629,7 @@ function watch(mode: string) {
           // A failed read has not imported bytes or advanced the cursor. Keep
           // that verified replica through transport loss and host suspension.
           // Protocol/cursor failures still leave this loop for a fresh bootstrap.
+          let livePoll = upToDate;
           const response = await retrySessionRead(
             signal,
             async () => {
@@ -636,7 +637,7 @@ function watch(mode: string) {
                 offset,
                 cursor,
                 signal,
-                ...(upToDate ? { live: 'long-poll' as const } : {}),
+                ...(livePoll ? { live: 'long-poll' as const } : {}),
               });
               if (!result.ok) {
                 const error = result.result;
@@ -663,6 +664,7 @@ function watch(mode: string) {
               return result;
             },
             (error) => {
+              livePoll = false;
               markUnhealthy();
               channel.emit('creationOptionsChanged', {});
               reportError('network_or_auth');

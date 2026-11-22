@@ -56,6 +56,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var githubUpdates = SessionPullRequestUpdates()
   var githubSettle: Task<Void, Never>?
   var optionsRefresh: Task<Void, Never>?
+  var connectingShown = false
+  var connectingTask: Task<Void, Never>?
   /// The open run-config sheet's rows, refreshed when the computer's options arrive.
   weak var runConfigPanel: CreatePanelState?
   private let initialChoice: ModelChoice?
@@ -131,6 +133,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     memberTask?.cancel()
     githubSettle?.cancel()
     optionsRefresh?.cancel()
+    connectingTask?.cancel()
     browserCheckTask?.cancel()
     feed?.finish()
     for store in devicePreviews.values where !previewCache.isDeviceCached(store) { store.finish() }
@@ -600,7 +603,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   }
 
   private func wireEvents() {
-    chat.onReconnect = { [weak self] _ in self?.feed?.reconnect() }
+    chat.onReconnect = { [weak self] _ in
+      guard let self else { return }
+      self.connectingShown = true
+      self.feed?.reconnect()
+      self.renderComposer()
+    }
     chat.onLoadEarlierHistory = { [weak self] in
       guard let self else { return }
       DataRuntime.current?.loadOlderSession(self.sessionId)
