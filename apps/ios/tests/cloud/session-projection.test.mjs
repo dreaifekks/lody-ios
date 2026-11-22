@@ -709,16 +709,42 @@ test('projects user attachments stored only in inputConfig.inputBlocks even when
     agentType: 'codex',
     inputBlocks,
   });
+  const mixedItems = setAll(
+    doc.getList('history').pushContainer(new LoroMap()),
+    { id: 'u-mixed', role: 'user', status: 'handled' },
+  );
+  const mixedList = mixedItems.setContainer('items', new LoroList());
+  setAll(mixedList.pushContainer(new LoroMap()), {
+    type: 'text',
+    text: 'Inspect both',
+  });
+  setAll(mixedList.pushContainer(new LoroMap()), {
+    type: 'image',
+    imageId: localImageId,
+    transport: 'local',
+    machineId: 'mac-mini',
+    localImageId,
+    mimeType: 'image/png',
+    fileName: 'only-in-blocks.png',
+    sizeBytes: 512,
+  });
+  setAll(mixedItems.setContainer('inputConfig', new LoroMap()), {
+    cliType: 'builtin',
+    agentType: 'codex',
+    inputBlocks,
+  });
   doc.commit();
 
   const projected = projectSession(doc, 'input-blocks-fallback');
   for (const entry of projected.entries) {
     assert.equal(entry.items.length, 3);
     assert.equal(entry.items[0].type, 'text');
-    assert.equal(entry.items[1].type, 'local_attachment');
-    assert.equal(entry.items[1].file.path, '/Users/dev/only-in-blocks.pdf');
-    assert.equal(entry.items[2].type, 'image');
-    assert.equal(entry.items[2].image.localImageId, localImageId);
+    const localAttachment = entry.items.find(
+      (item) => item.type === 'local_attachment',
+    );
+    const localImage = entry.items.find((item) => item.type === 'image');
+    assert.equal(localAttachment?.file.path, '/Users/dev/only-in-blocks.pdf');
+    assert.equal(localImage?.image.localImageId, localImageId);
   }
   releaseProjection(doc);
 });

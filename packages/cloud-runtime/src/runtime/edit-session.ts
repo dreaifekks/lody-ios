@@ -218,10 +218,55 @@ function rawReferenceItems(list: unknown): RecordValue[] {
   );
 }
 
+function attachmentIdentityKeys(item: RecordValue): string[] {
+  const type = item.type ?? 'image';
+  if (type === 'image') {
+    const keys: string[] = [];
+    if (typeof item.imageId === 'string' && item.imageId)
+      keys.push(`image:${item.imageId}`);
+    if (typeof item.localImageId === 'string' && item.localImageId)
+      keys.push(`image:${item.localImageId}`);
+    return keys;
+  }
+  if (type === 'file') {
+    if (typeof item.fileId === 'string' && item.fileId)
+      return [`file:${item.fileId}`];
+    return [];
+  }
+  if (type === 'local_attachment') {
+    if (
+      typeof item.machineId === 'string' &&
+      item.machineId &&
+      typeof item.path === 'string' &&
+      item.path
+    )
+      return [`local_attachment:${item.machineId}\0${item.path}`];
+    return [];
+  }
+  return [];
+}
+
+function mergeAttachmentItems(
+  preferred: readonly RecordValue[],
+  supplemental: readonly RecordValue[],
+): RecordValue[] {
+  const merged: RecordValue[] = [];
+  const seen = new Set<string>();
+  const append = (item: RecordValue) => {
+    const keys = attachmentIdentityKeys(item);
+    if (keys.some((key) => seen.has(key))) return;
+    for (const key of keys) seen.add(key);
+    merged.push(item);
+  };
+  for (const item of preferred) append(item);
+  for (const item of supplemental) append(item);
+  return merged;
+}
+
 /**
- * Shared user-turn block view for transcript display, edit drafts and resends:
- * falls back to `inputConfig.inputBlocks` when `items` is absent/empty or
- * carries no attachments while `inputConfig.inputBlocks` does.
+ * Shared user-turn block view for transcript display and edit-draft text:
+ * keeps existing `items` in place and appends any attachments present only in
+ * `inputConfig.inputBlocks` without duplicating identities already in `items`.
  */
 export function userTurnItems(turn: RecordValue): RecordValue[] {
   const items = Array.isArray(turn?.items) ? turn.items : [];
@@ -229,16 +274,33 @@ export function userTurnItems(turn: RecordValue): RecordValue[] {
     ? turn.inputConfig.inputBlocks
     : [];
   if (items.length === 0) return blocks;
-  if (rawAttachmentItems(items).length > 0) return items;
-  const fallbackAttachments = rawAttachmentItems(blocks);
-  if (fallbackAttachments.length === 0) return items;
-  return [...items, ...fallbackAttachments];
+  const blockAttachments = rawAttachmentItems(blocks);
+  if (blockAttachments.length === 0) return items;
+  const seen = new Set<string>();
+  for (const item of rawAttachmentItems(items)) {
+    for (const key of attachmentIdentityKeys(item)) seen.add(key);
+  }
+  const missing: RecordValue[] = [];
+  for (const block of blockAttachments) {
+    const keys = attachmentIdentityKeys(block);
+    if (keys.some((key) => seen.has(key))) continue;
+    for (const key of keys) seen.add(key);
+    missing.push(block);
+  }
+  if (missing.length === 0) return items;
+  return [...items, ...missing];
 }
 
+/**
+ * Canonical attachment list for edit drafts and resends: prefers original
+ * blocks from `inputConfig.inputBlocks` and merges any extra attachments from
+ * `items` deduplicated by attachment identity.
+ */
 export function turnAttachmentItems(turn: RecordValue): RecordValue[] {
-  const fromItems = rawAttachmentItems(turn?.items);
-  if (fromItems.length > 0) return fromItems;
-  return rawAttachmentItems(turn?.inputConfig?.inputBlocks);
+  return mergeAttachmentItems(
+    rawAttachmentItems(turn?.inputConfig?.inputBlocks),
+    rawAttachmentItems(turn?.items),
+  );
 }
 
 export function editAttachments(turn: RecordValue): EditableAttachmentBlock[] {

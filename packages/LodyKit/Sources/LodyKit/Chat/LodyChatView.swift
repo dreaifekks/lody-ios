@@ -74,6 +74,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       targetTurnPendingLoadFrom = nil
       targetTurnSawRemoteLoading = false
       targetTurnLocalRevealAttempted = false
+      targetTurnScrolledEpoch = nil
       scrollToTargetTurn()
     }
   }
@@ -90,6 +91,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var targetTurnPendingLoadFrom: String?
   var targetTurnSawRemoteLoading = false
   var targetTurnLocalRevealAttempted = false
+  var targetTurnScrolledEpoch: Int?
   var lastScrolledTurnID: String?
   var pendingSnapshotEpoch = 0
   var decodedSnapshotEpoch = 0
@@ -97,33 +99,51 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var appliedSnapshotEpoch = 0
   var liveSnapshotEpoch: Int?
 
-  private func clearTargetTurn() {
-    targetTurnLoadAttempts = 0
-    targetTurnPendingLoadFrom = nil
-    targetTurnSawRemoteLoading = false
-    targetTurnLocalRevealAttempted = false
-    if !targetTurnID.isEmpty { targetTurnID = "" }
-  }
-
-  func scrollToTargetTurn() {
-    guard !targetTurnID.isEmpty, !applying else { return }
-    let items = dataSource.snapshot().itemIdentifiers
-    if let row = items.compactMap({ rows[$0] }).first(where: { $0.entryID == targetTurnID }),
-       let index = dataSource.indexPath(for: row.id) {
-      let scrolled = targetTurnID
-      clearTargetTurn()
-      lastScrolledTurnID = scrolled
-      pauseTracking()
-      collection.scrollToItem(at: index, at: .top, animated: false)
-      return
-    }
-    // Wait until the live transcript snapshot has finished decoding, rendering and committing.
+  private var isLiveSnapshotCommitted: Bool {
     guard transcriptLive,
           let liveEpoch = liveSnapshotEpoch,
           appliedSnapshotEpoch >= liveEpoch,
           appliedSnapshotEpoch == pendingSnapshotEpoch,
           !decoding, !rendering, pendingEntries == nil,
-          frameTimer == nil, !framePending, !needsApply, !preparingHistory else { return }
+          frameTimer == nil, !framePending, !needsApply, !preparingHistory else {
+      return false
+    }
+    return true
+  }
+
+  private func clearTargetTurn() {
+    targetTurnLoadAttempts = 0
+    targetTurnPendingLoadFrom = nil
+    targetTurnSawRemoteLoading = false
+    targetTurnLocalRevealAttempted = false
+    targetTurnScrolledEpoch = nil
+    if !targetTurnID.isEmpty { targetTurnID = "" }
+  }
+
+  func scrollToTargetTurn() {
+    guard !targetTurnID.isEmpty, !applying else { return }
+    let liveCommitted = isLiveSnapshotCommitted
+    let items = dataSource.snapshot().itemIdentifiers
+    if let row = items.compactMap({ rows[$0] }).first(where: { $0.entryID == targetTurnID }),
+       let index = dataSource.indexPath(for: row.id) {
+      let scrolled = targetTurnID
+      let shouldScroll = liveCommitted || targetTurnScrolledEpoch != appliedSnapshotEpoch
+      // Keep the target active on cached/provisional hits until a committed live
+      // snapshot confirms it; otherwise an initial 6-turn live window can evict it.
+      if liveCommitted {
+        clearTargetTurn()
+      } else {
+        targetTurnScrolledEpoch = appliedSnapshotEpoch
+      }
+      if shouldScroll {
+        lastScrolledTurnID = scrolled
+        pauseTracking()
+        collection.scrollToItem(at: index, at: .top, animated: false)
+      }
+      return
+    }
+    // Wait until the live transcript snapshot has finished decoding, rendering and committing.
+    guard liveCommitted else { return }
     // Reveal an already-loaded turn that sits earlier than the 50-entry display boundary.
     if let targetIndex = transcript.entries.firstIndex(where: { $0.id == targetTurnID }) {
       let visibleStart = historyStartID.flatMap { id in

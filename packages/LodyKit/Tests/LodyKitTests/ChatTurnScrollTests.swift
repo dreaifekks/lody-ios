@@ -45,6 +45,46 @@ final class ChatTurnScrollTests: XCTestCase {
     XCTAssertEqual(view.appliedSnapshotEpoch, view.pendingSnapshotEpoch)
   }
 
+  func testCachedHitKeepsTargetUntilLiveWindowConfirmsAndLoadsEarlierHistoryIfEvicted() async throws {
+    let (window, view) = makeAttachedChatView()
+    defer { window.isHidden = true }
+
+    var pagesLoaded = 0
+    view.onLoadEarlierHistory = { [weak view] in
+      guard let view else { return }
+      pagesLoaded += 1
+      view.remoteHasEarlierHistory = false
+      let ids = (1...12).map { "t\($0)" }
+      if let json = try? self.encodeEntries(ids) {
+        view.setEntries(json, animate: false)
+        view.scheduleUpdate()
+      }
+    }
+
+    // Cached snapshot initially contains the linked turn `t2`: scroll immediately,
+    // but keep `targetTurnID` alive until a live snapshot confirms it.
+    view.targetTurnID = "t2"
+    view.transcriptLive = false
+    view.setEntries(try encodeEntries(["t1", "t2", "t3"]), animate: false)
+    view.scheduleUpdate()
+
+    try await waitUntil { view.appliedSnapshotEpoch >= 1 && view.lastScrolledTurnID == "t2" }
+    XCTAssertEqual(view.targetTurnID, "t2", "Provisional cached hit must retain targetTurnID until live confirms")
+    XCTAssertEqual(pagesLoaded, 0)
+
+    // First live snapshot arrives with only the newest 6 turns (evicting `t2`).
+    view.lastScrolledTurnID = nil
+    view.remoteHasEarlierHistory = true
+    view.transcriptLive = true
+    view.setEntries(try encodeEntries((7...12).map { "t\($0)" }), animate: false)
+    view.scheduleUpdate()
+
+    try await waitUntil { view.targetTurnID.isEmpty }
+    XCTAssertEqual(pagesLoaded, 1, "Live handoff evicting the cached target must page earlier history")
+    XCTAssertEqual(view.lastScrolledTurnID, "t2")
+    XCTAssertFalse(view.followsBottom)
+  }
+
   func testTargetTurnExpandsEarlierRemoteHistoryAndLocalWindowUntilFound() async throws {
     let (window, view) = makeAttachedChatView()
     defer { window.isHidden = true }

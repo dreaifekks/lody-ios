@@ -441,3 +441,112 @@ test('editing and resending preserves local_attachment and local image stored on
     fixture.close();
   }
 });
+
+test('editing and resending merges mixed attachments across items and inputConfig.inputBlocks without duplication', async () => {
+  const requests = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      requests.push(request);
+      return { result: { success: true } };
+    },
+  });
+  const imageInItems = {
+    type: 'image',
+    imageId: 'img-in-items',
+    mimeType: 'image/png',
+    fileName: 'shot.png',
+    sizeBytes: 320,
+  };
+  const localAttachmentInBlocks = {
+    type: 'local_attachment',
+    machineId: 'm1',
+    path: '/Users/dev/mixed.pdf',
+    kind: 'file',
+    fileName: 'mixed.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 512,
+  };
+  const sharedLocalImage = {
+    type: 'image',
+    imageId: '44444444-5555-4666-8777-888888888888',
+    transport: 'local',
+    machineId: 'm1',
+    localImageId: '44444444-5555-4666-8777-888888888888',
+    mimeType: 'image/png',
+    fileName: 'dup.png',
+    sizeBytes: 400,
+  };
+  const mixedTurn = {
+    id: 'mixed-turn',
+    role: 'user',
+    status: 'handled',
+    items: [
+      { type: 'text', text: 'Mixed original' },
+      imageInItems,
+      {
+        type: 'image',
+        imageId: sharedLocalImage.localImageId,
+        mimeType: 'image/png',
+        sizeBytes: 400,
+      },
+    ],
+    inputConfig: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      prompt: 'Mixed original',
+      inputBlocks: [
+        { type: 'text', text: 'Mixed original' },
+        localAttachmentInBlocks,
+        sharedLocalImage,
+      ],
+    },
+  };
+  try {
+    fixture.server.getList('history').push(mixedTurn);
+    await fixture.pushUpdate();
+    const read = await fixture.runtime.editSession(
+      {
+        sessionId: 's1',
+        userId: 'u1',
+        expectedUserTurnId: 'mixed-turn',
+        action: 'read',
+      },
+      meta,
+    );
+    assert.equal(read.state, 'ready');
+    assert.equal(read.text, 'Mixed original');
+    assert.deepEqual(
+      read.attachments.map((item) => [
+        item.editId,
+        item.type,
+        item.path ?? item.localImageId ?? item.imageId,
+      ]),
+      [
+        ['original:0', 'local_attachment', '/Users/dev/mixed.pdf'],
+        ['original:1', 'image', sharedLocalImage.localImageId],
+        ['original:2', 'image', 'img-in-items'],
+      ],
+    );
+    const resent = await fixture.runtime.editSession(
+      {
+        sessionId: 's1',
+        userId: 'u1',
+        expectedUserTurnId: 'mixed-turn',
+        action: 'send',
+        id: 'mixed-turn-edited',
+        text: 'Mixed updated',
+        retainedIds: ['original:0', 'original:1', 'original:2'],
+      },
+      meta,
+    );
+    assert.equal(resent.state, 'accepted');
+    assert.deepEqual(requests[0].params.inputConfig.inputBlocks, [
+      { type: 'text', text: 'Mixed updated' },
+      localAttachmentInBlocks,
+      sharedLocalImage,
+      imageInItems,
+    ]);
+  } finally {
+    fixture.close();
+  }
+});

@@ -108,6 +108,67 @@ test('edit-session preserves local_attachment and transport:local localImageId b
       localImage,
     ]);
   }
+
+  // Mixed records: `items` has an image while `inputConfig.inputBlocks` has a
+  // `local_attachment` (plus a duplicate of that image). Both are preserved
+  // without duplication and `inputBlocks` wins for overlapping identities.
+  const cloudImageInItems = {
+    type: 'image',
+    imageId: 'cloud-img-1',
+    mimeType: 'image/png',
+    fileName: 'diagram.png',
+    sizeBytes: 512,
+  };
+  const mixedTurn = {
+    items: [
+      { type: 'text', text: 'Mixed attachments' },
+      cloudImageInItems,
+      {
+        type: 'image',
+        imageId: localImage.localImageId,
+        mimeType: 'image/png',
+        sizeBytes: 1024,
+      },
+    ],
+    inputConfig: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      inputBlocks: [
+        { type: 'text', text: 'Mixed attachments' },
+        localAttachment,
+        localImage,
+      ],
+    },
+  };
+  const mixedOriginals = editAttachments(mixedTurn);
+  assert.equal(mixedOriginals.length, 3);
+  assert.deepEqual(
+    mixedOriginals.map((item) => [
+      item.editId,
+      item.type,
+      item.path ?? item.localImageId ?? item.imageId,
+    ]),
+    [
+      ['original:0', 'local_attachment', '/Users/dev/report.md'],
+      ['original:1', 'image', localImage.localImageId],
+      ['original:2', 'image', 'cloud-img-1'],
+    ],
+  );
+  // Overlapping local image keeps rich `inputBlocks` transport/machine metadata.
+  assert.equal(mixedOriginals[1].transport, 'local');
+  assert.equal(mixedOriginals[1].machineId, 'mac-mini');
+  const mixedRebuilt = replacementInput(
+    mixedTurn,
+    'Edited mixed',
+    ['original:0', 'original:1', 'original:2'],
+    [],
+  );
+  assert.deepEqual(mixedRebuilt.inputBlocks, [
+    { type: 'text', text: 'Edited mixed' },
+    localAttachment,
+    localImage,
+    cloudImageInItems,
+  ]);
 });
 
 test('Antigravity mode migration and agy permission tiers', () => {
