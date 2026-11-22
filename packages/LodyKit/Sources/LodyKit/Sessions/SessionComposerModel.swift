@@ -34,6 +34,12 @@ struct SessionComposerService {
 
 @MainActor
 final class SessionComposerModel {
+  private struct OptionsRead {
+    var workspaceId: String
+    var projectId: String?
+    var session: SessionItem
+  }
+
   var changed: (() -> Void)?
   private(set) var capability: Capability?
   private(set) var tier: String?
@@ -45,7 +51,10 @@ final class SessionComposerModel {
   private var restored = ""
   private var snapshotChoice: ModelChoice?
   private var capabilityKey: String?
-  private var capabilityTask: Task<Void, Never>?
+  private(set) var capabilityTask: Task<Void, Never>?
+  /// The last options read failed, or the runtime listed this conversation's computer before
+  /// its capability or agent caught up; `optionsChanged` reads it again.
+  private var optionsRead: OptionsRead?
   private var tierKey = ""
   private var tierTimer: Timer?
   /// The conversation's agent: it never changes here (web locks the Agent row once a chat has history).
@@ -112,6 +121,7 @@ final class SessionComposerModel {
     agentConfigId = session.agentConfigId
     capabilityKey = key
     capabilityTask?.cancel()
+    optionsRead = nil
     loadRoles(workspaceId)
     // A plain chat's `<machine>:unassigned` project is not in the catalog: still load the
     // workspace's options, or the composer loses its model, reasoning and permission controls.
@@ -119,21 +129,45 @@ final class SessionComposerModel {
       capability = nil
       return
     }
-    let service = service
+    readOptions(.init(workspaceId: workspaceId, projectId: projectId, session: session), key: key, retry: false)
+  }
+
+  /// The runtime reports changed creation options (a computer caught up, came online or the
+  /// runtime became ready): read them again while the last read left this conversation's
+  /// capability or agent unlisted.
+  func optionsChanged() {
+    guard let read = optionsRead, let key = capabilityKey else { return }
+    readOptions(read, key: key, retry: true)
+  }
+
+  private func readOptions(_ read: OptionsRead, key: String, retry: Bool) {
+    optionsRead = read
+    capabilityTask?.cancel()
+    let service = service, session = read.session
     capabilityTask = Task { [weak self] in
-      let options = try? await service.options(workspaceId, projectId)
+      let options = try? await service.options(read.workspaceId, read.projectId)
       guard let self, !Task.isCancelled, self.capabilityKey == key else { return }
-      // A failed read (runtime not ready, computer unreachable) is retried on the next render.
-      if options == nil { self.capabilityKey = nil }
-      self.capability = options.flatMap {
-        CreateLogic.capability(
-          in: $0.capabilities, machineId: session.machineId, configId: session.agentConfigId,
-          cliType: session.cliType, agentType: session.agentType)
+      // A retry keeps what an earlier read of this conversation found: the computer drops out of
+      // the options again while its stream imports updates or reconnects.
+      guard let options else {
+        if !retry {
+          self.capability = nil
+          self.agentName = nil
+          self.online = []
+          self.changed?()
+        }
+        return
       }
-      let agents = (options?.agents ?? []).filter { $0.machineId == session.machineId }
-      self.online = Set(agents.map(\.id))
-      self.agentName = agents.first { $0.id == session.agentConfigId }?.name
+      let capability = CreateLogic.capability(
+        in: options.capabilities, machineId: session.machineId, configId: session.agentConfigId,
+        cliType: session.cliType, agentType: session.agentType)
+      let agents = options.agents.filter { $0.machineId == session.machineId }
+      let agentName = agents.first { $0.id == session.agentConfigId }?.name
         ?? agents.first { session.agentConfigId == nil && $0.cliType == session.cliType && $0.agentType == session.agentType }?.name
+      self.online = Set(agents.map(\.id))
+      self.capability = capability ?? (retry ? self.capability : nil)
+      self.agentName = agentName ?? (retry ? self.agentName : nil)
+      if self.capability != nil && self.agentName != nil { self.optionsRead = nil }
       self.changed?()
     }
   }

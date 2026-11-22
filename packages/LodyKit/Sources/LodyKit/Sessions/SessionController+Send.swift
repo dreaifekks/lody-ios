@@ -91,6 +91,24 @@ extension SessionController {
     chat.onSteer = { [weak self] body in self?.controlTurn("steer", messageId: body["id"] as? String) }
   }
 
+  /// A computer that catches up, comes online or a runtime that becomes ready changes the
+  /// creation options; the composer reads them again while its last read was incomplete.
+  func observeCreationOptions() -> NSObjectProtocol {
+    NotificationCenter.default.addObserver(forName: .lodyDataRuntimeEvent, object: nil, queue: .main) { [weak self] note in
+      let optionsChanged = note.userInfo?["creationOptionsChanged"] as? Bool == true
+      let live = note.userInfo?["state"] as? String == "live"
+      guard optionsChanged || live else { return }
+      MainActor.assumeIsolated {
+        guard let self, DataRuntime.current?.workspace == self.source.state.workspaceId else { return }
+        self.optionsRefresh?.cancel()
+        self.optionsRefresh = Task { [weak self] in
+          do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+          self?.composerModel.optionsChanged()
+        }
+      }
+    }
+  }
+
   var supportsMessageQuotes: Bool {
     let catalog = source.state.catalog
     guard let session = catalog.session(sessionId) else { return false }
@@ -225,6 +243,10 @@ extension SessionController {
     adjustComposer(&composer)
     apply("composer", Self.json(composer), chat.setComposerState)
     apply("options", composerModel.optionsJSON, chat.setComposerOptions)
+    if let panel = runConfigPanel {
+      let rows = composerModel.runConfig
+      if panel.runConfig != rows { panel.runConfig = rows }
+    }
     apply("pending", sender?.pendingSendJSON ?? "", chat.setPendingSendJSON)
     renderDecisions(feed)
     renderEditable(feed, enabled: live && state.connected && !state.loading && !session.archived && sender?.sending != true
@@ -288,6 +310,7 @@ extension SessionController {
     chat.endEditing(true)
     let state = CreatePanelState()
     state.runConfig = rows
+    runConfigPanel = state
     state.onPick = { [weak self, weak state] row, option in
       guard let self else { return }
       self.composerModel.pick(row, option)

@@ -55,6 +55,9 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var githubScope = ""
   var githubUpdates = SessionPullRequestUpdates()
   var githubSettle: Task<Void, Never>?
+  var optionsRefresh: Task<Void, Never>?
+  /// The open run-config sheet's rows, refreshed when the computer's options arrive.
+  weak var runConfigPanel: CreatePanelState?
   private let initialChoice: ModelChoice?
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0
@@ -127,6 +130,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   isolated deinit {
     memberTask?.cancel()
     githubSettle?.cancel()
+    optionsRefresh?.cancel()
     browserCheckTask?.cancel()
     feed?.finish()
     for store in devicePreviews.values where !previewCache.isDeviceCached(store) { store.finish() }
@@ -169,6 +173,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         }
       }
     }
+    observers.append(observeCreationOptions())
     render()
   }
 

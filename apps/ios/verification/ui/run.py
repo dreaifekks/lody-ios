@@ -21,7 +21,7 @@ CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
-    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'message-quote', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'dictation'],
+    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'message-quote', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'dictation', 'run-config-late'],
     'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'],
 }
 SUITES = {
@@ -41,6 +41,7 @@ HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search
 PREVIEW = {
     'toast': 'session-preview-live',
     'message-quote': 'session-preview-quote',
+    'run-config-late': 'send-run-config-late',
     'role-mention-chat': 'mention-chat',
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
@@ -159,6 +160,7 @@ PREVIEW = {
 READY = {
     'toast': 'session-preview-probe',
     'message-quote': 'quote-comment',
+    'run-config-late': 'send-status',
     'role-mention-sheet': 'create-session-input',
     'agent-roles': 'list-unavailable-action',
     'session-native': 'session-preview-probe',
@@ -569,7 +571,7 @@ try:
                     script = Path(__file__).with_name('paste-plain.py')
                 if case in ['rich-paste-sheet', 'rich-paste-chat']:
                     script = Path(__file__).with_name('rich-paste.py')
-                if case == 'composer-rest-draft':
+                if case in ('composer-rest-draft', 'run-config-late'):
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'composer-glass-chat':
                     script = Path(__file__).with_name('composer-glass.py')

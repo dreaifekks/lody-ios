@@ -111,6 +111,10 @@ enum NativeDebug {
       fields["headerPreview"] = scenario == "send-header-preview"
       fields["queuedMessageBehavior"] = scenario.hasSuffix("guide") ? "guide" : "queue"
     }
+    if scenario == "send-run-config-late" {
+      id = "send-preview"
+      fields["lateOptions"] = true
+    }
     let aliases = ["pull-request-preview": "pull-request-native-preview", "permission-native-waiting": "permission-native-preview",
       "diagnostics-settings-preview": "settings",
       "preferences-preview": "preferences", "queued-message-behavior-preview": "preferences",

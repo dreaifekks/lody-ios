@@ -8,6 +8,8 @@ final class SendPreviewFixture {
     var steer = true
     var behavior = "queue"
     var longContext = false
+    /// The first options read misses the computer's capability, as before its stream caught up.
+    var lateOptions = false
   }
 
   static let sessionId = "offline-send-preview"
@@ -28,6 +30,7 @@ final class SendPreviewFixture {
   private var completion: CheckedContinuation<String, Error>?
   private var submitted: (id: String, guide: Bool)?
   private var guideReceipts: [String] = []
+  private var optionsReads = 0
   private var control: (action: String, messageId: String?, resume: CheckedContinuation<String, Error>?)?
   private var uploadStep = 0
 
@@ -57,7 +60,7 @@ final class SendPreviewFixture {
     let running = entries.contains { $0["role"] as? String == "assistant" && $0["finished"] as? Bool != true }
     return SessionItem(
       id: Self.sessionId, title: "Send handoff check", status: running ? "running" : "idle", projectId: "fixture:local:project",
-      createdAt: "2026-09-07T00:00:00Z", machineId: "fixture", cliType: "builtin", agentType: "fixture"
+      createdAt: "2026-09-07T00:00:00Z", machineId: "fixture", cliType: "builtin", agentType: options.lateOptions ? "codex" : "fixture"
     )
   }
 
@@ -91,9 +94,18 @@ final class SendPreviewFixture {
         return try await self.request(payload)
       },
       composer: SessionComposerService(
-        options: { [steer = options.steer] _, _ in
-          CreationOptions(sessionId: Self.sessionId, agents: [], capabilities: [
-            Capability(machineId: "fixture", cliType: "builtin", agentType: "fixture", steer: steer),
+        options: { [weak self, steer = options.steer] _, _ in
+          guard let self, self.options.lateOptions else {
+            return CreationOptions(sessionId: Self.sessionId, agents: [], capabilities: [
+              Capability(machineId: "fixture", cliType: "builtin", agentType: "fixture", steer: steer),
+            ])
+          }
+          self.optionsReads += 1
+          return CreationOptions(sessionId: Self.sessionId, agents: [], capabilities: self.optionsReads == 1 ? [] : [
+            Capability(machineId: "fixture", cliType: "builtin", agentType: "codex",
+                       models: [CapabilityChoice(id: "gpt-5", name: "GPT-5")],
+                       configOptions: [ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gpt-5"))],
+                       steer: steer),
           ])
         },
         tier: { _, _ in nil }
