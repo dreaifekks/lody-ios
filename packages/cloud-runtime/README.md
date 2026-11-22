@@ -254,7 +254,10 @@ member's machine are not discoverable here and are refused.
 `start({ workspaceReadOnly })` removes every status, pin and section action, and
 section management waits until the section rows are known.
 
-The workspace Flock is read live beside `:meta` and `:mf:<id>`; its failures are
+The workspace Flock is read live beside `:meta` and `:mf:<id>`. `start` opens it
+together with `:meta` rather than after the first catalog, so the small section
+stream is usually ready before the full conversation list publishes and pinned
+sections do not appear after the rows. Its failures are
 diagnostics, never `syncError`, and keep the last sections. A workspace without
 that stream has no sections; the first section write creates the stream, as Agent
 Role saves do, and the read restarts at once. Time is the server clock: the

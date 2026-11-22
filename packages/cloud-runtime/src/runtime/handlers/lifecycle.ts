@@ -129,7 +129,9 @@ export function registerLifecycle(ctx: RuntimeContext) {
         await ctx.disposeProviderOperations?.();
       }
       if (version !== scopeStartVersion) return {};
-      if (workspaceId !== state.workspace || userId !== state.userId) {
+      const scopeChanged =
+        workspaceId !== state.workspace || userId !== state.userId;
+      if (scopeChanged) {
         stopSessions();
         state.workspaceReplica = undefined;
         state.pinSections = { sections: [], loaded: false };
@@ -161,6 +163,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       );
       ctx.setForeground?.(active);
       ctx.watch('meta');
+      if (scopeChanged) ctx.refreshWorkspace();
       refreshClock();
       if (active) ctx.startPresence();
       return {};
