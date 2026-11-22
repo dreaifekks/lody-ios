@@ -717,5 +717,63 @@
       "sessionId": "session-1",
       "inputId": "input-1"
     }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-status-move",
+    "method": "statusViewCommand",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "command": {
+        "type": "move",
+        "sessionId": "session-2",
+        "to": {
+          "area": "pinned",
+          "sectionId": "section-a"
+        },
+        "beforeId": null
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-status-snooze",
+    "method": "statusViewCommand",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "command": {
+        "type": "snooze",
+        "sessionId": "session-3",
+        "until": 1763730000000,
+        "includeOpened": true
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-status-section",
+    "method": "statusViewCommand",
+    "payload": {
+      "workspaceId": "workspace-1",
+      "command": {
+        "type": "moveSection",
+        "sectionId": "section-a",
+        "beforeId": null
+      }
+    }
+  },
+  {
+    "v": 1,
+    "gen": 3,
+    "kind": "request",
+    "id": "req-snooze-presets",
+    "method": "snoozePresets",
+    "payload": {}
   }
 ]

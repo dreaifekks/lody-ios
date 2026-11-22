@@ -128,8 +128,8 @@ final class SessionSender {
     try await store.put(record.with(phase: "uploaded")).value
   }
 
-  func retry() {
-    guard let store, let record, record.phase == "failed", !dispatching else { return }
+  func retry(_ id: String) {
+    guard let store, let record, record.sendId == id, record.phase == "failed", canSend else { return }
     var next = record.with(phase: "waiting")
     next.send["reason"] = nil
     store.put(next)
@@ -152,7 +152,8 @@ final class SessionSender {
       clear(previous)
     }
     if let record {
-      let uploaded = record.phase == "uploaded" && previous?.sendId == record.sendId && previous?.phase == "sending"
+      let guideUploaded = record.send["guide"]?.truthy == true && record.phase == "uploaded"
+      let uploaded = guideUploaded || (record.phase == "uploaded" && previous?.sendId == record.sendId && previous?.phase == "sending")
       if ["accepted", "queued"].contains(record.phase) || uploaded { clear(record) }
     }
     previous = record

@@ -154,6 +154,7 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     try await foreground()
     try await handoff()
     try await failedSendRecovery()
+    try await retryReferences()
     try await reconciledDelivery()
   }
 
@@ -179,6 +180,49 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     try await sender.discardPending("replacement")
     precondition(sender.record == nil)
     print("PASS: explicit handoff reconciliation confirms delivery without replay, survives restart, and fences late results by exact input")
+  }
+
+  @MainActor static func retryReferences() async throws {
+    let disk = Disk(), network = Network()
+    let store = OutboxStore(key: "references", generation: 0, persistence: disk.persistence, awaitingConfirmation: "unknown")
+    store.onChange = { NotificationCenter.default.post(name: .lodyOutboxDidChange, object: store) }
+    var draft = record("s1", phase: "failed", extra: [
+      "text": .string("$audit @role:reviewer"), "displayText": .string("$audit 🧪 Reviewer"),
+      "quotes": .array([.object(["id": .string("q"), "text": .string("Quote")])]),
+      "reason": .string("mention_expansion_failed"),
+    ])
+    var legacy = draft.with(phase: "waiting")
+    legacy.send["reason"] = nil
+    legacy.send["literalReferences"] = .bool(true)
+    let restored = OutboxRecord.restore(OutboxRecord.encode([legacy]), awaitingConfirmation: "unknown")
+    precondition(restored == [draft], "An old queued literal send must wait for explicit retry before expanding references")
+    legacy.send["phase"] = .string("sending")
+    let uncertain = OutboxRecord.restore(OutboxRecord.encode([legacy]), awaitingConfirmation: "unknown")
+    precondition(uncertain == [draft.with(phase: "unknown", reason: "unknown")])
+    try await store.put(restored[0]).value
+    let sender = SessionSender(sessionId: "s1", store: store, services: network.services, inflight: OutboxInflight())
+    sender.update(.init(userId: "u1", connected: true, session: SessionItem(id: "s1"), context: OutboxForeground(live: true)))
+    defer { store.onChange = nil; sender.changed = nil }
+    sender.retry("replaced")
+    precondition(sender.record == draft)
+    let accepted = Gate()
+    sender.changed = { if sender.record?.phase == "accepted", sender.canSend { accepted.open() } }
+    sender.retry(draft.sendId)
+    sender.retry(draft.sendId)
+    try await accepted.wait()
+    precondition(network.sent.count == 1)
+    var payload = network.sent[0]
+    precondition(payload["id"] == draft.send["id"] && payload["attachments"] == draft.send["attachments"])
+    payload["billingEntitlement"] = .null
+    let params = try JSONDecoder().decode(RuntimeContract.SendTurnParams.self, from: JSONEncoder().encode(payload))
+    let wire = try JSONDecoder().decode([String: OutboxValue].self, from: JSONEncoder().encode(params))
+    precondition(wire["text"] == draft.send["text"])
+    precondition(wire["quotes"] == draft.send["quotes"])
+    draft.send["phase"] = .string("unknown")
+    try await store.put(draft).value
+    sender.retry(draft.sendId)
+    precondition(sender.record == draft)
+    print("PASS: explicit retry sends the original reference tokens once, preserving identity, quotes and attachments")
   }
 
   @MainActor static func failedSendRecovery() async throws {
@@ -398,7 +442,7 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     dispatcher.update(store: store, inputs: .init(userId: "u1", connected: true, catalogRevision: 1))
     await settle()
     precondition(network.sent.count == 2 && phases(store) == ["failed"] && network.alerts.count == 1)
-    precondition(store.snapshot.records[0].send["reason"] == .string("send.error.mentions"))
+    precondition(store.snapshot.records[0].send["reason"] == .string("mention_expansion_failed"))
     network = Network()
     network.send = { _ in "not json" }
     (dispatcher, store, _) = await harness([record("s1")], network)

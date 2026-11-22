@@ -249,6 +249,9 @@ struct ChatItem: Decodable {
   var isBackgrounded: Bool? = nil
   var skipTranscript: Bool? = nil
   var processDurationMs: Int? = nil
+  /// Web `isProcessStatusToolCall`: `context_compaction` reads as a one-line status, not a tool.
+  var activityKind: String? = nil
+  var isContextCompaction: Bool { type == "tool_call" && activityKind == "context_compaction" }
   var isProcess: Bool { operation == nil && proposal == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
   var hidesFromTranscript: Bool {
     if let operation { return operation.cards.isEmpty && operation.notices.isEmpty }
@@ -682,7 +685,7 @@ struct ChatTranscript {
           let toolGroup = entry.items[start].type == "tool_call"
           let end = entry.items.indices.dropFirst(start + 1).first {
             let item = entry.items[$0]
-            if toolGroup { return item.type != "tool_call" || item.kind == "switch_mode" }
+            if toolGroup { return item.type != "tool_call" || item.kind == "switch_mode" || item.isContextCompaction }
             return item.type == "text" || item.type == "proposed_plan" || item.isAttachment
           } ?? entry.items.endIndex
           visible = Array(start..<end).filter { entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && !entry.items[$0].hidesFromTranscript }
@@ -717,7 +720,7 @@ struct ChatTranscript {
               groups[index] = [index]
               visible.append(index)
             }
-          } else if item.type == "tool_call", item.kind != "switch_mode" {
+          } else if item.type == "tool_call", item.kind != "switch_mode", !item.isContextCompaction {
             thoughtStart = nil
             if let start = toolStart {
               groups[start, default: []].append(index)
@@ -864,10 +867,21 @@ struct ChatTranscript {
           }
         case "text": break
         case "thought": row.symbol = "brain"
+        case "tool_call" where item.isContextCompaction:
+          // Web `ToolCallBlock` compaction status: live while pending, then its outcome.
+          let compacting = item.status == "pending" || item.status == "in_progress"
+          let key: String
+          if compacting { key = "native.chat.transcript.compacting" }
+          else if item.status == "failed" { key = "native.chat.transcript.compactionFailed" }
+          else { key = "native.chat.transcript.compacted" }
+          row.text = String(localized: String.LocalizationValue(key), bundle: .lody)
+          row.symbol = "arrow.down.right.and.arrow.up.left"
+          row.running = entry.isRunning && compacting
+          row.actionable = false
         case "tool_call":
           row.symbol = ["read": "doc.text.magnifyingglass", "search": "magnifyingglass", "edit": "square.and.pencil",
             "write": "square.and.pencil", "execute": "terminal", "bash": "terminal", "fetch": "globe"][item.kind ?? ""] ?? "wrench.and.screwdriver"
-          row.text = item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody)
+          row.text = ChatTranscript.compactParentHops(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody))
           if item.permission?.pending == true { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.pending", bundle: .lody), String(describing: row.text)) }
           else if item.status == "failed" { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.failed", bundle: .lody), String(describing: row.text)) }
           // Web `PermissionRequestBlock`: an answered plan approval reads as the chosen option.
@@ -916,6 +930,10 @@ struct ChatTranscript {
 }
 
 extension ChatTranscript {
+  static func compactParentHops(_ text: String) -> String {
+    text.replacingOccurrences(of: #"(?:\.\./){2,}"#, with: "…/", options: .regularExpression)
+  }
+
   /// Images of one turn that only tool work separates (an agent uploading several images, one
   /// image group, or repeated upload calls) become ONE fanned `imageStack` row instead of a long
   /// column of photos. The stack sits where its first image was; the process rows between its
@@ -1076,7 +1094,7 @@ enum ChatProcessSummary {
         hasThought = true
         continue
       }
-      guard item.type == "tool_call" else { continue }
+      guard item.type == "tool_call", !item.isContextCompaction else { continue }
       switch item.kind {
       case "execute", "bash":
         commands += 1
@@ -1156,10 +1174,19 @@ extension ChatPendingSend {
           running: failed != true && reconnect != true && !["accepted", "uploaded", "unknown"].contains(phase ?? ""),
           attachments: media, uploadProgress: uploadProgress ?? [:]))
       }
-      let body = displayText ?? text
+      var body = displayText ?? text
+      var shown: [ChatTextReference] = displayText == nil ? [] : references ?? []
+      // Quote cards follow the text as the runtime will send them, drawn as history draws them.
+      for quote in quotes ?? [] {
+        if !body.isEmpty { body += "\n\n" }
+        let start = (body as NSString).length
+        body += quote.text
+        shown.append(ChatTextReference(start: start, end: (body as NSString).length, kind: "message_quote", target: quote.id, quote: quote.text))
+        if !quote.comment.isEmpty { body += "\n\n" + quote.comment }
+      }
       if !body.isEmpty {
         result.append(ChatRow(id: id + (result.isEmpty ? ":user" : ":user-text"), entryID: id, kind: "user", text: body,
-          references: displayText == nil ? [] : references ?? []))
+          references: shown))
       }
       // A local send in flight is the signed-in user's own turn; its first row carries the header.
       if !result.isEmpty {

@@ -394,38 +394,75 @@ final class ChatComposerInput: TextView {
   }
 
   /// Inserts a reference chip over `range`. With a `label` the chip shows it and sends `token`.
-  func insertReference(_ token: String, label: String? = nil, replacing range: NSRange) {
-    insertSegments([ChatComposerSegment(text: label ?? token, token: label == nil ? nil : token, reference: true)], replacing: range)
+  @discardableResult
+  func insertReference(_ token: String, label: String? = nil, replacing range: NSRange) -> NodeKey? {
+    insertSegments([ChatComposerSegment(text: label ?? token, token: label == nil ? nil : token, reference: true)], replacing: range).first
   }
 
   /// Inserts text and reference chips over `range` (a prompt shortcut's body, with its references
-  /// as chips), then a space.
-  func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) {
+  /// as chips), then a space. Returns the inserted chips' node keys.
+  @discardableResult
+  func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) -> [NodeKey] {
     selectedRange = range
-    for segment in segments where segment.reference {
-      if let token = segment.token, token != segment.text { labelledReferences[segment.text] = token }
-    }
+    var keys: [NodeKey] = []
     try? editor.update {
       guard let selection = try getSelection() as? RangeSelection else { return }
-      var nodes: [Node] = []
-      for segment in segments where !segment.text.isEmpty {
-        if segment.reference {
-          let node = ChatReferenceNode(text: segment.text, key: nil)
-          node.referenceToken = segment.token ?? segment.text
-          nodes.append(node)
-          continue
-        }
-        // A body's newlines become line breaks.
-        let lines = segment.text.components(separatedBy: "\n")
-        for (index, line) in lines.enumerated() {
-          if index > 0 { nodes.append(createLineBreakNode()) }
-          if !line.isEmpty { nodes.append(createTextNode(text: line)) }
-        }
-      }
-      nodes.append(createTextNode(text: " "))
+      let nodes = try makeNodes(segments) + [createTextNode(text: " ")]
       _ = try selection.insertNodes(nodes: nodes, selectStart: false)
+      keys = nodes.compactMap { ($0 as? ChatReferenceNode)?.key }
     }
     delegate?.textViewDidChange?(self)
+    return keys
+  }
+
+  /// Replaces one chip (still sending `token`) with `segments`, leaving the rest of the prompt
+  /// and the caret where they are. False when the chip is gone (deleted, sent or replaced).
+  @discardableResult
+  func replaceReference(_ key: NodeKey, token: String, with segments: [ChatComposerSegment]) -> Bool {
+    var replaced = false
+    try? editor.update {
+      guard let chip: ChatReferenceNode = getNodeByKey(key: key), chip.referenceToken == token,
+            chip.getParent() != nil else { return }
+      let selection = try getSelection() as? RangeSelection
+      let caretOnChip = selection.map { $0.anchor.key == key || $0.focus.key == key } ?? false
+      let label = chip.getTextContent()
+      let nodes = try makeNodes(segments)
+      guard let first = nodes.first else { return }
+      var last = try chip.replace(replaceWith: first)
+      for node in nodes.dropFirst() { last = try last.insertAfter(nodeToInsert: node) }
+      if caretOnChip { _ = try last.selectNext(anchorOffset: 0, focusOffset: 0) }
+      // The chip's label leaves the draft's references once no chip shows it.
+      var shown = false
+      func find(_ node: Node) {
+        if let reference = node as? ChatReferenceNode, reference.getTextContent() == label { shown = true }
+        (node as? ElementNode)?.getChildren().forEach(find)
+      }
+      getRoot().map(find)
+      if !shown { labelledReferences[label] = nil }
+      replaced = true
+    }
+    if replaced { delegate?.textViewDidChange?(self) }
+    return replaced
+  }
+
+  private func makeNodes(_ segments: [ChatComposerSegment]) throws -> [Node] {
+    var nodes: [Node] = []
+    for segment in segments where !segment.text.isEmpty {
+      if segment.reference {
+        if let token = segment.token, token != segment.text { labelledReferences[segment.text] = token }
+        let node = ChatReferenceNode(text: segment.text, key: nil)
+        node.referenceToken = segment.token ?? segment.text
+        nodes.append(node)
+        continue
+      }
+      // A body's newlines become line breaks.
+      let lines = segment.text.components(separatedBy: "\n")
+      for (index, line) in lines.enumerated() {
+        if index > 0 { nodes.append(createLineBreakNode()) }
+        if !line.isEmpty { nodes.append(createTextNode(text: line)) }
+      }
+    }
+    return nodes
   }
 
   var referenceTokens: [String] {
@@ -735,6 +772,11 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private let attachmentBar = ChatAttachmentBar()
   private let attachmentStack = ChatComposerAttachmentStack()
   private var attachments: [ChatAttachment] = []
+  /// Quote cards (web message quotes), in insertion order after the attachments.
+  private var quotes: [ChatMessageQuote] = []
+  /// Whether the conversation's computer delivers quotes (`protocolCapabilities.messageQuotes`).
+  /// Unset means no: a card is never created or sent, so a quote is never sent as plain text.
+  var quotesSupported: (() -> Bool)?
   private let filePicker = ChatAttachmentPicker()
   private let libraryPicker = ChatPhotoLibraryPicker()
   private var inputHeight: NSLayoutConstraint!
@@ -779,13 +821,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// Host chrome below the safe area (a page-owned header) that full screen must stay under.
   var fullScreenTopInset: CGFloat = 0 { didSet { if fullScreen { updateComposer() } } }
   private var fullScreen = false
+  private var fittedRoom: CGFloat?
+  private var fittingRoom = false
   private let grabber = ChatComposerGrabber(frame: .zero)
   private var grabberHeight: NSLayoutConstraint!
   private var dragProgress: CGFloat?
   private var dragStart: CGFloat = 0
   private var dragDistance: CGFloat = 1
   private let fullScreenDim = UIView()
-  private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?)?
+  private var pendingDraft: (text: String, attachments: [ChatAttachment], state: String?, quotes: [ChatMessageQuote])?
   private var sentStates: [String: String] = [:]
   var sendHandoff = true
   /// A pushed creation host keeps its keyboard edge until the destination replaces it.
@@ -827,6 +871,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     didSet {
       guard cardStyle != oldValue else { return }
       (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setCard(cardStyle)
+      applyLaneInset()
       updateComposer()
     }
   }
@@ -839,6 +884,17 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// rest while a typed draft remains, so the prompt keeps showing its lines.
   private var cardOpen: Bool { cardStyle && (!restsCollapsed || input.isFirstResponder || hasDraftText) }
   private var hasDraftText: Bool { !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+  /// The action bar and queue line up with the resting surface's edges.
+  private var laneInset: CGFloat { ChatComposerLiquidGlassSurfaceLayout.restInset(card: cardStyle) }
+  private lazy var laneConstraints: [NSLayoutConstraint] = [
+    queueView.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+    queueView.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+    actionBar.leadingAnchor.constraint(equalTo: composer.leadingAnchor),
+    actionBar.trailingAnchor.constraint(equalTo: composer.trailingAnchor),
+  ]
+  private func applyLaneInset() {
+    for constraint in laneConstraints { constraint.constant = constraint.firstAttribute == .leading ? laneInset : -laneInset }
+  }
   private lazy var surfaceLayout: any ChatComposerSurfaceLayout = ChatComposerLiquidGlassSurfaceLayout(
     container: composer,
     inputSurface: inputSurface
@@ -965,15 +1021,22 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     filePicker.onPick = { [weak self] picked in self?.addAttachments(picked) }
     libraryPicker.onPick = { [weak self] picked in self?.addAttachments(picked) }
     attachmentBar.onPreview = { [weak self] id in
+      if let quote = self?.quotes.first(where: { ChatAttachmentBar.quoteID($0) == id }) {
+        self?.presentQuoteSheet(quote, editing: true)
+        return
+      }
       guard let self, let index = self.attachments.firstIndex(where: { $0.id == id }), let controller = self.presenter() else { return }
       controller.present(ChatAttachmentPreview(self.attachments, index: index), animated: true)
     }
     attachmentBar.onRemove = { [weak self] id in
       guard let self else { return }
       self.attachments.removeAll { $0.id == id }
-      self.attachmentBar.render(self.attachments, animatedRemoval: true)
+      let removedQuote = self.quotes.contains { ChatAttachmentBar.quoteID($0) == id }
+      self.quotes.removeAll { ChatAttachmentBar.quoteID($0) == id }
+      self.attachmentBar.render(self.attachments, quotes: self.quotes, animatedRemoval: true)
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       self.updateComposer()
+      if removedQuote { self.saveDraft() }
     }
     notice.titleLabel?.font = .dynamic(of: 13)
     notice.titleLabel?.numberOfLines = 0
@@ -1056,6 +1119,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     actionBarHeight = actionBar.heightAnchor.constraint(equalToConstant: 0)
     mentionHeight = mentionPanel.heightAnchor.constraint(equalToConstant: 0)
     surfaceLayout.activate()
+    applyLaneInset()
+    NSLayoutConstraint.activate(laneConstraints)
     NSLayoutConstraint.activate([
       composer.topAnchor.constraint(equalTo: topAnchor),
       composer.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1067,11 +1132,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       mentionPanel.leadingAnchor.constraint(equalTo: leadingAnchor),
       mentionPanel.trailingAnchor.constraint(equalTo: trailingAnchor),
       mentionPanel.bottomAnchor.constraint(equalTo: bottomAnchor), mentionHeight,
-      queueView.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 16),
-      queueView.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -16), queueHeight, queueGap,
-      actionBar.topAnchor.constraint(equalTo: notice.bottomAnchor),
-      actionBar.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 16),
-      actionBar.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -16), actionBarHeight,
+      queueHeight, queueGap,
+      actionBar.topAnchor.constraint(equalTo: notice.bottomAnchor), actionBarHeight,
       notice.topAnchor.constraint(equalTo: composer.topAnchor), notice.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 20),
       notice.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -20), noticeHeight,
       attachmentTop,
@@ -1134,14 +1196,42 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     saveDraft()
   }
   func setStoredDraft(_ text: String) {
-    guard !text.isEmpty, input.text.isEmpty else { return }
-    input.restoreDraft(text)
+    guard !text.isEmpty, input.text.isEmpty, quotes.isEmpty else { return }
+    // Quote cards ride the draft envelope beside the editor state (`draftValue`).
+    if let data = text.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       object["v"] as? Int == 1, object["quotes"] != nil {
+      quotes = ChatMessageQuote.decode(object["quotes"])
+      if object["lexical"] != nil { input.restoreDraft(text) }
+      else if let plain = object["text"] as? String { input.text = plain }
+    } else {
+      input.restoreDraft(text)
+    }
     updateComposer()
+  }
+  /// Restores an edited message's quotes as cards (the edit page).
+  func setInitialQuotes(_ restored: [ChatMessageQuote]) {
+    guard quotes.isEmpty, pendingDraft == nil else { return }
+    quotes = restored
+    updateComposer()
+  }
+  private var draftValue: String {
+    let base = input.draftEnvelope
+    guard !quotes.isEmpty else { return base }
+    var envelope: [String: Any] = ["v": 1]
+    if let data = base.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       object["v"] as? Int == 1 {
+      envelope = object
+    } else if !base.isEmpty {
+      envelope["text"] = base
+    }
+    envelope["quotes"] = quotes.map(\.json)
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope), let value = String(data: data, encoding: .utf8) else { return base }
+    return value
   }
   private func saveDraft() {
     draftSave?.cancel()
     draftSave = nil
-    onDraftChange?(input.draftEnvelope)
+    onDraftChange?(draftValue)
   }
   /// Typing persists shortly after it pauses, so a draft survives the app being killed
   /// while the page is open, not only leaving the page or the app.
@@ -1214,13 +1304,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     ChatSendHandoff.cancel(id: id)
     pendingSendID = nil
     if let draft = pendingDraft {
-      if !sendHandoff || ((input.text ?? "").isEmpty && attachments.isEmpty) {
+      if !sendHandoff || ((input.text ?? "").isEmpty && attachments.isEmpty && quotes.isEmpty) {
         if draft.state.map({ input.restore(state: $0) }) != true { input.text = draft.text }
         attachments = draft.attachments
+        // A rejected send keeps its cards exactly as they were.
+        quotes = draft.quotes
       } else {
         failedDraft = ChatPendingSend(id: id, text: draft.text, attachments: draft.attachments.map { item in
           ChatPendingSend.Attachment(id: item.id, name: item.name, uri: item.url.absoluteString, kind: item.isImage ? "image" : "file")
-        }, status: "", failed: true)
+        }, status: "", failed: true, quotes: draft.quotes)
       }
       pendingDraft = nil
     }
@@ -1244,18 +1336,19 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     pendingDraft = (pending.text, pending.attachments.compactMap { item in
       guard let url = URL(string: item.uri), url.isFileURL else { return nil }
       return ChatAttachment(id: item.id, name: item.name, url: url, isImage: item.kind == "image")
-    }, sentStates[pending.id])
+    }, sentStates[pending.id], pending.quotes ?? [])
     updateComposer()
   }
 
   private func takeDraft() {
     dictator.cancel()
     guard pendingDraft == nil else { return }
-    pendingDraft = (input.markdown, attachments, input.serializedState)
+    pendingDraft = (input.markdown, attachments, input.serializedState, quotes)
     // Cross-container creation keeps its draft visible while its host dismisses.
     guard sendHandoff else { return }
     input.text = ""
     attachments = []
+    quotes = []
   }
   #if LODY_SHARE_EXTENSION
   private func presentAttachmentCamera() {
@@ -1447,6 +1540,45 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     saveDraft()
   }
+  /// Whether this composer takes quote cards: the conversation composer while editable.
+  var canQuote: Bool { quotesSupported != nil && state.editable }
+
+  /// Quotes a selected passage (the transcript's Quote action): checks the limits and the
+  /// computer's support, then opens the comment sheet; Add puts the card in the strip.
+  func beginQuote(_ selection: String) {
+    guard state.editable, !state.sending, pendingDraft == nil else { return }
+    let snapshot: String
+    switch ChatMessageQuote.snapshot(of: selection) {
+    case .success(let value): snapshot = value
+    case .failure(.empty): return
+    case .failure(.tooLong):
+      LodyToastOverlay.shared.show(message: ChatMessageQuote.tooLongMessage, kind: .warning)
+      return
+    }
+    guard quotesSupported?() == true else {
+      LodyToastOverlay.shared.show(message: ChatMessageQuote.upgradeMessage, kind: .warning)
+      return
+    }
+    presentQuoteSheet(ChatMessageQuote(text: snapshot), editing: false)
+  }
+
+  private func presentQuoteSheet(_ quote: ChatMessageQuote, editing: Bool) {
+    guard let controller = presenter(), controller.presentedViewController == nil else { return }
+    let sheet = ChatQuoteSheetController(quote: quote, editing: editing, onCommit: { [weak self] next in
+      guard let self, self.pendingDraft == nil else { return }
+      if let index = self.quotes.firstIndex(where: { $0.id == next.id }) { self.quotes[index] = next }
+      else if !editing { self.quotes.append(next) }
+      self.updateComposer()
+      self.saveDraft()
+    }, onRemove: { [weak self] in
+      guard let self, self.pendingDraft == nil else { return }
+      self.quotes.removeAll { $0.id == quote.id }
+      self.updateComposer()
+      self.saveDraft()
+    })
+    controller.present(sheet, animated: true)
+  }
+
   private func presenter() -> UIViewController? {
     owningController().map { $0.presentedViewController ?? $0 } ?? window?.rootViewController
   }
@@ -1458,18 +1590,36 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     return nil
   }
-  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
-    guard let superview, let host = owningController()?.view else { return ChatMessageContent.maximumCollapsedHeight }
+  /// The highest edge the composer may reach, in its superview: under the safe area and the page's header.
+  private func pageTop() -> CGFloat? {
+    guard let superview, let host = owningController()?.view else { return nil }
     // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
-    let top = max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
+    return max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
+  }
+  private var layoutRoot: UIView { owningController()?.view ?? superview ?? self }
+  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
+    guard let top = pageTop() else { return ChatMessageContent.maximumCollapsedHeight }
     return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
+  }
+  /// Room above the keyboard in hosts that let the composer grow up to their header (the conversation).
+  private var pageRoom: CGFloat? {
+    guard allowsFullScreen, let top = pageTop() else { return nil }
+    return frame.maxY - top
+  }
+  /// The keyboard or the header moved: fit the docked panel and the input to the new room.
+  func fitPageRoom() {
+    guard let room = pageRoom, abs(room - (fittedRoom ?? 0)) > 0.5 else { return }
+    // Called from the host's layout pass, which already carries any keyboard animation.
+    fittingRoom = true
+    updateComposer()
+    fittingRoom = false
   }
   @objc private func toggleFullScreen() {
     setFullScreen(!fullScreen)
   }
   private func setFullScreen(_ value: Bool, animated: Bool = true) {
     guard fullScreen != value, let superview else { return }
-    superview.layoutIfNeeded()
+    layoutRoot.layoutIfNeeded()
     fullScreen = value
     if value {
       fullScreenDim.frame = superview.bounds
@@ -1480,7 +1630,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     let changes = {
       self.fullScreenDim.alpha = value ? 1 : 0
-      superview.layoutIfNeeded()
+      self.layoutRoot.layoutIfNeeded()
       self.input.scrollRangeToVisible(self.input.selectedRange)
     }
     let finish = { (_: Bool) in
@@ -1517,7 +1667,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       dragProgress = progress
       fullScreenDim.alpha = progress
       updateComposer()
-      superview.layoutIfNeeded()
+      layoutRoot.layoutIfNeeded()
     default:
       let velocity = pan.velocity(in: superview).y
       let progress = dragProgress ?? dragStart
@@ -1533,7 +1683,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       updateComposer()
       let settle = {
         self.fullScreenDim.alpha = target ? 1 : 0
-        superview.layoutIfNeeded()
+        self.layoutRoot.layoutIfNeeded()
         self.input.scrollRangeToVisible(self.input.selectedRange)
       }
       let finish = { (_: Bool) in
@@ -1584,15 +1734,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     input.hydrateReferences(activeMentionItems ?? [])
     mentionPanel.update(input: input, items: activeMentionItems ?? [], enabled: activeMentionItems != nil)
-    let dockChanged = mentionHeight.constant != mentionPanel.panelHeight
-    mentionHeight.constant = mentionPanel.panelHeight
-    // The prompt (and everything above it) sits on top of the docked panel.
-    (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(mentionPanel.panelHeight)
-    if dockChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
-      UIView.lodySpring(duration: 0.32, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-        (self.window ?? self.superview ?? self).layoutIfNeeded()
-      }
-    }
     // Card style (new session) has no @ button, like web: typing @ still opens mentions.
     mentionButton.isHidden = cardStyle || activeMentionItems == nil || !input.isFirstResponder
     mentionButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
@@ -1634,16 +1775,17 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     attach.alpha = attach.isEnabled ? 1 : 0.5
     #endif
     attachmentBar.isUserInteractionEnabled = state.editable && !sending
-    attachmentBar.render(attachments)
+    attachmentBar.render(attachments, quotes: quotes)
     attachmentBar.isHidden = !expanded
     let showsAttachmentRow = expanded && attachmentBar.hasVisiblePills
-    attachmentHeight.constant = showsAttachmentRow ? ChatAttachmentBar.tileSide : 0
+    attachmentHeight.constant = showsAttachmentRow ? attachmentBar.rowHeight : 0
     attachmentTop.constant = showsAttachmentRow ? 8 : 0
-    attachmentStack.render(attachments)
-    attachmentStack.isHidden = expanded || attachments.isEmpty
-    hint.text = attachments.isEmpty ? state.placeholder : String(localized: "native.chat.composer.addMessage", bundle: .lody)
+    attachmentStack.render(attachments, quotes: quotes)
+    attachmentStack.isHidden = expanded || (attachments.isEmpty && quotes.isEmpty)
+    hint.text = attachments.isEmpty && quotes.isEmpty ? state.placeholder : String(localized: "native.chat.composer.addMessage", bundle: .lody)
     hint.isHidden = !input.text.isEmpty
-    let hasContent = !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+    // A quote card alone is a message: Send is enabled without main text.
+    let hasContent = !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty || !quotes.isEmpty
     let stop = !hasContent && state.running == true
     let loading = sending || state.stopping == true
     let blocked = failedDraft != nil || displayError != nil || !state.editable || state.controlling == true
@@ -1686,7 +1828,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let showsBar = !editing && ChatActionBarView.shows(state.actionBar)
     actionBar.render(state.actionBar, visible: showsBar, animated: true)
     // One row of capsules; the stacked fallback at very large text is taller.
-    actionBarHeight.constant = showsBar ? actionBar.fittingHeight(width: max(0, bounds.width - 32)) : 0
+    actionBarHeight.constant = showsBar ? actionBar.fittingHeight(width: max(0, bounds.width - 2 * laneInset)) : 0
     queueGap.constant = showsBar && queueHeight.constant > 0 ? 8 : 0
     let noticeText = failedDraft == nil ? (displayError ?? state.notice) : String(localized: "native.chat.composer.failedDraft", bundle: .lody)
     let canReconnect = failedDraft != nil || displayError != nil || state.reconnect
@@ -1713,7 +1855,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     grabber.isHidden = !showsGrabber
     grabberHeight.constant = showsGrabber ? ChatComposerGrabber.height : 0
     grabber.accessibilityLabel = String(localized: String.LocalizationValue(fullScreen ? "native.chat.composer.collapse" : "native.chat.composer.expand"), bundle: .lody)
-    let fullProgress = dragProgress ?? (fullScreen ? 1 : 0)
+    var fullProgress = dragProgress ?? (fullScreen ? 1 : 0)
     accessoryHeight.constant = expanded ? 48 : 0
     attachLeading.constant = expanded ? 8 : 2
     sheetContentBottom.constant = expanded && !cardStyle ? -ChatComposerLiquidGlassSurfaceLayout.sheetBleed : 0
@@ -1742,8 +1884,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     hintLeading.constant = leadingInset + input.textContainer.lineFragmentPadding
     hintTop.constant = topInset
     let height = input.sizeThatFits(CGSize(width: max(1, input.bounds.width), height: .greatestFiniteMagnitude)).height
-    let overflows = height > ChatMessageContent.maximumCollapsedHeight
-    let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
+    let others = queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
     // Attached media takes the third line's room so larger previews grow upward
     // without adding an empty writing line. Typed text can still grow naturally.
     var minimumHeight: CGFloat = 132
@@ -1752,7 +1893,21 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       if input.isFirstResponder { lines = showsAttachmentRow ? 2 : 3 }
       minimumHeight = topInset + verticalInset + lines * input.font!.lineHeight
     }
-    let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
+    var inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
+    // Below the page header: the docked panel gives up rows first (its lists scroll), then the
+    // input stops growing and scrolls, down to one line.
+    var dock = mentionPanel.panelHeight
+    fittedRoom = pageRoom
+    if let room = fittedRoom, expanded {
+      if dock > 0 { dock = min(dock, max(ChatMentionPanel.minimumDockHeight, room - others - inlineHeight)) }
+      inlineHeight = min(inlineHeight, max(topInset + verticalInset + input.font!.lineHeight, room - others - dock))
+    }
+    let dockChanged = mentionHeight.constant != dock
+    mentionHeight.constant = dock
+    // The prompt (and everything above it) sits on top of the docked panel.
+    (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(dock)
+    let chrome = others + dock
+    if dock > 0 { fullProgress = 0 }
     // A conversation's card opens with focus (the expansion's own animation carries it).
     // A conversation's card can also stay open across a focus change when a draft keeps it open.
     let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
@@ -1765,14 +1920,14 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       dragDistance = max(1, fullScreenInputHeight(chrome: chrome) - inlineHeight)
       inputHeight.constant = inlineHeight
     }
-    input.isScrollEnabled = expanded && (fullProgress > 0 || overflows)
+    input.isScrollEnabled = expanded && (fullProgress > 0 || height > inputHeight.constant + 0.5)
     if !expanded { input.contentOffset = .zero }
     updateComposerOptions()
     onHeightChange?(chrome + inputHeight.constant)
     setNeedsLayout()
     // The card is always "expanded", so its focus change grows the input here: ride along with
     // the keyboard on the same spring rather than jumping.
-    if cardFocusChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
+    if (cardFocusChanged || dockChanged) && !fittingRoom && window != nil && !UIAccessibility.isReduceMotionEnabled {
       UIView.lodySpring(duration: 0.35, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
         (self.window ?? self.superview ?? self).layoutIfNeeded()
       }
@@ -1871,7 +2026,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         self.onComposerOptionChange?(["modelId": self.composerOptions.modelId, "effort": self.composerOptions.effort, "permissionId": option.id])
       }
     })
-    let hasRunConfig = cardStyle && onRunConfig != nil && composerOptions.agentName?.isEmpty == false
+    // Whenever the collapsed mark opens the run config, the expanded chip must too.
+    let hasRunConfig = cardStyle && onRunConfig != nil
+      && (composerOptions.agentName?.isEmpty == false || composerOptions.agentAsset != nil)
     modelButton.isHidden = !composerExpanded || (composerOptions.models.isEmpty && !hasRunConfig)
     modelButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
     // Web's run-config chip: assistant mark, model · effort, and a fast bolt, in one line.
@@ -1879,7 +2036,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let dot = NSAttributedString(string: "  ·  ", attributes: [.foregroundColor: UIColor.tertiaryLabel])
     var triggerTitle = composerOptions.modelTitle
     if hasRunConfig && composerOptions.models.isEmpty {
-      triggerTitle = composerOptions.agentName ?? triggerTitle
+      triggerTitle = composerOptions.agentName.flatMap { $0.isEmpty ? nil : $0 } ?? triggerTitle
     }
     let title = NSMutableAttributedString(string: triggerTitle, attributes: [.foregroundColor: UIColor.label])
     if !composerOptions.efforts.isEmpty || !composerOptions.effort.isEmpty {
@@ -2113,7 +2270,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   /// Return never stops a running turn: with nothing to send, Send is Stop, and only a tap means it.
   private func submitFromKeyboard() {
-    guard hasDraftText || !attachments.isEmpty else { return }
+    guard hasDraftText || !attachments.isEmpty || !quotes.isEmpty else { return }
     submit()
   }
 
@@ -2132,8 +2289,13 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       break
     }
     if previewBeforeSubmit?() == true { return }
-    if state.running == true && input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty {
+    if state.running == true && input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && quotes.isEmpty {
       onStop?()
+      return
+    }
+    // Never send quotes as plain text to a computer that cannot read them; keep the draft.
+    if !quotes.isEmpty && quotesSupported?() != true {
+      LodyToastOverlay.shared.show(message: ChatMessageQuote.upgradeMessage, kind: .warning)
       return
     }
     sendFeedback.impactOccurred(intensity: 0.85)
@@ -2142,7 +2304,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     let guiding = guidesSubmission
     let id = UUID().uuidString.lowercased()
     let body = input.markdown
-    let payload: [String: Any] = [
+    var payload: [String: Any] = [
       "id": id, "queue": queued, "guide": guiding, "text": body, "displayText": input.text ?? body,
       "references": input.text == nil ? [] : input.chipReferences,
       "startedAt": Date().timeIntervalSince1970 * 1000,
@@ -2150,6 +2312,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
         ["id": $0.id, "name": $0.name, "uri": $0.url.absoluteString, "kind": $0.isImage ? "image" : "file"]
       },
     ]
+    if !quotes.isEmpty { payload["quotes"] = quotes.map(\.json) }
     if relaying || prepareSend?(payload) == true { return }
     commitSend(payload)
     onSend?(payload)
@@ -2184,6 +2347,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       guard let url = URL(string: item.uri), url.isFileURL else { continue }
       attachments.append(ChatAttachment(id: item.id, name: item.name, url: url, isImage: item.kind == "image"))
     }
+    for quote in failed.quotes ?? [] where !quotes.contains(where: { $0.id == quote.id }) { quotes.append(quote) }
     restoredSendID = failed.id
     failedDraft = nil
     updateComposer()

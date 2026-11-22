@@ -4,7 +4,7 @@ Read before changing the shell, page hosting and presentation, navigation, deep 
 
 - `LodyShell` owns the root navigation controller and sheet navigation controllers. `LodyPageController` hosts native content, carries results and clears callbacks on close. Reuse `pushNative`, `presentNative`, `finish` and `close`; do not add a second presentation manager. Conversation file routes retain per-path ownership until the preview closes (including interactive dismissal), not merely until presentation returns; different file paths remain independent.
 
-- Deep links are parsed by `LodyCore.AppLink` and routed by `LodyApplication`. Notification navigation validates account, workspace and session catalog before opening a session.
+- Deep links are parsed by `LodyCore.AppLink` and routed by `LodyApplication`. Notification navigation validates account, workspace and session catalog before opening a session. Opening a session from outside first completes compact Home's non-animated pop (`HomeController.reset`), so the detail navigation leaves the window before its content is replaced; iOS 18 aborts when two queued navigation changes swap keyboard-guided views during one layout pass.
 
 - `HomeController` owns the adaptive UIKit split and list, session and inspector navigation controllers. Preserve native interactive pop. `SessionNavigation` handles session actions; tool pages use `LodyShell.presentDetail`. Keep sheets for transient flows and Debug demos.
 

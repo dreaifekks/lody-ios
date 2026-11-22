@@ -51,6 +51,16 @@ export type Session = {
   archived: boolean;
   isTabClosed?: boolean;
   pinned: boolean;
+  /** Pin section of a pinned session (session meta `pinSectionId`); missing means the default section. */
+  pinSectionId?: string;
+  /** Fractional index shared by pin sections and Status Focus (session meta `orderKey`). */
+  orderKey?: string;
+  /** Epoch ms the session is snoozed in Later until (session meta `snoozedUntil`). */
+  snoozedUntil?: number;
+  /** Epoch ms the user settled the session (session meta `settledAt`). */
+  settledAt?: number;
+  /** Epoch ms the user moved an inactive session back to Focus (session meta `focusRestoredAt`). */
+  focusRestoredAt?: number;
   /** The Lody user who owns the session (session meta `userId`). */
   userId?: string;
   /** The agent config (ACP provider) the session runs; picks its model capability. */
@@ -95,6 +105,12 @@ export type Catalog = {
   machineEmulators?: Record<string, 'available'>;
   /** Per-machine numeric protocol capability versions advertised by the CLI. */
   machineCapabilities?: Record<string, Record<string, number>>;
+  /** Each machine's owner (machine meta `ownerUserId`). */
+  machineOwners?: Record<string, string>;
+  /** Workspace pin sections (`wf:workspace` `pinSection` rows) in render order. */
+  pinSections?: import('../contract/status-view.ts').PinSection[];
+  /** Status view layouts computed by the shared planner; native clients only render them. */
+  statusView?: import('../contract/status-view.ts').CatalogStatusView;
 };
 export type SavedCatalog = { catalog: Catalog; syncedAt: number };
 export type Connection = {

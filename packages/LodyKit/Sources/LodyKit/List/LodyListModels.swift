@@ -90,6 +90,10 @@ struct LodyListVisualItem {
   var tone: String = ""
   var cost: Double? = nil
   var axisLabel: String = ""
+  /// The quota (bucket or model) a usage window belongs to.
+  var group: String = ""
+  /// A compact window name for inline quota lines ("5h", "7d").
+  var shortLabel: String = ""
 }
 
 struct LodyListVisual {
@@ -130,6 +134,11 @@ struct LodyListSection {
   var rows: [LodyListRow] = []
   var visual: LodyListVisual? = nil
   var gap: LodyListGap = .section
+  /// Chats list: keep the labelled section while it has no rows (an empty pin section or Focus
+  /// stays visible and a drop target).
+  var keepsEmpty: Bool = false
+  /// Chats list: the label's ⋯ menu (pin section management), emitted as `sectionAction`.
+  var headerMenu: [LodyListAction] = []
 }
 
 enum LodyListGap {

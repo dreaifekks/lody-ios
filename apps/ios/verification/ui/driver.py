@@ -196,6 +196,7 @@ class UI:
         got = self.element(identifier).get('AXValue') or ''
         if got.casefold() != text.casefold():
             self.axe('tap', '--id', identifier, '--post-delay', '.4')
+            self.axe('key-combo', '--modifiers', '227', '--key', '4')
             self.axe('type', text)
             got = self.element(identifier).get('AXValue') or ''
         self.restore_software_keyboard()

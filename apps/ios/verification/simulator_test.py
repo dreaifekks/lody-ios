@@ -3,6 +3,7 @@ import fcntl
 import importlib.util
 import json
 import multiprocessing
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -579,6 +580,8 @@ class VerifyEntryPointTests(unittest.TestCase):
                     check=True,
                     capture_output=True,
                     text=True,
+                    # Python 3.14 argparse colours help when FORCE_COLOR is set, even into a pipe.
+                    env={**os.environ, 'PYTHON_COLORS': '0'},
                 )
                 self.assertIn('[--udid UDID]', result.stdout)
 

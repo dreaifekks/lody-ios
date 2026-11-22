@@ -265,3 +265,41 @@ test('editing a Roost session uses its owner history and the edit RPC', async ()
     fixture.close();
   }
 });
+
+test('an accepted edit and resend counts as a send; a refused or uncertain one does not', async () => {
+  let result = { result: { success: false, error: { message: 'stale' } } };
+  const fixture = await openTestSession({ onRpc: () => result });
+  const sends = [];
+  fixture.runtime.setSessionSendObserver((id) => sends.push(id));
+  try {
+    fixture.server.getList('history').push(original);
+    await fixture.pushUpdate();
+    const args = {
+      sessionId: 's1',
+      userId: 'u1',
+      expectedUserTurnId: 'original',
+      action: 'send',
+      text: 'Changed',
+      retainedIds: ['original:0'],
+    };
+    assert.equal(
+      (await fixture.runtime.editSession({ ...args, id: 'r1' }, meta)).state,
+      'not_sent',
+    );
+    result = { error: { message: 'lost response' } };
+    assert.equal(
+      (await fixture.runtime.editSession({ ...args, id: 'r2' }, meta)).state,
+      'unknown',
+    );
+    assert.deepEqual(sends, []);
+    result = { result: { success: true } };
+    assert.equal(
+      (await fixture.runtime.editSession({ ...args, id: 'r3' }, meta)).state,
+      'accepted',
+    );
+    assert.deepEqual(sends, ['s1']);
+  } finally {
+    fixture.runtime.setSessionSendObserver(() => {});
+    fixture.close();
+  }
+});

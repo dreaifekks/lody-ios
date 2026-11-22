@@ -97,8 +97,8 @@ extension LodyChatView {
       onRetrySend(["forget": true, "id": row.entryID])
       return
     }
-    if let pendingSend, id == pendingSend.id + ":pending", pendingSend.failed == true {
-      onRetrySend([:])
+    if let pendingSend, pendingSend.failed == true, id == pendingSend.id + ":pending" {
+      onRetrySend(["id": pendingSend.id])
       return
     }
     onActivityPress(["entryId": row.entryID, "itemId": row.itemID, "processStartId": row.processStartID])
@@ -156,7 +156,12 @@ extension LodyChatView {
   func openAttachment(_ attachment: ChatMessageAttachment) {
     guard let controller = presenter(), controller.presentedViewController == nil else { return }
     pauseTracking()
-    if let uri = attachment.localURI, let url = URL(string: uri), url.isFileURL {
+    let local = attachment.localURI.flatMap(URL.init(string:)).flatMap { $0.isFileURL ? $0 : nil }
+    if ChatMarkdownAttachmentSheet.handles(attachment) {
+      ChatMarkdownAttachmentSheet.present(file: attachment, localURL: local, workspace: imageWorkspace, session: imageSession, from: controller)
+      return
+    }
+    if let url = local {
       controller.present(ChatAttachmentPreview([ChatAttachment(id: attachment.id, name: attachment.fileName, url: url, isImage: false)], index: 0), animated: true)
       return
     }
@@ -514,7 +519,7 @@ extension LodyChatView {
     // Process summaries sit close together (32 pt rows, the whole width taps); other actionable
     // rows keep the 44 pt floor.
     if row.kind == "summary" { return max(ChatCell.summaryHeight, measuredHeight) }
-    let tapFloor = row.actionable || row.kind == "pending"
+    let tapFloor = row.actionable || row.kind == "pending" || row.kind == "tool_call"
     if tapFloor { return max(44, measuredHeight) }
     if row.kind == "delivery" {
       return max(ChatCell.messageFont(for: row, compatibleWith: traitCollection).lineHeight, measuredHeight)

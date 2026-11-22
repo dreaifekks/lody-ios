@@ -41,7 +41,8 @@ for grouping in [HomeGrouping.time, .status, .project] {
   precondition(sections[0].rows.map(\.parentId) == ["", "bucket-parent"])
 }
 precondition(InboxSections.home(bucketCatalog, grouping: .time, now: now)[0].id == "week")
-precondition(InboxSections.home(bucketCatalog, grouping: .status, now: now)[0].id == "attention")
+// Without the runtime's layout (an older runtime or cache) Status lists time buckets: Swift never classifies tiers.
+precondition(InboxSections.home(bucketCatalog, grouping: .status, now: now)[0].id == "week")
 
 var pinnedParent = bucketParent
 pinnedParent.pinned = true
@@ -311,8 +312,6 @@ waitingTab.id = "nested-tab"
 waitingTab.parentSessionId = runningTab.id
 waitingTab.status = "requestPermission"
 precondition(tabRows([runningTab, waitingTab]).first?.imageTint == "warning")
-let waitingSections = InboxSections.home(SessionCatalog(sessions: [tabOwner, runningTab, waitingTab]), grouping: .status, now: now)
-precondition(waitingSections.first?.id == "attention")
 var closedRunning = runningTab
 closedRunning.isTabClosed = true
 precondition(tabRows([closedRunning]).first?.imageTint == "blue")
@@ -392,21 +391,27 @@ let cycle = SessionRelations.tree(sessions: [relationRoot, relationTab, relation
 precondition(cycle.rows.count == 3 && Set(cycle.rows.flatMap { $0.sessions.map(\.id) }).count == 4)
 print("Related conversations: precise opener, containment, exact Tab targets, missing/archived roots and cycles passed")
 
-// A refresh rebuilds the projection, retaining whole families at the idle root limit.
-var idleCatalog = SessionCatalog(sessions: (0..<21).map {
-  SessionItem(id: "idle-root-\($0)", projectId: "p", lastMessageAt: Double(100 - $0), lastReadAt: 100)
+// A refresh rebuilds the projection; Settled folds past its root limit without splitting a family.
+let settledSessions = (0..<21).map {
+  SessionItem(id: "settled-root-\($0)", projectId: "p", lastMessageAt: Double(100 - $0), lastReadAt: 100)
+} + [SessionItem(id: "settled-child", projectId: "other", openedBySessionId: "settled-root-19", lastMessageAt: 1, lastReadAt: 100)]
+var settledLayout = StatusViewLayout(settled: (0..<21).map { index in
+  StatusViewRow(
+    id: "settled-root-\(index)", tier: .settled,
+    children: index == 19 ? [StatusViewRow(id: "settled-child", tier: .settled)] : [], activityAt: Double(100 - index)
+  )
 })
-idleCatalog.sessions.append(SessionItem(id: "idle-child", projectId: "other", openedBySessionId: "idle-root-19", lastMessageAt: 1, lastReadAt: 100))
-let limitedIdle = InboxSections.home(idleCatalog, grouping: .status, now: now).flatMap(\.rows)
-precondition(limitedIdle.count == 22 && limitedIdle.suffix(2).map(\.id) == ["idle-child", InboxSections.idleMoreId])
-precondition(limitedIdle.first { $0.id == "idle-child" }?.parentId == "idle-root-19")
-precondition(!limitedIdle.contains { $0.id == "idle-root-20" })
-precondition(InboxSections.home(idleCatalog, grouping: .status, idleExpanded: true, now: now).flatMap(\.rows).count == 23)
-idleCatalog.sessions[20].pinned = true
-idleCatalog.sessions[20].title = "Updated title"
-let refreshedIdle = InboxSections.home(idleCatalog, grouping: .status, now: now)
-precondition(refreshedIdle.first?.id == "pinned" && refreshedIdle.first?.rows.first?.title == "Updated title")
-precondition(!refreshedIdle.flatMap(\.rows).contains { $0.id == InboxSections.idleMoreId })
+func settledRows(_ layout: StatusViewLayout, expanded: Bool = false) -> [LodyListRow] {
+  InboxSections.home(SessionCatalog(sessions: settledSessions), grouping: .status, layout: layout, settledExpanded: expanded, now: now)
+    .first { $0.id == InboxSections.settledId }?.rows ?? []
+}
+let limitedSettled = settledRows(settledLayout)
+precondition(limitedSettled.count == 22 && limitedSettled.suffix(2).map(\.id) == ["settled-child", InboxSections.settledMoreId])
+precondition(limitedSettled.first { $0.id == "settled-child" }?.parentId == "settled-root-19")
+precondition(!limitedSettled.contains { $0.id == "settled-root-20" })
+precondition(settledRows(settledLayout, expanded: true).count == 23)
+settledLayout.settled.removeLast()
+precondition(!settledRows(settledLayout).contains { $0.id == InboxSections.settledMoreId })
 for grouping in [HomeGrouping.time, .project, .status] {
   let cycleRows = InboxSections.home(SessionCatalog(sessions: [cycleA, cycleB]), grouping: grouping, now: now).flatMap(\.rows)
   precondition(cycleRows.map(\.id) == ["a", "b"] && cycleRows.allSatisfy { $0.parentId.isEmpty })
@@ -424,4 +429,310 @@ sortSessions.append(SessionItem(id: "sort-tab", status: "waiting", projectId: "b
 precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .urgency).map(\.id) == ["b", "a", "empty"])
 precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .activity).map(\.id) == ["b", "a", "empty"])
 precondition(InboxSections.sortProjects(sortProjects, sessions: sortSessions, sort: .name).map(\.id) == ["a", "b", "empty"])
-print("PASS: Home refresh, complete idle families, cycles and project sorting retain projection semantics")
+print("PASS: Home refresh, complete settled families, cycles and project sorting retain projection semantics")
+
+// MARK: Status view layout (runtime `catalog.statusView`, rendered without native sorting)
+
+let statusSaved = """
+{"catalog":{"projects":[{"id":"p","name":"Lody"}],"machineIds":[],"sessions":[
+{"id":"pin-default","title":"Pinned default","pinned":true,"projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - 10 * hour),"lastReadAt":\(now)},
+{"id":"pin-maint","title":"Mirror check","pinned":true,"projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - 20 * hour),"lastReadAt":\(now)},
+{"id":"focus-old","title":"Older but first","projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - 30 * hour),"lastReadAt":\(now)},
+{"id":"focus-new","title":"Newer but second","projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - hour)},
+{"id":"focus-child","title":"Opened child","projectId":"p","createdAt":"2026-01-02T03:04:05Z","openedBySessionId":"focus-new","lastMessageAt":\(now - hour)},
+{"id":"later-a","title":"Snoozed","projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - hour)},
+{"id":"settled-a","title":"Done","projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - 200 * hour)},
+{"id":"read-only","title":"Teammate's","projectId":"p","createdAt":"2026-01-02T03:04:05Z","lastMessageAt":\(now - hour)}
+],
+"pinSections":[{"id":"maint","name":"Maintenance","orderKey":"80"},{"id":"empty","name":"Empty","orderKey":"90"},{"broken":true}],
+"statusView":{
+ "mine":{
+  "pinned":[
+   {"sectionId":null,"name":null,"rows":[{"id":"pin-default","tier":"pinned","children":[],"activityAt":\(now - 10 * hour),"unread":false,"snoozedUntil":null,"woken":false,"canManage":true,"canPrefer":true}],"hiddenCount":0},
+   {"sectionId":"maint","name":"Maintenance","rows":[{"id":"pin-maint","tier":"pinned","children":[],"activityAt":\(now - 20 * hour),"unread":false,"snoozedUntil":null,"woken":false,"canManage":true,"canPrefer":true}],"hiddenCount":2},
+   {"sectionId":"empty","name":"Empty","rows":[],"hiddenCount":0}
+  ],
+  "focus":[
+   {"id":"focus-old","tier":"focus","children":[],"activityAt":\(now - 2 * hour),"unread":true,"snoozedUntil":null,"woken":true,"canManage":true,"canPrefer":true},
+   {"id":"focus-new","tier":"focus","children":[{"id":"focus-child","tier":"focus","children":[],"activityAt":\(now - hour),"unread":false,"snoozedUntil":null,"woken":false,"canManage":true,"canPrefer":true}],"activityAt":\(now - hour),"unread":true,"snoozedUntil":null,"woken":false,"canManage":true,"canPrefer":true},
+   {"id":"read-only","tier":"focus","children":[],"activityAt":\(now - hour),"unread":false,"snoozedUntil":null,"woken":false,"canManage":false,"canPrefer":false},
+   {"id":"unknown-tier","tier":"someday","children":[]}
+  ],
+  "later":[{"id":"later-a","tier":"later","children":[],"activityAt":\(now - hour),"unread":false,"snoozedUntil":\(now + 2 * hour + 60_000),"woken":false,"canManage":true,"canPrefer":true}],
+  "settled":[{"id":"settled-a","tier":"settled","children":[],"activityAt":\(now - 200 * hour),"unread":false,"snoozedUntil":null,"woken":false,"canManage":true,"canPrefer":true}],
+  "canManageSections":true,
+  "nextChangeAt":\(now + 2 * hour)
+ },
+ "team":{"pinned":[],"focus":[],"later":[],"settled":[],"canManageSections":false,"nextChangeAt":null},
+ "nowMs":\(now),
+ "sectionsLoaded":true
+}}}
+"""
+let statusCatalog = SessionCatalog.decode(saved: Data(statusSaved.utf8))!
+let statusLayouts = statusCatalog.statusView!
+let statusLayout = statusLayouts.mine
+precondition(statusCatalog.pinSections.map(\.id) == ["maint", "empty"], "Malformed pin section rows are dropped, not the catalog")
+precondition(statusLayouts.nowMs == now && statusLayouts.sectionsLoaded && statusLayout.canManageSections && !statusLayouts.team.canManageSections)
+precondition(statusLayout.focus.map(\.id) == ["focus-old", "focus-new", "read-only"], "Unknown tiers drop only that row")
+precondition(statusLayout.focus[1].children.map(\.id) == ["focus-child"] && statusLayout.later[0].snoozedUntil != nil)
+precondition(statusLayout.nextChangeAt == now + 2 * hour && statusLayouts.team.focus.isEmpty)
+precondition(statusLayout.pinned.map(\.sectionId) == [nil, "maint", "empty"] && statusLayout.pinned[1].hiddenCount == 2)
+precondition(statusLayouts.row("pin-maint", team: true)?.tier == .pinned, "The conversation page finds a row in either scope")
+precondition(SessionCatalog.decode(saved: Data(saved.utf8))?.statusView == nil, "Catalogs from older runtimes carry no layout")
+
+let statusSections = InboxSections.home(statusCatalog, grouping: .status, layout: statusLayout, now: now)
+precondition(statusSections.map(\.id) == ["pinned", "pinned:maint", "pinned:empty", "focus", "later", "settled"], "\(statusSections.map(\.id))")
+precondition(statusSections.map(\.header) == ["inbox.section.pinned", "Maintenance", "Empty", "home.status.focus", "home.status.later", "home.status.settled"])
+let focusSection = statusSections[3]
+precondition(focusSection.rows.map(\.id) == ["focus-old", "focus-new", "focus-child", "read-only"], "Layout order wins over recency")
+precondition(focusSection.rows[2].parentId == "focus-new" && focusSection.headerValue == "4")
+precondition(focusSection.rows[0].unread && focusSection.rows[0].value == LodyRelativeTime.compact(now - 2 * hour, now: now),
+  "Unread and activity time come from the layout row (a woken snooze)")
+precondition(!statusSections[1].rows.contains { $0.id == "focus-old" })
+precondition(statusSections[1].rows.last?.id == InboxSections.hiddenRowPrefix + "pinned:maint", "The scope-hidden count follows its section")
+precondition(statusSections[2].rows.isEmpty && statusSections[2].keepsEmpty, "An empty user section stays a drop target")
+precondition(statusSections[0].headerMenu.map(\.id) == [InboxSections.sectionActions.create], "The default section is only a place to create one")
+precondition(statusSections[1].headerMenu.map(\.id) == [
+  InboxSections.sectionActions.create, InboxSections.sectionActions.rename, InboxSections.sectionActions.down, InboxSections.sectionActions.delete,
+])
+precondition(statusSections[2].headerMenu.map(\.id).contains(InboxSections.sectionActions.up)
+  && !statusSections[2].headerMenu.map(\.id).contains(InboxSections.sectionActions.down))
+
+// Swipes and menus follow the tier and the row's permissions.
+let swipeIds = { (row: LodyListRow) in row.actions.map(\.id) }
+precondition(swipeIds(focusSection.rows[0]) == [InboxSections.statusActions.settle, InboxSections.statusActions.later])
+precondition(focusSection.rows[0].leadingActions.map(\.id) == ["pin"] && !focusSection.rows[0].pinned)
+precondition(!focusSection.rows[0].menuActions.contains { $0.id == "pin" }, "Pin lives in the status menu beside Move to section")
+let readOnlyRow = focusSection.rows[3]
+precondition(readOnlyRow.actions.isEmpty && readOnlyRow.leadingActions.isEmpty, "Read-only members are offered no status or pin actions")
+precondition(readOnlyRow.menuActions.map(\.id) == ["share"], "Without canManage, Rename, Archive and Delete leave the menu too")
+let laterRow = statusSections[4].rows[0]
+precondition(swipeIds(laterRow) == [InboxSections.statusActions.settle, InboxSections.statusActions.later])
+precondition(laterRow.value == "3h" && laterRow.valueSymbol == "clock", "Later rows show their countdown")
+precondition(swipeIds(statusSections[5].rows[0]) == ["archive"], "Settled rows keep Archive")
+precondition(statusSections[0].rows[0].pinned && statusSections[0].rows[0].leadingActions.first?.title == "session.action.unpin")
+
+// The local viewed watermark clears emphasis before the read receipt syncs.
+var viewedStatus = statusCatalog
+viewedStatus.sessions = viewedStatus.sessions.map { session in
+  var session = session
+  if session.id == "focus-new" { session.lastViewedMessageAt = now - hour }
+  return session
+}
+precondition(InboxSections.home(viewedStatus, grouping: .status, layout: statusLayout, now: now)[3].rows[1].unread == false)
+
+// Time and project buckets keep native grouping but never repeat a pinned conversation.
+for grouping in [HomeGrouping.time, .project] {
+  let sections = InboxSections.home(statusCatalog, grouping: grouping, layout: statusLayout, now: now)
+  precondition(Array(sections.prefix(3).map(\.id)) == ["pinned", "pinned:maint", "pinned:empty"])
+  let ids = sections.flatMap(\.rows).map(\.id)
+  precondition(ids.filter { $0 == "pin-maint" }.count == 1 && ids.contains("settled-a"))
+}
+
+// A creation the catalog has not read back opens at the top of Focus.
+var pendingCatalog = statusCatalog
+pendingCatalog.sessions.append(SessionItem.markedPending(SessionItem(id: "pending-new", projectId: "p")))
+precondition(InboxSections.home(pendingCatalog, grouping: .status, layout: statusLayout, now: now)[3].rows.first?.id == "pending-new")
+
+// Drop planning: the neighbour the row lands before, the area rules, and keyboard-free alternatives.
+let items = ["focus-old", "focus-new", "focus-child", "read-only"]
+let roots: Set = ["focus-old", "focus-new", "read-only"]
+precondition(StatusViewPlanning.beforeId(moving: "read-only", family: [], items: items, roots: roots, index: 0) == "focus-old")
+precondition(StatusViewPlanning.beforeId(moving: "focus-old", family: [], items: items, roots: roots, index: 3) == nil, "The end lands last")
+precondition(StatusViewPlanning.beforeId(moving: "focus-old", family: [], items: items, roots: roots, index: 1) == "read-only",
+  "A drop between an opener and its child lands after that family")
+precondition(StatusViewPlanning.beforeId(moving: "focus-new", family: ["focus-child"], items: items, roots: roots, index: 1) == "read-only")
+let laterLayoutRow = statusLayout.later[0]
+precondition(StatusViewPlanning.drop(laterLayoutRow, into: .focus, beforeId: "focus-old")
+  == .move(sessionId: "later-a", to: .focus, beforeId: "focus-old"), "A Later row dropped into Focus is restored there")
+precondition(StatusViewPlanning.drop(statusLayout.focus[2], into: .focus, beforeId: nil) == nil, "Read-only rows cannot be reordered")
+precondition(StatusViewPlanning.drop(statusLayout.pinned[0].rows[0], into: .focus, beforeId: nil)
+  == .move(sessionId: "pin-default", to: .focus, beforeId: nil), "A pinned row dropped into Focus is unpinned there (Spec)")
+var pinOnly = statusLayout.pinned[0].rows[0]
+pinOnly.canManage = false
+precondition(StatusViewPlanning.drop(pinOnly, into: .focus, beforeId: nil) == nil, "Placing in Focus still needs canManage")
+// An Outbox creation listed above Focus is unknown to the planner: dropping before it means the top.
+precondition(StatusViewPlanning.knownBefore("pending-new", moving: "later-a", in: .focus, of: statusLayout) == "focus-old")
+precondition(StatusViewPlanning.knownBefore("pending-new", moving: "focus-old", in: .focus, of: statusLayout) == "focus-new")
+precondition(StatusViewPlanning.knownBefore("focus-new", moving: "later-a", in: .focus, of: statusLayout) == "focus-new")
+precondition(StatusViewPlanning.knownBefore(nil, moving: "later-a", in: .focus, of: statusLayout) == nil)
+precondition(StatusViewPlanning.drop(statusLayout.focus[0], into: .pinned("maint"), beforeId: nil)
+  == .move(sessionId: "focus-old", to: .pinned("maint"), beforeId: nil), "Dropping into the pin area pins")
+precondition(StatusViewPlanning.step("focus-new", up: true, in: statusLayout) == .move(sessionId: "focus-new", to: .focus, beforeId: "focus-old"))
+precondition(StatusViewPlanning.step("focus-old", up: false, in: statusLayout) == .move(sessionId: "focus-old", to: .focus, beforeId: "read-only"))
+precondition(StatusViewPlanning.step("focus-new", up: false, in: statusLayout) == .move(sessionId: "focus-new", to: .focus, beforeId: nil))
+precondition(StatusViewPlanning.step("focus-old", up: true, in: statusLayout) == nil && StatusViewPlanning.step("focus-child", up: true, in: statusLayout) == nil)
+precondition(StatusViewPlanning.step("later-a", up: true, in: statusLayout) == nil, "Later keeps the runtime's wake-up order")
+let moveDirections = StatusViewPlanning.moveDirections(in: statusLayout)
+precondition(moveDirections["focus-old"] == .init(up: false, down: true))
+precondition(moveDirections["focus-new"] == .init(up: true, down: true))
+precondition(moveDirections["focus-child"] == nil && moveDirections["read-only"] == nil && moveDirections["later-a"] == nil)
+precondition(StatusViewPlanning.moveToTop("focus-new", in: statusLayout) == .move(sessionId: "focus-new", to: .focus, beforeId: "focus-old"))
+precondition(StatusViewPlanning.moveToTop("focus-old", in: statusLayout) == nil)
+precondition(StatusViewArea(sectionId: "pinned:maint") == .pinned("maint") && StatusViewArea(sectionId: "pinned") == .pinned(nil)
+  && StatusViewArea(sectionId: "later") == nil && StatusViewArea.pinned("maint").sectionId == "pinned:maint")
+let sectionOrder = ["a", "b", "c"]
+precondition(StatusViewPlanning.moveSection("b", up: true, sections: sectionOrder) == .moveSection(sectionId: "b", beforeId: "a"))
+precondition(StatusViewPlanning.moveSection("a", up: false, sections: sectionOrder) == .moveSection(sectionId: "a", beforeId: "c"))
+precondition(StatusViewPlanning.moveSection("b", up: false, sections: sectionOrder) == .moveSection(sectionId: "b", beforeId: nil))
+precondition(StatusViewPlanning.moveSection("a", up: true, sections: sectionOrder) == nil)
+
+// The held order shows the drop at once and yields to the catalog's read-back.
+let dropped = StatusViewCommand.move(sessionId: "later-a", to: .focus, beforeId: "focus-new")
+var held = StatusViewHold(dropped, base: statusLayout)!
+let shown = held.apply(to: statusLayout)
+precondition(shown.focus.map(\.id) == ["focus-old", "later-a", "focus-new", "read-only"] && shown.later.isEmpty)
+precondition(shown.focus[1].tier == .focus && shown.focus[1].snoozedUntil == nil)
+precondition(!held.released(by: statusLayout), "Unrelated or stale layouts keep the dropped order")
+precondition(held.released(by: shown), "A layout showing the row where it was dropped releases the hold")
+held.acknowledged = true
+precondition(!held.released(by: statusLayout))
+var unrelated = statusLayout
+unrelated.nextChangeAt = now + 3 * hour
+unrelated.settled[0].unread = true
+precondition(!held.released(by: unrelated), "A catalog update that does not move the row keeps the hold until read-back")
+let elsewhere = StatusViewHold(.move(sessionId: "later-a", to: .focus, beforeId: nil), base: statusLayout)!.apply(to: statusLayout)
+precondition(held.released(by: elsewhere), "After the write is accepted, a layout that moved the row wins")
+held.acknowledged = false
+held.failed = true
+precondition(held.released(by: statusLayout), "A failed write puts the published order back")
+let pinnedHold = StatusViewHold(.move(sessionId: "focus-old", to: .pinned("empty"), beforeId: nil), base: statusLayout)!.apply(to: statusLayout)
+precondition(pinnedHold.pinned[2].rows.map(\.id) == ["focus-old"] && pinnedHold.focus.map(\.id) == ["focus-new", "read-only"])
+precondition(StatusViewHold(.settle(sessionId: "x", includeOpened: false), base: statusLayout) == nil)
+// Two quick moves both stay on screen.
+let firstMove = StatusViewHold(.move(sessionId: "later-a", to: .focus, beforeId: "focus-old"), base: statusLayout)!
+let secondMove = StatusViewHold(.move(sessionId: "settled-a", to: .pinned("empty"), beforeId: nil), base: statusLayout)!
+let both = StatusViewHold.apply([firstMove, secondMove], to: statusLayout)
+precondition(both.focus.first?.id == "later-a" && both.pinned[2].rows.map(\.id) == ["settled-a"] && both.settled.isEmpty)
+
+// A read-back for a different move can change the next row without moving this row.
+let earlier = StatusViewHold(.move(sessionId: "focus-new", to: .pinned("empty"), beforeId: nil), base: statusLayout)!
+var later = StatusViewHold(.move(sessionId: "focus-old", to: .focus, beforeId: nil), base: statusLayout)!
+later.acknowledged = true
+later.concurrentMoves = [earlier.sessionId]
+let partial = earlier.apply(to: statusLayout)
+precondition(earlier.released(by: partial))
+precondition(!later.released(by: partial), "Another move's read-back must not release this row")
+let complete = later.apply(to: partial)
+precondition(later.released(by: complete) && complete.focus.last?.id == "focus-old")
+
+// Undo returns each conversation to where it was: a child that was already settled stays settled.
+precondition(StatusViewPlanning.undo([statusLayout.focus[1], statusLayout.settled[0], statusLayout.focus[1]], now: now)
+  == [.moveToFocus(sessionId: "focus-new", includeOpened: false), .settle(sessionId: "settled-a", includeOpened: false)])
+// Undo returns a conversation to where it was.
+precondition(StatusViewPlanning.undo(statusLayout.focus[0], includeOpened: true, now: now) == .moveToFocus(sessionId: "focus-old", includeOpened: true))
+precondition(StatusViewPlanning.undo(laterLayoutRow, includeOpened: false, now: now)
+  == .snooze(sessionId: "later-a", until: laterLayoutRow.snoozedUntil!, includeOpened: false))
+precondition(StatusViewPlanning.undo(laterLayoutRow, includeOpened: false, now: laterLayoutRow.snoozedUntil! + 1) == .moveToFocus(sessionId: "later-a", includeOpened: false))
+precondition(StatusViewPlanning.undo(statusLayout.settled[0], includeOpened: false, now: now) == .settle(sessionId: "settled-a", includeOpened: false))
+
+// Countdown labels match web `formatSnoozeCountdown`.
+// Whole milliseconds, as the runtime sends them, keep the boundaries exact.
+let tick = now.rounded()
+for (remaining, label) in [(30_000.0, "<1m"), (45 * 60_000.0, "45m"), (2 * hour, "2h"), (23 * hour, "23h"), (3 * 24 * hour, "3d"), (24 * hour, "1d")] {
+  let shown = StatusViewFormat.countdown(until: tick + remaining, now: tick)
+  precondition(shown == label, "\(remaining) -> \(String(describing: shown))")
+}
+precondition(StatusViewFormat.countdown(until: tick, now: tick) == nil)
+
+// Commands encode to the note's JSON; nulls stay explicit.
+func commandJSON(_ command: StatusViewCommand) -> String {
+  String(decoding: try! JSONSerialization.data(withJSONObject: command.json, options: [.sortedKeys]), as: UTF8.self)
+}
+precondition(commandJSON(.move(sessionId: "s", to: .pinned(nil), beforeId: nil))
+  == #"{"beforeId":null,"sessionId":"s","to":{"area":"pinned","sectionId":null},"type":"move"}"#)
+precondition(commandJSON(.move(sessionId: "s", to: .focus, beforeId: "t")) == #"{"beforeId":"t","sessionId":"s","to":{"area":"focus"},"type":"move"}"#)
+precondition(commandJSON(.snooze(sessionId: "s", until: 5, includeOpened: true)) == #"{"includeOpened":true,"sessionId":"s","type":"snooze","until":5}"#)
+precondition(commandJSON(.moveSection(sectionId: "a", beforeId: nil)) == #"{"beforeId":null,"sectionId":"a","type":"moveSection"}"#)
+
+// A read-only member (the host knows the role) and unread section rows withdraw actions.
+let readOnlyLayout = statusLayouts.layout(team: false, readOnly: true)
+precondition(readOnlyLayout.index.values.allSatisfy { !$0.canManage && !$0.canPrefer } && !readOnlyLayout.canManageSections)
+precondition(readOnlyLayout.focus.map(\.id) == statusLayout.focus.map(\.id), "Read-only members still see the same order")
+let readOnlySections = InboxSections.home(statusCatalog, grouping: .status, layout: readOnlyLayout, now: now)
+precondition(readOnlySections.allSatisfy { $0.headerMenu.isEmpty })
+precondition(readOnlySections.flatMap(\.rows).allSatisfy { $0.leadingActions.isEmpty && !$0.actions.contains { $0.id.hasPrefix("status:") } })
+var unloaded = statusLayouts
+unloaded.sectionsLoaded = false
+precondition(!unloaded.layout(team: false).canManageSections && unloaded.layout(team: false).index["focus-old"]?.canPrefer == true)
+precondition(StatusViewPlanning.drop(readOnlyLayout.focus[0], into: .focus, beforeId: nil) == nil)
+
+// The server clock: `nowMs` paired with the device instant it arrived at. A catalog restored from
+// cache carries its receipt time, so it cannot pollute the offset; real skew of hours is kept.
+var clock = StatusViewClock()
+clock.observe(serverNow: tick + 30_000, deviceNow: tick)
+precondition(clock.now(device: tick + 1_000) == tick + 31_000)
+clock.observe(serverNow: tick - 3 * hour + 30_000, deviceNow: tick - 3 * hour)
+precondition(clock.offset == 30_000, "An older sample (a cached catalog received hours ago) never replaces a newer one")
+clock.observe(serverNow: tick + 2 * hour + 1_000, deviceNow: tick + 1_000)
+precondition(clock.offset == 2 * hour, "A device clock hours off is still corrected")
+clock.observe(serverNow: .nan, deviceNow: tick + 2_000)
+precondition(clock.offset == 2 * hour)
+let receivedSaved = Data((String(statusSaved.dropLast(1)) + #","syncedAt":1234}"#).utf8)
+precondition(SessionCatalog.decode(saved: receivedSaved)?.statusView?.receivedAt == 1234, "The receipt time travels with nowMs")
+precondition(statusLayouts.receivedAt == nil && SessionCatalog.decode(saved: receivedSaved)?.statusView == statusLayouts)
+
+// Opening a conversation marks it read, and its root up to a woken snooze.
+var wokenRoot = statusCatalog.session("focus-old")!
+// Its messages were read before the snooze woke it.
+wokenRoot.lastReadAt = now - 20 * hour
+let wokenRow = statusLayout.index["focus-old"]!
+precondition(StatusViewRead.receipts(page: wokenRoot, root: wokenRoot, rootRow: wokenRow, now: now)
+  == [.init(sessionId: "focus-old", at: now, viewed: now - 2 * hour)], "Reading only up to lastMessageAt leaves a woken row unread")
+var wokenTab = SessionItem(id: "woken-tab", projectId: "p", parentSessionId: "focus-old", lastMessageAt: now - 40 * hour, lastReadAt: now)
+precondition(StatusViewRead.receipts(page: wokenTab, root: wokenRoot, rootRow: wokenRow, now: now)
+  == [.init(sessionId: "focus-old", at: now, viewed: now - 2 * hour)], "A Tab page clears its root's wake-up")
+var unreadRoot = wokenRoot
+unreadRoot.lastReadAt = now - 40 * hour
+precondition(StatusViewRead.receipts(page: wokenTab, root: unreadRoot, rootRow: wokenRow, now: now).isEmpty,
+  "A Tab never marks its root's own unseen messages read")
+wokenTab.lastReadAt = nil
+precondition(StatusViewRead.receipts(page: wokenTab, root: unreadRoot, rootRow: wokenRow, now: now)
+  == [.init(sessionId: "woken-tab", at: now, viewed: now - 40 * hour)])
+let unreadPage = statusCatalog.session("focus-new")!
+precondition(StatusViewRead.receipts(page: unreadPage, root: unreadPage, rootRow: statusLayout.index["focus-new"], now: now)
+  == [.init(sessionId: "focus-new", at: now, viewed: now - hour)])
+precondition(StatusViewRead.receipts(page: statusCatalog.session("pin-default")!, root: statusCatalog.session("pin-default")!,
+  rootRow: statusLayout.index["pin-default"], now: now).isEmpty, "Read conversations send nothing")
+
+// An internal Tab's unread output keeps its conversation's dot, whatever the layout row says.
+var tabCatalog = statusCatalog
+tabCatalog.sessions.append(SessionItem(id: "settled-tab", projectId: "p", parentSessionId: "settled-a", lastMessageAt: now - hour))
+let tabSettled = InboxSections.home(tabCatalog, grouping: .status, layout: statusLayout, now: now)[5].rows[0]
+precondition(tabSettled.id == "settled-a" && tabSettled.unread, "Tab unread is not overwritten by the layout row")
+
+// An opened child carried under a pinned opener is not itself pinned: it offers Pin, not Unpin.
+var carriedLayout = statusLayout
+carriedLayout.pinned[0].rows[0].children = [StatusViewRow(id: "carried", tier: .pinned, activityAt: now - hour, canManage: true, canPrefer: true)]
+var carriedCatalog = statusCatalog
+carriedCatalog.sessions.append(SessionItem(id: "carried", projectId: "p", openedBySessionId: "pin-default", lastMessageAt: now - hour, lastReadAt: now))
+let carriedRows = InboxSections.home(carriedCatalog, grouping: .status, layout: carriedLayout, now: now)[0].rows
+precondition(carriedRows.map(\.id) == ["pin-default", "carried"] && carriedRows[0].pinned && !carriedRows[1].pinned)
+precondition(carriedRows[1].leadingActions.first?.title == "session.action.pin")
+
+// Time and project rows never offer management the layout withholds.
+let timeReadOnly = InboxSections.home(statusCatalog, grouping: .time, layout: readOnlyLayout, now: now).flatMap(\.rows)
+precondition(timeReadOnly.filter { !$0.id.hasPrefix("view:") }.allSatisfy {
+  $0.leadingActions.isEmpty && !$0.actions.contains { $0.id == "archive" } && !$0.menuActions.contains { ["rename", "archive", "delete"].contains($0.id) }
+})
+
+let legacyReadOnly = InboxSections.readOnly(InboxSections.home(statusCatalog, grouping: .project, now: now))
+let legacyRows = legacyReadOnly.flatMap(\.rows).filter { $0.id == "focus-old" }
+precondition(legacyRows.count == 1 && legacyRows[0].leadingActions.isEmpty && legacyRows[0].actions.isEmpty
+  && legacyRows[0].menuActions.contains { $0.id == "share" }
+  && !legacyRows[0].menuActions.contains { ["rename", "archive", "delete", "pin"].contains($0.id) })
+
+// The runtime's own fixture catalog decodes and renders in its order.
+let runtimeFixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+  .appendingPathComponent("../../../../../packages/cloud-runtime/contract/fixtures/catalog-status-view.json").standardized
+let fixtureCatalog = try! JSONSerialization.jsonObject(with: Data(contentsOf: runtimeFixture))
+let fixture = SessionCatalog.decode(saved: try! JSONSerialization.data(withJSONObject: ["catalog": fixtureCatalog]))!
+let fixtureView = fixture.statusView!
+precondition(fixtureView.sectionsLoaded && fixtureView.nowMs.isFinite && !fixture.pinSections.isEmpty)
+let fixtureLayout = fixtureView.layout(team: false)
+let fixtureSections = InboxSections.home(fixture, grouping: .status, layout: fixtureLayout, now: fixtureView.nowMs)
+let fixtureFocus = fixtureSections.first { $0.id == InboxSections.focusId }!.rows.filter { !$0.id.hasPrefix("view:") }.map(\.id)
+let fixtureFocusIds = fixtureLayout.focus.flatMap(\.family).map(\.id).filter { id in fixture.sessions.contains { $0.id == id } }
+precondition(fixtureFocus == fixtureFocusIds, "\(fixtureFocus) vs \(fixtureFocusIds)")
+precondition(Array(fixtureSections.prefix(fixtureLayout.pinned.count).map(\.id)) == fixtureLayout.pinned.map { StatusViewArea.pinned($0.sectionId).sectionId })
+print("PASS: Status view layout decodes, renders in runtime order, plans drops and holds them until read-back")

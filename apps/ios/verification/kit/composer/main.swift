@@ -34,14 +34,17 @@ let agentOnlyComposer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, h
 agentOnlyComposer.cardStyle = true
 var openedAgentConfig = false
 agentOnlyComposer.onRunConfig = { openedAgentConfig = true }
-agentOnlyComposer.setComposerState(#"{"editable":true,"canSend":false,"sending":false}"#)
-agentOnlyComposer.setComposerOptions(#"{"agentName":"Kimi Code","models":[],"efforts":[]}"#)
+agentOnlyComposer.setComposerState(#"{"editable":true,"canSend":false,"sending":false,"notice":"","reconnect":false,"placeholder":"Task"}"#)
+agentOnlyComposer.setComposerOptions(#"{"agentName":"Kimi Code","modelId":"","effort":"","models":[],"efforts":[]}"#)
 let agentOnlyButton = descendants(agentOnlyComposer).compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "session-model" }!
 precondition(!agentOnlyButton.isHidden, "An assistant without model capabilities must retain its configuration trigger")
 precondition(agentOnlyButton.configuration?.attributedTitle?.description.contains("Kimi Code") == true, "The trigger must identify the assistant when no models are available")
-agentOnlyButton.sendActions(for: .touchUpInside)
+// A spawned check has no UIApplication to route control events; perform the target's action.
+for action in agentOnlyButton.actions(forTarget: agentOnlyComposer, forControlEvent: .touchUpInside) ?? [] {
+  agentOnlyComposer.perform(NSSelectorFromString(action))
+}
 precondition(openedAgentConfig, "The assistant-only trigger must open run configuration")
-agentOnlyComposer.setComposerOptions(#"{"models":[],"efforts":[]}"#)
+agentOnlyComposer.setComposerOptions(#"{"modelId":"","effort":"","models":[],"efforts":[]}"#)
 precondition(agentOnlyButton.isHidden, "No assistant and no models must not show an empty trigger")
 print("Composer: assistant-only configuration remains visible and opens")
 
@@ -143,21 +146,24 @@ try? FileManager.default.removeItem(at: handoffURL)
 print("Attachments: ChatKit thumbnail handoff target and reveal pass")
 
 let composer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
-let initialScroll = UIScrollView()
-initialScroll.bottomEdgeEffect.isHidden = true
-composer.attachScrollEdge(to: initialScroll)
-let scrollInteraction = composer.interactions.compactMap { $0 as? UIScrollEdgeElementContainerInteraction }.first!
-precondition(scrollInteraction.scrollView === initialScroll && scrollInteraction.edge == .bottom)
-precondition(!initialScroll.bottomEdgeEffect.isHidden && initialScroll.bottomEdgeEffect.style == .soft,
-  "Attaching a composer must enable soft occlusion")
-let replacementScroll = UIScrollView()
-composer.attachScrollEdge(to: replacementScroll)
-precondition(scrollInteraction.scrollView === replacementScroll && replacementScroll.bottomEdgeEffect.style == .soft,
-  "Moving the composer to another host must configure the new scroll view")
-composer.attachScrollEdge(to: nil)
-precondition(scrollInteraction.scrollView == nil,
-  "Detaching the composer must release its scroll target")
-print("Composer scroll edge: direct attachment, host replacement and detachment pass")
+// Soft scroll edges exist from iOS 26; earlier systems draw no edge effect.
+if #available(iOS 26, *) {
+  let initialScroll = UIScrollView()
+  initialScroll.bottomEdgeEffect.isHidden = true
+  composer.attachScrollEdge(to: initialScroll)
+  let scrollInteraction = composer.interactions.compactMap { $0 as? UIScrollEdgeElementContainerInteraction }.first!
+  precondition(scrollInteraction.scrollView === initialScroll && scrollInteraction.edge == .bottom)
+  precondition(!initialScroll.bottomEdgeEffect.isHidden && initialScroll.bottomEdgeEffect.style == .soft,
+    "Attaching a composer must enable soft occlusion")
+  let replacementScroll = UIScrollView()
+  composer.attachScrollEdge(to: replacementScroll)
+  precondition(scrollInteraction.scrollView === replacementScroll && replacementScroll.bottomEdgeEffect.style == .soft,
+    "Moving the composer to another host must configure the new scroll view")
+  composer.attachScrollEdge(to: nil)
+  precondition(scrollInteraction.scrollView == nil,
+    "Detaching the composer must release its scroll target")
+  print("Composer scroll edge: direct attachment, host replacement and detachment pass")
+}
 composer.setInputIdentifier("create-session-input")
 var height: CGFloat = 0
 composer.onHeightChange = { height = $0 }
@@ -926,16 +932,6 @@ precondition(!steerTarget.isHidden, "Cancelling a steer flight must reveal the l
 print("Steer flight: departing queue rows slide straight into the transcript and clean up on cancellation")
 
 
-let modelComposer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 120))
-modelComposer.setComposerState(ready)
-modelComposer.setComposerOptions(#"{"modelId":"gpt","models":[{"id":"gpt","title":"GPT"}],"effort":"medium","efforts":[{"id":"medium","title":"Medium"}]}"#)
-let modelButton = descendants(modelComposer).compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "session-model" }!
-precondition(
-  modelButton.configuration?.preferredSymbolConfigurationForImage
-    == UIImage.SymbolConfiguration(pointSize: 5, weight: .medium),
-  "The model trigger chevron must use the compact 5-point symbol size"
-)
-print("Composer: model trigger chevron stays compact")
 
 let glassComposer = ChatComposerView(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
 let glassWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -970,7 +966,7 @@ glassComposer.layoutIfNeeded()
     "\(label): the resting composer must be one 48-point capsule aligned with the transcript's 20-point side insets; got \(surface)")
   precondition(glassAttach.isDescendant(of: glassInputSurface) && abs(attach.minX - 2) < 0.5 && abs(attach.midY - surface.height / 2) < 0.5,
     "\(label): Add must sit at the capsule's leading end; got \(attach)")
-  precondition(glassSend.isHidden, "\(label): an empty resting capsule must not show Send")
+  precondition(!glassSend.isHidden, "\(label): the one-line composer keeps Send in place")
 }
 
 assertGlassCapsule("rest")
@@ -1008,8 +1004,9 @@ precondition(abs(attachInset - 30) < 0.5 && abs(sendInset - 24) < 0.5 && abs(bas
   "Toolbar Add must center 30 points in and Send 24 points in on one baseline; got add \(attachInset), send \(sendInset), baseline \(baselineDelta)")
 precondition(attachCenter.y > glassInput.convert(glassInput.bounds, to: glassInputSurface).maxY,
   "The toolbar must sit below the text")
-precondition(!glassModel.isHidden && modelFrame.midX > glassInputSurface.bounds.midX && modelFrame.maxX <= sendFrame.minX + 0.5,
-  "The focused model selector must remain on the trailing side before Send")
+precondition(!glassModel.isHidden && modelFrame.minX >= glassAttach.convert(glassAttach.bounds, to: glassInputSurface).maxX - 0.5
+  && modelFrame.maxX <= sendFrame.minX + 0.5,
+  "The focused run-config chip must sit between Add and Send")
 print("Composer glass: focus turns the capsule into an edge-to-edge sheet with a balanced toolbar")
 glassInput.text = "@"
 glassInput.selectedRange = NSRange(location: 1, length: 0)
@@ -1017,16 +1014,16 @@ glassComposer.textViewDidChange(glassInput)
 RunLoop.current.run(until: Date().addingTimeInterval(0.4))
 glassComposer.layoutIfNeeded()
 let sheetMentions = descendants(glassComposer).compactMap { $0 as? ChatMentionPanel }.first!
-precondition(!sheetMentions.isHidden && sheetMentions.isDescendant(of: glassInputSurface) && sheetMentions.effect == nil,
-  "Mention results must open inside the sheet, on the sheet's own material")
-precondition(sheetMentions.convert(sheetMentions.bounds, to: glassInputSurface).maxY <= glassInput.convert(glassInput.bounds, to: glassInputSurface).minY + 0.5,
-  "Mention results must sit above the text")
-precondition(abs(sheetMentions.convert(sheetMentions.bounds, to: glassInputSurface).width - glassInputSurface.bounds.width) < 0.5,
-  "Mention results must span the sheet")
+precondition(!sheetMentions.isHidden && sheetMentions.superview === glassComposer && sheetMentions.backgroundColor == .lodyBackground,
+  "Mention results must dock in the composer on an opaque panel")
+precondition(sheetMentions.convert(sheetMentions.bounds, to: glassComposer).minY >= glassInput.convert(glassInput.bounds, to: glassComposer).maxY - 0.5,
+  "Mention results must dock below the prompt, directly on the keyboard")
+precondition(abs(sheetMentions.convert(sheetMentions.bounds, to: glassComposer).width - glassComposer.bounds.width) < 0.5,
+  "Mention results must span the composer")
 glassInput.text = ""
 glassComposer.textViewDidChange(glassInput)
 RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-print("Composer mentions: results open inside the sheet above the text")
+print("Composer mentions: results dock below the prompt across the composer")
 glassComposer.allowsFullScreen = true
 glassComposer.layoutIfNeeded()
 let grabber = descendants(glassComposer).first { $0.accessibilityIdentifier == "session-grabber" }
@@ -1080,6 +1077,8 @@ assert(ChatMentionPanel.activeRange(text: "@auth ", selection: NSRange(location:
 assert(ChatMentionPanel.activeRange(text: "@auth", selection: NSRange(location: 1, length: 3)) == nil)
 
 assert(ChatMentionPanel.activeRange(text: "😀 $auth", selection: NSRange(location: 8, length: 0)) == NSRange(location: 3, length: 5))
+assert(ChatMentionPanel.activeRange(text: "😀 ￥auth", selection: NSRange(location: 8, length: 0)) == NSRange(location: 3, length: 5))
+assert(ChatMentionPanel.activeRange(text: "price¥5", selection: NSRange(location: 7, length: 0)) == nil)
 assert(ChatMentionPanel.activeRange(text: "/compact", selection: NSRange(location: 8, length: 0)) == NSRange(location: 0, length: 8))
 assert(ChatMentionPanel.activeRange(text: "read /tmp", selection: NSRange(location: 9, length: 0)) == nil)
 assert(ChatMentionPanel.activeRange(text: "/tmp/file", selection: NSRange(location: 9, length: 0)) == nil)
@@ -1102,8 +1101,8 @@ referenceText("@")
 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 precondition(!referencePanel.isHidden && referencePanel.alpha == 1)
 referenceText("")
-precondition(!referencePanel.isHidden && referencePanel.panelHeight > 0 && !referencePanel.isUserInteractionEnabled,
-             "An exiting panel must retain its content and layout space until its animation finishes")
+precondition(!referencePanel.isHidden && referencePanel.panelHeight == 0,
+             "An exiting panel fades in place while its host animates the released space")
 RunLoop.current.run(until: Date().addingTimeInterval(0.03))
 referenceText("@")
 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
@@ -1120,12 +1119,11 @@ RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 precondition(!referencePanel.isHidden && referencePanel.panelHeight > 0,
              "The real reference entry must remain usable while its catalog is loading or empty")
 let referenceList = descendants(referencePanel).compactMap { $0 as? UICollectionView }.first!
-referencePanel.collectionView(referenceList, didSelectItemAt: IndexPath(item: 1, section: 0))
 let skill = ChatMentionItem(path: "/Users/test/skills/auth/SKILL.md", name: "auth-review", kind: "skill", subtitle: "Auth", insertText: "$auth-review")
-referencePanel.finishBrowse(path: skill.path, selectedItem: skill)
+referencePanel.choose(skill)
 precondition(referenceInput.text == skill.insertText! + " ",
-             "A remotely selected skill must insert only its short token even when the inline catalog has not arrived")
-print("References: empty catalog browse and remote skill insertion passed")
+             "A chosen skill must insert only its short token even when the inline catalog has not arrived")
+print("References: empty catalog entry and short skill insertion passed")
 precondition(referenceInput.becomeFirstResponder())
 referenceInput.text = "/"
 referenceInput.selectedRange = NSRange(location: 1, length: 0)
@@ -1136,15 +1134,23 @@ let command = ChatMentionItem(path: "compact", name: "compact", kind: "cmd", sub
 referencePanel.update(input: referenceInput, items: [skill, command])
 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 precondition(!referencePanel.isHidden)
-precondition(referencePanel.collectionView(referenceList, numberOfItemsInSection: 0) == 1, "Slash must open commands directly")
-referencePanel.collectionView(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
+precondition(referenceList.numberOfItems(inSection: 0) == 1, "Slash must open commands directly")
+referenceList.delegate!.collectionView!(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
 precondition(referenceInput.text == "/compact ")
 referenceInput.text = "$"
 referenceInput.selectedRange = NSRange(location: 1, length: 0)
 referencePanel.update(input: referenceInput, items: [skill, command])
-precondition(referencePanel.collectionView(referenceList, numberOfItemsInSection: 0) == 1, "Dollar must open skills directly")
-referencePanel.collectionView(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
+precondition(referenceList.numberOfItems(inSection: 0) == 1, "Dollar must open skills directly")
+referenceList.delegate!.collectionView!(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
 precondition(referenceInput.text == "$auth-review ")
+for sign in ["￥", "¥"] {
+  referenceInput.text = sign
+  referenceInput.selectedRange = NSRange(location: 1, length: 0)
+  referencePanel.update(input: referenceInput, items: [skill, command])
+  precondition(referenceList.numberOfItems(inSection: 0) == 1, "\(sign) must open skills directly")
+  referenceList.delegate!.collectionView!(referenceList, didSelectItemAt: IndexPath(item: 0, section: 0))
+  precondition(referenceInput.text == "$auth-review ")
+}
 
 referenceText("@")
 referencePanel.removeFromSuperview()
@@ -1220,7 +1226,7 @@ materialWindow.addSubview(barComposer)
 barComposer.onHeightChange = { barComposer.frame.size.height = $0 }
 let actionBar = descendants(barComposer).compactMap { $0 as? ChatActionBarView }.first!
 @MainActor func barState(_ extra: [String: Any]) {
-  var state: [String: Any] = ["editable": true, "canSend": true, "sending": false, "running": false, "placeholder": "Task"]
+  var state: [String: Any] = ["editable": true, "canSend": true, "sending": false, "running": false, "notice": "", "reconnect": false, "placeholder": "Task"]
   state.merge(extra) { $1 }
   barComposer.setComposerState(String(decoding: try! JSONSerialization.data(withJSONObject: state), as: UTF8.self))
   barComposer.layoutIfNeeded()
@@ -1271,8 +1277,8 @@ precondition(!orderChips.isHidden && !orderQueue.isHidden && !orderNotice.isHidd
 precondition(orderFrame(orderNotice).maxY <= orderFrame(orderChips).minY + 0.5, "The notice must sit above the action bar")
 precondition(orderFrame(orderChips).maxY <= orderFrame(orderQueue).minY + 0.5, "The queue must sit below the action bar")
 precondition(orderFrame(orderQueue).maxY <= orderFrame(orderSurface).minY + 0.5, "The queue must sit directly above the capsule")
-precondition(abs(orderFrame(orderQueue).minX - 16) < 0.5 && abs(orderComposer.bounds.maxX - orderFrame(orderQueue).maxX - 16) < 0.5,
-  "The queue card keeps 16-point side insets")
+precondition(abs(orderFrame(orderQueue).minX - orderFrame(orderSurface).minX) < 0.5 && abs(orderFrame(orderQueue).maxX - orderFrame(orderSurface).maxX) < 0.5,
+  "The queue card shares the capsule's side edges")
 orderComposer.removeFromSuperview()
 print("Composer order: notice, action bar, queue, then the capsule")
 
@@ -1344,7 +1350,7 @@ let chipCommand = ChatMentionItem(path: "compact", name: "compact", kind: "cmd",
 chipPanel.update(input: chipInput, items: [chipCommand])
 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
 let chipList = descendants(chipPanel).compactMap { $0 as? UICollectionView }.first!
-chipPanel.collectionView(chipList, didSelectItemAt: IndexPath(item: 0, section: 0))
+chipList.delegate!.collectionView!(chipList, didSelectItemAt: IndexPath(item: 0, section: 0))
 precondition(chipInput.text == "/compact ", "A reference must insert exactly its token")
 precondition(chipInput.referenceTokens == ["/compact"], "An inserted reference must become a chip node")
 typeInto(chipInput, "now")
@@ -1518,14 +1524,14 @@ precondition(bigAttachments.first?["name"] == "Text.txt", "Undo that cannot inse
 print("Rich composer: huge logs become Text.txt and a refused undo keeps the file")
 
 // Friendly labels must never replace ordinary prose or confuse equal display names.
-let (_, referenceInput) = makeRichComposer()
-referenceInput.text = "@Same title "
-referenceInput.insertReference("@session:first", label: "@Same title", replacing: NSRange(location: (referenceInput.text as NSString).length, length: 0))
-referenceInput.insertReference("@session:second", label: "@Same title", replacing: NSRange(location: (referenceInput.text as NSString).length, length: 0))
-precondition(referenceInput.markdown == "@Same title @session:first @session:second ")
-let savedReferences = referenceInput.draftEnvelope
-referenceInput.text = ""
-referenceInput.restoreDraft(savedReferences)
-precondition(referenceInput.markdown == "@Same title @session:first @session:second ")
-precondition(!referenceInput.text.contains("session:"))
+let (_, labelInput) = makeRichComposer()
+labelInput.text = "@Same title "
+labelInput.insertReference("@session:first", label: "@Same title", replacing: NSRange(location: (labelInput.text as NSString).length, length: 0))
+labelInput.insertReference("@session:second", label: "@Same title", replacing: NSRange(location: (labelInput.text as NSString).length, length: 0))
+precondition(labelInput.markdown == "@Same title @session:first @session:second ")
+let savedReferences = labelInput.draftEnvelope
+labelInput.text = ""
+labelInput.restoreDraft(savedReferences)
+precondition(labelInput.markdown == "@Same title @session:first @session:second ")
+precondition(!labelInput.text.contains("session:"))
 print("Mention labels: identical titles retain distinct tokens across draft restoration")

@@ -265,3 +265,28 @@ test('keys a handler returns but the contract does not declare are reported', as
   assert.deepEqual(reports, [['ensureSession', ['.stale']]]);
   assert.deepEqual(posts.at(-1).payload, {});
 });
+
+test('the fixture catalog carries a contract-valid Status view', async () => {
+  const { CatalogStatusView, PinSection } =
+    await import('../../../../packages/cloud-runtime/src/contract/status-view.ts');
+  const catalog = await fixtures('catalog-status-view');
+  const view = CatalogStatusView.parse(catalog.statusView);
+  for (const section of catalog.pinSections) PinSection.parse(section);
+  const ids = new Set(catalog.sessions.map((session) => session.id));
+  const rows = (list) => list.flatMap((row) => [row, ...rows(row.children)]);
+  for (const layout of [view.mine, view.team])
+    for (const row of rows([
+      ...layout.pinned.flatMap((section) => section.rows),
+      ...layout.focus,
+      ...layout.later,
+      ...layout.settled,
+    ]))
+      assert.ok(ids.has(row.id), row.id);
+  assert.equal(
+    CatalogStatusView.safeParse({
+      ...view,
+      mine: { ...view.mine, focus: [{ id: 'x', tier: 'focus' }] },
+    }).success,
+    false,
+  );
+});

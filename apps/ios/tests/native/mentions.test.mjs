@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { Flock } from '@loro-dev/flock-wasm/base64';
 import { openTestSession } from '../helpers.mjs';
 
 const bundle = await build({
@@ -249,6 +250,38 @@ test('only advertised well-formed commands are selectable', () => {
   );
 });
 
+test('a session lists its agent’s reported commands before the config’s probe preview', () => {
+  const agent = { cliType: 'custom', agentType: 'custom-a1' };
+  const preview = {
+    ...agent,
+    availableCommands: [{ name: 'probe', description: 'Probe' }],
+  };
+  const names = (actual, capability) =>
+    mentions
+      .agentCommandMentions(actual, capability, agent)
+      .items.map((item) => item.insertText);
+  // The probe of a custom command can finish before it advertises commands.
+  assert.deepEqual(
+    names([{ name: 'review' }, { name: 'init' }], {
+      ...agent,
+      availableCommands: [],
+    }),
+    ['/review', '/init'],
+  );
+  assert.deepEqual(
+    names([], preview),
+    [],
+    'a reported empty list clears the menu',
+  );
+  assert.deepEqual(names(undefined, preview), ['/probe']);
+  assert.deepEqual(
+    names(undefined, { ...preview, agentType: 'custom-other' }),
+    [],
+    'another agent’s preview is never shown',
+  );
+  assert.deepEqual(names(undefined, undefined), []);
+});
+
 test('first turn, queue and Steer persist the same expansion before delivery; failure writes nothing', async () => {
   const requests = [];
   const fixture = await openTestSession({
@@ -325,6 +358,59 @@ test('first turn, queue and Steer persist the same expansion before delivery; fa
       'Steer must not reinterpret an already expanded queued prompt',
     );
     assert.equal(args.text, text, 'Failure/retry state retains the raw draft');
+  } finally {
+    fixture.close();
+  }
+});
+
+test('retry keeps the original references and writes the same input once the catalog recovers', async () => {
+  const flock = new Flock('retry-meta');
+  flock.set(['m', 'session-s1'], { machineId: 'm1', agentConfigId: 'a1' });
+  const fixture = await openTestSession({
+    settings: () => new Flock('retry-settings').exportFile(),
+    onRpc: () => ({ result: { accepted: true } }),
+  });
+  try {
+    let recovered = false;
+    const handlers = new Map();
+    fixture.runtime.registerSessions(
+      {
+        channel: { handle: (name, fn) => handlers.set(name, fn) },
+        state: { workspace: 'w1', userId: 'u1', metaReplica: { flock } },
+        getGrant: async () => ({
+          token: 'fixture',
+          gatewayBaseUrl: 'https://example.invalid',
+        }),
+      },
+      async ({ category }) =>
+        recovered
+          ? load(category)
+          : { items: [], incomplete: true, truncated: false },
+    );
+    const send = handlers.get('sendTurn');
+    const args = {
+      id: '00000000-0000-4000-8000-000000000012',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text,
+    };
+    for (const attempt of [args, { ...args, literalReferences: true }]) {
+      const rejected = await send(attempt);
+      assert.equal(rejected.state, 'not_sent');
+      assert.equal(rejected.reason, 'mention_expansion_failed');
+    }
+    assert.equal(fixture.appends.length, 0);
+    recovered = true;
+    const result = await send(args);
+    assert.equal(result.state, 'accepted', result.reason);
+    const history = fixture.server.toJSON().history;
+    assert.deepEqual(
+      history.map((entry) => [entry.id, entry.inputConfig.prompt]),
+      [[args.id, expected]],
+    );
   } finally {
     fixture.close();
   }

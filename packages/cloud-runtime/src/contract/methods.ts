@@ -99,6 +99,11 @@ import {
 } from './files.ts';
 import { ItemDetail, ItemDetailParams } from './item-detail.ts';
 import {
+  SnoozePresetsResult,
+  StatusViewCommandParams,
+  StatusViewCommandResult,
+} from './status-view.ts';
+import {
   ArchiveSessionParams,
   SetTabClosedParams,
   CheckTurnQuotaParams,
@@ -324,6 +329,16 @@ export const runtimeCalls = {
     timeoutMs: 45_000,
   },
   pinSession: { params: PinSessionParams, result: Empty, timeoutMs: 45_000 },
+  statusViewCommand: {
+    params: StatusViewCommandParams,
+    result: StatusViewCommandResult,
+    timeoutMs: 45_000,
+  },
+  snoozePresets: {
+    params: Empty,
+    result: SnoozePresetsResult,
+    timeoutMs: 10_000,
+  },
   markSessionRead: {
     params: MarkSessionReadParams,
     result: Empty,

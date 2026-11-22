@@ -145,7 +145,30 @@ do {
   catch let error as NSError { try expect(error.domain != "Read failure was hidden", "Storage failures are observable") }
   do { _ = try app.count(since: .infinity); throw NSError(domain: "Invalid range was accepted", code: 1) }
   catch let error as NSError { try expect(error.domain == "Lody.Diagnostics.Range", "Range input is validated natively") }
-  print("Diagnostics: range, restart, merge, privacy, interrupted write, clear, concurrent writers, retention and rotation passed")
+  // RunningBoard kills a suspended app holding the App Group lock (0xdead10cc), so writes run only inside execution time.
+  let suspendRoot = root.appending(path: "suspend")
+  let windows = Clock()
+  let denied = DiagnosticsStore(directory: suspendRoot, process: .app, activity: { _ in nil })
+  denied.record("app", "background")
+  denied.flush()
+  try expect(!FileManager.default.fileExists(atPath: suspendRoot.path), "Without background time a record never takes the shared lock")
+  let expiring = DiagnosticsStore(directory: suspendRoot, process: .app, activity: { expired in
+    windows.advance(1)
+    expired()
+    return { windows.advance(-1) }
+  })
+  expiring.record("app", "expired_before_write")
+  expiring.flush()
+  try expect(!FileManager.default.fileExists(atPath: suspendRoot.path), "A record whose execution time expired before writing is dropped")
+  let granted = DiagnosticsStore(directory: suspendRoot, process: .app, activity: { _ in
+    windows.advance(1)
+    return { windows.advance(-1) }
+  })
+  granted.record("app", "granted")
+  granted.flush()
+  try expect(granted.count(since: 900) == 1, "A record with background time is written")
+  try expect(windows.read() == Date(timeIntervalSince1970: 1_800_000_000), "Every execution window is released after its record")
+  print("Diagnostics: range, restart, merge, privacy, interrupted write, clear, concurrent writers, retention, rotation and suspension safety passed")
 } catch {
   fatalError("Diagnostics check failed: \(error)")
 }

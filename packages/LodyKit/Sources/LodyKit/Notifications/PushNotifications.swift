@@ -273,6 +273,7 @@ final class PushLifecycle {
   }
 
   func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+    DiagnosticsStore.shared.keepAlive(application)
     DiagnosticsStore.shared.record("app", "launch", fields: ["appState": String(application.applicationState.rawValue), "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""])
     PushNotifications.shared.start(launchOptions)
     return true

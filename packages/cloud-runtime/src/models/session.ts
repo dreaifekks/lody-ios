@@ -46,6 +46,7 @@ export type ItemSummary =
       added?: number;
       removed?: number;
       hasDetail: boolean;
+      activityKind?: 'context_compaction' | 'codex_retry';
       permission?: {
         requestId: string;
         pending: boolean;

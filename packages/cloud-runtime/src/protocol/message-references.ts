@@ -1,5 +1,6 @@
 import type { MentionItem } from '../models/mentions.ts';
 import { mentionPrompt } from '../runtime/mention-expansion.ts';
+import { messageQuoteSpans } from './message-quotes.ts';
 
 /** Web-compatible UTF-16 ranges in the original wire text. */
 export type MessageReference = {
@@ -9,6 +10,10 @@ export type MessageReference = {
   label: string;
   target?: string;
   mark?: string;
+  /** `message_quote` only: the quote format version on the wire. */
+  quoteVersion?: 1;
+  /** `message_quote` only: the decoded snapshot the display text shows. */
+  quote?: string;
 };
 const kinds = new Set([
   'file',
@@ -116,13 +121,22 @@ export function presentMessageText(
   text: string,
   input?: unknown,
 ): { text: string; references: MessageReference[] } {
-  const spans = valid(text, input);
+  // A valid quote block is shown as its snapshot. Blank it out (offsets kept)
+  // so no reference is recognized inside it and its code fences protect nothing.
+  const quotes = messageQuoteSpans(text, input);
+  let source = text;
+  for (const quote of quotes)
+    source =
+      source.slice(0, quote.start) +
+      ' '.repeat(quote.end - quote.start) +
+      source.slice(quote.end);
+  const spans = valid(source, input);
   // Older native clients did not persist display spans. Only recognize the exact
   // generated grammar; ordinary prose and code must remain untouched.
   if (input === undefined) {
     const legacy =
       /use lody mcp to query session\[id: [^\]\n]+\] history|use lody mcp to create a session with agent role\[id: [^\]\n]+?, name: ([^\]\n]+)\]|@session:[\w-]+|@role:[\w-]+(?:@[\w-]+)?/g;
-    for (const m of text.matchAll(legacy))
+    for (const m of source.matchAll(legacy))
       spans.push({
         start: m.index!,
         end: m.index! + m[0].length,
@@ -132,7 +146,7 @@ export function presentMessageText(
   }
   const readable =
     /(?<!\S)use \/([^\s]+) \[Skill Path\]\(((?:\\.|[^\\)])+)\)|(?<!\S)@(?:"((?:\\.|[^"\\])*)"|([^\s@"`]+))|(?<!\S)(\$[^\s$]+|#[1-9][0-9]*)(?=$|\s|[.,;!?])/g;
-  for (const m of text.matchAll(readable)) {
+  for (const m of source.matchAll(readable)) {
     const start = m.index!,
       end = start + m[0].length;
     if (spans.some((s) => start < s.end && end > s.start)) continue;
@@ -165,11 +179,30 @@ export function presentMessageText(
   let cursor = 0,
     result = '';
   const references: MessageReference[] = [];
-  for (const span of valid(text, spans)) {
+  const ordered = [
+    ...valid(source, spans).filter(
+      (span) => !quotes.some((q) => span.start < q.end && span.end > q.start),
+    ),
+    ...quotes,
+  ].sort((a, b) => a.start - b.start);
+  for (const span of ordered) {
     result += text.slice(cursor, span.start);
     const start = result.length;
-    result += label(span);
-    references.push({ ...span, start, end: result.length });
+    if (span.kind === 'message_quote' && 'quote' in span) {
+      result += span.quote;
+      references.push({
+        start,
+        end: result.length,
+        kind: span.kind,
+        label: span.label,
+        ...(span.target === undefined ? {} : { target: span.target }),
+        quoteVersion: 1,
+        quote: span.quote,
+      });
+    } else {
+      result += label(span);
+      references.push({ ...span, start, end: result.length });
+    }
     cursor = span.end;
   }
   return { text: result + text.slice(cursor), references };

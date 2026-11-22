@@ -16,7 +16,8 @@ import {
   renameSession,
   setSessionOwner,
 } from '../archive-session';
-import { creationOptions, createSession } from '../create-session';
+import { creationOptions, createSession, machineMeta } from '../create-session';
+import { planCommand } from '../status-view.ts';
 import { readWorkspaceProjects } from '../project-groups';
 import { sessionMcpSelection } from '../mcp';
 import { expandMentions } from '../mention-expansion';
@@ -250,12 +251,20 @@ export function registerSessions(
         replica.flock,
         state.machineReplicas,
       );
+      const sources = ctx.statusSources?.();
+      const [order] = sources
+        ? planCommand(sources, {
+            type: 'newSessionOrder',
+            sessionId: args.sessionId,
+          })
+        : [];
       const result = await createSession(
         group ? { ...args, projectId: undefined } : args,
         options,
         replica,
         getGrant,
         group,
+        order?.type === 'session' ? order.patch.orderKey : undefined,
       );
       if (result.state === 'created') republish(replica);
       return result;
@@ -419,7 +428,17 @@ export function registerSessions(
     };
   });
   channel.handle('respondPermission', respondPermission);
-  channel.handle('controlTurn', controlTurn);
+  channel.handle('controlTurn', (args) => {
+    const flock = state.metaReplica?.flock;
+    const capabilities = flock
+      ? machineMeta(flock, args.machineId).protocolCapabilities
+      : undefined;
+    const supportsOperationInbox =
+      !!capabilities &&
+      typeof capabilities === 'object' &&
+      Number((capabilities as Record<string, unknown>).operationInbox) >= 1;
+    return controlTurn(args, { supportsOperationInbox });
+  });
   channel.handle('checkTurnQuota', checkTurnQuota);
   channel.handle('editSession', (args) => {
     if (!state.metaReplica || state.unhealthy.size)
@@ -500,9 +519,13 @@ export function registerSessions(
         scoped();
         const ids = await sessionMcpSelection(
           sourceWorkspace,
-          getGrant,
+          scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
           persisted,
-          AbortSignal.timeout(30000),
+          AbortSignal.timeout(state.workspaceReplica ? 8000 : 30000),
+          () =>
+            state.workspace === sourceWorkspace
+              ? state.workspaceReplica
+              : undefined,
         );
         scoped();
         return ids;

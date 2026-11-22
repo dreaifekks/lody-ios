@@ -8,7 +8,7 @@ final class LocalStore: @unchecked Sendable {
 }
 @MainActor final class DataRuntime {
   static var current: DataRuntime?
-  func openSession(_ id: String) { preconditionFailure("Unexpected live runtime") }
+  func reconnectSession(_ id: String) { preconditionFailure("Unexpected live runtime") }
   func watchSession(_ id: String) { preconditionFailure("Unexpected live runtime") }
   func unwatchSession(_ id: String) { preconditionFailure("Unexpected live runtime") }
 }

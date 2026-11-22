@@ -158,7 +158,10 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   func reset() {
     for navigation in Set(tabNavigations.values).union([primary]) { navigation.popToRootViewController(animated: false) }
-    if compactTabsInstalled { compactNavigation.popToRootViewController(animated: false) }
+    if compactTabsInstalled {
+      compactNavigation.popToRootViewController(animated: false)
+      compactNavigation.view.layoutIfNeeded()
+    }
     let keepsSchedules = schedulesInDetail
     clearSession()
     if keepsSchedules { showSchedulesInDetail() }

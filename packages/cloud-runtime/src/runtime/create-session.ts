@@ -445,6 +445,8 @@ export async function createSession(
   getGrant: () => Promise<{ token: string; gatewayBaseUrl: string }>,
   /** A multi-repository project (web Project group), read fresh by the caller. */
   group?: WorkspaceProject,
+  /** Status view `newSessionOrder`: the top of Focus. Tabs never take one. */
+  orderKey?: string,
 ): Promise<CreateSessionResult> {
   const agent = options.agents.find(
     (a) => a.id === args.agentConfigId && a.machineId === args.machineId,
@@ -527,6 +529,7 @@ export async function createSession(
       { preferred: args.preferRoost ? 'roost' : 'loro' },
     ),
     isArchived: false,
+    ...(orderKey && !tab ? { orderKey } : {}),
     createdAt: new Date().toISOString(),
     cliType: agent.cliType,
     agentType: agent.agentType,

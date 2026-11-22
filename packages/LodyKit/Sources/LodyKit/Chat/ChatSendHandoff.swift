@@ -100,6 +100,14 @@ final class ChatReferenceChipsView: UIView {
         next.append((rect.offsetBy(dx: label.frame.minX, dy: label.frame.minY).insetBy(dx: -3, dy: 2), fill))
       }
     }
+    // A sent quote's leading bar spans its lines (web's quote block).
+    text.enumerateAttribute(.lodyQuoteBar, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+      guard value != nil, range.length > 0 else { return }
+      let lines = label.rectangles(for: range).filter { $0.height > 0 && $0.minY < visible }
+      guard let top = lines.map(\.minY).min(), let bottom = lines.map(\.maxY).max() else { return }
+      let bar = CGRect(x: label.frame.minX, y: label.frame.minY + top + 2, width: 3, height: max(0, min(bottom, visible) - top - 4))
+      next.append((bar, UIColor.lodyTertiary))
+    }
     guard next.count != runs.count || zip(next, runs).contains(where: { $0.rect != $1.rect || $0.fill != $1.fill }) else { return }
     runs = next
     setNeedsDisplay()

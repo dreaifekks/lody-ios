@@ -7,6 +7,7 @@ export type ShortcutRequest = {
 } & (
   | { action: 'list'; fresh?: boolean }
   | { action: 'read'; entry: PromptShortcutIndexEntry }
+  | { action: 'select'; id: string }
   | {
       action: 'save';
       entry: PromptShortcutIndexEntry | null;

@@ -50,7 +50,11 @@ struct OutboxRecord: Codable, Sendable, Equatable {
             let send = item.object?["send"]?.object, send["id"]?.truthy == true,
             send["text"]?.string != nil, case .array? = send["attachments"],
             send["choice"]?.truthy == true else { return nil }
-      let record = OutboxRecord(session: session, send: send)
+      var record = OutboxRecord(session: session, send: send)
+      // An older client queued the displayed wording. Expanding its references requires a new tap.
+      if record.send.removeValue(forKey: "literalReferences") == .bool(true), record.phase == "waiting" {
+        return record.with(phase: "failed", reason: "mention_expansion_failed")
+      }
       guard record.phase == "creating" || record.phase == "sending" else { return record }
       return record.with(phase: "unknown", reason: awaitingConfirmation)
     }

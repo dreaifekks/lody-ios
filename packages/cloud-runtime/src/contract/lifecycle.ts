@@ -6,6 +6,8 @@ export const StartParams = z
     userId: z.string(),
     active: z.boolean(),
     knownRepos: z.record(z.string(), z.string()).optional(),
+    /** The member lacks workspace write permission: no Status view writes are offered. */
+    workspaceReadOnly: z.boolean().optional(),
   })
   .meta({ id: 'StartParams' });
 

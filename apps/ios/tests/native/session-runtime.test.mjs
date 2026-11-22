@@ -10,6 +10,73 @@ import {
   historyPublications,
 } from '../helpers.mjs';
 
+test('an empty session opens on the next 250 ms routing metadata check', async (t) => {
+  const runtime = await loadRuntime();
+  const snapshot = new LoroDoc().export({ mode: 'snapshot' });
+  globalThis.__sessionClient = class {
+    async bootstrap() {
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '1',
+          nextOffset: '1',
+          upToDate: true,
+          snapshot: { body: snapshot },
+          updates: [],
+        },
+      };
+    }
+    readOnce({ signal }) {
+      return new Promise((_, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    }
+  };
+  t.after(() => {
+    runtime.stopSessions();
+    delete globalThis.__sessionClient;
+  });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const drain = () => new Promise((resolve) => setImmediate(resolve));
+  const checking = Promise.withResolvers();
+  const events = [];
+  let target;
+  await runtime.openSession(
+    's1',
+    'w1',
+    async () => ({ token: 'synthetic', gatewayBaseUrl: 'https://x.invalid' }),
+    ({ session }) => {
+      if (session) events.push(JSON.parse(session));
+    },
+    async () => {},
+    true,
+    () => {
+      checking.resolve();
+      return target;
+    },
+  );
+  await checking.promise;
+  await drain();
+  t.mock.timers.tick(250);
+  await drain();
+  assert.equal(events.at(-1)?.reason, 'metadata_not_ready');
+
+  target = { backend: 'loro' };
+  t.mock.timers.tick(249);
+  await drain();
+  assert.equal(events.at(-1)?.status, 'syncing');
+  assert.equal(
+    events.filter((e) => e.reason === 'metadata_not_ready').length,
+    1,
+  );
+  t.mock.timers.tick(1);
+  await drain();
+  assert.equal(events.at(-1)?.status, 'live');
+  assert.deepEqual(events.at(-1)?.entries, []);
+});
+
 test('an existing legacy Loro history opens while session metadata is unavailable', async () => {
   const resolveTarget = () => undefined;
   resolveTarget.isCurrent = () => true;
@@ -1425,15 +1492,21 @@ for (const steerResult of [
         },
       });
       try {
-        const sent = await fixture.runtime.sendTurn({
-          sessionId: 's1',
-          machineId: 'm1',
-          userId: 'u1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          text: 'Guide',
-          guide: true,
-        });
+        const sends = [];
+        fixture.runtime.setSessionSendObserver((id) => sends.push(id));
+        const sent = await fixture.runtime
+          .sendTurn({
+            sessionId: 's1',
+            machineId: 'm1',
+            userId: 'u1',
+            cliType: 'builtin',
+            agentType: 'codex',
+            text: 'Guide',
+            guide: true,
+          })
+          .finally(() => fixture.runtime.setSessionSendObserver(() => {}));
+        // The owner accepted the Roost guide: it counts as a send.
+        assert.deepEqual(sends, ['s1']);
         if (steerResult.inactive) {
           assert.equal(sent.state, 'uploaded');
           return;
@@ -4349,16 +4422,23 @@ test('guide writes a steer history turn instead of the FIFO queue and retains it
     });
     fixture.server.commit();
     await fixture.pushUpdate();
-    const result = await fixture.runtime.sendTurn({
-      sessionId: 's1',
-      machineId: 'm1',
-      userId: 'u1',
-      text: 'steer now',
-      cliType: 'builtin',
-      agentType: 'codex',
-      guide: true,
-    });
+    // A guide never moves the dispatch pointer, yet it is a send: the runtime
+    // must hear of it to clear Later / Settled.
+    const sends = [];
+    fixture.runtime.setSessionSendObserver((id) => sends.push(id));
+    const result = await fixture.runtime
+      .sendTurn({
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        text: 'steer now',
+        cliType: 'builtin',
+        agentType: 'codex',
+        guide: true,
+      })
+      .finally(() => fixture.runtime.setSessionSendObserver(() => {}));
     assert.equal(result.state, 'uploaded');
+    assert.deepEqual(sends, ['s1']);
     await new Promise((resolve) => setImmediate(resolve));
     const raw = fixture.server.toJSON();
     assert.equal((raw.mq ?? []).length, 0);

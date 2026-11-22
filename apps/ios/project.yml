@@ -221,6 +221,7 @@ targets:
           - Chat/ChatThrowCurve.swift
           - Chat/ChatNumericText.swift
           - Chat/ChatPendingSend.swift
+          - Chat/ChatMessageQuote.swift
           - Toast/LodyToastOverlay.swift
           - Toast/LodyToastPillView.swift
           - Toast/LodySessionBannerView.swift

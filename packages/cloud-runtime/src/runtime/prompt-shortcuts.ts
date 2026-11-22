@@ -562,6 +562,7 @@ export function shortcutAccess(
     list,
     listAvailable,
     read,
+    body,
     authorized,
     workspaceIndex,
     openWorkspaceIndexForWrite,
@@ -643,6 +644,23 @@ export async function promptShortcuts(
       mapShortcutError(error);
     }
     return access.read(entry);
+  }
+  if (request.action === 'select') {
+    // As web checks its live snapshot: the listing the composer showed, not a fresh index read,
+    // so a prefetched body inserts without waiting on the network.
+    const listing =
+      listings.get(`${request.workspaceId}:${userId}`)?.value ??
+      (await listedShortcuts(
+        request.workspaceId,
+        userId,
+        workspaceGrant,
+        cloud,
+      ));
+    const entry = listing.entries.find((item) => item.id === request.id);
+    if (!entry) throw new Error('shortcut_changed');
+    const value = await access.body(entry);
+    signal.throwIfAborted();
+    return value;
   }
   if (request.action !== 'save') throw new Error('invalid_shortcut');
 

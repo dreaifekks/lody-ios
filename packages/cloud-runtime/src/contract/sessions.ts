@@ -173,6 +173,15 @@ export const RetryPendingInputResult = z
   .meta({ id: 'RetryPendingInputResult' });
 export type RetryPendingInputResult = z.infer<typeof RetryPendingInputResult>;
 
+/** A composer quote card: a read-only snapshot and the comment on it (web message quotes). */
+export const MessageQuoteInput = z
+  .object({
+    id: z.string(),
+    text: z.string(),
+    comment: z.string().optional(),
+  })
+  .meta({ id: 'MessageQuoteInput' });
+
 export const SendTurnParams = z
   .object({
     sessionId,
@@ -184,6 +193,8 @@ export const SendTurnParams = z
     userId: z.string().optional(),
     text: z.string(),
     attachmentBlocks: blocks.optional(),
+    /** Quote cards; the runtime appends them after the rewritten text. */
+    quotes: z.array(MessageQuoteInput).optional(),
     cliType: z.string().optional(),
     agentType: z.string().optional(),
     resume: z.string().optional(),
@@ -245,6 +256,7 @@ export const EditSessionParams = z
       text: z.string().optional(),
       retainedIds: z.array(z.string()).optional(),
       attachmentBlocks: blocks.optional(),
+      quotes: z.array(MessageQuoteInput).optional(),
     }),
   ])
   .meta({ id: 'EditSessionParams' });
@@ -286,6 +298,8 @@ export const EditSessionResult = z
       state: z.literal('ready'),
       id: z.string(),
       text: z.string(),
+      /** The message's quotes, restored as cards; `text` is the main text before them. */
+      quotes: z.array(MessageQuoteInput).optional(),
       attachments: z.array(EditAttachment),
     }),
     z.object({ state: z.literal('accepted'), id: z.string() }),

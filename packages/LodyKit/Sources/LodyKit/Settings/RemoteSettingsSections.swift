@@ -140,6 +140,24 @@ enum RemoteSettingsSections {
     return String.localizedStringWithFormat(String(localized: "settings.usage.minutes", bundle: .lody), Int(seconds / 60))
   }
 
+  /// "5h", "7d": the window length for compact quota lines; nil when unknown.
+  private static func shortDuration(_ seconds: Double?) -> String? {
+    guard let seconds, seconds > 0, seconds.isFinite else { return nil }
+    let key: String
+    let amount: Int
+    if seconds.truncatingRemainder(dividingBy: 86400) == 0 {
+      key = "quotaShortDays"
+      amount = Int(seconds / 86400)
+    } else if seconds.truncatingRemainder(dividingBy: 3600) == 0 {
+      key = "quotaShortHours"
+      amount = Int(seconds / 3600)
+    } else {
+      key = "quotaShortMinutes"
+      amount = max(1, Int((seconds / 60).rounded()))
+    }
+    return String.localizedStringWithFormat(String(localized: String.LocalizationValue("settings.providers." + key), bundle: .lody), amount)
+  }
+
   private static func resetCaption(_ resetsAt: Double?, now: Double) -> String {
     guard let resetsAt, resetsAt != 0, resetsAt.isFinite, resetsAt * 1000 - now > 0 else { return usage("resetsUnknown") }
     return String.localizedStringWithFormat(String(localized: "settings.usage.resetsIn", bundle: .lody), String(describing: usageSpan(resetsAt * 1000 - now)))
@@ -167,6 +185,8 @@ enum RemoteSettingsSections {
         ring.pace = forecast.pace
         ring.detail = forecast.detail
         ring.tone = forecast.tone
+        ring.group = name
+        ring.shortLabel = shortDuration(window.duration) ?? window.label.flatMap { $0.isEmpty ? nil : $0 } ?? RemoteSettingsSections.usage("window")
         ring.accessibilityLabel = [
           label, value, String.localizedStringWithFormat(String(localized: "settings.usage.used", bundle: .lody), String(describing: Int(window.usedPercent.rounded()))), caption, forecast.detail,
         ].filter { !$0.isEmpty }.joined(separator: ", ")

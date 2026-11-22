@@ -146,7 +146,8 @@ final class OutboxDispatcher {
   private func considerForeground(_ record: OutboxRecord, store: OutboxStore) {
     let id = record.sessionId, phase = record.phase, context = inputs.context
     guard !inflight.contains(id) else { return }
-    if record.creation == nil, context.transcript.replied.contains(record.sendId) {
+    if record.creation == nil,
+       context.transcript.replied.contains(record.sendId) || context.transcript.settled.contains(record.sendId) {
       store.remove(id)
       return
     }
@@ -240,9 +241,8 @@ final class OutboxDispatcher {
   }
 
   private func fail(_ record: OutboxRecord, store: OutboxStore, reason: String) async {
-    let reason = reason == "mention_expansion_failed" ? text("send.error.mentions") : reason
     _ = await store.put(record.with(phase: "failed", reason: reason)).result
-    services.alert(text("send.alert.title"), reason)
+    services.alert(text("send.alert.title"), reason == "mention_expansion_failed" ? text("send.error.mentions") : reason)
   }
 
   func quotaError(_ reason: String?, fallback: String) -> String {
@@ -278,7 +278,7 @@ final class OutboxDispatcher {
     ]
     payload["sessionId"] = session["id"]
     for key in ["machineId", "cliType", "agentType", "resume"] { payload[key] = session[key] }
-    for key in ["id", "text", "attachments", "agentRoleId"] { payload[key] = send[key] }
+    for key in ["id", "text", "attachments", "agentRoleId", "quotes"] { payload[key] = send[key] }
     let choice = send["choice"]?.object ?? [:]
     for (from, to) in [("modelId", "modelId"), ("modeId", "modeId"), ("effort", "reasoningEffort"),
                        ("reasoningEffortConfigId", "reasoningEffortConfigId"), ("configOptionValues", "configOptionValues")] {

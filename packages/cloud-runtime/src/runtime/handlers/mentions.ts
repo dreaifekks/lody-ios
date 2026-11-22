@@ -4,7 +4,12 @@ import type {
   MentionSource,
 } from '../../models/mentions';
 import { workspaceRoleMentions } from '../agent-roles';
-import { commandMentions, mentionCatalog, sessionMentions } from '../mentions';
+import {
+  agentCommandMentions,
+  mentionCatalog,
+  sessionMentions,
+} from '../mentions';
+import { sessionDoc } from '../session';
 import { listedShortcuts } from '../prompt-shortcuts';
 import {
   sameShortcutProject,
@@ -69,7 +74,7 @@ export function registerMentions(ctx: RuntimeContext) {
     if (
       args.workspaceId !== state.workspace ||
       !state.metaReplica ||
-      state.unhealthy.size
+      state.unhealthy.has('meta')
     )
       throw new Error('metadata_not_ready');
     if (args.category === 'role') {
@@ -82,6 +87,8 @@ export function registerMentions(ctx: RuntimeContext) {
           state.userId !== sourceUserId
         )
           throw new Error('workspace_changed');
+        if (!state.metaReplica || state.unhealthy.has('meta'))
+          throw new Error('metadata_not_ready');
       };
       const result = await workspaceRoleMentions(
         sourceWorkspace,
@@ -95,6 +102,7 @@ export function registerMentions(ctx: RuntimeContext) {
         },
         () => state.presence,
         catalogs.get('meta')?.machineNames,
+        state.unhealthy,
       );
       check();
       return result;
@@ -122,7 +130,11 @@ export function registerMentions(ctx: RuntimeContext) {
         ? args.machineId
         : project?.machineId) ??
       args.machineId;
-    if (!machineId || !machineReplicas.has(machineId))
+    if (
+      !machineId ||
+      state.unhealthy.has(machineId) ||
+      !machineReplicas.has(machineId)
+    )
       throw new Error('machine_unavailable');
     const prefix = `${machineId}:local:`;
     const localProjectId = projectId?.startsWith(prefix)
@@ -173,12 +185,14 @@ export function registerMentions(ctx: RuntimeContext) {
           kind: 'cmd' as const,
           subtitle: entry.name,
           insertText: `/shortcut:${entry.slug}`,
+          revision: entry.revision,
         }));
       const currentMeta = state.metaReplica;
       if (
         !currentMeta ||
         state.workspace !== sourceWorkspace ||
-        state.unhealthy.size
+        state.unhealthy.has('meta') ||
+        state.unhealthy.has(machineId)
       )
         throw new Error('metadata_not_ready');
       const commands = () => {
@@ -193,18 +207,22 @@ export function registerMentions(ctx: RuntimeContext) {
               'agentConfigId',
             ]) ?? metadata?.agentConfigId)
           : args.agentConfigId;
-        if (typeof configId !== 'string') return commandMentions([]);
-        const capability = machineReplicas
-          .get(machineId)
-          ?.get(['acpCapability', configId]) as
-          Record<string, unknown> | undefined;
-        if (
-          !capability ||
-          capability.cliType !== (args.cliType ?? session?.cliType) ||
-          capability.agentType !== (args.agentType ?? session?.agentType)
-        )
-          return commandMentions([]);
-        return commandMentions(capability.availableCommands);
+        const runtimeConfig = session
+          ? (sessionDoc(session.id)?.getMap('acpRuntimeConfig').toJSON() as
+              Record<string, unknown> | undefined)
+          : undefined;
+        const capability =
+          typeof configId === 'string'
+            ? (machineReplicas
+                .get(machineId)
+                ?.get(['acpCapability', configId]) as
+                Record<string, unknown> | undefined)
+            : undefined;
+        return agentCommandMentions(
+          runtimeConfig?.availableCommands,
+          capability,
+          { cliType, agentType },
+        );
       };
       const result = commands();
       const names = new Set(result.items.map((item) => item.insertText));

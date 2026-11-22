@@ -172,6 +172,12 @@ export const PromptShortcutsParams = z
     }),
     z.object({
       ...shortcutScope,
+      /** A composer's choice: the listed shortcut's body, checked against the last listing. */
+      action: z.literal('select'),
+      id: shortcutIdentifier,
+    }),
+    z.object({
+      ...shortcutScope,
       action: z.literal('save'),
       entry: PromptShortcutIndexEntry.nullable(),
       value: PromptShortcut,

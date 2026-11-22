@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from urllib.parse import parse_qs, urlparse
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from driver import UI, launch_covered, restart_accessibility
 import catalog
@@ -95,28 +95,30 @@ class RunnerTest(unittest.TestCase):
                 self.assertFalse(ui.keyboard_ready(items))
                 axe.assert_called_once()
 
-    def test_batch_typing_recovers_uncommitted_input_once(self):
+    def test_batch_typing_replaces_partial_input_before_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             ui = UI('owned-simulator', directory)
-            with patch.object(ui, 'axe') as axe, patch.object(ui, 'element', side_effect=[{'AXValue': ''}, {'AXValue': 'draft'}]):
+            value = ''
+            selected = False
+
+            def send_input(*args):
+                nonlocal value, selected
+                if args == ('key-combo', '--modifiers', '227', '--key', '4'):
+                    selected = True
+                elif args == ('type', 'draft'):
+                    value = 'draft' if selected else value + 'dra'
+                    selected = False
+
+            with patch.object(ui, 'axe', side_effect=send_input), patch.object(ui, 'element', side_effect=lambda _: {'AXValue': value}):
                 ui.type_into('field', 'draft')
-                self.assertEqual(axe.call_args_list, [
-                    call('type', 'draft'),
-                    call('tap', '--id', 'field', '--post-delay', '.4'),
-                    call('type', 'draft'),
-                ])
+            self.assertEqual(value, 'draft')
 
     def test_batch_typing_fails_when_retry_does_not_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             ui = UI('owned-simulator', directory)
-            with patch.object(ui, 'axe') as axe, patch.object(ui, 'element', return_value={'AXValue': 'different'}):
+            with patch.object(ui, 'axe'), patch.object(ui, 'element', return_value={'AXValue': 'different'}):
                 with self.assertRaisesRegex(AssertionError, 'did not commit'):
                     ui.type_into('field', 'draft')
-                self.assertEqual(axe.call_args_list, [
-                    call('type', 'draft'),
-                    call('tap', '--id', 'field', '--post-delay', '.4'),
-                    call('type', 'draft'),
-                ])
 
     def test_parallel_workers_keep_sibling_results_after_failure(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -21,7 +21,7 @@ CHAT = ROOT / 'apps/ios/verification/kit/chat'
 # Each retained scene owns its services in Swift and exercises production controllers.
 BATCHES = {
     'pages': ['onboarding', 'home', 'home-grouping-crash', 'home-settings', 'home-workspace', 'schedules', 'home-states', 'navigation', 'licenses', 'create-parity', 'model-memory', 'project-picker', 'branch-picker', 'directory', 'project', 'activity', 'notifications', 'diagnostics', 'settings-baseline', 'preferences', 'queued-message-behavior'],
-    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'dictation'],
+    'send': ['send', 'send-queue', 'send-guide', 'send-interrupt', 'send-rounds', 'send-scroll-guide', 'send-scroll-queue', 'send-scroll-normal', 'session-native', 'proposal-cards', 'session-simulator', 'permission-native', 'item-details', 'edit-message', 'message-quote', 'session-share', 'agent-error', 'native-diff', 'native-workspace-changes', 'native-file-content', 'dictation', 'run-config-late'],
     'settings': ['agents-settings', 'agents-presets', 'agents-pi', 'agents-auth-methods', 'prompt-shortcuts', 'project-visibility', 'github-settings', 'ai-usage', 'agent-roles'],
 }
 SUITES = {
@@ -35,10 +35,13 @@ SUITES = {
 CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
-CASES = PHONE_CASES + PAD_CASES + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production']
-HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general'}
+STATUS_CASES = ('home-status', 'home-status-drag')
+CASES = PHONE_CASES + PAD_CASES + list(STATUS_CASES) + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room']
+HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general', *STATUS_CASES}
 PREVIEW = {
     'toast': 'session-preview-live',
+    'message-quote': 'session-preview-quote',
+    'run-config-late': 'send-run-config-late',
     'role-mention-chat': 'mention-chat',
     'role-mention-sheet': 'mention-sheet',
     'agent-roles': 'agent-roles-preview',
@@ -156,6 +159,8 @@ PREVIEW = {
 }
 READY = {
     'toast': 'session-preview-probe',
+    'message-quote': 'quote-comment',
+    'run-config-late': 'send-status',
     'role-mention-sheet': 'create-session-input',
     'agent-roles': 'list-unavailable-action',
     'session-native': 'session-preview-probe',
@@ -440,11 +445,15 @@ try:
                         launch.append('--ui-verify-home')
                     if case == 'home-grouping-crash':
                         launch.append('--ui-verify-sticky-groups')
+                    if case in STATUS_CASES:
+                        launch.append('--ui-review-status')
+                    if case == 'home-status':
+                        launch.extend(('--ui-review-status-hold', '--ui-review-status-undo'))
                     if case == 'navigation':
                         launch.append('--ui-verify-session-tabs')
                     if case in {'session-search', 'session-search-pad'}:
                         launch.append('--ui-verify-search')
-                    if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
+                    if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
                         launch.append('--ui-verify-mentions')
                     if mode[2] or (case.startswith('attachment-camera-') and args.camera_access == 'fixture'):
                         sim('privacy', args.udid, 'reset', 'photos', 'ai.lody.mobile')
@@ -519,9 +528,9 @@ try:
                     ui.axe('tap', '--label', 'Image Fixture')
                     ui.element('preview-image:attachment:ui-verify-image')
                 ui.capture('before')
-                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
-                if case == 'home-grouping-crash':
-                    script = Path(__file__).with_name('home-grouping-crash.py')
+                script = Path(__file__).with_name(f'{case}.py') if case in ['toast', 'message-quote', 'workspace-changes', 'simulator-preview', 'item-details', 'message-details', 'message-share', 'pull-request', 'project-picker', 'branch-picker', 'notifications', 'user-mentions', 'file-preview', 'html-preview', 'chat-performance', 'chat-stream-performance', 'settings', 'preferences', 'queued-message-behavior', 'send', 'send-handoff', 'send-rounds', 'send-queue', 'steer', 'send-guide', 'send-interrupt', 'smooth-scroll', 'composer', 'composer-glass', 'composer-video', 'markdown', 'mermaid', 'duration', 'process-counts', 'process-failed', 'agent-error', 'proposed-plan', 'changes', 'inline-diff', 'background', 'inbox', 'home', 'home-settings', 'schedules', 'home-workspace', 'home-states', 'ipad', 'licenses', 'navigation', 'model-memory', 'onboarding', 'context-menu', 'chat-chrome', 'title-rename', 'composer-rich', 'composer-fullscreen'] else CHAT / ('composer.py' if case.startswith('composer-') else f'{case}.py')
+                if case == 'home-grouping-crash' or case in STATUS_CASES:
+                    script = Path(__file__).with_name(f'{case}.py')
                 if case.startswith('send-scroll-'):
                     script = Path(__file__).with_name('send-scroll.py')
                 if case in {'devices', 'devices-pad'}:
@@ -562,12 +571,12 @@ try:
                     script = Path(__file__).with_name('paste-plain.py')
                 if case in ['rich-paste-sheet', 'rich-paste-chat']:
                     script = Path(__file__).with_name('rich-paste.py')
-                if case == 'composer-rest-draft':
+                if case in ('composer-rest-draft', 'run-config-late'):
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'composer-glass-chat':
                     script = Path(__file__).with_name('composer-glass.py')
-                if case == 'mentions-production':
-                    script = Path(__file__).with_name('mentions-production.py')
+                if case in ('mentions-production', 'mentions-room'):
+                    script = Path(__file__).with_name(case + '.py')
                 if case in ['role-mention-chat', 'role-mention-sheet']:
                     script = Path(__file__).with_name('role-mentions.py')
                 if case in ['mention-chat', 'mention-sheet']:

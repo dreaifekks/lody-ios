@@ -1,5 +1,10 @@
 import { projectControl } from './local-projects';
 import { sealedRpc } from './machine-rpc';
+import {
+  toSessionFileDisplayPath,
+  toSessionFileRequestPath,
+  type SessionFileRootMount,
+} from '../protocol/session-file-roots.ts';
 
 type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
 export type MachineContext = {
@@ -8,7 +13,19 @@ export type MachineContext = {
   getGrant: Grant;
   signal: AbortSignal;
 };
-export type FileContext = MachineContext & { ownerSessionId: string };
+export type FileContext = MachineContext & {
+  ownerSessionId: string;
+  /** Project group members used in place; empty for ordinary sessions. */
+  mounts?: readonly SessionFileRootMount[];
+};
+
+/** Split a display path into what a file RPC takes (web `toSessionFileRequestPath`). */
+function at(ctx: FileContext, path: string) {
+  return toSessionFileRequestPath(path, ctx.mounts ?? []);
+}
+function shown(ctx: FileContext, path: string, rootId?: string) {
+  return toSessionFileDisplayPath(path, ctx.mounts ?? [], rootId);
+}
 
 type EncodedText =
   | { encoding: 'plain' | 'utf8-plain'; text: string; rawBytes: number }
@@ -86,19 +103,20 @@ export type DiffResult =
 async function toDiffResult(
   response: DiffResponse,
   base: 'turn' | 'current',
+  displayPath: (path: string) => string,
 ): Promise<DiffResult> {
   if (response.status !== 'ok')
     return {
       status: 'unavailable',
       base,
-      path: response.path,
+      path: displayPath(response.path),
       reason: response.reason,
       message: response.message,
     };
   return {
     status: 'ok',
     base,
-    path: response.path,
+    path: displayPath(response.path),
     old: await side(response.oldSnapshot),
     new: await side(response.newSnapshot),
     add: response.add,
@@ -164,32 +182,38 @@ export async function fileDiff(
   ctx: FileContext,
   args: { sessionId: string; path: string },
 ): Promise<DiffResult> {
+  const target = at(ctx, args.path);
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
     'code-collab/open-current-diff',
     ctx.ownerSessionId,
-    { sessionId: args.sessionId, path: args.path },
+    { sessionId: args.sessionId, ...target },
     ctx.getGrant,
     ctx.signal,
   )) as DiffResponse;
-  return toDiffResult(response, 'current');
+  return toDiffResult(response, 'current', (path) =>
+    shown(ctx, path, target.rootId),
+  );
 }
 
 export async function turnDiff(
   ctx: FileContext,
   args: { sessionId: string; entryId: string; path: string },
 ): Promise<DiffResult> {
+  const target = at(ctx, args.path);
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
     'code-collab/open-turn-diff',
     ctx.ownerSessionId,
-    { sessionId: args.sessionId, turnId: args.entryId, path: args.path },
+    { sessionId: args.sessionId, turnId: args.entryId, ...target },
     ctx.getGrant,
     ctx.signal,
   )) as DiffResponse;
-  return toDiffResult(response, 'turn');
+  return toDiffResult(response, 'turn', (path) =>
+    shown(ctx, path, target.rootId),
+  );
 }
 
 export type DirectoryEntry = { name: string; type: 'file' | 'directory' };
@@ -301,6 +325,9 @@ export async function readFile(
   ctx: FileContext,
   args: { sessionId: string; path: string },
 ): Promise<FileContent> {
+  // A link under a Project group member's directory reads that member's root,
+  // as on web; the main root alone would report it outside the workspace.
+  const target = at(ctx, args.path);
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
@@ -309,23 +336,25 @@ export async function readFile(
     {
       v: 3,
       sessionId: args.sessionId,
-      path: args.path,
+      ...target,
       maxBytes: READ_FILE_MAX_BYTES,
     },
     ctx.getGrant,
     ctx.signal,
   )) as PreviewResponse;
+  const path = (reported: string | undefined) =>
+    reported === undefined ? args.path : shown(ctx, reported, target.rootId);
   if (response.status !== 'ok')
     return {
       status: 'error',
-      path: response.path ?? args.path,
+      path: path(response.path),
       code: response.code,
       message: response.message,
     };
   if (response.kind === 'binary' && response.content.encoding === 'base64')
     return {
       status: 'ok',
-      path: response.path,
+      path: path(response.path),
       kind: 'binary',
       base64: response.content.data,
       mimeType: response.mimeType,
@@ -333,7 +362,7 @@ export async function readFile(
     };
   return {
     status: 'ok',
-    path: response.path,
+    path: path(response.path),
     kind: 'text',
     text: await decodeText(response.content),
     bytes: response.sizeBytes,

@@ -268,6 +268,9 @@ final class ChatAttachmentBar: CKAttachmentStrip {
 
   static let thumbnailRadius: CGFloat = 10
   static let tileSide: CGFloat = 80
+  /// Quote cards alone use a compact row; files and images keep the full tile.
+  static let compactTileSide: CGFloat = 48
+  var rowHeight: CGFloat { style.tileSide }
 
   init() {
     var style = CKAttachmentStyle()
@@ -292,7 +295,18 @@ final class ChatAttachmentBar: CKAttachmentStrip {
     return thumbnailView(id: id)
   }
 
-  func render(_ attachments: [ChatAttachment], animatedRemoval: Bool = false) {
+  /// Quote cards share the strip after the attachments, under ids `quoteID(_:)`.
+  static let quotePrefix = "quote:"
+  static func quoteID(_ quote: ChatMessageQuote) -> String { quotePrefix + quote.id }
+
+  func render(_ attachments: [ChatAttachment], quotes: [ChatMessageQuote] = [], animatedRemoval: Bool = false) {
+    let cards = quotes.map { quote -> CKAttachmentItem in
+      let excerpt = quote.excerpt
+      return CKAttachmentItem(id: Self.quoteID(quote), name: excerpt, symbol: "quote.opening",
+        detail: quote.commentLine ?? String(localized: "native.chat.quote.addComment", bundle: .lody),
+        previewAccessibilityLabel: String.localizedStringWithFormat(String(localized: "native.chat.quote.card", bundle: .lody), excerpt),
+        removeAccessibilityLabel: String(localized: "native.chat.quote.remove", bundle: .lody))
+    }
     let items = attachments.map { attachment -> CKAttachmentItem in
       if let cached = projected[attachment.id], cached.source == attachment { return cached.item }
       let type = UTType(filenameExtension: (attachment.name as NSString).pathExtension)
@@ -310,7 +324,10 @@ final class ChatAttachmentBar: CKAttachmentStrip {
     }
     let ids = Set(attachments.map(\.id))
     projected = projected.filter { ids.contains($0.key) }
-    super.render(items, animatedRemoval: animatedRemoval)
+    let side = attachments.isEmpty ? Self.compactTileSide : Self.tileSide
+    // A new tile size rebuilds every pill, so the last one leaving keeps its size and animates out.
+    if style.tileSide != side && !(items + cards).isEmpty { style.tileSide = side }
+    super.render(items + cards, animatedRemoval: animatedRemoval)
   }
 }
 

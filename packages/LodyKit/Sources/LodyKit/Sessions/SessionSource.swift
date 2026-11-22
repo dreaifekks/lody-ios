@@ -27,19 +27,27 @@ enum SessionWrite: Sendable {
 }
 
 typealias SessionWriteService = @MainActor (_ workspaceId: String, _ sessionId: String, _ write: SessionWrite) async throws -> Void
+/// Returns the rows written; 0 means the runtime's planner refused the command or it changed nothing.
+typealias StatusViewService = @MainActor (_ workspaceId: String, _ command: StatusViewCommand, _ scope: HomeScope) async throws -> Int
 
 @MainActor
 final class SessionSource {
   let changes: [Notification.Name]
   let write: SessionWriteService
+  /// Status view and pin section writes, planned by the shared runtime against its replica.
+  let statusCommand: StatusViewService
   private let read: @MainActor () -> SessionListState
   private let rawSession: @MainActor (String) -> String?
 
   init(
     changes: [Notification.Name], read: @escaping @MainActor () -> SessionListState,
-    raw: @escaping @MainActor (String) -> String? = { _ in nil }, write: @escaping SessionWriteService
+    raw: @escaping @MainActor (String) -> String? = { _ in nil }, write: @escaping SessionWriteService,
+    statusCommand: @escaping StatusViewService = { _, _, _ in
+      throw DataRuntime.failure("not_ready", String(localized: "native.runtime.sessionNotSynced", bundle: .lody))
+    }
   ) {
     self.changes = changes
+    self.statusCommand = statusCommand
     self.read = read
     rawSession = raw
     self.write = write
@@ -54,12 +62,17 @@ final class SessionSource {
     read: { SessionCatalogPreview.state ?? SessionPublished.state() },
     raw: { id in SessionCatalogPreview.state == nil ? SessionPublished.raw(id) : SessionCatalogPreview.raw(id) },
     write: { workspaceId, sessionId, write in
+      if StatusViewPreview.matches(workspaceId), case .archive(let archived) = write {
+        StatusViewPreview.archive(sessionId, archived: archived)
+        return
+      }
       if NativeHomeFixture.active, case .delete(let ids) = write {
         try await NativeHomeFixture.request("deleteSessions", ["sessionId": sessionId, "sessionIds": ids])
         return
       }
       try await SessionActions.cloud(workspaceId, sessionId, write)
-    }
+    },
+    statusCommand: { workspaceId, command, scope in try await StatusViewRuntime.command(workspaceId, command, scope: scope) }
   )
 
   // A persisted local watermark clears unread emphasis.
@@ -160,7 +173,7 @@ enum SessionPublished {
       cache = (key, base)
     }
     state.catalog = base
-    state.catalog.sessions += (published.pendingSessions ?? []).compactMap(\.value)
+    state.catalog.sessions += (published.pendingSessions ?? []).compactMap(\.value).map(SessionItem.markedPending)
     return state
   }
 
@@ -180,7 +193,8 @@ enum SessionCatalogPreview {
   static var state: SessionListState? {
     guard var state = base else { return nil }
     let pending = pendingSessions()
-    state.catalog.sessions += try! JSONDecoder().decode([SessionItem].self, from: JSONEncoder().encode(pending))
+    state.catalog.sessions += try! JSONDecoder().decode([SessionItem].self, from: JSONEncoder().encode(pending)).map(SessionItem.markedPending)
+    if StatusViewPreview.matches(state.workspaceId) { StatusViewPreview.project(into: &state.catalog) }
     return state
   }
   private static func pendingSessions() -> [OutboxValue] {

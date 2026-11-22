@@ -31,10 +31,11 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   var canCreate = false {
     didSet {
       floatingCreate?.isEnabled = canCreate
-      if #available(iOS 18.4, *) { tab(forIdentifier: Self.createID)?.isEnabled = canCreate }
+      if #available(iOS 18.4, *) { tab(forIdentifier: createTabIdentifier)?.isEnabled = canCreate }
     }
   }
   private static let createID = "home-new-session"
+  private var createTabIdentifier = HomeTabsController.createID
   /// Before iOS 26 the create action floats above the tab bar's trailing edge instead of taking a tab.
   private lazy var floatingCreate: UIButton? = Self.makeFloatingCreate()
   private static let floatingSize: CGFloat = 56
@@ -88,24 +89,12 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
 
   func install(navigation: @escaping (HomeTab) -> UINavigationController) {
     // Restore roots moved into the regular-width detail column even when UIKit has
-    // already resolved a tab's provider. Each navigation keeps its original tab.
+    // already resolved a tab's provider. Each navigation keeps its original tab:
+    // UIKit rejects a controller resolved by one UITab being handed to another, so a
+    // second compact install (folding an iPhone Duo again) must reuse the first tabs.
     let navigations = HomeTab.allCases.map { ($0, navigation($0)) }
     if #available(iOS 18.0, *) {
-      var built = navigations.map { destination, controller in
-        let tab = UITab(title: destination.title, image: destination.icon.uiImage,
-          identifier: "home-tab-\(destination)") { _ in controller }
-        tab.accessibilityIdentifier = tab.identifier
-        return tab
-      }
-      if floatingCreate == nil {
-        let create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
-          identifier: Self.createID) { _ in UIViewController() }
-        create.accessibilityIdentifier = Self.createID
-        built.append(create)
-      }
-      tabs = built
-      // iOS 27 supports a separate prominent action without misrepresenting it as Search.
-      if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
+      if tabs.isEmpty { installTabs(navigations) }
     } else if viewControllers == nil {
       // Classic tab bar items carry the same titles, icons and identifiers.
       for (index, (destination, controller)) in navigations.enumerated() {
@@ -123,6 +112,36 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     }
   }
 
+  @available(iOS 18.0, *)
+  private func installTabs(_ navigations: [(HomeTab, UINavigationController)]) {
+    var built = navigations.map { destination, controller in
+      let tab = UITab(title: destination.title, image: destination.icon.uiImage,
+        identifier: "home-tab-\(destination)") { _ in controller }
+      tab.accessibilityIdentifier = tab.identifier
+      return tab
+    }
+    if #available(iOS 26.0, *), floatingCreate == nil {
+      let create: UITab
+      if #available(iOS 27.0, *) {
+        create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
+          identifier: Self.createID) { _ in UIViewController() }
+      } else {
+        let search = UISearchTab { _ in UIViewController() }
+        search.automaticallyActivatesSearch = true
+        search.title = String(localized: "tabs.newSession", bundle: .lody)
+        search.image = LodyIcon.compose.uiImage
+        create = search
+      }
+      create.accessibilityIdentifier = Self.createID
+      create.isEnabled = canCreate
+      createTabIdentifier = create.identifier
+      built.append(create)
+    }
+    tabs = built
+    // iOS 27 supports a separate prominent action without misrepresenting it as Search.
+    if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
+  }
+
   func show(_ destination: HomeTab) {
     if #available(iOS 18.0, *) {
       selectedTab = tab(forIdentifier: "home-tab-\(destination)")
@@ -136,14 +155,14 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   /// The create action keeps the compose glyph; on Schedules it adds a schedule, elsewhere it starts a chat.
   private func updateCreate(_ destination: HomeTab) {
     let title = String(localized: String.LocalizationValue(destination == .schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
-    if #available(iOS 18.0, *) { tab(forIdentifier: Self.createID)?.title = title }
+    if #available(iOS 18.0, *) { tab(forIdentifier: createTabIdentifier)?.title = title }
     floatingCreate?.accessibilityLabel = title
     floatingCreate?.isHidden = destination == .settings
   }
 
   @available(iOS 18.0, *)
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-    if tab.identifier == Self.createID { if canCreate { onCreate() }; return false }
+    if tab.identifier == createTabIdentifier { if canCreate { onCreate() }; return false }
     return true
   }
 

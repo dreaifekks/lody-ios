@@ -14,7 +14,7 @@ export async function loadSchedules() {
     stdin: {
       contents: `
         export * from './src/runtime/schedules.ts';
-        export { draftInput, ruleOf, triggerOf } from './src/runtime/handlers/schedules.ts';
+        export { draftInput, ruleOf, scheduleMachine, triggerOf } from './src/runtime/handlers/schedules.ts';
         export * from './src/protocol/schedules.ts';
         export { proposalRule } from './src/protocol/proposals.ts';
       `,

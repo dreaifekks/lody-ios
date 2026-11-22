@@ -93,6 +93,8 @@ struct SessionItem: Equatable, Sendable {
   var workspaceUnpushed = false
   /// Present for Project group conversations.
   var projectRun: SessionProjectRun?
+  /// A local creation the catalog has not read back yet (Outbox); the runtime layout cannot list it.
+  var pending = false
 
   var activityAt: Double { lastMessageAt ?? SessionItem.parse(createdAt) }
 
@@ -109,6 +111,14 @@ extension SessionItem {
   var latestTurnFailed: Bool {
     guard let failed = lastFailedUserMsgId else { return false }
     return failed == lastHandledUserMsgId
+  }
+}
+
+extension SessionItem {
+  static func markedPending(_ session: SessionItem) -> SessionItem {
+    var session = session
+    session.pending = true
+    return session
   }
 }
 
@@ -232,16 +242,15 @@ struct SessionCatalog: Equatable, Sendable {
   var machineEmulators: [String: String] = [:]
   /// Computer id to numeric protocol capability versions advertised by its CLI.
   var machineCapabilities: [String: [String: Int]] = [:]
+  /// The shared runtime's Status view and pin layout; nil from a runtime or cache older than it.
+  var statusView: StatusViewLayouts?
+  /// Pin section definitions in display order.
+  var pinSections: [StatusViewPinSection] = []
 
   func session(_ id: String) -> SessionItem? { sessions.first { $0.id == id } }
 
   func supportsPreviewStopProcess(machineId: String) -> Bool {
     (machineCapabilities[machineId]?["previewStopProcess"] ?? 0) >= 1
-  }
-
-  func supportsDeviceShutdown(_ platform: DevicePlatform, machineId: String) -> Bool {
-    let key = platform == .android ? "androidEmulatorShutdown" : "iosSimulatorShutdown"
-    return (machineCapabilities[machineId]?[key] ?? 0) >= 1
   }
 
   func viewed(_ views: [String: Double]) -> SessionCatalog {
@@ -265,13 +274,23 @@ struct SessionCatalog: Equatable, Sendable {
       var machineSimulators: Lossy<[String: String]>?
       var machineEmulators: Lossy<[String: String]>?
       var machineCapabilities: Lossy<[String: [String: Int]]>?
+      var statusView: Lossy<StatusViewLayouts>?
+      var pinSections: [Lossy<StatusViewPinSection>]?
     }
-    struct Saved: Decodable { var catalog: Shape }
-    guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
+    struct Saved: Decodable {
+      var catalog: Shape
+      /// Device time the catalog was received (`CatalogSession` wraps every saved catalog with it).
+      var syncedAt: Double?
+    }
+    guard let wrapper = try? JSONDecoder().decode(Saved.self, from: saved) else { return nil }
+    let shape = wrapper.catalog
+    var statusView = shape.statusView?.value
+    statusView?.receivedAt = wrapper.syncedAt
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
       machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
-      machineEmulators: shape.machineEmulators?.value ?? [:], machineCapabilities: shape.machineCapabilities?.value ?? [:]
+      machineEmulators: shape.machineEmulators?.value ?? [:], machineCapabilities: shape.machineCapabilities?.value ?? [:],
+      statusView: statusView, pinSections: (shape.pinSections ?? []).compactMap(\.value)
     )
   }
 }

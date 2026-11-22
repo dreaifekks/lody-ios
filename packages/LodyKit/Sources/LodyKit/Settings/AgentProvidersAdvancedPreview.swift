@@ -9,13 +9,7 @@ enum AgentProvidersAdvancedPreview {
       detail: { try fixture.detail($0) },
       probe: { _ in ProviderProbe(success: true, authRequired: false, capabilities: ProviderCapabilities()) },
       auth: { _ in throw SettingsError("provider_auth_unavailable") },
-      operation: { request in
-        guard request.action == "pi-extension-scan", request.id == "pi-agent" else { throw SettingsError("provider_operation_unavailable") }
-        return ProviderOperationResult(action: request.action, success: true, extensions: [
-          .init(path: "/fixture/extensions/retained", name: "Retained extension"),
-          .init(path: "/fixture/extensions/example", name: "Example extension"),
-        ])
-      }
+      operation: { _ in throw SettingsError("provider_operation_unavailable") }
     )
     return AgentProvidersController(scope: SettingsActor(userId: "fixture", workspaceId: pi ? "pi-preview" : "presets-preview"),
                                     service: { try fixture.perform($0) }, details: details)
@@ -25,7 +19,7 @@ enum AgentProvidersAdvancedPreview {
     private let pi: Bool
     private var revision = 0
     private var endpoint = "https://us.fixture.invalid/v1"
-    private var runtime: [String: ProviderJSON] = [
+    private let runtime: [String: ProviderJSON] = [
       "piPath": .string("/fixture/bin/pi"),
       "piExtensions": .array([.string("/fixture/extensions/retained")]),
     ]
@@ -65,12 +59,8 @@ enum AgentProvidersAdvancedPreview {
       guard request.action == "save", let fields = request.fields, request.id == snapshot.providers.first?.id,
             request.machineId == "studio", fields.detailRevision == String(revision) else { throw SettingsError("provider_conflict") }
       if pi {
-        if case .object(let patch) = fields.runtimeOverrides {
-          guard patch["action"] == .string("merge"), case .object(let value) = patch["value"],
-                case .array(let remove) = patch["remove"] else { throw SettingsError("invalid_runtime_patch") }
-          runtime.merge(value) { _, next in next }
-          for case .string(let key) in remove { runtime.removeValue(forKey: key) }
-        }
+        // Mobile does not edit the runtime path, extension list or description; a save must leave them out.
+        guard fields.runtimeOverrides == nil, fields.description == nil else { throw SettingsError("hidden_fields_sent") }
       } else {
         if let preset = fields.presetId {
           guard preset == "fixture-gateway", fields.presetModeId == "custom",

@@ -13,6 +13,8 @@ struct ChatTextReference: Decodable, Equatable {
   var end: Int
   let kind: String
   let target: String?
+  /// `message_quote` only: the quoted snapshot this range shows (runtime `presentMessageText`).
+  var quote: String? = nil
 }
 
 struct ChatPendingSend: Decodable {
@@ -36,4 +38,6 @@ struct ChatPendingSend: Decodable {
   var guide: Bool? = nil
   var phase: String? = nil
   var uploadProgress: [String: ChatAttachmentUploadProgress]? = nil
+  /// The composer's quote cards, sent after the text (`ChatMessageQuote`).
+  var quotes: [ChatMessageQuote]? = nil
 }

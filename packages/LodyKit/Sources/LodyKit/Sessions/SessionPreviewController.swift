@@ -159,6 +159,10 @@ final class SessionPreviewController: SessionController {
     super.viewDidAppear(animated)
     if scenario.hasPrefix("usage") { chat.composer.usageNow = { Date(timeIntervalSince1970: 1_799_596_400) } }
     if scenario == "usage-popup" { chat.composer.presentUsage() }
+    if scenario == "quote" {
+      chat.composer.quotesSupported = { true }
+      chat.composer.beginQuote("What can I help you with?")
+    }
     if scenario == "bar-tabs" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.chat.onTitlePress([:]) }
     }

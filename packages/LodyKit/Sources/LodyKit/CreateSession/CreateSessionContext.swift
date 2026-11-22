@@ -43,6 +43,8 @@ struct CreatePicker: Identifiable, Equatable {
   var id: String
   var glyph: CreateGlyph
   var title: String
+  /// Custom row label for `CreateRunConfigSheet`; nil falls back to `CreateSessionContext.runConfigLabel`.
+  var label: String?
   var placeholder = false
   var loading = false
   /// Empty: the line is not a choice here.
@@ -598,12 +600,13 @@ struct GlyphView: View {
 /// Web's `MobileRunConfigSheet`: labelled rows whose value expands its options in place.
 struct CreateRunConfigSheet: View {
   @ObservedObject var state: CreatePanelState
+  var title: String = String(localized: "create.runConfig.title", bundle: .lody)
   var onHeightChange: (CGFloat) -> Void = { _ in }
 
   var body: some View {
     ScrollView {
       VStack(spacing: LodySpacing.md) {
-        Text(String(localized: "create.runConfig.title", bundle: .lody))
+        Text(title)
           .lodyTextStyle(.headline)
           .foregroundStyle(LodyColor.textPrimary)
           .padding(.top, LodySpacing.xl)
@@ -657,9 +660,10 @@ struct CreateRunConfigSheet: View {
 
   @ViewBuilder
   private func rowFace(_ row: CreatePicker) -> some View {
+    let label = row.label ?? CreateSessionContext.runConfigLabel(row.id)
     if let on = row.toggle {
       Toggle(isOn: Binding(get: { on }, set: { state.onPick(row.id, $0 ? CreateSessionContext.toggleOn : CreateSessionContext.toggleOff) })) {
-        Text(CreateSessionContext.runConfigLabel(row.id))
+        Text(label)
           .lodyTextStyle(.subhead)
           .foregroundStyle(LodyColor.textSecondary)
       }
@@ -668,13 +672,13 @@ struct CreateRunConfigSheet: View {
       .padding(.vertical, LodySpacing.xs)
       .accessibilityIdentifier("run-config-" + row.id)
     } else {
-      listFace(row)
+      listFace(row, label: label)
     }
   }
 
-  private func listFace(_ row: CreatePicker) -> some View {
+  private func listFace(_ row: CreatePicker, label: String) -> some View {
     HStack(spacing: LodySpacing.md) {
-      Text(CreateSessionContext.runConfigLabel(row.id))
+      Text(label)
         .lodyTextStyle(.subhead)
         .foregroundStyle(LodyColor.textSecondary)
         .frame(width: 96, alignment: .leading)
@@ -701,8 +705,9 @@ struct CreateRunConfigSheet: View {
       }
       .buttonStyle(.plain)
       .disabled(row.options.isEmpty)
-      .accessibilityLabel(CreateSessionContext.runConfigLabel(row.id))
+      .accessibilityLabel(label)
       .accessibilityValue(row.title)
+      .accessibilityIdentifier("run-config-" + row.id)
     }
     .padding(.vertical, LodySpacing.xs)
   }

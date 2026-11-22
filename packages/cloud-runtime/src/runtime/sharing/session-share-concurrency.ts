@@ -12,24 +12,29 @@ export async function mapShareConcurrent<T, R>(
   let next = 0;
   let failure: unknown;
   let failed = false;
-  await Promise.all(
-    Array.from({ length: Math.min(4, items.length) }, async () => {
-      try {
-        while (next < items.length) {
-          combined.throwIfAborted();
-          const index = next++;
-          results[index] = await run(items[index]!, index, combined);
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(4, items.length) }, async () => {
+        try {
+          while (next < items.length) {
+            combined.throwIfAborted();
+            const index = next++;
+            results[index] = await run(items[index]!, index, combined);
+          }
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            failure = error;
+          }
+          abort.abort();
         }
-      } catch (error) {
-        if (!failed) {
-          failed = true;
-          failure = error;
-        }
-        abort.abort();
-      }
-    }),
-  );
-  if (failed) throw failure;
-  combined.throwIfAborted();
-  return results;
+      }),
+    );
+    if (failed) throw failure;
+    combined.throwIfAborted();
+    return results;
+  } finally {
+    // Every task has settled: release the combined signal's hold on `signal`.
+    abort.abort();
+  }
 }

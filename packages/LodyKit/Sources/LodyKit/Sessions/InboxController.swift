@@ -6,9 +6,18 @@ final class InboxController: UIViewController {
   let source: SessionSource
   private let chrome = InboxChrome()
   private lazy var actions = SessionActions(source: source)
+  private lazy var status = StatusViewActions(source: source)
   private var query = ""
-  /// The status view's quiet group shows everything; not persisted, so it opens folded.
-  private var idleExpanded = false
+  /// Settled shows every conversation; not persisted, so it opens folded.
+  private var settledExpanded = false
+  /// A dropped row's order, held until the catalog reads the move back.
+  /// Dropped orders, oldest first, each held until the catalog reads its move back.
+  private var holds: [(key: String, generation: Int, value: StatusViewHold)] = []
+  private var holdGeneration = 0
+  /// The layout the list shows (hold applied); drag, drop and accessibility moves resolve against it.
+  private var shownLayout: StatusViewLayout?
+  /// Re-renders Later countdowns each minute while any are listed.
+  private var countdownTimer: Timer?
   private var search: (key: String, catalog: SessionCatalog, hits: InboxSearchHits)?
   private var requested: (key: String, catalog: SessionCatalog)?
   private var searchTask: Task<Void, Never>?
@@ -35,6 +44,7 @@ final class InboxController: UIViewController {
   isolated deinit {
     searchTask?.cancel()
     memberTask?.cancel()
+    countdownTimer?.invalidate()
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
   }
 
@@ -44,6 +54,7 @@ final class InboxController: UIViewController {
     list.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     list.accessibilityIdentifier = "ipad-inbox-list"
     list.forwarded = { [weak self] name, body in self?.event(name, body) }
+    status.runMove = { [weak self] command in self?.runMove(command) }
     list.shareOnboarding = { [weak self] items, source in
       let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
       sheet.popoverPresentationController?.sourceView = source
@@ -51,7 +62,7 @@ final class InboxController: UIViewController {
     }
     view.addSubview(list)
     wireChrome()
-    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange]).map { name in
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyHomeGroupingChanged, .lodyProjectGroupsDidChange, .lodyWorkspaceRoleDidChange]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated {
           self?.render(onlyIfContentChanged: name == .lodyCatalogDidChange || name == .lodySessionCatalogPreviewDidChange)
@@ -159,17 +170,132 @@ final class InboxController: UIViewController {
     // The Archived switch narrows every view, search included, to archived chats.
     if archived { catalog.sessions = catalog.sessions.filter(\.archived) }
     list.setPinsGroupLabels(term.isEmpty)
+    let layout = statusLayout(state)
+    shownLayout = term.isEmpty && !archived ? layout : nil
+    list.setStatusHooks(shownLayout == nil ? nil : statusHooks)
+    scheduleCountdown(shownLayout)
     guard term.isEmpty else {
       renderSearch(term, state: state, catalog: catalog)
       return
     }
     if archived {
-      list.setSections(InboxSections.archived(catalog, owner: HomeScope.stored == .mine ? state.userId : nil))
+      setSections(InboxSections.archived(catalog, owner: HomeScope.stored == .mine ? state.userId : nil), for: state)
       return
     }
     // Every size class groups by the view menu's choice (time / project / status).
     let owner = HomeScope.stored == .mine ? state.userId : nil
-    list.setSections(InboxSections.home(catalog, grouping: HomeGrouping.stored, owner: owner, idleExpanded: idleExpanded))
+    // Layout times are on the server clock, so its rows age and count down against it.
+    setSections(InboxSections.home(
+      catalog, grouping: HomeGrouping.stored, owner: owner, layout: layout, settledExpanded: settledExpanded,
+      now: layout == nil ? LodyRelativeTime.now() : StatusViewActions.now
+    ), for: state)
+  }
+
+  private func setSections(_ sections: [LodyListSection], for state: SessionListState) {
+    list.setSections(StatusViewActions.readOnly(state) ? InboxSections.readOnly(sections) : sections)
+  }
+
+  // MARK: Status view
+
+  /// The runtime layout for the current scope, with a held drop applied until it reads back.
+  private func statusLayout(_ state: SessionListState) -> StatusViewLayout? {
+    if let view = state.catalog.statusView {
+      // `nowMs` belongs with the instant the catalog arrived, not with this render.
+      StatusViewActions.clock.observe(serverNow: view.nowMs, deviceNow: view.receivedAt ?? LodyRelativeTime.now())
+    }
+    guard let published = state.catalog.statusView?.layout(team: HomeScope.stored == .team, readOnly: StatusViewActions.readOnly(state)) else {
+      holds = []
+      return nil
+    }
+    let key = state.key + HomeScope.stored.rawValue
+    holds.removeAll { $0.key != key || $0.value.released(by: published) }
+    return StatusViewHold.apply(holds.map(\.value), to: published)
+  }
+
+  /// Outside the Status grouping only the Pinned area is on screen, so only its rows reorder there.
+  private func movable(_ id: String) -> Bool {
+    guard HomeGrouping.stored != .status else { return true }
+    guard let area = shownLayout?.root(of: id)?.area, case .pinned = area else { return false }
+    return true
+  }
+
+  private lazy var statusHooks = ChatListStatusHooks(
+    menu: { [weak self] id in
+      guard let self else { return [] }
+      return self.status.menu(id, from: self, reorders: self.movable(id))
+    },
+    canDrag: { [weak self] id in
+      guard let self, self.movable(id), let row = self.shownLayout?.index[id] else { return false }
+      return row.tier == .pinned ? row.canPrefer : row.canManage || row.canPrefer
+    },
+    drop: { [weak self] id, sectionId, beforeId in
+      guard let layout = self?.shownLayout, let row = layout.index[id], let area = StatusViewArea(sectionId: sectionId) else { return nil }
+      let before = StatusViewPlanning.knownBefore(beforeId, moving: id, in: area, of: layout)
+      return StatusViewPlanning.drop(row, into: area, beforeId: before)
+    },
+    moveDirections: { [weak self] in
+      guard let self, let layout = self.shownLayout else { return [:] }
+      return StatusViewPlanning.moveDirections(in: layout).filter { self.movable($0.key) }
+    },
+    step: { [weak self] id, up in
+      guard let self, self.movable(id) else { return nil }
+      return self.shownLayout.flatMap { StatusViewPlanning.step(id, up: up, in: $0) }
+    },
+    perform: { [weak self] command in self?.runMove(command) }
+  )
+
+  /// Drops, Move to section, Move to top and accessibility moves: the list shows the new order at
+  /// once and keeps it until the catalog reads the write back (or the write fails).
+  private func runMove(_ command: StatusViewCommand) {
+    let state = source.state
+    guard let base = state.catalog.statusView?.layout(team: HomeScope.stored == .team, readOnly: StatusViewActions.readOnly(state)),
+      var value = StatusViewHold(command, base: base)
+    else {
+      status.run(command)
+      return
+    }
+    // Dropped where it already was: nothing to write, but the list must settle again.
+    guard !value.landed(in: base) else {
+      render()
+      return
+    }
+    holdGeneration += 1
+    let generation = holdGeneration
+    // A newer move of the same row replaces its older hold; other rows keep theirs.
+    let key = state.key + HomeScope.stored.rawValue
+    holds.removeAll { $0.key != key || $0.value.sessionId == value.sessionId }
+    for index in holds.indices {
+      value.concurrentMoves.insert(holds[index].value.sessionId)
+      holds[index].value.concurrentMoves.insert(value.sessionId)
+    }
+    holds.append((key, generation, value))
+    render()
+    Task { [weak self] in
+      guard let self else { return }
+      let writes = await self.status.perform(command)
+      guard let index = self.holds.firstIndex(where: { $0.generation == generation }) else { return }
+      // 0 writes: the planner refused the move or it changed nothing, so no read-back will come.
+      if let writes, writes > 0 { self.holds[index].value.acknowledged = true } else { self.holds[index].value.failed = true }
+      self.render()
+      guard (writes ?? 0) > 0 else { return }
+      // An accepted write that never moves the published row (another device won the race) must not
+      // pin the local order forever.
+      try? await Task.sleep(for: .seconds(5))
+      guard let late = self.holds.firstIndex(where: { $0.generation == generation }) else { return }
+      self.holds[late].value.failed = true
+      self.render()
+    }
+  }
+
+  private func scheduleCountdown(_ layout: StatusViewLayout?) {
+    let needed = HomeGrouping.stored == .status && !(layout?.later.isEmpty ?? true)
+    guard needed != (countdownTimer != nil) else { return }
+    countdownTimer?.invalidate()
+    countdownTimer = needed
+      ? Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        MainActor.assumeIsolated { self?.render() }
+      }
+      : nil
   }
 
   private func wireChrome() {
@@ -197,7 +323,7 @@ final class InboxController: UIViewController {
     if requested?.key != key || requested?.catalog != catalog { requestSearch(term, key: key, state: state, catalog: catalog) }
     let current = search.flatMap { $0.key == key && $0.catalog == catalog ? $0 : nil }
     list.setPlaceholder(String(localized: String.LocalizationValue(current == nil ? "search.placeholder.loading" : "search.placeholder.noMatch"), bundle: .lody))
-    list.setSections(InboxSections.search(catalog, hits: current?.hits ?? InboxSearchHits(), query: term))
+    setSections(InboxSections.search(catalog, hits: current?.hits ?? InboxSearchHits(), query: term), for: state)
   }
 
   private func requestSearch(_ term: String, key: String, state: SessionListState, catalog: SessionCatalog) {
@@ -298,16 +424,21 @@ final class InboxController: UIViewController {
       }
     case "rowAction":
       guard let action = body["actionId"] as? String else { return }
+      if status.perform(action, row: id, from: self) { return }
       actions.perform(action, row: id, from: self)
+    case "sectionAction":
+      guard let action = body["actionId"] as? String else { return }
+      status.performSection(action, section: id, from: self)
     default:
       break
     }
   }
 
   private func consume(_ id: String) -> Bool {
-    // The Chats pseudo-project has no page of its own.
-    guard id == InboxSections.idleMoreId else { return InboxSections.isChatRow(id) }
-    idleExpanded.toggle()
+    // The Chats pseudo-project and the "hidden in this view" lines have no page of their own.
+    if id.hasPrefix(InboxSections.hiddenRowPrefix) { return true }
+    guard id == InboxSections.settledMoreId else { return InboxSections.isChatRow(id) }
+    settledExpanded.toggle()
     render()
     return true
   }

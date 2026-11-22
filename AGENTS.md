@@ -8,7 +8,8 @@ its rules. These triggers bind callers outside the owning directory as well.
 - Any native UI, including text, colour, canvases, touch targets, grouped lists and page chrome: read the [UI baseline](docs/rules/ui-baseline.md).
 - Native UI, Debug fixtures, or UI verification, build and simulator workflows, including shared controls and their app or extension hosts: read the [UI verification rules](apps/ios/verification/ui/AGENTS.md).
 - The shell, page hosting and presentation, navigation, deep links, page factories or the Debug page: read [Shell and pages](docs/rules/shell.md).
-- Home, its tabs and bottom bar, the workspace capsule or the iPad sidebar: read [Home](docs/rules/home.md).
+- Home, its tabs and bottom bar, the workspace capsule, the Chats project index or the iPad sidebar: read [Home](docs/rules/home.md).
+- The Home Pinned area and pin sections, the Status grouping (Focus / Later / Settled), their drag and drop, swipes, menus and Later sheet, or the conversation page's status actions: read [Status view](docs/rules/status-view.md).
 - Conversation-list rendering, grouping, project-index interaction, family or Tab attention, including Home/Shell navigation, Projects and Activity lists, shared list models, catalog projections and their verification fixtures: read the [Sessions rules](packages/LodyKit/Sources/LodyKit/Sessions/AGENTS.md).
 - The conversation transcript, turns, header, Tabs, message actions, members, avatars, images or agent marks: read [Conversation](docs/rules/conversation.md).
 - The conversation composer, action bar, merge, the native PR page or usage beside Send: read [Composer and action bar](docs/rules/composer.md).

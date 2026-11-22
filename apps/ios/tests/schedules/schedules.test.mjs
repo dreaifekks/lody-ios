@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LoroDoc, LoroMap } from 'loro-crdt/base64';
+import { Flock } from '@loro-dev/flock-wasm/base64';
 import { grant, loadSchedules } from './harness.mjs';
 
 const runtime = await loadSchedules();
@@ -10,6 +11,7 @@ const {
   scheduleDefinitionFingerprint,
   draftInput,
   ruleOf,
+  scheduleMachine,
   triggerOf,
   proposalRule,
 } = runtime;
@@ -110,6 +112,30 @@ test('saving an untouched rule keeps the stored trigger verbatim', async () => {
     2000,
   );
   assert.equal(moved.trigger.expression, '0 10 * * 1-5');
+});
+
+test('a schedule computer reads its name, owner, clock and support from workspace metadata', () => {
+  const meta = new Flock('meta');
+  meta.set(['m', 'machine-studio-mac'], {
+    name: 'Studio Mac',
+    ownerUserId: OWNER,
+    timeZone: 'Asia/Shanghai',
+  });
+  meta.set(['m', 'machine-studio-mac', 'protocolCapabilities'], {
+    schedules: 2,
+  });
+  assert.deepEqual(scheduleMachine(meta, 'studio-mac'), {
+    name: 'Studio Mac',
+    owner: OWNER,
+    timeZone: 'Asia/Shanghai',
+    supported: true,
+  });
+  assert.deepEqual(scheduleMachine(meta, 'unknown'), {
+    name: undefined,
+    owner: '',
+    timeZone: undefined,
+    supported: false,
+  });
 });
 
 test('an unsupported stored rule can only be kept, never rewritten', () => {

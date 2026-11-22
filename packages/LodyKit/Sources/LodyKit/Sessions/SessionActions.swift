@@ -60,6 +60,7 @@ final class SessionActions {
 
   private func sessionAction(_ actionId: String, _ session: SessionItem, in state: SessionListState, from controller: UIViewController) {
     let workspace = state.workspaceId
+    if ["archive", "delete", "pin", "rename"].contains(actionId), StatusViewActions.readOnly(state) { return }
     switch actionId {
     case "delete":
       confirmDeletion(session, in: state, from: controller)

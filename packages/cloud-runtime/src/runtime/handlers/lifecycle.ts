@@ -11,6 +11,7 @@ import {
   startAcceptedInputs,
   stopSessions,
   resumeAcceptedInputs,
+  resumeSessions,
 } from '../session';
 import type { RuntimeContext } from './context.ts';
 import type { HistoryTokenIntent } from '../../contract/sharing.ts';
@@ -123,7 +124,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
   let scopeStartVersion = 0;
   channel.handle(
     'start',
-    async ({ workspaceId, userId, active, knownRepos }) => {
+    async ({ workspaceId, userId, active, knownRepos, workspaceReadOnly }) => {
       const version = ++scopeStartVersion;
       if (workspaceId !== state.workspace || userId !== state.userId) {
         forgetSettings();
@@ -131,10 +132,16 @@ export function registerLifecycle(ctx: RuntimeContext) {
         await ctx.disposeProviderOperations?.();
       }
       if (version !== scopeStartVersion) return {};
-      if (workspaceId !== state.workspace || userId !== state.userId)
+      const scopeChanged =
+        workspaceId !== state.workspace || userId !== state.userId;
+      if (scopeChanged) {
         stopSessions();
+        state.workspaceReplica = undefined;
+        state.pinSections = { sections: [], loaded: false };
+      }
       state.workspace = workspaceId;
       state.userId = userId;
+      state.workspaceReadOnly = workspaceReadOnly === true;
       startAcceptedInputs({
         accountId: userId,
         workspaceId,
@@ -157,15 +164,27 @@ export function registerLifecycle(ctx: RuntimeContext) {
       state.knownProjects = Object.entries(knownRepos ?? {}).map(
         ([id, repoFullName]) => ({ id, repoFullName }),
       );
+      ctx.setForeground?.(active);
       ctx.watch('meta');
+      if (scopeChanged) ctx.refreshWorkspace();
+      refreshClock();
       if (active) ctx.startPresence();
       return {};
     },
   );
+  // Foreground: recalibrate and recompute time-derived Status view tiers.
+  const refreshClock = () =>
+    void ctx.syncClock?.().then((accepted) => {
+      if (accepted) ctx.publish();
+    });
   channel.handle('setActive', ({ active }) => {
     if (!state.workspace) return {};
+    ctx.setForeground?.(active);
     if (active) {
+      refreshClock();
+      ctx.publish();
       ctx.startPresence();
+      resumeSessions();
       traceSessionResume();
       resumeAcceptedInputs();
     } else ctx.stopPresence();

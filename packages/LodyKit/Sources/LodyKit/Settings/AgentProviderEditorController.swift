@@ -1,5 +1,7 @@
-import UIKit
 import LodyCore
+import LodyDesignSystem
+import SwiftUI
+import UIKit
 
 struct AgentProviderFields: Encodable, Sendable {
   var name: String
@@ -19,6 +21,10 @@ struct AgentProviderFields: Encodable, Sendable {
   var presetEndpoint: String?
 }
 
+/// The provider editor: a header card (with the quota line and operation status), then Basics, Command
+/// (custom only), Account, Conversation defaults, Environment variables and Delete. Every value is a row
+/// that opens a sheet or a menu; sheets edit the draft and only Save persists it. More (…) holds
+/// Refresh capabilities, Save and test and Delete for saved providers.
 @MainActor
 final class AgentProviderEditorController: LodyFormController {
   var saved: ((AgentProviderSnapshot) -> Void)?
@@ -27,13 +33,11 @@ final class AgentProviderEditorController: LodyFormController {
   var saveFailed: (() -> Void)?
   var deleteRequested: ((AgentProviderItem) -> Void)?
   private let providerHeader = AgentProviderHeaderView()
-  private let usage = AgentProviderUsageView()
-  private var usageGroup: LodyFormGroup?
-  private var actionsGroup: LodyFormGroup?
+  private let quotaLine = AgentProviderQuotaLine()
+  private let quotaContainer = UIView()
   private lazy var deleteButton = LodyFormButton.make(id: "provider-delete", title: text("delete"), destructive: true) { [weak self] in
     self?.confirmDelete()
   }
-  private var deleteGroup: LodyFormGroup?
   private let machine: AgentProviderMachine
   private var item: AgentProviderItem?
   private let catalog: [AgentProviderCatalogItem]
@@ -43,13 +47,9 @@ final class AgentProviderEditorController: LodyFormController {
   private let details: ProviderDetailService
   private let presets: [ProviderPreset]
   private let advanced = AgentProviderAdvanced()
-  private let testButton = UIButton(type: .system)
-  private let authButton = UIButton(type: .system)
-  private let refreshButton = UIButton(type: .system)
-  private var operationButtons: [String: UIButton] = [:]
   private let operationStatus = LodyFormGroup.caption()
   private let operationSpinner = UIActivityIndicatorView(style: .medium)
-  private var progressObserver: NSObjectProtocol?
+  private var statusContainer: UIView?
   private var refreshObserver: NSObjectProtocol?
   private var activeOperation: String?
   private var detailLoading = false
@@ -61,12 +61,24 @@ final class AgentProviderEditorController: LodyFormController {
   private var uncertain = false
   private let provider = UIButton.lodyFormPicker("provider-type")
   private var commandGroup: LodyFormGroup?
-  private lazy var name = LodyFormField(id: "provider-name", label: text("name"), text: item?.name ?? "", limit: 200)
-  private lazy var prompt = LodyFormTextView(id: "provider-prompt", label: text("prompt"), text: item?.prompt ?? "", limit: 32000, minHeight: 160)
-  private lazy var command = LodyFormField(id: "provider-command", label: text("command"), text: item?.command ?? "", limit: 4096)
-  private lazy var args = LodyFormTextView(id: "provider-args", label: text("args"), text: (item?.args ?? []).joined(separator: "\n"), limit: 32000, minHeight: 88)
+  private var accountGroup: LodyFormGroup?
+  private var titleGroup: LodyFormGroup?
+  private weak var titleConfigSheet: UIViewController?
+  private var nameValue: String
+  private let promptValue: String
+  private var commandValue: String
+  private var argsValue: String
+  private let nameRow = LodyFormValueRow(id: "provider-name", title: AgentProviderSections.text("name"))
+  private let commandRow = LodyFormValueRow(id: "provider-command", title: AgentProviderSections.text("command"))
+  private let argsRow = LodyFormValueRow(id: "provider-args", title: AgentProviderSections.text("args"))
   private lazy var cancelItem = Self.barButton(symbol: "xmark", label: String(localized: "common.cancel", bundle: .lody)) { [weak self] in self?.closeForm() }
   private lazy var saveItem = Self.barButton(symbol: "checkmark", label: RemoteSettingsSections.remote("save"), prominent: true) { [weak self] in self?.save() }
+  private lazy var moreItem: UIBarButtonItem = {
+    let button = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: nil)
+    button.accessibilityLabel = AgentProviderSections.text("more")
+    button.accessibilityIdentifier = "provider-more"
+    return button
+  }()
 
   init(machine: AgentProviderMachine, item: AgentProviderItem?, catalog: [AgentProviderCatalogItem], scope: SettingsActor,
        service: @escaping AgentProviderService, details: ProviderDetailService = .cloud, presets: [ProviderPreset] = []) {
@@ -78,6 +90,10 @@ final class AgentProviderEditorController: LodyFormController {
     self.service = service
     self.details = details
     self.presets = presets
+    nameValue = item?.name ?? ""
+    promptValue = item?.prompt ?? ""
+    commandValue = item?.command ?? ""
+    argsValue = (item?.args ?? []).joined(separator: "\n")
     super.init(nibName: nil, bundle: nil)
     if let item {
       selected = catalog.first { $0.cliType == item.cliType && $0.agentType == item.agentType }
@@ -97,82 +113,34 @@ final class AgentProviderEditorController: LodyFormController {
       self.invalid = self.scope.key != self.scopeKey
       self.render()
     }
-    name.clearButtonMode = .whileEditing
-    command.clearButtonMode = .whileEditing
-    provider.menu = UIMenu(children: catalog.map { option in
-      UIAction(title: option.name, state: option.id == selected?.id ? .on : .off) { [weak self] _ in
-        guard let self else { return }
-        self.selected = option
-        self.advanced.select(option, presets: self.presets)
-        if self.name.trimmed.isEmpty { self.name.text = option.name }
-        self.render()
-      }
-    })
-    stack.addArrangedSubview(providerHeader)
-    stack.addArrangedSubview(LodyFormGroup(LodyFormRow(label: text("provider"), content: provider, picker: true), name))
-    let custom = LodyFormGroup(header: text("custom"), footer: text("argsHint"), command, args)
+    stack.addArrangedSubview(makeHeader())
+    stack.addArrangedSubview(LodyFormGroup(header: text("basics"), LodyFormRow(label: text("type"), content: provider, picker: true), nameRow))
+    let custom = LodyFormGroup(header: text("custom"), commandRow, argsRow)
     commandGroup = custom
     stack.addArrangedSubview(custom)
-    stack.addArrangedSubview(LodyFormGroup(header: text("prompt"), footer: RemoteSettingsSections.remote("agentHint"), prompt))
-    let usageGroup = LodyFormGroup(header: text("usage"), usage)
-    self.usageGroup = usageGroup
-    stack.addArrangedSubview(usageGroup)
+    let account = LodyFormGroup(header: text("account"), rows: [
+      advanced.credentialModeRow, advanced.credentialRow, advanced.endpointChoiceRow, advanced.endpointRow,
+      advanced.codexModeRow, advanced.codexEndpointRow,
+    ])
+    accountGroup = account
+    stack.addArrangedSubview(account)
+    stack.addArrangedSubview(LodyFormGroup.inset(advanced.unavailable))
+    let title = LodyFormGroup(footer: text("titleGenerationHint"), advanced.titleRow)
+    titleGroup = title
+    stack.addArrangedSubview(title)
+    stack.addArrangedSubview(LodyFormGroup.inset(advanced.extensions))
+    stack.addArrangedSubview(advanced.environment)
+    if item != nil, !isReadOnly { stack.addArrangedSubview(LodyFormGroup(deleteButton)) }
+
+    nameRow.addAction(UIAction { [weak self] _ in self?.editName() }, for: .touchUpInside)
+    commandRow.addAction(UIAction { [weak self] _ in self?.editCommand() }, for: .touchUpInside)
+    argsRow.addAction(UIAction { [weak self] _ in self?.editArgs() }, for: .touchUpInside)
+    advanced.titleRow.addAction(UIAction { [weak self] _ in self?.presentTitleConfig() }, for: .touchUpInside)
+    quotaLine.addAction(UIAction { [weak self] _ in self?.showUsage() }, for: .touchUpInside)
+
     advanced.configure(machine: machine)
     advanced.select(selected, presets: presets)
     advanced.changed = { [weak self] in self?.render() }
-    stack.addArrangedSubview(advanced)
-    configureAction(testButton, title: text("saveAndTest"), symbol: "checkmark.seal")
-    testButton.accessibilityIdentifier = "provider-test"
-    testButton.addAction(UIAction { [weak self] _ in self?.save(probe: true) }, for: .touchUpInside)
-    configureAction(authButton, title: text("signIn"), symbol: "person.badge.key")
-    authButton.accessibilityIdentifier = "provider-sign-in"
-    authButton.addAction(UIAction { [weak self] _ in self?.authenticate() }, for: .touchUpInside)
-    configureAction(refreshButton, title: text("refreshModels"), symbol: "arrow.clockwise")
-    refreshButton.accessibilityIdentifier = "provider-refresh-models"
-    refreshButton.addAction(UIAction { [weak self] _ in self?.refreshModels() }, for: .touchUpInside)
-    var actionRows: [UIView] = [testButton, refreshButton, authButton]
-    let rateLimits: String
-    if #available(iOS 17.0, *) {
-      rateLimits = "gauge.with.dots.needle.33percent"
-    } else {
-      rateLimits = "gauge.medium"
-    }
-    let symbols = ["binary-status": "shippingbox", "binary-install": "arrow.down.circle",
-                   "pi-extension-scan": "puzzlepiece.extension", "rate-limits-refresh": rateLimits]
-    for action in ["binary-status", "binary-install", "pi-extension-scan", "rate-limits-refresh"] {
-      let button = UIButton(type: .system)
-      configureAction(button, title: text(action), symbol: symbols[action] ?? "circle")
-      button.accessibilityIdentifier = "provider-" + action
-      button.addAction(UIAction { [weak self] _ in self?.operate(action) }, for: .touchUpInside)
-      operationButtons[action] = button
-      actionRows.append(button)
-    }
-    let actions = LodyFormGroup(header: text("actions"), footer: text("testPersists"), rows: actionRows)
-    actionsGroup = actions
-    stack.addArrangedSubview(actions)
-    operationSpinner.hidesWhenStopped = true
-    operationStatus.accessibilityIdentifier = "provider-operation-status"
-    let status = UIStackView(arrangedSubviews: [operationSpinner, operationStatus])
-    status.spacing = 8
-    status.alignment = .center
-    stack.addArrangedSubview(LodyFormGroup.inset(status))
-    if item != nil, !isReadOnly {
-      let group = LodyFormGroup(deleteButton)
-      deleteGroup = group
-      stack.addArrangedSubview(group)
-    }
-    progressObserver = NotificationCenter.default.addObserver(forName: .lodyProviderOperationProgress, object: nil, queue: .main) { [weak self] notification in
-      guard let progress = notification.object as? RuntimeContract.AgentProviderOperationProgress else { return }
-      let eventScope = notification.userInfo?["scopeKey"] as? String
-      MainActor.assumeIsolated {
-        guard let self, self.scope.key == self.scopeKey, eventScope == self.scopeKey,
-              self.activeOperation == "binary-install", self.item?.id == progress.id,
-              self.machine.id == progress.machineId else { return }
-        var label = self.text("binary." + progress.status)
-        if let percent = progress.percent, percent.isFinite { label += " · \(Int(min(100, max(0, percent))))%" }
-        self.operationStatus.text = label
-      }
-    }
     refreshObserver = NotificationCenter.default.addObserver(forName: .lodyProviderRefreshProgress, object: nil, queue: .main) { [weak self] notification in
       guard let progress = notification.object as? RuntimeContract.AgentProviderRefreshProgress else { return }
       let eventScope = notification.userInfo?["scopeKey"] as? String
@@ -182,85 +150,95 @@ final class AgentProviderEditorController: LodyFormController {
               self.machine.id == progress.machineId else { return }
         self.operationStatus.text = String.localizedStringWithFormat(
           self.text("readingModelOptions"), progress.modelName, progress.index, progress.total)
+        self.render()
       }
     }
-    if item == nil {
-      let hint = LodyFormGroup.caption()
-      hint.text = text("setupHint")
-      hint.numberOfLines = 0
-      stack.insertArrangedSubview(LodyFormGroup.inset(hint), at: 2)
-    }
-    name.changed = { [weak self] in self?.render() }
-    command.changed = { [weak self] in self?.render() }
     render()
     if item != nil { loadDetail() }
+  }
+
+  /// The card, the quota line under it and the operation status line.
+  private func makeHeader() -> UIView {
+    quotaLine.translatesAutoresizingMaskIntoConstraints = false
+    quotaContainer.addSubview(quotaLine)
+    NSLayoutConstraint.activate([
+      // Under the name, past the 56 pt mark and its 14 pt gap.
+      quotaLine.leadingAnchor.constraint(equalTo: quotaContainer.leadingAnchor, constant: LodyFormGroup.margin + 70),
+      quotaLine.trailingAnchor.constraint(lessThanOrEqualTo: quotaContainer.trailingAnchor, constant: -LodyFormGroup.margin),
+      quotaLine.topAnchor.constraint(equalTo: quotaContainer.topAnchor),
+      quotaLine.bottomAnchor.constraint(equalTo: quotaContainer.bottomAnchor),
+    ])
+    operationSpinner.hidesWhenStopped = true
+    operationStatus.accessibilityIdentifier = "provider-operation-status"
+    let status = UIStackView(arrangedSubviews: [operationSpinner, operationStatus])
+    status.spacing = 8
+    status.alignment = .center
+    let statusContainer = LodyFormGroup.inset(status)
+    self.statusContainer = statusContainer
+    let card = UIStackView(arrangedSubviews: [providerHeader, quotaContainer, statusContainer])
+    card.axis = .vertical
+    card.spacing = 6
+    return card
   }
 
   override func didMove(toParent parent: UIViewController?) {
     super.didMove(toParent: parent)
     header?.leftBarButtonItems = [cancelItem]
-    header?.rightBarButtonItems = isReadOnly ? [] : [saveItem]
     render()
   }
 
   private var isReadOnly: Bool { machine.readOnly || item?.readOnly == true }
+  private var editable: Bool { !busy && !detailLoading && !detailFailed && !invalid && !uncertain && !isReadOnly }
+  private var name: String { nameValue.trimmingCharacters(in: .whitespacesAndNewlines) }
+  private var command: String { commandValue.trimmingCharacters(in: .whitespacesAndNewlines) }
+  private var canRefreshModels: Bool { editable && machine.online && item != nil }
 
   private func render() {
     guard isViewLoaded else { return }
-    let editable = !busy && !detailLoading && !detailFailed && !invalid && !uncertain && !isReadOnly
-    name.isEnabled = editable
-    prompt.isEditable = editable
-    command.isEnabled = editable
-    args.isEditable = editable
-    provider.isEnabled = editable && item == nil
-    provider.configuration?.title = selected?.name ?? text("provider")
-    providerHeader.update(
-      name: name.trimmed.isEmpty ? (selected?.name ?? text("provider")) : name.trimmed,
-      detail: [selected?.name ?? "", machine.name.isEmpty ? machine.id : machine.name].filter { !$0.isEmpty }.joined(separator: " · "),
-      asset: LodyAgentIcon.asset(cliType: selected?.cliType ?? "builtin", agentType: selected?.agentType ?? "") ?? "",
-      custom: selected?.cliType == "custom", online: machine.online
-    )
-    let windows = usageWindows()
-    usage.update(windows)
-    usageGroup?.isHidden = windows.isEmpty
-    deleteButton.isEnabled = !busy && !invalid && !uncertain
+    let canEdit = editable
+    provider.isEnabled = canEdit && item == nil
+    provider.configuration?.title = selected?.name ?? text("type")
     provider.menu = UIMenu(children: catalog.map { option in
       UIAction(title: option.name, state: option.id == selected?.id ? .on : .off) { [weak self] _ in
         guard let self else { return }
         let prior = self.selected?.name
         self.selected = option
         self.advanced.select(option, presets: self.presets)
-        if self.name.trimmed.isEmpty || self.name.trimmed == prior { self.name.text = option.name }
+        if self.name.isEmpty || self.name == prior { self.nameValue = option.name }
         self.render()
       }
     })
-    advanced.setEditable(editable)
-    authButton.isEnabled = editable && item != nil && advanced.detail?.supportsAuthentication == true
-    setRow(authButton, hidden: item == nil || advanced.detail?.supportsAuthentication != true)
-    setRow(testButton, hidden: isReadOnly)
-    // Refreshing reads the saved Provider; a draft is tested through Save and test.
-    refreshButton.isEnabled = editable && machine.online && item != nil
-    setRow(refreshButton, hidden: isReadOnly || item == nil)
+    display(nameRow, value: name)
+    display(commandRow, value: command)
+    display(argsRow, value: argsValue.components(separatedBy: .newlines).filter { !$0.isEmpty }.joined(separator: " "))
+    for row in [nameRow, commandRow, argsRow] { row.isEnabled = canEdit }
     commandGroup?.isHidden = selected?.cliType != "custom"
-    saveItem.isEnabled = editable && advanced.isValid && selected != nil && !name.trimmed.isEmpty
-      && (selected?.cliType != "custom" || !command.trimmed.isEmpty)
-    testButton.isEnabled = saveItem.isEnabled
+
+    providerHeader.update(
+      name: name.isEmpty ? (selected?.name ?? text("provider")) : name,
+      detail: [selected?.name ?? "", machine.name.isEmpty ? machine.id : machine.name].filter { !$0.isEmpty }.joined(separator: " · "),
+      asset: LodyAgentIcon.asset(cliType: selected?.cliType ?? "builtin", agentType: selected?.agentType ?? "") ?? "",
+      custom: selected?.cliType == "custom", online: machine.online
+    )
+    quotaLine.update(usageWindows())
+    quotaContainer.isHidden = quotaLine.isHidden
+    if activeOperation != nil { operationSpinner.startAnimating() } else { operationSpinner.stopAnimating() }
+    statusContainer?.isHidden = activeOperation == nil && (operationStatus.text ?? "").isEmpty
+
+    advanced.setEditable(canEdit)
+    accountGroup?.isHidden = !advanced.hasCredentials && !advanced.showsCodex
+    titleGroup?.isHidden = !advanced.showsTitle
+
+    saveItem.isEnabled = canEdit && advanced.isValid && selected != nil && !name.isEmpty
+      && (selected?.cliType != "custom" || !command.isEmpty)
     cancelItem.isEnabled = !busy
+    deleteButton.isEnabled = !busy && !invalid && !uncertain
+    moreItem.menu = UIMenu(children: moreActions())
+    var items: [UIBarButtonItem] = []
+    if !isReadOnly { items = item == nil ? [saveItem] : [saveItem, moreItem] }
+    if header?.rightBarButtonItems?.count ?? 0 != items.count { header?.rightBarButtonItems = items }
     isModalInPresentation = busy
     if invalid { advanced.clearSecrets() }
-    if activeOperation != nil { operationSpinner.startAnimating() } else { operationSpinner.stopAnimating() }
-    for (action, button) in operationButtons {
-      // Unavailable or unsupported operations are left out rather than listed with a reason.
-      var supported = advanced.detail?.unavailableActions.contains(where: { $0.action == action }) != true
-      if action == "rate-limits-refresh" { supported = supported && item != nil && advanced.detail?.supportsRateLimitsRefresh != false }
-      if action.hasPrefix("binary-") { supported = supported && ["builtin", "registry"].contains(selected?.cliType ?? "") }
-      if action == "pi-extension-scan" {
-        supported = supported && selected?.agentType == "pi" && (advanced.detail?.supportsPiExtensions ?? machine.supportsPiExtensions) == true
-      }
-      button.isEnabled = editable && machine.online
-      setRow(button, hidden: !supported || isReadOnly)
-    }
-    actionsGroup?.isHidden = isReadOnly
     if invalid || uncertain || detailFailed {
       let notice = LodyFormGroup.caption(color: .systemRed, size: 15)
       notice.numberOfLines = 0
@@ -277,14 +255,99 @@ final class AgentProviderEditorController: LodyFormController {
     }
   }
 
+  private func display(_ row: LodyFormValueRow, value: String) {
+    if value.isEmpty { row.update(value: text("notSet"), placeholder: true) } else { row.update(value: value) }
+  }
+
+  private func moreActions() -> [UIMenuElement] {
+    guard !isReadOnly, item != nil else { return [] }
+    let refresh = UIAction(title: text("refresh"), image: UIImage(systemName: "arrow.clockwise"),
+                           attributes: canRefreshModels ? [] : .disabled) { [weak self] _ in self?.refreshModels() }
+    let test = UIAction(title: text("saveAndTest"), image: UIImage(systemName: "checkmark.seal"),
+                        attributes: saveItem.isEnabled ? [] : .disabled) { [weak self] _ in self?.save(probe: true) }
+    let delete = UIAction(title: text("delete"), image: UIImage(systemName: "trash"),
+                          attributes: deleteButton.isEnabled ? .destructive : [.destructive, .disabled]) { [weak self] _ in self?.confirmDelete() }
+    return [UIMenu(options: .displayInline, children: [refresh, test]), delete]
+  }
+
+  // MARK: Draft sheets
+
+  private func editText(_ id: String, title key: String, value: String, limit: Int,
+                        options: AgentProviderTextSheet.Options = AgentProviderTextSheet.Options(), detents: [Double] = [0.5, 1],
+                        apply: @escaping @MainActor (AgentProviderEditorController, String) -> Void) {
+    guard editable else { return }
+    let sheet = AgentProviderTextSheet(id: id, label: text(key), text: value, limit: limit, options: options) { [weak self] next in
+      guard let self, self.scope.key == self.scopeKey else { return }
+      apply(self, next)
+      self.render()
+    }
+    LodyShell.shared.presentNative(sheet, title: text(key), detents: detents)
+  }
+
+  private func editName() {
+    editText("provider-name", title: "name", value: nameValue, limit: 200) { $0.nameValue = $1 }
+  }
+
+  private func editCommand() {
+    var options = AgentProviderTextSheet.Options()
+    options.footer = text("commandHint")
+    editText("provider-command", title: "command", value: commandValue, limit: 4096, options: options) { $0.commandValue = $1 }
+  }
+
+  private func editArgs() {
+    var options = AgentProviderTextSheet.Options()
+    options.multiline = true
+    options.minHeight = 200
+    options.footer = text("argsHint")
+    editText("provider-args", title: "args", value: argsValue, limit: 32000, options: options, detents: [1]) { $0.argsValue = $1 }
+  }
+
+  private func presentTitleConfig() {
+    guard editable, advanced.showsTitle, titleConfigSheet == nil else { return }
+    view.endEditing(true)
+    let state = advanced.makeTitleConfigState()
+    guard !state.runConfig.isEmpty else { return }
+    let title = text("titleGeneration")
+    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: state, title: title))
+    var contentHeight = CGFloat(state.runConfig.count) * (LodySize.controlMd + LodySpacing.xs * 2)
+      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
+    sheet.rootView = CreateRunConfigSheet(state: state, title: title, onHeightChange: { [weak sheet] height in
+      guard height > 0, abs(contentHeight - height) > 1 else { return }
+      contentHeight = height
+      sheet?.sheetPresentationController?.animateChanges {
+        sheet?.sheetPresentationController?.invalidateDetents()
+      }
+    })
+    if let presentation = sheet.sheetPresentationController {
+      presentation.detents = [.custom(identifier: .init("titleConfigContent")) { context in
+        min(contentHeight, context.maximumDetentValue)
+      }]
+      presentation.prefersGrabberVisible = true
+    }
+    titleConfigSheet = sheet
+    present(sheet, animated: true)
+  }
+
+  private func showUsage() {
+    guard let item else { return }
+    let supported = advanced.detail.map { detail in
+      detail.supportsRateLimitsRefresh != false && !detail.unavailableActions.contains { $0.action == "rate-limits-refresh" }
+    }
+    let controller = AgentProviderUsageController(machine: machine, item: item, scope: scope, details: details,
+                                                  canRefresh: !isReadOnly && machine.online && !invalid, supported: supported)
+    LodyShell.shared.presentNative(controller, title: AgentProviderUsageController.sheetTitle(item), detents: [0.6, 1])
+  }
+
+  // MARK: Save and operations
+
   private func save(probe: Bool = false) {
     guard saveItem.isEnabled, scope.key == scopeKey, let selected else { return }
     busy = true
     render()
-    let customArgs = (args.text ?? "") == (item?.args ?? []).joined(separator: "\n") ? item?.args ?? [] :
-      ((args.text ?? "").isEmpty ? [] : (args.text ?? "").components(separatedBy: .newlines))
-    var fields = AgentProviderFields(name: name.trimmed, prompt: prompt.text ?? "", cliType: selected.cliType,
-                                     agentType: selected.agentType, command: selected.cliType == "custom" ? command.trimmed : "",
+    let customArgs = argsValue == (item?.args ?? []).joined(separator: "\n") ? item?.args ?? [] :
+      (argsValue.isEmpty ? [] : argsValue.components(separatedBy: .newlines))
+    var fields = AgentProviderFields(name: name, prompt: promptValue, cliType: selected.cliType,
+                                     agentType: selected.agentType, command: selected.cliType == "custom" ? command : "",
                                      args: selected.cliType == "custom" ? customArgs : [])
     advanced.apply(to: &fields)
     let request = AgentProviderRequest(workspaceId: scope.workspaceId, action: "save", machineId: machine.id,
@@ -369,8 +432,7 @@ final class AgentProviderEditorController: LodyFormController {
   /// Starts the agent again and switches it through every model, naming each one as its
   /// options are read. Without the machine capability this is an ordinary refresh.
   private func refreshModels() {
-    guard refreshButton.isEnabled, !busy, !detailLoading, !detailFailed, !uncertain, !invalid, !isReadOnly,
-          item != nil, scope.key == scopeKey else { return }
+    guard canRefreshModels, scope.key == scopeKey else { return }
     busy = true
     activeOperation = "refresh-models"
     operationStatus.text = text("refreshing")
@@ -400,76 +462,13 @@ final class AgentProviderEditorController: LodyFormController {
     loadDetail()
   }
 
-  private func operate(_ action: String) {
-    guard operationButtons[action]?.isEnabled == true, !busy, !detailLoading, !detailFailed, !uncertain, !invalid, !isReadOnly, scope.key == scopeKey else { return }
-    busy = true
-    activeOperation = action
-    operationStatus.text = text(action == "binary-install" ? "installing" : "working")
-    render()
-    let request = ProviderOperationRequest(workspaceId: scope.workspaceId, machineId: machine.id, id: item?.id, action: action,
-                                           cliType: item == nil && action.hasPrefix("binary-") ? selected?.cliType : nil,
-                                           agentType: item == nil && action.hasPrefix("binary-") ? selected?.agentType : nil)
-    Task { [weak self, details] in
-      do {
-        let result = try await details.operation(request)
-        guard let self, self.scope.key == self.scopeKey else { return }
-        self.busy = false
-        self.activeOperation = nil
-        if let extensions = result.extensions { self.advanced.showExtensions(extensions) }
-        var message = result.success ? self.text("operationComplete") : self.text("operationFailed")
-        if let status = result.status { message = self.text("binary.\(status)") }
-        if let version = result.version { message += " · " + version }
-        self.operationStatus.text = message
-        self.render()
-      } catch {
-        guard let self, self.scope.key == self.scopeKey else { return }
-        self.busy = false
-        self.activeOperation = nil
-        self.operationStatus.text = self.text("operationUnknown")
-        self.render()
-      }
-    }
-  }
-
   isolated deinit {
-    if let progressObserver { NotificationCenter.default.removeObserver(progressObserver) }
     if let refreshObserver { NotificationCenter.default.removeObserver(refreshObserver) }
-  }
-
-  private func authenticate() {
-    guard let detail = advanced.detail, let item, !busy, scope.key == scopeKey else { return }
-    let controller = AgentProviderAuthController(target: target, methods: detail.supportsMethodSelection ? detail.capabilities.authMethods : [], scope: scope, service: details)
-    controller.authenticated = { [weak self] in
-      guard let self else { return }
-      self.operationStatus.text = self.text("auth.authenticated")
-    }
-    LodyShell.shared.presentNative(controller, title: item.name, detents: [1])
   }
 
   override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated)
     if isBeingDismissed || navigationController?.isBeingDismissed == true { advanced.clearSecrets() }
-  }
-
-  /// Hides a group row together with the hairline drawn after it.
-  private func setRow(_ view: UIView, hidden: Bool) {
-    view.isHidden = hidden
-    guard let group = view.superview as? UIStackView, let index = group.arrangedSubviews.firstIndex(of: view),
-          index + 1 < group.arrangedSubviews.count else { return }
-    group.arrangedSubviews[index + 1].isHidden = hidden
-  }
-
-  private func configureAction(_ button: UIButton, title: String, symbol: String) {
-    var configuration = UIButton.Configuration.plain()
-    configuration.title = title
-    configuration.image = UIImage(systemName: symbol)
-    configuration.imagePadding = 12
-    configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-    configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0)
-    configuration.baseForegroundColor = .lodyInk
-    button.configuration = configuration
-    button.contentHorizontalAlignment = .leading
-    button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
   }
 
   private func usageWindows() -> [LodyListVisualItem] {
@@ -556,54 +555,5 @@ final class AgentProviderHeaderView: UIView {
     mark.image = (image ?? UIImage(systemName: custom ? "terminal" : "sparkles"))?.withRenderingMode(.alwaysTemplate)
     dot.backgroundColor = online ? .systemGreen : .tertiaryLabel
     accessibilityLabel = [name, detail].joined(separator: ", ")
-  }
-}
-
-/// One bar per subscription window: what is left, and when it resets.
-@MainActor
-final class AgentProviderUsageView: UIStackView {
-  init() {
-    super.init(frame: .zero)
-    axis = .vertical
-    spacing = 14
-    isLayoutMarginsRelativeArrangement = true
-    directionalLayoutMargins = NSDirectionalEdgeInsets(
-      top: 12, leading: LodyFormGroup.margin, bottom: 12, trailing: LodyFormGroup.margin
-    )
-  }
-
-  @available(*, unavailable)
-  required init(coder: NSCoder) { fatalError() }
-
-  func update(_ windows: [LodyListVisualItem]) {
-    arrangedSubviews.forEach { $0.removeFromSuperview() }
-    for window in windows {
-      let label = UILabel()
-      label.font = .preferredFont(forTextStyle: .subheadline)
-      label.text = window.label
-      label.numberOfLines = 0
-      let value = UILabel()
-      value.font = .preferredFont(forTextStyle: .subheadline).withWeight(.medium)
-      value.text = window.value
-      value.setContentCompressionResistancePriority(.required, for: .horizontal)
-      value.setContentHuggingPriority(.required, for: .horizontal)
-      let heading = UIStackView(arrangedSubviews: [label, value])
-      heading.spacing = 12
-      let bar = UIProgressView(progressViewStyle: .default)
-      bar.progressTintColor = window.tone == "warning" ? .systemOrange : .lodyAccent
-      bar.trackTintColor = .tertiarySystemFill
-      bar.progress = Float(max(0, min(1, 1 - window.fraction)))
-      let caption = UILabel()
-      caption.font = .preferredFont(forTextStyle: .caption1)
-      caption.textColor = .secondaryLabel
-      caption.numberOfLines = 0
-      caption.text = [window.caption, window.detail].filter { !$0.isEmpty }.joined(separator: " · ")
-      let block = UIStackView(arrangedSubviews: [heading, bar, caption])
-      block.axis = .vertical
-      block.spacing = 6
-      block.isAccessibilityElement = true
-      block.accessibilityLabel = window.accessibilityLabel
-      addArrangedSubview(block)
-    }
   }
 }

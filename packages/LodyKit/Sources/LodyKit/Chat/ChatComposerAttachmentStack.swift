@@ -22,14 +22,18 @@ final class ChatComposerAttachmentStack: UIView {
 
   var stackWidth: CGFloat { widthConstraint.constant }
 
-  func render(_ attachments: [ChatAttachment]) {
-    accessibilityLabel = attachments.map(\.name).joined(separator: ", ")
-    let shown = Array(attachments.prefix(Self.limit))
+  func render(_ attachments: [ChatAttachment], quotes: [ChatMessageQuote] = []) {
+    accessibilityLabel = (attachments.map(\.name) + quotes.map(\.excerpt)).joined(separator: ", ")
+    // Quote cards follow the attachments, as in the expanded strip.
+    var entries: [(id: String, attachment: ChatAttachment?)] = []
+    for attachment in attachments { entries.append((id: attachment.id, attachment: attachment)) }
+    for quote in quotes { entries.append((id: ChatAttachmentBar.quoteID(quote), attachment: nil)) }
+    let shown = Array(entries.prefix(Self.limit))
     guard shown.map(\.id) != renderedIDs else { return }
     renderedIDs = shown.map(\.id)
     tiles.forEach { $0.removeFromSuperview() }
-    tiles = shown.enumerated().map { index, attachment in
-      let tile = Self.tile(for: attachment)
+    tiles = shown.enumerated().map { index, entry in
+      let tile = Self.tile(for: entry.attachment)
       tile.frame = CGRect(x: CGFloat(index) * (Self.side + Self.spacing), y: 0, width: Self.side, height: Self.side)
       return tile
     }
@@ -37,7 +41,7 @@ final class ChatComposerAttachmentStack: UIView {
     widthConstraint.constant = shown.isEmpty ? 0 : Self.side + CGFloat(shown.count - 1) * (Self.side + Self.spacing)
   }
 
-  private static func tile(for attachment: ChatAttachment) -> UIView {
+  private static func tile(for attachment: ChatAttachment?) -> UIView {
     let tile = UIView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     tile.layer.cornerRadius = 7
     tile.layer.cornerCurve = .continuous
@@ -45,11 +49,11 @@ final class ChatComposerAttachmentStack: UIView {
     tile.backgroundColor = .tertiarySystemFill
     let content = UIImageView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     content.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    if attachment.isImage, let image = ChatAttachment.thumbnail(attachment.url)?.preparingThumbnail(of: CGSize(width: 56, height: 56)) {
+    if let attachment, attachment.isImage, let image = ChatAttachment.thumbnail(attachment.url)?.preparingThumbnail(of: CGSize(width: 56, height: 56)) {
       content.image = image
       content.contentMode = .scaleAspectFill
     } else {
-      content.image = UIImage(systemName: "doc", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .medium))
+      content.image = UIImage(systemName: attachment == nil ? "quote.opening" : "doc", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .medium))
       content.tintColor = .secondaryLabel
       content.contentMode = .center
     }

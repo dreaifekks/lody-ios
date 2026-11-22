@@ -62,6 +62,8 @@ final class SessionListView: UIView {
     retry.isHidden = action == nil || hasRows
   }
   func setOwners(_ value: [String: WorkspaceMember]) { list.owners = value }
+  /// Status view menus, drag and drop and accessibility moves; nil outside Home.
+  func setStatusHooks(_ value: ChatListStatusHooks?) { list.status = value }
   func deselectOnReturn(animated: Bool, coordinator: UIViewControllerTransitionCoordinator?) {
     list.collection.deselectOnReturn(animated: animated, coordinator: coordinator)
   }

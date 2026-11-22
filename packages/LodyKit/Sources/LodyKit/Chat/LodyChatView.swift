@@ -115,6 +115,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var measurements: [String: (width: CGFloat, text: NSAttributedString, height: CGFloat)] = [:]
   let store = ChatMarkdownStore(traits: .current)
   var markdownSelections: [String: TextSelectionGroup] = [:]
+  private lazy var selectionTap = UITapGestureRecognizer(target: self, action: #selector(clearMarkdownSelections(_:)))
   let findBar = ChatFindBar()
   var findPresented = false
   var lastFindRequest = ""
@@ -352,6 +353,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     tap.cancelsTouchesInView = false
     tap.delegate = self
     collection.addGestureRecognizer(tap)
+    selectionTap.cancelsTouchesInView = false
+    selectionTap.delegate = self
+    collection.addGestureRecognizer(selectionTap)
     collection.contentInsetAdjustmentBehavior = .automatic
     collection.delegate = self
     collection.selectionDidLayout = { [weak self] in self?.refreshMarkdownSelections() }
@@ -501,7 +505,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       cell.onInteraction = { [weak self] in self?.pauseTracking() }
       cell.canEdit = { [weak self] in self?.editableMessageID == row.entryID && row.kind == "user" }
       cell.onEdit = { [weak self] in self?.onEditMessage(["entryId": row.entryID]) }
-      cell.label.onLink = row.kind == "user" ? { [weak self] in self?.openMessageLink($0) } : nil
+      cell.label.onLink = row.kind == "user" ? { [weak self] in self?.openUserMessageLink($0) } : nil
       cell.onToggle = { [weak self] in self?.toggleExpansion(row) }
       cell.onActivate = { [weak self] in
         guard let self, let index = self.dataSource.indexPath(for: row.id) else { return }
@@ -598,6 +602,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       width: bounds.width - safeAreaInsets.left - safeAreaInsets.right,
       height: max(0, composer.frame.minY - safeAreaInsets.top - pageHeaderHeight - 40)))
     bringSubviewToFront(simulatorPreview)
+    composer.fitPageRoom()
+    overlay.crowded = composer.frame.minY - 8 - ChatOverlay.controlSize < safeAreaInsets.top + pageHeaderHeight
     adoptComposerIfNeeded()
     bindScrollOwnerIfNeeded()
     attachTitle()
@@ -833,6 +839,14 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   }
 
   @objc private func dismissKeyboard() { endEditing(true) }
+  /// A user bubble's links: its sent quotes open in full, other links as in any message.
+  func openUserMessageLink(_ href: String) {
+    guard let quote = ChatQuoteLink.snapshot(href) else { openMessageLink(href); return }
+    guard let controller = presenter(), controller.presentedViewController == nil else { return }
+    pauseTracking()
+    controller.present(ChatQuoteViewerController(snapshot: quote), animated: true)
+  }
+
   func openMessageLink(_ href: String) {
     pauseTracking()
     if let target = ChatFileLink(href) {
@@ -844,6 +858,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
   }
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if gestureRecognizer === selectionTap { return true }
     // Row actions own their tap. Dismissing the keyboard first moves the row
     // before UICollectionView can deliver selection (notably Retry).
     if let index = collection.indexPathForItem(at: touch.location(in: collection)),
@@ -1031,6 +1046,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     incoming.fullScreenTopInset = old.fullScreenTopInset
     // The conversation's run config, not the creation page's, answers the chip from here on.
     incoming.onRunConfig = old.onRunConfig
+    incoming.quotesSupported = old.quotesSupported
     incoming.cardStyle = old.cardStyle
     incoming.restsCollapsed = old.restsCollapsed
     incoming.setInputIdentifier("session-input")

@@ -23,6 +23,11 @@ export function executionProjection(
     raw.filter((e) => e.role === 'user').map((e) => [e.id, e]),
   );
   const assistants = raw.filter((e) => e.role === 'assistant');
+  const lastAssistant = assistants.at(-1);
+  const hasActiveAssistant =
+    !!lastAssistant &&
+    lastAssistant.finished !== true &&
+    typeof lastAssistant.endedAt !== 'number';
   for (const entry of users.values()) {
     const receipt = receipts.get(entry.id);
     const intent =
@@ -30,18 +35,34 @@ export function executionProjection(
       entry.inputConfig?._lodyDeliveryKind === 'steer';
     const targetId = receipt?.targetId ?? entry.inputConfig?._lodySteerTarget;
     if (receipt || intent) {
-      let delivery = receipt?.state ?? 'confirming';
+      let delivery: SteerReceipt['state'] | undefined =
+        receipt?.state ?? 'confirming';
       if (
         ['processing', 'handled'].includes(entry.status) ||
         assistants.some((e) => e.userTurnId === entry.id)
       )
         delivery = 'accepted';
-      if (entry.status === 'pending' && receipt?.state !== 'accepted')
+      else if (
+        ['pending', 'seen'].includes(entry.status) &&
+        receipt?.state !== 'accepted'
+      )
         delivery = 'waiting';
-      result.set(entry.id, { delivery });
+      else if (entry.status === 'delivery_unknown') delivery = 'unknown';
+      else if (['canceled', 'failed'].includes(entry.status))
+        delivery = undefined;
+      else if (
+        entry.status === 'pending_apply' &&
+        !receipt &&
+        !hasActiveAssistant
+      )
+        delivery = 'unknown';
+      if (delivery) result.set(entry.id, { delivery });
       if (
         targetId &&
-        ['confirming', 'unknown', 'accepted'].includes(delivery) &&
+        delivery &&
+        (delivery === 'accepted' ||
+          (hasActiveAssistant &&
+            ['confirming', 'unknown'].includes(delivery))) &&
         !raw.some((e) => e.role === 'assistant' && e.userTurnId === entry.id)
       ) {
         result.set(targetId, { ...result.get(targetId), holdOpen: true });

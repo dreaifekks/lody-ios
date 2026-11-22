@@ -135,6 +135,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       signedOutLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -LodyLayout.screenPaddingX * 2),
     ])
     NSLayoutConstraint.activate(composingConstraints)
+    composer.allowsFullScreen = true
     composer.setInputIdentifier("create-session-input")
     composer.setComposerState(CreateJSON.encode(["placeholder": String(localized: "create.composer.placeholder", bundle: .lody)]))
 #if !LODY_SHARE_EXTENSION
@@ -149,6 +150,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     fetchBranches()
     loadAgentRoles()
     loadGroups()
+  }
+
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    composer.fitPageRoom()
   }
 
   @objc private func searchFocusChanged(_ notification: Notification) {

@@ -13,7 +13,9 @@ enum GitHubPullRequests { static func run(_ payload: String) async throws -> Str
   var writes = 0
   var service: PullRequestService { .init(read: { [self] in
     try await withCheckedThrowingContinuation { reads.append($0) }
-  }, comment: { [self] _ in writes += 1; return true }) }
+  }, comment: { [self] _ in writes += 1; return true },
+    merge: { _ in preconditionFailure("Unexpected merge during comment verification") },
+    deleteBranch: { preconditionFailure("Unexpected branch deletion during comment verification") }) }
   var snapshot: PullRequestSnapshot {
     .init(state: "open", author: "a", repository: "a/b", number: 1, title: "Title", body: "", headRef: "feature", baseRef: "main", headSha: "1234567", additions: 1, deletions: 0, changedFiles: 1, commits: 1, checks: [], comments: [])
   }

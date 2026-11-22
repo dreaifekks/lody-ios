@@ -252,6 +252,8 @@ enum LodyToastOverlay {
 
     private func restartTimer() {
       timer?.invalidate()
+      // The offline Status Undo check waits for a completed projection before tapping the toast.
+      if pills.last?.hasAction == true, LodyUIVerify.status, LodyUIVerify.has("--ui-review-status-undo") { return }
       let voiceOver = UIAccessibility.isVoiceOverRunning
       let duration: TimeInterval
       if pills.last?.hasAction == true {

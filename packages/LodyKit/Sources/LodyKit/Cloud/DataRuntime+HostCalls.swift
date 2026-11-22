@@ -6,6 +6,16 @@ extension DataRuntime {
     switch request {
     case .grant:
       grantWaiters.append(id)
+      if let prefetchedGrant {
+        self.prefetchedGrant = nil
+        var grant = prefetchedGrant.value
+        let elapsed = prefetchedGrant.requestedAt.duration(to: .now).components
+        grant.expiresIn -= Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        if grant.expiresIn > 30, let workspace, WorkspaceModePins.shared.mode(workspace) == .plaintext {
+          deliverGrant(grant)
+          return
+        }
+      }
       fetchGrant()
     case .shortcutCloud(let params): shortcutCloud(id, params)
     case .githubMentions(let params): githubMentions(id, params)
@@ -70,7 +80,7 @@ extension DataRuntime {
       else { channel.fail(id: id, method: Call.method, code: "share_request_failed") }
     }
   }
-  private func fetchGrant() {
+  func fetchGrant() {
     guard grantTask == nil else { return }
     guard let workspace, WorkspaceModePins.shared.mode(workspace) == .plaintext, let view = webView else { deliverGrant(nil); return }
     do {
@@ -80,6 +90,7 @@ extension DataRuntime {
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.httpBody = try JSONSerialization.data(withJSONObject: ["workspaceId": workspace])
+      let requestedAt = ContinuousClock.now
       grantTask = URLSession.shared.dataTask(with: request) { [weak self, weak view] data, response, error in
         DispatchQueue.main.async {
           guard let self, let view, self.webView === view else { return }
@@ -93,7 +104,9 @@ extension DataRuntime {
              let expiry = value["expiresIn"] as? Double, expiry > 0 {
             grant = .init(token: token, gatewayBaseUrl: address, expiresIn: expiry, shardHostSuffix: value["shardHostSuffix"] as? String)
           }
-          self.deliverGrant(grant)
+          if self.grantWaiters.isEmpty, let grant {
+            self.prefetchedGrant = (grant, requestedAt)
+          } else { self.deliverGrant(grant) }
         }
       }
       grantTask?.resume()

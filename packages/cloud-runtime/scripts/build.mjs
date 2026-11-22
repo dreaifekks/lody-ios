@@ -30,7 +30,7 @@ export async function buildDataRuntime(
     bundle: true,
     format: 'esm',
     platform: 'browser',
-    target: 'safari17',
+    target: 'safari16.4',
     write: false,
   });
   await mkdir(output, { recursive: true });

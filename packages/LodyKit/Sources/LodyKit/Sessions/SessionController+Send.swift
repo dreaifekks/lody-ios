@@ -76,7 +76,7 @@ extension SessionController {
       if body["pendingActions"] as? Bool == true { self?.presentPendingActions(body["id"] as? String) }
       else if body["forget"] as? Bool == true { self?.confirmForgetPendingInput(body["id"] as? String) }
       else if body["retryPending"] as? Bool == true, let id = body["id"] as? String { self?.retryPendingInput(id) }
-      else { self?.sender?.retry() }
+      else if let id = body["id"] as? String { self?.sender?.retry(id) }
     }
     chat.onComposerOptionChange = { [weak self] body in self?.composerModel.change(body) }
     // The conversation composer is the new-chat composer (web's mobile session page): a card
@@ -85,8 +85,34 @@ extension SessionController {
     // At rest one line (+, prompt, agent mark ⌄, Send); the card opens while editing.
     chat.composer.restsCollapsed = true
     chat.composer.onRunConfig = { [weak self] in self?.presentRunConfig() }
+    // Quotes need the conversation's computer to advertise `messageQuotes` (web gate).
+    chat.composer.quotesSupported = { [weak self] in self?.supportsMessageQuotes == true }
     chat.onStop = { [weak self] _ in self?.controlTurn("stop") }
     chat.onSteer = { [weak self] body in self?.controlTurn("steer", messageId: body["id"] as? String) }
+  }
+
+  /// A computer that catches up, comes online or a runtime that becomes ready changes the
+  /// creation options; the composer reads them again while its last read was incomplete.
+  func observeCreationOptions() -> NSObjectProtocol {
+    NotificationCenter.default.addObserver(forName: .lodyDataRuntimeEvent, object: nil, queue: .main) { [weak self] note in
+      let optionsChanged = note.userInfo?["creationOptionsChanged"] as? Bool == true
+      let live = note.userInfo?["state"] as? String == "live"
+      guard optionsChanged || live else { return }
+      MainActor.assumeIsolated {
+        guard let self, DataRuntime.current?.workspace == self.source.state.workspaceId else { return }
+        self.optionsRefresh?.cancel()
+        self.optionsRefresh = Task { [weak self] in
+          do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+          self?.composerModel.optionsChanged()
+        }
+      }
+    }
+  }
+
+  var supportsMessageQuotes: Bool {
+    let catalog = source.state.catalog
+    guard let session = catalog.session(sessionId) else { return false }
+    return (catalog.machineCapabilities[session.machineId]?[ChatMessageQuote.capability] ?? 0) >= 1
   }
 
   private func retryPendingInput(_ id: String) {
@@ -217,6 +243,10 @@ extension SessionController {
     adjustComposer(&composer)
     apply("composer", Self.json(composer), chat.setComposerState)
     apply("options", composerModel.optionsJSON, chat.setComposerOptions)
+    if let panel = runConfigPanel {
+      let rows = composerModel.runConfig
+      if panel.runConfig != rows { panel.runConfig = rows }
+    }
     apply("pending", sender?.pendingSendJSON ?? "", chat.setPendingSendJSON)
     renderDecisions(feed)
     renderEditable(feed, enabled: live && state.connected && !state.loading && !session.archived && sender?.sending != true
@@ -247,9 +277,29 @@ extension SessionController {
   }
 
   private func connection(_ feed: SessionFeedState) -> String {
-    if feed.overflow { return "" }
-    if ["offline", "failed", "stopped"].contains(feed.status) { return "paused" }
-    return feed.status == "live" ? "" : "connecting"
+    if feed.overflow || feed.status == "live" {
+      connectingTask?.cancel()
+      connectingTask = nil
+      connectingShown = false
+      return ""
+    }
+    if ["offline", "failed", "stopped"].contains(feed.status) {
+      connectingTask?.cancel()
+      connectingTask = nil
+      connectingShown = false
+      return "paused"
+    }
+    if connectingShown { return "connecting" }
+    if connectingTask == nil {
+      connectingTask = Task { @MainActor [weak self] in
+        do { try await Task.sleep(for: .milliseconds(4000)) } catch { return }
+        guard let self else { return }
+        self.connectingTask = nil
+        self.connectingShown = true
+        self.renderComposer()
+      }
+    }
+    return ""
   }
 
   private func placeholder(_ session: SessionItem, locked: Bool) -> String {
@@ -280,6 +330,7 @@ extension SessionController {
     chat.endEditing(true)
     let state = CreatePanelState()
     state.runConfig = rows
+    runConfigPanel = state
     state.onPick = { [weak self, weak state] row, option in
       guard let self else { return }
       self.composerModel.pick(row, option)
