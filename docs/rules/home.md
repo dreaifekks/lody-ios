@@ -13,3 +13,13 @@ Read before changing Home: its tabs and bottom bar, the workspace capsule, the S
 - On the Schedules tab the system tab bar's create action turns into "+" ("New schedule", `HomeTabsController.updateCreate`) and pushes a new schedule's editor (`SchedulesController.newSchedule`). The Projects add menu (`Projects/ProjectAddMenu`, `GitHubRepositoryPicker`) is unwired while the Projects tab is hidden.
 
 - The workspace capsule opens `Chrome/WorkspaceSwitcherPanel`, a popover that never adapts into a sheet, because a `UIMenu` wraps long names and cannot fade them. Each workspace name stays on one line and fades out at the trailing edge (no wrapping, no ellipsis); rows keep the leading checkmark, workspace avatars, full VoiceOver names and the selected trait. The email heading comes only from the source’s account projection, never a global-auth fallback; empty identity clears it. Choosing the current workspace is a no-op. Workspace management remains in Settings › General.
+
+## Chats project index
+
+These rules bind `Sessions/InboxProjectIndex` and every caller that renders, scrolls or replaces the Chats list.
+
+- The Chats project index (compact and split column alike) appears while scrolling over the list, accepts direct tap/scrub only inside its visible opaque rail, and resolves jumps against committed rendered sections. Never attach an index long-press recognizer to the list. Linger dismissal must be invalidated by renewed scrolling/touch, snapshot replacement, backgrounding and detachment; search and other groupings retain their existing behavior.
+
+- Project grouping may hide the repeated place label, but must retain raw repository identity for the index. On iOS and Android, each project group label leads with that repository's owner avatar (`RepositoryIcon`, `muted` off) in original colours, without the row marks' saturation or opacity. Keep index artwork at 24 pt in targets with at least 48 pt pitch; overflow uses bounded landmarks instead of squeezing targets. Keep landmarks fixed during a gesture and retain every destination through scrubbing and accessibility. Anchor scrubbing to the tapped landmark so small finger movement cannot jump to an unrelated proportional destination. The rail background must remain opaque in both light and dark appearances.
+
+- Index entrance and exit use restrained movement with full opacity at rest. Disable hit targets when dismissal begins, fence interrupted animation completions, and skip movement under Reduce Motion. Lifecycle cancellation must stop animations and hide immediately.
