@@ -249,6 +249,38 @@ test('only advertised well-formed commands are selectable', () => {
   );
 });
 
+test('a session lists its agent’s reported commands before the config’s probe preview', () => {
+  const agent = { cliType: 'custom', agentType: 'custom-a1' };
+  const preview = {
+    ...agent,
+    availableCommands: [{ name: 'probe', description: 'Probe' }],
+  };
+  const names = (actual, capability) =>
+    mentions
+      .agentCommandMentions(actual, capability, agent)
+      .items.map((item) => item.insertText);
+  // The probe of a custom command can finish before it advertises commands.
+  assert.deepEqual(
+    names([{ name: 'review' }, { name: 'init' }], {
+      ...agent,
+      availableCommands: [],
+    }),
+    ['/review', '/init'],
+  );
+  assert.deepEqual(
+    names([], preview),
+    [],
+    'a reported empty list clears the menu',
+  );
+  assert.deepEqual(names(undefined, preview), ['/probe']);
+  assert.deepEqual(
+    names(undefined, { ...preview, agentType: 'custom-other' }),
+    [],
+    'another agent’s preview is never shown',
+  );
+  assert.deepEqual(names(undefined, undefined), []);
+});
+
 test('first turn, queue and Steer persist the same expansion before delivery; failure writes nothing', async () => {
   const requests = [];
   const fixture = await openTestSession({

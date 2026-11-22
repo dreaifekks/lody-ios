@@ -4,7 +4,12 @@ import type {
   MentionSource,
 } from '../../models/mentions';
 import { workspaceRoleMentions } from '../agent-roles';
-import { commandMentions, mentionCatalog, sessionMentions } from '../mentions';
+import {
+  agentCommandMentions,
+  mentionCatalog,
+  sessionMentions,
+} from '../mentions';
+import { sessionDoc } from '../session';
 import { listedShortcuts } from '../prompt-shortcuts';
 import {
   sameShortcutProject,
@@ -193,18 +198,22 @@ export function registerMentions(ctx: RuntimeContext) {
               'agentConfigId',
             ]) ?? metadata?.agentConfigId)
           : args.agentConfigId;
-        if (typeof configId !== 'string') return commandMentions([]);
-        const capability = machineReplicas
-          .get(machineId)
-          ?.get(['acpCapability', configId]) as
-          Record<string, unknown> | undefined;
-        if (
-          !capability ||
-          capability.cliType !== (args.cliType ?? session?.cliType) ||
-          capability.agentType !== (args.agentType ?? session?.agentType)
-        )
-          return commandMentions([]);
-        return commandMentions(capability.availableCommands);
+        const runtimeConfig = session
+          ? (sessionDoc(session.id)?.getMap('acpRuntimeConfig').toJSON() as
+              Record<string, unknown> | undefined)
+          : undefined;
+        const capability =
+          typeof configId === 'string'
+            ? (machineReplicas
+                .get(machineId)
+                ?.get(['acpCapability', configId]) as
+                Record<string, unknown> | undefined)
+            : undefined;
+        return agentCommandMentions(
+          runtimeConfig?.availableCommands,
+          capability,
+          { cliType, agentType },
+        );
       };
       const result = commands();
       const names = new Set(result.items.map((item) => item.insertText));

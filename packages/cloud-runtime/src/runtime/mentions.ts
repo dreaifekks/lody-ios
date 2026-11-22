@@ -323,3 +323,22 @@ export function commandMentions(commands: unknown): MentionCatalog {
   }
   return { items: [...items.values()], truncated: false, incomplete: false };
 }
+
+/**
+ * Web `useAvailableCommands`: the session's actual list (an empty one included) once its
+ * agent reported it, otherwise the agent config's probe preview when it describes that agent.
+ */
+export function agentCommandMentions(
+  actual: unknown,
+  capability: Record<string, unknown> | undefined,
+  agent: { cliType?: string; agentType?: string },
+): MentionCatalog {
+  if (Array.isArray(actual)) return commandMentions(actual);
+  if (
+    !capability ||
+    capability.cliType !== agent.cliType ||
+    capability.agentType !== agent.agentType
+  )
+    return commandMentions([]);
+  return commandMentions(capability.availableCommands);
+}
