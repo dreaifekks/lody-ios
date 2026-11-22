@@ -1855,7 +1855,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     grabber.isHidden = !showsGrabber
     grabberHeight.constant = showsGrabber ? ChatComposerGrabber.height : 0
     grabber.accessibilityLabel = String(localized: String.LocalizationValue(fullScreen ? "native.chat.composer.collapse" : "native.chat.composer.expand"), bundle: .lody)
-    let fullProgress = dragProgress ?? (fullScreen ? 1 : 0)
+    var fullProgress = dragProgress ?? (fullScreen ? 1 : 0)
     accessoryHeight.constant = expanded ? 48 : 0
     attachLeading.constant = expanded ? 8 : 2
     sheetContentBottom.constant = expanded && !cardStyle ? -ChatComposerLiquidGlassSurfaceLayout.sheetBleed : 0
@@ -1907,6 +1907,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // The prompt (and everything above it) sits on top of the docked panel.
     (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(dock)
     let chrome = others + dock
+    if dock > 0 { fullProgress = 0 }
     // A conversation's card opens with focus (the expansion's own animation carries it).
     // A conversation's card can also stay open across a focus change when a draft keeps it open.
     let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
