@@ -14,6 +14,9 @@ import { sessionFileRootMounts } from '../../protocol/session-file-roots.ts';
 
 export type RuntimeChannel = ReturnType<typeof createChannel>;
 export type MetaReplica = { flock: Flock; client: StreamsClient };
+export type GrantProvider = (() => Promise<Grant>) & {
+  invalidate?: (failedToken?: string) => void;
+};
 
 export type RuntimeState = {
   workspace: string;
@@ -35,7 +38,7 @@ export type RuntimeState = {
 export type RuntimeContext = {
   channel: RuntimeChannel;
   state: RuntimeState;
-  getGrant: () => Promise<Grant>;
+  getGrant: GrantProvider;
   broker: (operation: string, args: object) => Promise<unknown>;
   publish: () => void;
   publishSubscriptions: () => void;
@@ -69,17 +72,25 @@ export function scopedWorkspaceGrant(
   { state, getGrant }: RuntimeContext,
   workspaceId: string,
   userId: string,
-) {
-  return async () => {
-    const check = () => {
-      if (state.workspace !== workspaceId || state.userId !== userId)
-        throw new Error('workspace_changed');
-    };
-    check();
-    const value = await getGrant();
-    check();
-    return value;
+): GrantProvider {
+  const check = () => {
+    if (state.workspace !== workspaceId || state.userId !== userId)
+      throw new Error('workspace_changed');
   };
+  return Object.assign(
+    async () => {
+      check();
+      const value = await getGrant();
+      check();
+      return value;
+    },
+    {
+      invalidate: (failedToken?: string) => {
+        if (state.workspace === workspaceId && state.userId === userId)
+          getGrant.invalidate?.(failedToken);
+      },
+    },
+  );
 }
 
 export function scopedShortcutCloud(

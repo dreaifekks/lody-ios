@@ -92,20 +92,29 @@ const publishSubscriptions = () =>
 let grant: Grant | undefined,
   expiresAt = 0;
 let grantPending: Promise<Grant> | undefined;
-async function getGrant() {
-  if (grant && Date.now() < expiresAt) return grant;
-  grantPending ??= channel
-    .request('grant', {})
-    .then((value) => {
-      grant = value;
-      expiresAt = Date.now() + Math.max(1, value.expiresIn - 30) * 1000;
-      return value;
-    })
-    .finally(() => {
-      grantPending = undefined;
-    });
-  return grantPending;
+function invalidateGrant(failedToken?: string) {
+  if (!failedToken || grant?.token === failedToken) {
+    grant = undefined;
+    expiresAt = 0;
+  }
 }
+const getGrant = Object.assign(
+  async function getGrant() {
+    if (grant && Date.now() < expiresAt) return grant;
+    grantPending ??= channel
+      .request('grant', {})
+      .then((value) => {
+        grant = value;
+        expiresAt = Date.now() + Math.max(1, value.expiresIn - 30) * 1000;
+        return value;
+      })
+      .finally(() => {
+        grantPending = undefined;
+      });
+    return grantPending;
+  },
+  { invalidate: invalidateGrant },
+);
 const delay = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     if (signal.aborted) {

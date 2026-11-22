@@ -1746,11 +1746,13 @@ export async function sendTurn(
       if (!applied) throw new Error('role_changed');
     }
     const pendingQueue = (state.doc.toJSON().mq ?? []) as any[];
-    const mcpServerIds = await selectMcp(
+    let persistedMcp: unknown =
       pendingQueue.findLast((item) =>
         Array.isArray(item.acpSessionConfig?.mcpServerIds),
-      )?.acpSessionConfig.mcpServerIds ?? previous.mcpServerIds,
-    );
+      )?.acpSessionConfig.mcpServerIds ?? previous.mcpServerIds;
+    if (!Array.isArray(persistedMcp) && (started || pendingQueue.length > 0))
+      persistedMcp = [];
+    const mcpServerIds = await selectMcp(persistedMcp);
     if (sessions.get(state.id) !== state || !state.ready)
       throw new Error('session_not_ready');
     const inputConfig = {
