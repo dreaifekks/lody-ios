@@ -25,6 +25,18 @@ export const ClearableString = z
   .object({ value: z.string().nullable() })
   .meta({ id: 'ClearableString' });
 
+export const CreateTabParams = z
+  .object({
+    workspaceId,
+    sessionId: z.string().uuid(),
+    parentSessionId: z.string().min(1),
+    preferRoost: z.boolean().optional(),
+    title: z.string().min(1).max(200),
+    /** A Tab is a session: the free-plan session quota applies as on Web (null fails open). */
+    billingEntitlement: BillingEntitlement.nullable(),
+  })
+  .meta({ id: 'CreateTabParams' });
+
 export const CreateSessionParams = z
   .object({
     workspaceId,
@@ -33,8 +45,17 @@ export const CreateSessionParams = z
     machineId: z.string(),
     agentConfigId: z.string(),
     userId: z.string(),
+    preferRoost: z.boolean().optional(),
     title: z.string(),
     branch: z.string().optional(),
+    /** Provenance only (web): the Role this session starts as, frozen at its revision. */
+    agentRoleId: z.string().min(1).optional(),
+    agentRoleRevision: z.number().int().positive().optional(),
+    /**
+     * Start in a multi-repository project (web Project group): the runtime reads the
+     * group fresh and writes its `projectRun` snapshot. `projectId` is then omitted.
+     */
+    projectGroupId: z.string().uuid().optional(),
     billingEntitlement: BillingEntitlement.nullable(),
   })
   .meta({ id: 'CreateSessionParams' });
@@ -80,6 +101,10 @@ export const ArchiveSessionParams = z
   .object({ workspaceId, sessionId, archived: z.boolean() })
   .meta({ id: 'ArchiveSessionParams' });
 
+export const SetTabClosedParams = z
+  .object({ workspaceId, sessionId, closed: z.boolean() })
+  .meta({ id: 'SetTabClosedParams' });
+
 export const PinSessionParams = z
   .object({ workspaceId, sessionId, pinned: z.boolean() })
   .meta({ id: 'PinSessionParams' });
@@ -92,6 +117,45 @@ export const RenameSessionParams = z
   .object({ workspaceId, sessionId, title: z.string() })
   .meta({ id: 'RenameSessionParams' });
 
+export const SetSessionOwnerParams = z
+  .object({ workspaceId, sessionId, userId: z.string().min(1) })
+  .meta({ id: 'SetSessionOwnerParams' });
+
+export const SessionWorkspacePathParams = z
+  .object({ workspaceId, sessionId })
+  .meta({ id: 'SessionWorkspacePathParams' });
+
+export const SessionWorkspacePathResult = z
+  .object({ path: z.string().nullable() })
+  .meta({ id: 'SessionWorkspacePathResult' });
+
+export const ConversationMarkdownParams = z
+  .object({
+    workspaceId,
+    sessionId,
+    /** Display names keyed by userId; the builder shows them only for multi-human sessions. */
+    participants: z.record(z.string(), z.string()),
+    /** Localized header line used only when the final assistant turn is unfinished. */
+    incompleteNotice: z.string(),
+  })
+  .meta({ id: 'ConversationMarkdownParams' });
+
+export const ConversationMarkdownResult = z
+  .discriminatedUnion('state', [
+    z.object({ state: z.literal('empty') }),
+    z.object({
+      state: z.literal('ready'),
+      markdown: z.string(),
+      estimatedTokens: z.number(),
+      overBudget: z.boolean(),
+      toolCallsCollapsed: z.boolean(),
+      thinkingTruncated: z.boolean(),
+      terminalTrimmed: z.boolean(),
+      toolResultsTruncated: z.number(),
+    }),
+  ])
+  .meta({ id: 'ConversationMarkdownResult' });
+
 export const CheckTurnQuotaParams = z
   .object({ sessionId, billingEntitlement: BillingEntitlement.nullable() })
   .meta({ id: 'CheckTurnQuotaParams' });
@@ -102,6 +166,24 @@ export const CheckTurnQuotaResult = z
     z.object({ state: z.literal('not_sent'), reason: QuotaReason }),
   ])
   .meta({ id: 'CheckTurnQuotaResult' });
+
+export const ForgetPendingInputParams = z
+  .object({ sessionId, inputId: z.string().min(1).max(256) })
+  .meta({ id: 'ForgetPendingInputParams' });
+
+export const RetryPendingInputResult = z
+  .object({ state: z.enum(['pending', 'accepted', 'settled']) })
+  .meta({ id: 'RetryPendingInputResult' });
+export type RetryPendingInputResult = z.infer<typeof RetryPendingInputResult>;
+
+/** A composer quote card: a read-only snapshot and the comment on it (web message quotes). */
+export const MessageQuoteInput = z
+  .object({
+    id: z.string(),
+    text: z.string(),
+    comment: z.string().optional(),
+  })
+  .meta({ id: 'MessageQuoteInput' });
 
 export const SendTurnParams = z
   .object({
@@ -115,6 +197,8 @@ export const SendTurnParams = z
     userId: z.string().optional(),
     text: z.string(),
     attachmentBlocks: blocks.optional(),
+    /** Quote cards; the runtime appends them after the rewritten text. */
+    quotes: z.array(MessageQuoteInput).optional(),
     cliType: z.string().optional(),
     agentType: z.string().optional(),
     resume: z.string().optional(),
@@ -123,6 +207,14 @@ export const SendTurnParams = z
     reasoningEffort: ClearableString.optional(),
     reasoningEffortConfigId: z.string().optional(),
     configOptionValues: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * The turn may run as an Agent Role (web session composer). Only the id
+     * crosses: the runtime reads the Role row itself and applies its memory and
+     * provenance — and, on a session's first turn only, its prompt prefix — or
+     * refuses (`role_unavailable` / `role_changed`). `{ value: null }` is an
+     * explicit None that ends the conversation's Role; omitted inherits it.
+     */
+    agentRoleId: ClearableString.optional(),
     billingEntitlement: BillingEntitlement.nullable(),
   })
   .meta({ id: 'SendTurnParams' });
@@ -169,6 +261,7 @@ export const EditSessionParams = z
       text: z.string().optional(),
       retainedIds: z.array(z.string()).optional(),
       attachmentBlocks: blocks.optional(),
+      quotes: z.array(MessageQuoteInput).optional(),
     }),
   ])
   .meta({ id: 'EditSessionParams' });
@@ -210,6 +303,8 @@ export const EditSessionResult = z
       state: z.literal('ready'),
       id: z.string(),
       text: z.string(),
+      /** The message's quotes, restored as cards; `text` is the main text before them. */
+      quotes: z.array(MessageQuoteInput).optional(),
       attachments: z.array(EditAttachment),
     }),
     z.object({ state: z.literal('accepted'), id: z.string() }),
@@ -255,6 +350,27 @@ export const RespondPermissionResult = z
   .object({ state: z.enum(['accepted', 'stale', 'conflict']) })
   .meta({ id: 'RespondPermissionResult' });
 
+/**
+ * Accept or dismiss an Agent's proposal notice (`agent_role_proposal` saves the
+ * Role, `schedule_proposal` creates the schedule) and record the outcome in history.
+ */
+export const DecideProposalParams = z
+  .object({
+    workspaceId,
+    sessionId,
+    entryId: z.string().min(1),
+    itemId: z.string().min(1),
+    decision: z.enum(['accept', 'dismiss']),
+  })
+  .meta({ id: 'DecideProposalParams' });
+
+export const DecideProposalResult = z
+  .object({
+    outcome: z.enum(['saved', 'created', 'dismissed']),
+    scheduleId: z.string().optional(),
+  })
+  .meta({ id: 'DecideProposalResult' });
+
 export type BillingEntitlement = z.infer<typeof BillingEntitlement>;
 export type CreateSessionResult = z.input<typeof CreateSessionResult>;
 export type CheckTurnQuotaResult = z.input<typeof CheckTurnQuotaResult>;
@@ -278,3 +394,18 @@ export const ConfirmSessionCreationParams = z
 export const ConfirmSessionCreationResult = z
   .object({ state: z.enum(['seen', 'pending', 'absent', 'not_ready']) })
   .meta({ id: 'ConfirmSessionCreationResult' });
+
+export const ForkSessionParams = z
+  .object({
+    workspaceId,
+    sourceSessionId: sessionId,
+    sourceTurnId: z.string().min(1),
+    action: z.enum(['read', 'send']),
+    targetSessionId: z.string().uuid().optional(),
+  })
+  .meta({ id: 'ForkSessionParams' });
+export const ForkSessionResult = z
+  .object({
+    state: z.enum(['ready', 'created', 'rejected', 'unknown']),
+  })
+  .meta({ id: 'ForkSessionResult' });

@@ -1,12 +1,5 @@
 import { lanTerminalEndpoint } from '../../protocol/catalog.ts';
 import { machineRpc } from '../machine-rpc';
-import { openSettings } from '../settings';
-import {
-  machineHostsVoice,
-  sharedVoiceAgent,
-  voiceAgentOptions,
-  voiceReply,
-} from '../voice';
 import type { RuntimeContext } from './context.ts';
 
 /** LAN diagnostics use the same heartbeat projection as creation and Role discovery. */
@@ -49,6 +42,8 @@ export function registerLan(ctx: RuntimeContext) {
       { requestId: crypto.randomUUID() },
       getGrant,
       AbortSignal.timeout(6000),
+      undefined,
+      30000,
       () => {
         sentAt = performance.now();
       },
@@ -85,63 +80,5 @@ export function registerLan(ctx: RuntimeContext) {
             )
           : undefined,
     };
-  });
-  channel.handle('voiceAgents', async (args) => {
-    if (args.workspaceId !== state.workspace || !state.metaReplica)
-      throw new Error('metadata_not_ready');
-    const replica = state.metaReplica;
-    const { flock } = await openSettings(
-      `${args.workspaceId}:wf:workspace`,
-      getGrant,
-      AbortSignal.timeout(30000),
-    );
-    if (state.workspace !== args.workspaceId || state.metaReplica !== replica)
-      throw new Error('workspace_changed');
-    return {
-      shared: sharedVoiceAgent(flock.scan()),
-      agents: voiceAgentOptions(replica.flock, state.machineReplicas),
-    };
-  });
-  channel.handle('machineVoice', async (args) => {
-    if (args.workspaceId !== state.workspace || !state.metaReplica)
-      throw new Error('metadata_not_ready');
-    const replica = state.metaReplica;
-    const { request } = args;
-    if (typeof request.action !== 'string')
-      throw new Error('invalid_voice_request');
-    let machineId = args.machineId;
-    let params = request;
-    if (request.action === 'start') {
-      let agent = args.agent;
-      if (!agent) {
-        const { flock } = await openSettings(
-          `${args.workspaceId}:wf:workspace`,
-          getGrant,
-          AbortSignal.timeout(30000),
-        );
-        agent = sharedVoiceAgent(flock.scan()) ?? undefined;
-      }
-      if (!agent) return { success: false, error: 'voice_no_agent' };
-      machineId = agent.machineId;
-      params = { ...request, configId: agent.configId };
-    }
-    if (state.workspace !== args.workspaceId || state.metaReplica !== replica)
-      throw new Error('workspace_changed');
-    if (
-      !machineId ||
-      !(state.catalogs.get('meta')?.machineIds ?? []).includes(machineId)
-    )
-      return { success: false, error: 'machine_unavailable' };
-    if (!machineHostsVoice(replica.flock, machineId))
-      return { success: false, error: 'voice_unsupported' };
-    const reply = await machineRpc(
-      args.workspaceId,
-      machineId,
-      'machine/voice',
-      params,
-      getGrant,
-      AbortSignal.timeout(request.action === 'start' ? 180000 : 30000),
-    );
-    return { ...voiceReply(reply), machineId };
   });
 }

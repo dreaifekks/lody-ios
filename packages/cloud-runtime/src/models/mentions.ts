@@ -8,6 +8,8 @@ export type MentionItem = {
   insertText?: string;
   /** Role target labels may differ from the catalog Role name. */
   roleName?: string;
+  /** A Role's emoji, shown before its name. */
+  emoji?: string;
 };
 export type MentionSource = {
   workspaceId: string;

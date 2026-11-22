@@ -1,0 +1,114 @@
+{
+  "repository": "https://github.com/LodyAI/Lody",
+  "branch": "main",
+  "commit": "7895c4102d22ed9fd28b43451ae79a65e4781b8b",
+  "license": "AGPL-3.0-only (fractional index: MIT, see its header)",
+  "files": [
+    {
+      "path": "pinned-sections.ts",
+      "upstream": "packages/shared/src/pinned-sections.ts",
+      "sha256": "bb16421317f3f79ede294ce4f378b5cbd836a12ff328636f48411010bf4d898f",
+      "adapt": [
+        [
+          "from './vendor/loro-fractional-index';",
+          "from './vendor/loro-fractional-index.ts';"
+        ]
+      ]
+    },
+    {
+      "path": "vendor/loro-fractional-index.ts",
+      "upstream": "packages/shared/src/vendor/loro-fractional-index.ts",
+      "sha256": "7b9ee055b6baf2c50106951001550636286638199db1e1a784ef29ffe06c0fe6",
+      "adapt": []
+    },
+    {
+      "path": "status-view/index.ts",
+      "upstream": "packages/shared/src/status-view/index.ts",
+      "sha256": "c8e4555d524526cec2b76afcecc5466ecbf2882e9b3c05521042efb0cabe5c9a",
+      "adapt": [
+        [
+          "from './command';",
+          "from './command.ts';"
+        ],
+        [
+          "from './layout';",
+          "from './layout.ts';"
+        ],
+        [
+          "from './opened-by-tree';",
+          "from './opened-by-tree.ts';"
+        ],
+        [
+          "from './tiers';",
+          "from './tiers.ts';"
+        ]
+      ]
+    },
+    {
+      "path": "status-view/tiers.ts",
+      "upstream": "packages/shared/src/status-view/tiers.ts",
+      "sha256": "08a7474e7130544171c4576dd1e47f8fcc3c1051a40b86a94a9782bc0c3ee2e4",
+      "adapt": []
+    },
+    {
+      "path": "status-view/opened-by-tree.ts",
+      "upstream": "packages/shared/src/status-view/opened-by-tree.ts",
+      "sha256": "6750b15d5004e04cde6547227b87b7ed3768cf0a31e9bbaf0267d11d1a531b24",
+      "adapt": []
+    },
+    {
+      "path": "status-view/layout.ts",
+      "upstream": "packages/shared/src/status-view/layout.ts",
+      "sha256": "c9a4692b2961a83ffe5afb037b6da089c47494f3b00f496f295ff72477d586ff",
+      "adapt": [
+        [
+          "from '../pinned-sections';",
+          "from '../pinned-sections.ts';"
+        ],
+        [
+          "from './opened-by-tree';",
+          "from './opened-by-tree.ts';"
+        ],
+        [
+          "from './tiers';",
+          "from './tiers.ts';"
+        ]
+      ]
+    },
+    {
+      "path": "status-view/command.ts",
+      "upstream": "packages/shared/src/status-view/command.ts",
+      "sha256": "75aecaa1c735994fb3e5a5919066ad1c834606aa0dd213cf9d7011e4640caeea",
+      "adapt": [
+        [
+          "from '../pinned-sections';",
+          "from '../pinned-sections.ts';"
+        ],
+        [
+          "from '../vendor/loro-fractional-index';",
+          "from '../vendor/loro-fractional-index.ts';"
+        ],
+        [
+          "from './layout';",
+          "from './layout.ts';"
+        ],
+        [
+          "from './tiers';",
+          "from './tiers.ts';"
+        ]
+      ]
+    },
+    {
+      "path": "status-view/vectors/layout.json",
+      "upstream": "packages/shared/src/status-view/vectors/layout.json",
+      "sha256": "579dd1c05f2c7f9e6f7123e0f32b10ccc2c9fd42a294cdf528b25365212be449",
+      "adapt": []
+    },
+    {
+      "path": "status-view/vectors/commands.json",
+      "upstream": "packages/shared/src/status-view/vectors/commands.json",
+      "sha256": "9da18d567e9d3d5ade8c265d9e74acba0a2e5af6bc4cd802bcf17d8a86aacc3f",
+      "adapt": []
+    }
+  ]
+}

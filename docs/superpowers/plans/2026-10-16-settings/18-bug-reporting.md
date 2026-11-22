@@ -20,10 +20,10 @@ DiagnosticsScreen 已有时间范围、导出、清空和失败恢复；这还�
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/DiagnosticsScreen.tsx](../../../../apps/mobile/src/screens/DiagnosticsScreen.tsx)
-- [apps/mobile/src/features/diagnostics/service.ts](../../../../apps/mobile/src/features/diagnostics/service.ts)
-- [apps/mobile/verification/ui/diagnostics.py](../../../../apps/mobile/verification/ui/diagnostics.py)
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
+- `apps/mobile/src/screens/DiagnosticsScreen.tsx`
+- `apps/mobile/src/features/diagnostics/service.ts`
+- `apps/mobile/verification/ui/diagnostics.py`
+- `apps/mobile/src/screens/SettingsScreen.tsx`
 
 ## 工作内容
 

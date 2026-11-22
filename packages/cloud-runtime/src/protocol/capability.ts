@@ -29,6 +29,12 @@ export function fastModeFor(
   capability: Capability | undefined,
   choice: ModelChoice,
 ) {
+  const model =
+    choice.modelId ??
+    capability?.configOptions?.find((o) => o.category === 'model')
+      ?.currentValue;
+  if (typeof model === 'string' && capability?.fastModes?.[model] === false)
+    return undefined;
   const option = capability?.configOptions?.find(
     (item) =>
       ['fast-mode', 'fast'].includes(item.id) && item.type === 'boolean',

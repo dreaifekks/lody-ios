@@ -20,7 +20,7 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/verification/ui/README.md](../../../../apps/mobile/verification/ui/README.md)
+- `apps/mobile/verification/ui/README.md`
 - [docs/oss-alignment.md](../../../../docs/oss-alignment.md)
 - [AGENTS.md](../../../../AGENTS.md)
 
@@ -52,7 +52,7 @@
 
 - 日期：2026-10-18；本仓基线 `7f669aec86148492e0abc54c4564d32ff3d7ecc5`。本次整理文档与复核证据，不修改生产功能、权限、存储或生成的 iOS 工程。
 - [总计划覆盖矩阵](../2026-10-16-settings-reorganization.md#官方入口覆盖与缺口)逐项列出 16 类官方入口。已交付的是选定首版范围，不能宣称官方截图的全部操作均已补齐。
-- 当前 Settings 工作区包含通用、机器、Agents、角色、MCP、记忆、Prompt Shortcuts、项目、GitHub、AI 用量、已发布分享。逐行对照 [SettingsScreen](../../../../apps/mobile/src/screens/SettingsScreen.tsx) 的 section、scope 条件和事件处理，均有生产目标；无工作区不显示无效操作，报告 Bug 无占位行。
+- 当前 Settings 工作区包含通用、机器、Agents、角色、MCP、记忆、Prompt Shortcuts、项目、GitHub、AI 用量、已发布分享。逐行对照 `SettingsScreen` 的 section、scope 条件和事件处理，均有生产目标；无工作区不显示无效操作，报告 Bug 无占位行。
 - 第一阶段 iPhone 交付不等待后续模块；SET-06 的 iPad 检查仍暂缓。本次授权只收口已选批次，不把该暂缓改成全设备验收通过。
 
 ## 协议、权限与生效边界
@@ -74,7 +74,7 @@
 | AI 用量／SET-16              | AIUsageScreen → WorkspaceUsage.swift                                                             | CloudApi usage summary／timeline；服务端工作区授权，原生剔除成员明细                                                                            | UTC 服务端范围、Token／预估 USD；未知不作 0；无账单核对。原 CloudApi 调查未记录固定 SHA           |
 | 已发布分享／SET-17           | PublishedSharesScreen → runtime share broker → SessionSharing.swift                              | 官方 `a15cdae` 的 session-sharing DTO 与实际客户端；服务端 canManage／canRevoke、expectedRevision；本机 Keychain 链接版本校验                   | 管理员无他人 reader secret；设置不新增发布／重置；未知撤销不重放。spec 为 draft，不等于部署保证   |
 
-完整路径集中在 [runtime](../../../../packages/cloud-runtime/src/runtime)、[Cloud 原生实现](../../../../apps/mobile/modules/lody-kit/ios/Cloud)和[设置业务投影](../../../../apps/mobile/src/features/settings)。长期凭据留在 Keychain，RN 不新增 live replica；各模块具体未知结果恢复规则以任务记录为准。
+完整路径集中在 [runtime](../../../../packages/cloud-runtime/src/runtime)、`Cloud 原生实现`和`设置业务投影`。长期凭据留在 Keychain，RN 不新增 live replica；各模块具体未知结果恢复规则以任务记录为准。
 
 ## 交付与证据索引
 

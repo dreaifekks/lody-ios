@@ -1,10 +1,18 @@
 import { build } from 'esbuild';
+import { defaults } from '../../../../backend-config.mjs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-export async function buildDataRuntime(output) {
+export async function buildDataRuntime(
+  output,
+  backends = { ...defaults, STORAGE_SUFFIX: '' },
+) {
   const result = await build({
+    define: {
+      LODY_MOBILE_WORKER_URL: JSON.stringify(backends.CF_WORKER_URL),
+      LODY_MOBILE_STORAGE_SUFFIX: JSON.stringify(backends.STORAGE_SUFFIX),
+    },
     plugins: [
       {
         name: 'bundled-loro-wasm',
@@ -22,13 +30,13 @@ export async function buildDataRuntime(output) {
     bundle: true,
     format: 'esm',
     platform: 'browser',
-    target: 'safari17',
+    target: 'safari16.4',
     write: false,
   });
   await mkdir(output, { recursive: true });
   await writeFile(
     output + '/DataRuntime.html',
-    '<!doctype html><title>Lody Data Runtime</title><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; connect-src https: lody-hub:; script-src \'unsafe-inline\' \'wasm-unsafe-eval\'"><script type="module">' +
+    '<!doctype html><title>Lody Data Runtime</title><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; connect-src https: wss: lody-hub:; script-src \'unsafe-inline\' \'wasm-unsafe-eval\'"><script type="module">' +
       result.outputFiles[0].text.replaceAll('</script', '<\\/script') +
       '</script>',
   );
@@ -38,6 +46,7 @@ export async function buildDataRuntime(output) {
     StreamsCrdt: '@loro-dev/streams-crdt',
     StreamsClient: '@loro-dev/streams-client',
     Fzstd: 'fzstd',
+    Immer: 'immer',
   })) {
     await writeFile(
       output + '/' + name + '-LICENSE.txt',

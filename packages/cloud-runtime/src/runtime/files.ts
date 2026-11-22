@@ -1,5 +1,10 @@
 import { projectControl } from './local-projects';
 import { sealedRpc } from './machine-rpc';
+import {
+  toSessionFileDisplayPath,
+  toSessionFileRequestPath,
+  type SessionFileRootMount,
+} from '../protocol/session-file-roots.ts';
 
 type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
 export type MachineContext = {
@@ -8,7 +13,19 @@ export type MachineContext = {
   getGrant: Grant;
   signal: AbortSignal;
 };
-export type FileContext = MachineContext & { ownerSessionId: string };
+export type FileContext = MachineContext & {
+  ownerSessionId: string;
+  /** Project group members used in place; empty for ordinary sessions. */
+  mounts?: readonly SessionFileRootMount[];
+};
+
+/** Split a display path into what a file RPC takes (web `toSessionFileRequestPath`). */
+function at(ctx: FileContext, path: string) {
+  return toSessionFileRequestPath(path, ctx.mounts ?? []);
+}
+function shown(ctx: FileContext, path: string, rootId?: string) {
+  return toSessionFileDisplayPath(path, ctx.mounts ?? [], rootId);
+}
 
 type EncodedText =
   | { encoding: 'plain' | 'utf8-plain'; text: string; rawBytes: number }
@@ -86,19 +103,20 @@ export type DiffResult =
 async function toDiffResult(
   response: DiffResponse,
   base: 'turn' | 'current',
+  displayPath: (path: string) => string,
 ): Promise<DiffResult> {
   if (response.status !== 'ok')
     return {
       status: 'unavailable',
       base,
-      path: response.path,
+      path: displayPath(response.path),
       reason: response.reason,
       message: response.message,
     };
   return {
     status: 'ok',
     base,
-    path: response.path,
+    path: displayPath(response.path),
     old: await side(response.oldSnapshot),
     new: await side(response.newSnapshot),
     add: response.add,
@@ -164,37 +182,38 @@ export async function fileDiff(
   ctx: FileContext,
   args: { sessionId: string; path: string },
 ): Promise<DiffResult> {
+  const target = at(ctx, args.path);
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
     'code-collab/open-current-diff',
     ctx.ownerSessionId,
-    { sessionId: args.sessionId, path: args.path },
+    { sessionId: args.sessionId, ...target },
     ctx.getGrant,
     ctx.signal,
   )) as DiffResponse;
-  return toDiffResult(response, 'current');
+  return toDiffResult(response, 'current', (path) =>
+    shown(ctx, path, target.rootId),
+  );
 }
 
 export async function turnDiff(
   ctx: FileContext,
   args: { sessionId: string; entryId: string; path: string },
 ): Promise<DiffResult> {
+  const target = at(ctx, args.path);
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
     'code-collab/open-turn-diff',
     ctx.ownerSessionId,
-    { sessionId: args.sessionId, turnId: args.entryId, path: args.path },
+    { sessionId: args.sessionId, turnId: args.entryId, ...target },
     ctx.getGrant,
     ctx.signal,
   )) as DiffResponse;
-  if (
-    response.status === 'unavailable' &&
-    response.reason === 'turn_unavailable'
-  )
-    return fileDiff(ctx, { sessionId: args.sessionId, path: args.path });
-  return toDiffResult(response, 'turn');
+  return toDiffResult(response, 'turn', (path) =>
+    shown(ctx, path, target.rootId),
+  );
 }
 
 export type DirectoryEntry = { name: string; type: 'file' | 'directory' };
@@ -217,7 +236,53 @@ export async function listDir(
     ctx.signal,
   );
   if (!Array.isArray(result.entries)) throw new Error('invalid_directory');
-  const entries = (result.entries as DirectoryEntry[])
+  return {
+    entries: sortEntries(result.entries as DirectoryEntry[]),
+    truncated: !!result.truncated,
+  };
+}
+
+type SessionListResponse =
+  | {
+      status: 'ok';
+      path: string;
+      entries: DirectoryEntry[];
+      truncated: boolean;
+    }
+  | { status: 'error'; code: string; message?: string };
+
+/**
+ * One folder of the session's own workspace (its worktree when it has one) through
+ * the machine's `file/list-dir` (capability `sessionDirectoryListing`): the same root
+ * and owner envelope `readFile` uses, so a listed file always opens. Null when the
+ * machine answers `unsupported_protocol` (an encrypted workspace's reader).
+ */
+export async function listSessionDir(
+  ctx: FileContext,
+  args: { sessionId: string; relativePath: string },
+): Promise<{ entries: DirectoryEntry[]; truncated: boolean } | null> {
+  const response = (await sealedRpc(
+    ctx.workspaceId,
+    ctx.machineId,
+    'file/list-dir',
+    ctx.ownerSessionId,
+    { v: 3, sessionId: args.sessionId, path: args.relativePath, limit: 2000 },
+    ctx.getGrant,
+    ctx.signal,
+  )) as SessionListResponse;
+  if (response.status !== 'ok') {
+    if (response.code === 'unsupported_protocol') return null;
+    throw new Error(response.code || 'invalid_directory');
+  }
+  if (!Array.isArray(response.entries)) throw new Error('invalid_directory');
+  return {
+    entries: sortEntries(response.entries),
+    truncated: !!response.truncated,
+  };
+}
+
+function sortEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
+  return entries
     .filter(
       (entry) =>
         entry &&
@@ -229,7 +294,6 @@ export async function listDir(
       if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
-  return { entries, truncated: !!result.truncated };
 }
 
 export const READ_FILE_MAX_BYTES = 2 * 1024 * 1024;
@@ -261,6 +325,9 @@ export async function readFile(
   ctx: FileContext,
   args: { sessionId: string; path: string },
 ): Promise<FileContent> {
+  // A link under a Project group member's directory reads that member's root,
+  // as on web; the main root alone would report it outside the workspace.
+  const target = at(ctx, args.path);
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
@@ -269,23 +336,25 @@ export async function readFile(
     {
       v: 3,
       sessionId: args.sessionId,
-      path: args.path,
+      ...target,
       maxBytes: READ_FILE_MAX_BYTES,
     },
     ctx.getGrant,
     ctx.signal,
   )) as PreviewResponse;
+  const path = (reported: string | undefined) =>
+    reported === undefined ? args.path : shown(ctx, reported, target.rootId);
   if (response.status !== 'ok')
     return {
       status: 'error',
-      path: response.path ?? args.path,
+      path: path(response.path),
       code: response.code,
       message: response.message,
     };
   if (response.kind === 'binary' && response.content.encoding === 'base64')
     return {
       status: 'ok',
-      path: response.path,
+      path: path(response.path),
       kind: 'binary',
       base64: response.content.data,
       mimeType: response.mimeType,
@@ -293,7 +362,7 @@ export async function readFile(
     };
   return {
     status: 'ok',
-    path: response.path,
+    path: path(response.path),
     kind: 'text',
     text: await decodeText(response.content),
     bytes: response.sizeBytes,

@@ -17,7 +17,20 @@ const encode = (value: string): string => {
   return encodeURIComponent(value);
 };
 
-/** Outside `${workspaceId}:` so existing workspace-wide tokens cannot read private content. */
+/** Workspace-scoped Prompt Shortcut index Flock (`space_id = {workspaceId}`). */
+export function getWorkspaceShortcutIndexStreamId(workspaceId: string): string {
+  return `${encode(workspaceId)}:shortcut-index`;
+}
+
+/** Workspace-scoped Prompt Shortcut body LoroDoc (`space_id = {workspaceId}`). */
+export function getWorkspaceShortcutBodyStreamId(
+  workspaceId: string,
+  documentId: string,
+): string {
+  return `${encode(workspaceId)}:shortcut:${encode(documentId)}`;
+}
+
+/** Legacy Phase 1 read-only fallback stream IDs. */
 export function getShortcutIndexStreamId(domain: ShortcutAccessDomain): string {
   return `shortcut-index:${encode(domain.workspaceId)}:${encode(domain.ownerUserId)}:${domain.visibility}`;
 }

@@ -1,16 +1,50 @@
 import {
+  proposalOf,
+  type ProposalPresentation,
+} from '../protocol/proposals.ts';
+import {
+  operationPresentation,
+  type OperationPresentation,
+} from './operation-presentation.ts';
+import {
+  type SessionUsage,
+  projectSessionUsage,
+} from '../protocol/session-usage.ts';
+import { presentMessageText } from '../protocol/message-references.ts';
+import {
   readTurnMetadata,
   type TurnMetadata,
 } from '../protocol/turnMetadata.ts';
 import { executionProjection, type SteerReceipt } from './execution';
-import {
-  isContainer,
-  type ContainerID,
-  type LoroDoc,
-  type LoroList,
-  type LoroMap,
-  type LoroMovableList,
+import type {
+  ContainerID,
+  LoroDoc,
+  LoroList,
+  LoroMap,
+  LoroMovableList,
 } from 'loro-crdt/base64';
+
+const LORO_CONTAINERS = new Set([
+  'Text',
+  'Map',
+  'List',
+  'Tree',
+  'MovableList',
+  'Counter',
+]);
+function isContainer(
+  value: unknown,
+): value is { id: ContainerID; kind(): string; toJSON(): unknown } {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  if (
+    proto === null ||
+    typeof proto !== 'object' ||
+    typeof (proto as { kind?: unknown }).kind !== 'function'
+  )
+    return false;
+  return LORO_CONTAINERS.has((value as { kind(): string }).kind());
+}
 import {
   parseQuestionMeta,
   samePermissionOutcome,
@@ -50,10 +84,14 @@ export type ItemSummary =
   | {
       itemId: string;
       rev: number;
-      type: 'operation_completion' | 'operation_completion_batch';
-      memberCount: number;
+      type:
+        | 'operation_progress'
+        | 'operation_completion'
+        | 'operation_completion_batch';
+      operation: OperationPresentation;
+      memberCount?: number;
       deliveryStatus?: string;
-      members: OperationMemberSummary[];
+      members?: OperationMemberSummary[];
     }
   | {
       itemId: string;
@@ -61,6 +99,8 @@ export type ItemSummary =
       type: 'system_notice';
       name: string;
       meta?: SystemNoticeMeta;
+      /** `agent_role_proposal` / `schedule_proposal`, when well-formed. */
+      proposal?: ProposalPresentation;
     }
   | { itemId: string; rev: number; type: 'text'; text: string }
   | { itemId: string; rev: number; type: 'thought'; text: string }
@@ -84,12 +124,20 @@ export type ItemSummary =
       added?: number;
       removed?: number;
       hasDetail: boolean;
+      /** Plan text a `switch_mode` (plan-approval) card carries; see `planExitMarkdown`. */
+      plan?: string;
+      /** Web `isProcessStatusToolCall`: a one-line status (e.g. context compaction), not a tool card. */
+      activityKind?: 'context_compaction' | 'codex_retry';
       permission?: {
         requestId: string;
         pending: boolean;
         options?: { optionId: string; name: string; kind?: string }[];
         kind?: 'permission' | 'ask_user_question';
         questionMeta?: QuestionMeta;
+        /** The option a settled request was answered with (history `outcome.optionId`). */
+        chosenOptionId?: string;
+        /** The request was withdrawn (history outcome `cancelled`), not answered. */
+        withdrawn?: boolean;
       };
     }
   | {
@@ -140,6 +188,7 @@ export type EntrySummary = TurnMetadata & {
   finished: boolean;
   author?: TurnAuthor;
   userTurnId?: string;
+  userId?: string;
   executionId?: string;
   executionFinished?: boolean;
   steerCount?: number;
@@ -158,7 +207,12 @@ export type Envelope = {
   status: string;
   reason?: string;
   revision: number;
-  billableTurnCount: number;
+  billableTurnCount?: number;
+  usage?: SessionUsage;
+  historyHasMore?: boolean;
+  historyLoading?: boolean;
+  /** Locally persisted owner inputs whose delivery is still being reconciled. */
+  pendingRoostInputs?: readonly Record<string, unknown>[];
   awaitingUserSince?: number;
   preview?: { label: string; active: boolean };
   composer?: {
@@ -166,6 +220,8 @@ export type Envelope = {
     modeId?: string;
     effort?: string;
     configOptionValues?: Record<string, string | boolean>;
+    /** The Role the latest turn ran as; null after an explicit None (web). */
+    agentRoleId?: string | null;
   };
   entries: EntrySummary[];
 };
@@ -400,6 +456,25 @@ export function identityAt(list: LoroList, index: number) {
   return id ? `${id.peer}:${id.counter}` : `idx:${index}`;
 }
 
+/**
+ * Plan text carried by a plan-approval (`switch_mode`) card — web
+ * `resolvePlanExitMarkdown` (`packages/components/.../plan-surface.ts`).
+ * Claude puts it in `rawInput.plan` (its `content` can later be replaced by a
+ * status message), Kimi in the first `content` text block; Codex carries none
+ * here and renders a separate `proposed_plan` item instead.
+ */
+function planExitMarkdown(raw: any): string | undefined {
+  const rawPlan = raw.rawInput?.plan;
+  if (typeof rawPlan === 'string' && rawPlan.trim()) return rawPlan.trim();
+  const block = (Array.isArray(raw.content) ? raw.content : []).find(
+    (block: any) =>
+      block?.type === 'content' &&
+      block.content?.type === 'text' &&
+      typeof block.content.text === 'string' &&
+      block.content.text.trim(),
+  );
+  return block ? String(block.content.text).trim() : undefined;
+}
 function countDiff(content: unknown) {
   if (!Array.isArray(content)) return undefined;
   let added = 0,
@@ -438,65 +513,80 @@ function summarizeItem(
   const key = `${entryId}/${itemId}`;
 
   if (
-    type === 'operation_completion' ||
-    type === 'operation_completion_batch'
+    [
+      'operation_progress',
+      'operation_completion',
+      'operation_completion_batch',
+    ].includes(type)
   ) {
-    const members = (
+    const operation = operationPresentation(raw);
+    if (
+      type === 'operation_completion' ||
       type === 'operation_completion_batch'
-        ? (raw.members ?? []).slice(0, 50)
-        : [raw]
-    )
-      .flatMap((member: any): OperationMemberSummary[] => {
-        const completion = member.completion;
-        const result =
-          completion?.type === 'result'
-            ? completion.value
-            : completion?.partial;
-        if (completion?.type === 'error')
-          return [
-            {
-              title: completion.error.message,
-              status: 'failed',
-            },
-          ];
-        if (
-          completion?.type === 'result' &&
-          (member.operationKind === 'board_report' ||
-            member.source === 'board_report')
-        ) {
-          return (result?.boardReport?.events ?? []).map((event: any) => ({
-            title: event.title ?? event.sessionId,
-            status: event.kind,
+    ) {
+      const members = (
+        type === 'operation_completion_batch'
+          ? (raw.members ?? []).slice(0, 50)
+          : [raw]
+      )
+        .flatMap((member: any): OperationMemberSummary[] => {
+          const completion = member.completion;
+          const result =
+            completion?.type === 'result'
+              ? completion.value
+              : completion?.partial;
+          if (completion?.type === 'error')
+            return [
+              {
+                title: completion.error.message,
+                status: 'failed',
+              },
+            ];
+          if (
+            completion?.type === 'result' &&
+            (member.operationKind === 'board_report' ||
+              member.source === 'board_report')
+          ) {
+            return (result?.boardReport?.events ?? []).map((event: any) => ({
+              title: event.title ?? event.sessionId,
+              status: event.kind,
+            }));
+          }
+          return (result?.items ?? []).map((item: any) => ({
+            title: item.label ?? item.target?.sessionId ?? member.operationKind,
+            status: item.status,
           }));
-        }
-        return (result?.items ?? []).map((item: any) => ({
-          title: item.label ?? item.target?.sessionId ?? member.operationKind,
-          status: item.status,
-        }));
-      })
-      .slice(0, 50);
-    const summary = {
+        })
+        .slice(0, 50);
+      const summary = {
+        itemId,
+        rev: 0,
+        type,
+        operation,
+        memberCount: raw.memberCount ?? members.length,
+        deliveryStatus: raw.deliveryStatus,
+        members,
+      };
+      summary.rev = bump(projection, key, JSON.stringify(summary));
+      return summary as ItemSummary;
+    }
+    return {
       itemId,
-      rev: 0,
+      rev: bump(projection, key, JSON.stringify(operation)),
       type,
-      memberCount: raw.memberCount ?? members.length,
-      deliveryStatus: raw.deliveryStatus,
-      members,
-    };
-    summary.rev = bump(projection, key, JSON.stringify(summary));
-    return summary as ItemSummary;
+      operation,
+    } as ItemSummary;
   }
 
   if (type === 'system_notice') {
     const name = typeof raw.name === 'string' ? raw.name : '';
-    const meta = {
+    const noticeMeta: SystemNoticeMeta = {
       reason:
         typeof raw.meta?.reason === 'string' ? raw.meta.reason : undefined,
       code: typeof raw.meta?.code === 'string' ? raw.meta.code : undefined,
       message:
         typeof raw.meta?.message === 'string' ? raw.meta.message : undefined,
     };
-    const noticeMeta: SystemNoticeMeta = meta;
     if (name === 'board_context_maintenance') {
       Object.assign(noticeMeta, {
         trigger: raw.meta?.trigger,
@@ -519,12 +609,18 @@ function summarizeItem(
       if (raw.meta.before) noticeMeta.before = fields(raw.meta.before);
       noticeMeta.outcome = raw.meta.outcome;
     }
+    const proposal = proposalOf(name, raw.meta);
     return {
       itemId,
-      rev: bump(projection, key, JSON.stringify({ name, meta })),
+      rev: bump(
+        projection,
+        key,
+        JSON.stringify({ name, meta: noticeMeta, proposal }),
+      ),
       type,
       name,
-      meta,
+      meta: noticeMeta,
+      ...(proposal ? { proposal } : {}),
     };
   }
 
@@ -535,6 +631,7 @@ function summarizeItem(
       rev: bump(projection, key, text),
       type,
       text,
+      ...(raw.references?.length ? { references: raw.references } : {}),
     } as ItemSummary;
   }
 
@@ -592,6 +689,10 @@ function summarizeItem(
     const file = {
       id: String(raw.fileId ?? ''),
       fileName: String(raw.fileName ?? '附件'),
+      mimeType:
+        typeof raw.mimeType === 'string' && raw.mimeType.length <= 255
+          ? raw.mimeType
+          : undefined,
       transport: typeof raw.transport === 'string' ? raw.transport : undefined,
       sizeBytes: Number.isSafeInteger(raw.sizeBytes)
         ? raw.sizeBytes
@@ -621,21 +722,34 @@ function summarizeItem(
 
   if (type === 'tool_call') {
     const diff = countDiff(raw.content);
+    const plan = raw.kind === 'switch_mode' ? planExitMarkdown(raw) : undefined;
+    const activityKind =
+      raw.activityKind === 'context_compaction' ||
+      raw.activityKind === 'codex_retry'
+        ? (raw.activityKind as 'context_compaction' | 'codex_retry')
+        : undefined;
     const questionMeta = parseQuestionMeta(raw.permissionRequest?._meta);
     const isQuestion =
       !!questionMeta ||
       raw.permissionRequest?.kind === 'ask_user_question' ||
       raw.kind === 'ask_user_question';
+    // Only the decision itself: question answers (possibly secret) stay in `itemDetail`.
+    const outcome = raw.permissionRequest?.outcome;
     const permission =
       !parentItemId && raw.permissionRequest
         ? {
             requestId: String(raw.permissionRequest.requestId ?? ''),
-            pending: raw.permissionRequest.outcome == null,
+            pending: outcome == null,
             options: raw.permissionRequest.options,
             kind: isQuestion
               ? ('ask_user_question' as const)
               : ('permission' as const),
             questionMeta,
+            ...(outcome?.outcome === 'selected' &&
+            typeof outcome.optionId === 'string'
+              ? { chosenOptionId: outcome.optionId }
+              : {}),
+            ...(outcome?.outcome === 'cancelled' ? { withdrawn: true } : {}),
           }
         : undefined;
     const summary = {
@@ -652,6 +766,8 @@ function summarizeItem(
         (Array.isArray(raw.content) && raw.content.length > 0) ||
         raw.rawInput != null ||
         raw.rawOutput != null,
+      ...(plan ? { plan } : {}),
+      ...(activityKind ? { activityKind } : {}),
       permission,
     };
     summary.rev = bump(
@@ -700,6 +816,7 @@ function summarizeItem(
         raw.isBackgrounded == null ? undefined : Boolean(raw.isBackgrounded),
       skipTranscript:
         raw.skipTranscript == null ? undefined : Boolean(raw.skipTranscript),
+      group: taskGroup(raw),
       run: summarizeRun(projection, raw.run, entryId, itemId),
     };
     // Every step counts toward the rev, so an open run sheet reads it again.
@@ -756,7 +873,7 @@ export function subagentRun(
   doc: LoroDoc,
   entryId: string,
   itemId: string,
-  item: LoroMap,
+  item: { get(key: string): unknown },
 ): SubagentRunSummary | undefined {
   return summarizeRun(
     projectionFor(doc),
@@ -768,14 +885,20 @@ export function subagentRun(
 
 function summarizeEntry(
   projection: Projection,
-  history: LoroList,
+  history: LoroList | undefined,
   entry: any,
   index: number,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
 ) {
-  const id = String(entry?.id ?? identityAt(history, index));
+  const id = String(
+    entry?.id ?? (history ? identityAt(history, index) : `idx:${index}`),
+  );
+  const fallbackItemId = (itemIndex: number) => {
+    if (history) return `idx:${index}:${itemIndex}`;
+    return `idx:${id}:${itemIndex}`;
+  };
   if (pendingOutcomes?.size && Array.isArray(entry?.items)) {
-    const container = history.get(index) as LoroMap | undefined;
+    const container = history?.get(index) as LoroMap | undefined;
     const items =
       container && typeof container.get === 'function'
         ? (container.get('items') as LoroList)
@@ -784,11 +907,19 @@ function summarizeEntry(
       ...entry,
       items: entry.items.map((item: any, i: number) => {
         const request = item?.permissionRequest;
-        let itemId = `idx:${index}:${i}`;
+        let itemId = fallbackItemId(i);
         if (items && typeof items.getIdAt === 'function')
           itemId = identityAt(items, i);
         if (item?.type === 'tool_call' && typeof item.toolCallId === 'string')
           itemId = item.toolCallId;
+        // A proposal decision whose upload is unconfirmed stays undecided, so it can be retried.
+        if (
+          item?.type === 'system_notice' &&
+          pendingOutcomes.has(`${id}/${itemId}/notice`)
+        ) {
+          const { outcome: _outcome, ...meta } = item.meta ?? {};
+          return { ...item, meta };
+        }
         const key = `${id}/${itemId}/${request?.requestId}`;
         if (
           !pendingOutcomes.has(key) ||
@@ -799,7 +930,7 @@ function summarizeEntry(
       }),
     };
   }
-  const container = history.get(index) as LoroMap | undefined;
+  const container = history?.get(index) as LoroMap | undefined;
   const items =
     container && typeof (container as any).get === 'function'
       ? ((container as any).get('items') as LoroList | undefined)
@@ -808,11 +939,13 @@ function summarizeEntry(
   const summarizedItems: ItemSummary[] = list.map((item: any, i: number) =>
     summarizeItem(
       projection,
-      item,
+      entry.role === 'user' && item?.type === 'text'
+        ? { ...item, ...presentMessageText(item.text ?? '', item.spans) }
+        : item,
       id,
       items && typeof items.getIdAt === 'function'
         ? identityAt(items, i)
-        : `idx:${index}:${i}`,
+        : fallbackItemId(i),
     ),
   );
   const fileDiffs = (Array.isArray(entry?.fileDiff) ? entry.fileDiff : [])
@@ -857,6 +990,8 @@ function summarizeEntry(
       entry?.inputConfig?._lodyDeliveryKind === 'continue'
         ? ('continue' as const)
         : undefined,
+    // Who sent a user turn, for its avatar and name.
+    userId: typeof entry?.userId === 'string' ? entry.userId : undefined,
     items: summarizedItems,
     ...(fileDiffs.length ? { fileDiffs } : {}),
   };
@@ -890,6 +1025,16 @@ function pendingFingerprint(
   return fingerprint;
 }
 
+/** Use the ordinary transcript projection for locally pending upstream inputs. */
+export function projectPendingInputs(
+  doc: LoroDoc,
+  entries: readonly unknown[],
+) {
+  return entries.map((entry, index) =>
+    summarizeEntry(projectionFor(doc), undefined, entry, index),
+  );
+}
+
 /**
  * Projects the replica for the chat. Only entries a change reached since the
  * previous call are read again, and without provider payloads.
@@ -900,8 +1045,25 @@ export function projectSession(
   reason?: string,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+  historyOverride?: readonly unknown[],
+  historyMetadata?: readonly Record<string, unknown>[],
+  /**
+   * First history index sent to the host. Earlier entries still feed usage,
+   * billing, execution and the composer; only the transcript is windowed.
+   */
+  historyStart = 0,
 ): Envelope {
-  return project(doc, false, status, reason, pendingOutcomes, steerReceipts);
+  return project(
+    doc,
+    false,
+    status,
+    reason,
+    pendingOutcomes,
+    steerReceipts,
+    historyOverride,
+    historyMetadata,
+    historyStart,
+  );
 }
 
 /**
@@ -914,8 +1076,21 @@ export function projectSessionFull(
   reason?: string,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+  historyOverride?: readonly unknown[],
+  historyMetadata?: readonly Record<string, unknown>[],
+  historyStart = 0,
 ): Envelope {
-  return project(doc, true, status, reason, pendingOutcomes, steerReceipts);
+  return project(
+    doc,
+    true,
+    status,
+    reason,
+    pendingOutcomes,
+    steerReceipts,
+    historyOverride,
+    historyMetadata,
+    historyStart,
+  );
 }
 
 function project(
@@ -925,9 +1100,14 @@ function project(
   reason?: string,
   pendingOutcomes?: ReadonlyMap<string, unknown>,
   steerReceipts?: ReadonlyMap<string, SteerReceipt>,
+  historyOverride?: readonly unknown[],
+  historyMetadata?: readonly Record<string, unknown>[],
+  historyStart = 0,
 ): Envelope {
   const projection = projectionFor(doc);
-  const history = doc.getList(HISTORY) as LoroList;
+  const history = historyOverride
+    ? undefined
+    : (doc.getList(HISTORY) as LoroList);
   const links = doc.getMap('lodySteerLinks').toJSON() as Record<string, any>;
   const configFor = (id: string, input: any) => {
     const link = links[id];
@@ -944,67 +1124,94 @@ function project(
       _lodySteerMode: link.mode,
     };
   };
-  const reuse = !full && !projection.stale;
-  const present = new Set<ContainerID>();
-  const raw: any[] = [];
-  const summarized: (EntrySummary & { userTurnId?: string })[] = [];
-  for (let index = 0; index < history.length; index++) {
-    const container = history.get(index);
-    const key = isContainer(container) ? container.id : undefined;
-    let cached =
-      key && reuse && !projection.dirty.has(key)
-        ? projection.entries.get(key)
-        : undefined;
-    if (!cached) {
-      cached = {
-        base: full ? plain(container) : lightEntry(container),
-        index: -1,
-        link: '',
-        pending: '',
-      };
-      if (key) projection.entries.set(key, cached);
-    }
-    if (key) present.add(key);
-    const base = cached.base;
-    const entry = {
-      ...base,
-      inputConfig: configFor(base?.id, base?.inputConfig),
-    };
-    raw.push(entry);
-    // A summary also depends on the entry's place, steer link and unsent answers.
-    const link = JSON.stringify(links[base?.id]) ?? '';
-    const pending = pendingFingerprint(
-      pendingOutcomes,
-      String(base?.id ?? identityAt(history, index)),
-    );
-    if (
-      !cached.value ||
-      cached.index !== index ||
-      cached.link !== link ||
-      cached.pending !== pending
-    ) {
-      cached.value = summarizeEntry(
-        projection,
-        history,
-        entry,
-        index,
-        pendingOutcomes,
+  let raw: any[];
+  let start = 0;
+  let summarized: (EntrySummary & { userTurnId?: string })[];
+  if (historyOverride) {
+    raw = (historyOverride as any[]).map((entry) => ({
+      ...entry,
+      inputConfig: configFor(entry.id, entry.inputConfig),
+    }));
+    start = Math.min(Math.max(0, historyStart), raw.length);
+    summarized = raw
+      .slice(start)
+      .map((entry, offset) =>
+        summarizeEntry(
+          projection,
+          undefined,
+          entry,
+          start + offset,
+          pendingOutcomes,
+        ),
       );
-      cached.index = index;
-      cached.link = link;
-      cached.pending = pending;
+  } else {
+    const list = history!;
+    const reuse = !full && !projection.stale;
+    const present = new Set<ContainerID>();
+    raw = [];
+    const allSummarized: (EntrySummary & { userTurnId?: string })[] = [];
+    for (let index = 0; index < list.length; index++) {
+      const container = list.get(index);
+      const key = isContainer(container) ? container.id : undefined;
+      let cached =
+        key && reuse && !projection.dirty.has(key)
+          ? projection.entries.get(key)
+          : undefined;
+      if (!cached) {
+        cached = {
+          base: full ? plain(container) : lightEntry(container),
+          index: -1,
+          link: '',
+          pending: '',
+        };
+        if (key) projection.entries.set(key, cached);
+      }
+      if (key) present.add(key);
+      const base = cached.base;
+      const entry = {
+        ...base,
+        inputConfig: configFor(base?.id, base?.inputConfig),
+      };
+      raw.push(entry);
+      // A summary also depends on the entry's place, steer link and unsent answers.
+      const link = JSON.stringify(links[base?.id]) ?? '';
+      const pending = pendingFingerprint(
+        pendingOutcomes,
+        String(base?.id ?? identityAt(list, index)),
+      );
+      if (
+        !cached.value ||
+        cached.index !== index ||
+        cached.link !== link ||
+        cached.pending !== pending
+      ) {
+        cached.value = summarizeEntry(
+          projection,
+          list,
+          entry,
+          index,
+          pendingOutcomes,
+        );
+        cached.index = index;
+        cached.link = link;
+        cached.pending = pending;
+      }
+      allSummarized.push(cached.value);
     }
-    summarized.push(cached.value);
+    for (const key of projection.entries.keys())
+      if (!present.has(key)) projection.entries.delete(key);
+    projection.dirty.clear();
+    projection.stale = false;
+    start = Math.min(Math.max(0, historyStart), raw.length);
+    summarized = allSummarized.slice(start);
   }
-  for (const key of projection.entries.keys())
-    if (!present.has(key)) projection.entries.delete(key);
-  projection.dirty.clear();
-  projection.stale = false;
   const queued = (doc.getMovableList('mq').toJSON() as any[]).map((item) => ({
     ...item,
     acpSessionConfig: configFor(item.userTurnId, item.acpSessionConfig),
   }));
-  const input = conversationConfigs(raw, queued)[0];
+  const input =
+    conversationConfigs(raw, queued)[0] ??
+    historyMetadata?.findLast((entry) => entry.role === 'user')?.inputConfig;
   const options =
     input?.configOptionValues && typeof input.configOptionValues === 'object'
       ? input.configOptionValues
@@ -1026,6 +1233,11 @@ function project(
   const userIds = new Set(
     summarized.filter((e) => e.role === 'user').map((e) => e.id),
   );
+  // Inputs before the window are still landed: they must not reappear as queued.
+  const landedUserIds = new Set(userIds);
+  for (const entry of raw.slice(0, start))
+    if (entry?.role === 'user' && typeof entry.id === 'string')
+      landedUserIds.add(entry.id);
   const replies = new Map<string, typeof summarized>();
   for (const entry of summarized)
     if (entry.role === 'assistant' && userIds.has(entry.userTurnId!)) {
@@ -1046,7 +1258,7 @@ function project(
     [
       ...raw,
       ...queued
-        .filter((item) => !userIds.has(item.userTurnId))
+        .filter((item) => !landedUserIds.has(item.userTurnId))
         .map((item) => ({
           id: item.userTurnId,
           role: 'user',
@@ -1067,6 +1279,7 @@ function project(
     status,
     reason,
     revision,
+    usage: projectSessionUsage(raw),
     billableTurnCount: billableTurnCount({ history: raw, mq: queued }),
     awaitingUserSince:
       typeof session?.awaitingUserSince === 'number'
@@ -1086,6 +1299,10 @@ function project(
             ...(Object.keys(composerValues).length
               ? { configOptionValues: composerValues }
               : {}),
+            ...(typeof input.agentRoleId === 'string' ||
+            input.agentRoleId === null
+              ? { agentRoleId: input.agentRoleId }
+              : {}),
           },
         }
       : {}),
@@ -1095,7 +1312,7 @@ function project(
         .filter(
           (item) =>
             typeof item.userTurnId === 'string' &&
-            !userIds.has(item.userTurnId),
+            !landedUserIds.has(item.userTurnId),
         )
         .map((item) => ({
           id: item.userTurnId,
@@ -1122,9 +1339,34 @@ function project(
               { type: 'text', text: item.task },
             ]
           ).map((block: any, index: number) =>
-            summarizeItem(projection, block, item.userTurnId, `queue:${index}`),
+            summarizeItem(
+              projection,
+              block?.type === 'text'
+                ? {
+                    ...block,
+                    ...presentMessageText(block.text ?? '', block.spans),
+                  }
+                : block,
+              item.userTurnId,
+              `queue:${index}`,
+            ),
           ),
         })),
     ],
   };
+}
+
+/**
+ * Web `groupOf` (`subagent-task-state.tsx`): a scheduled wakeup is a task; anything with a
+ * subagent type or a run is a subagent; else a shell command, MCP task or monitor is a task and
+ * an unrecognised type stays with the subagents.
+ */
+const NON_AGENT_TASK_TYPES = new Set(['local_bash', 'mcp_task', 'monitor_mcp']);
+function taskGroup(raw: any): 'subagents' | 'tasks' {
+  if (raw?.taskKind === 'scheduled') return 'tasks';
+  if (raw?.subagentType || raw?.run) return 'subagents';
+  const type = raw?.taskType ?? raw?.actor;
+  return typeof type === 'string' && NON_AGENT_TASK_TYPES.has(type)
+    ? 'tasks'
+    : 'subagents';
 }

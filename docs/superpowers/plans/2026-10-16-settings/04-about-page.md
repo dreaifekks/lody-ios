@@ -20,11 +20,11 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
-- [apps/mobile/src/screens/LicensesScreen.tsx](../../../../apps/mobile/src/screens/LicensesScreen.tsx)
-- [apps/mobile/src/screens/LicenseDetailScreen.tsx](../../../../apps/mobile/src/screens/LicenseDetailScreen.tsx)
-- [apps/mobile/verification/ui/licenses.py](../../../../apps/mobile/verification/ui/licenses.py)
-- [apps/mobile/src/screens/DiagnosticsScreen.tsx](../../../../apps/mobile/src/screens/DiagnosticsScreen.tsx)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
+- `apps/mobile/src/screens/LicensesScreen.tsx`
+- `apps/mobile/src/screens/LicenseDetailScreen.tsx`
+- `apps/mobile/verification/ui/licenses.py`
+- `apps/mobile/src/screens/DiagnosticsScreen.tsx`
 
 ## 工作内容
 
@@ -57,6 +57,6 @@
 - 验证与证据：pnpm check、pnpm bundle 已通过；设置范围的英文浅深色 UI 检查已通过，证据位于 `.artifacts/settings-reorder/`。
 - 未解决问题：不运行聊天、模型、Share Extension 或目标页面的完整业务流程；本轮只验实际迁移影响。
 
-- 实现：[AboutScreen](../../../../apps/mobile/src/screens/AboutScreen.tsx) 展示配置中的版本／构建号并进入原许可页；首页诊断保留在“其他”组。现有 `licenses.py` 同步增加关于页这一层导航。
+- 实现：`AboutScreen` 展示配置中的版本／构建号并进入原许可页；首页诊断保留在“其他”组。现有 `licenses.py` 同步增加关于页这一层导航。
 
 - 完成日期：2026-10-17。`settings-baseline` 英文浅色／深色各覆盖六个状态及本次迁移入口，检查耗时分别为 257.65 秒／256.33 秒；截图与导航视频在 `.artifacts/settings-reorder/ui/`。

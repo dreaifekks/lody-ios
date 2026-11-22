@@ -2,6 +2,8 @@
 
 [总计划](../2026-10-16-settings-reorganization.md) · [任务索引](../2026-10-16-settings-reorganization.md#任务索引)
 
+> 2026-11-11 已移除：移动端设置不再提供已发布分享页面，运行时 `publishedShares` 方法和原生 `management` 操作一并删除。本文仅作历史记录。
+
 | 字段     | 内容                                                   |
 | -------- | ------------------------------------------------------ |
 | 阶段     | 第三阶段                                               |
@@ -20,13 +22,13 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/cloud/session-sharing.ts](../../../../apps/mobile/src/cloud/session-sharing.ts)
+- `apps/mobile/src/cloud/session-sharing.ts`
 - [packages/cloud-runtime/src/models/session-sharing.ts](../../../../packages/cloud-runtime/src/models/session-sharing.ts)
 - [packages/cloud-runtime/src/runtime/sharing/runtime.ts](../../../../packages/cloud-runtime/src/runtime/sharing/runtime.ts)
 - [packages/cloud-runtime/src/runtime/sharing/README.md](../../../../packages/cloud-runtime/src/runtime/sharing/README.md)
-- [apps/mobile/modules/lody-kit/ios/SessionShare/LodySessionShareView.swift](../../../../apps/mobile/modules/lody-kit/ios/SessionShare/LodySessionShareView.swift)
-- [apps/mobile/verification/ui/session-share.py](../../../../apps/mobile/verification/ui/session-share.py)
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
+- `apps/mobile/modules/lody-kit/ios/SessionShare/LodySessionShareView.swift`
+- `apps/mobile/verification/ui/session-share.py`
+- `apps/mobile/src/screens/SettingsScreen.tsx`
 
 ## 工作内容
 

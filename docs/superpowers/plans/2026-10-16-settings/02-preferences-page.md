@@ -20,15 +20,15 @@
 
 以下是本轮确认的调查入口；开工前重新检查工作树、调用方、导出、fixture 和配置。新增文件及协议以实施时的证据为准。
 
-- [apps/mobile/src/screens/SettingsScreen.tsx](../../../../apps/mobile/src/screens/SettingsScreen.tsx)
-- [apps/mobile/src/screens/NotificationSettingsScreen.tsx](../../../../apps/mobile/src/screens/NotificationSettingsScreen.tsx)
-- [apps/mobile/src/screens/QuickRepliesScreen.tsx](../../../../apps/mobile/src/screens/QuickRepliesScreen.tsx)
-- [apps/mobile/src/features/settings/queued-message-behavior.tsx](../../../../apps/mobile/src/features/settings/queued-message-behavior.tsx)
-- [apps/mobile/src/features/settings/quick-replies.tsx](../../../../apps/mobile/src/features/settings/quick-replies.tsx)
-- [apps/mobile/src/features/settings/quickReplies.ts](../../../../apps/mobile/src/features/settings/quickReplies.ts)
-- [apps/mobile/verification/ui/notifications.py](../../../../apps/mobile/verification/ui/notifications.py)
-- [apps/mobile/verification/ui/quick-replies.py](../../../../apps/mobile/verification/ui/quick-replies.py)
-- [apps/mobile/verification/ui/queued-message-behavior.py](../../../../apps/mobile/verification/ui/queued-message-behavior.py)
+- `apps/mobile/src/screens/SettingsScreen.tsx`
+- `apps/mobile/src/screens/NotificationSettingsScreen.tsx`
+- `apps/mobile/src/screens/QuickRepliesScreen.tsx`
+- `apps/mobile/src/features/settings/queued-message-behavior.tsx`
+- `apps/mobile/src/features/settings/quick-replies.tsx`
+- `apps/mobile/src/features/settings/quickReplies.ts`
+- `apps/mobile/verification/ui/notifications.py`
+- `apps/mobile/verification/ui/quick-replies.py`
+- `apps/mobile/verification/ui/queued-message-behavior.py`
 
 ## 工作内容
 
@@ -65,7 +65,7 @@
 
 ## 实现与入口
 
-- [PreferencesScreen](../../../../apps/mobile/src/screens/PreferencesScreen.tsx)：页面 ID 为 `preferences`，默认原生 push，透明导航栏和 NativeGroupedList。
+- `PreferencesScreen`：页面 ID 为 `preferences`，默认原生 push，透明导航栏和 NativeGroupedList。
 - “通知与实时活动／Notifications & Live Activities”分组保留 `notifications` 行，push 原 NotificationSettingsScreen；权限及账户条件仍由原页面拥有。
 - “会话行为／Chat Behavior”保留 `queued-message-behavior` 原生菜单和 `quick-replies` 导航行；菜单只接受 queue／guide，并调用现有 provider。
 - 新增 en／zh-Hans 三条页面文案。没有新增存储键、账户同步、通知分类或新的导航管理器。
@@ -91,7 +91,7 @@ pnpm verify:simulator --name 'SET-02 Preferences' -- pnpm verify:ui --app '<签�
 
 以下工作是在扩大验收范围时产生的，仍留在未提交工作树中单独标记，不计入 SET-02 的交付或完成条件：
 
-- [LodyGroupedList](../../../../apps/mobile/modules/lody-kit/ios/List/LodyGroupedList.swift) 的受控开关回退修复：拥有者立即拒绝修改时，控件可能保留请求值。这是既有共享控件问题，与本项分组和入口迁移无关。
+- `LodyGroupedList` 的受控开关回退修复：拥有者立即拒绝修改时，控件可能保留请求值。这是既有共享控件问题，与本项分组和入口迁移无关。
 - 通知故障 fixture、开关手势 helper，以及 notifications、model-memory、quick-replies、share-probe 的外围验证调整。Share Extension 尚未运行；不继续为本项执行。
 - 已运行的额外检查保留原始结果：通知浅色通过，model-memory 浅深色通过，create-parity 的 20 张目标状态差异比例为 0；快捷回复完整 UI 检查未通过，不据此声称整体回归通过。见 `.artifacts/settings-set-02/`。
 

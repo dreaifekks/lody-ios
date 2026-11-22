@@ -1,11 +1,5 @@
-export type QuickReply = {
-  id: string;
-  label: string;
-  message: string;
-};
-
 export type RemoteSetting = {
-  kind: 'machine' | 'agent' | 'mcp';
+  kind: 'machine' | 'agent';
   id: string;
   name: string;
   machineId?: string;
@@ -13,9 +7,6 @@ export type RemoteSetting = {
   readOnly?: boolean;
   detail?: string;
   prompt?: string;
-  enabledByDefault?: boolean;
-  configured?: boolean;
-  updatedAt?: number;
 };
 
 export type SettingsRequest = {
@@ -25,7 +16,5 @@ export type SettingsRequest = {
     item: RemoteSetting;
     name: string;
     prompt?: string;
-    enabledByDefault?: boolean;
   };
-  remove?: RemoteSetting;
 };

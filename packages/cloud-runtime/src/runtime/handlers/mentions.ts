@@ -3,16 +3,45 @@ import type {
   MentionCategory,
   MentionSource,
 } from '../../models/mentions';
-import { simpleShortcut } from '../../models/prompt-shortcuts.ts';
 import { workspaceRoleMentions } from '../agent-roles';
 import { commandMentions, mentionCatalog, sessionMentions } from '../mentions';
-import { shortcutAccess } from '../prompt-shortcuts';
-import { scopedShortcutCloud, type RuntimeContext } from './context.ts';
+import { listedShortcuts } from '../prompt-shortcuts';
+import {
+  sameShortcutProject,
+  type PromptShortcutScope,
+} from '../../protocol/prompt-shortcuts/model.ts';
+import type { PromptShortcutIndexEntry } from '../../protocol/prompt-shortcuts/catalog.ts';
+import {
+  scopedShortcutCloud,
+  scopedWorkspaceGrant,
+  type RuntimeContext,
+} from './context.ts';
 
 type MentionArgs = MentionSource & {
   category: MentionCategory;
   userId: string;
 };
+
+/**
+ * Web's `resolveShortcutAvailability` scope gate. References inside the body are not
+ * gated here: choosing a shortcut reads its body and both composers insert them as chips.
+ */
+function shortcutInScope(
+  entry: PromptShortcutIndexEntry,
+  scope: PromptShortcutScope,
+) {
+  const saved = entry.scope;
+  if (
+    saved.project &&
+    (!scope.project || !sameShortcutProject(saved.project, scope.project))
+  )
+    return false;
+  if (saved.machineId !== undefined && saved.machineId !== scope.machineId)
+    return false;
+  return (
+    saved.providerKey === undefined || saved.providerKey === scope.providerKey
+  );
+}
 
 export function registerMentions(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
@@ -65,7 +94,7 @@ export function registerMentions(ctx: RuntimeContext) {
           return value;
         },
         () => state.presence,
-        new Map(Object.entries(catalogs.get('meta')?.machineNames ?? {})),
+        catalogs.get('meta')?.machineNames,
         args.machineId ??
           catalogs.get('meta')?.sessions.find((s) => s.id === args.sessionId)
             ?.machineId,
@@ -128,18 +157,31 @@ export function registerMentions(ctx: RuntimeContext) {
     }
     if (args.category === 'cmd') {
       const sourceWorkspace = state.workspace;
-      const access = shortcutAccess(
-        state.workspace,
-        state.userId,
-        scopedShortcutCloud(ctx, sourceWorkspace, state.userId),
-        AbortSignal.timeout(30000),
-      );
-      const shortcuts = (
+      const cliType = args.cliType ?? session?.cliType;
+      const agentType = args.agentType ?? session?.agentType;
+      // The composer's scope, as web's `shortcutComposerScope`: a shortcut saved for a
+      // project, computer or agent lists only where they match (web hides the rest).
+      const scope: PromptShortcutScope = { machineId };
+      if (localProjectId)
+        scope.project = { kind: 'local', id: localProjectId, machineId };
+      else if (projectId?.startsWith('github:'))
+        scope.project = {
+          kind: 'github',
+          repository: projectId.slice('github:'.length),
+        };
+      if (cliType && agentType) scope.providerKey = `${cliType}:${agentType}`;
+      // Prompt Shortcuts migrated to UserSpace streams upstream, which lan-hub does not yet serve.
+      const listing =
         globalThis.location?.protocol === 'lody-hub:'
-          ? []
-          : await access.list().catch(() => [])
-      )
-        .filter(simpleShortcut)
+          ? { entries: [] as PromptShortcutIndexEntry[], incomplete: false }
+          : await listedShortcuts(
+              sourceWorkspace,
+              state.userId,
+              scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
+              scopedShortcutCloud(ctx, sourceWorkspace, state.userId),
+            );
+      const shortcuts = listing.entries
+        .filter((entry) => shortcutInScope(entry, scope))
         .map((entry) => ({
           path: entry.id,
           name: `/shortcut:${entry.slug}`,
@@ -183,6 +225,7 @@ export function registerMentions(ctx: RuntimeContext) {
       const names = new Set(result.items.map((item) => item.insertText));
       return {
         ...result,
+        incomplete: result.incomplete || listing.incomplete,
         items: [
           ...result.items,
           ...shortcuts.filter((item) => !names.has(item.insertText)),
