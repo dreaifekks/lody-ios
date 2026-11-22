@@ -1596,6 +1596,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
     return max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
   }
+  private var layoutRoot: UIView { owningController()?.view ?? superview ?? self }
   private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
     guard let top = pageTop() else { return ChatMessageContent.maximumCollapsedHeight }
     return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
@@ -1618,7 +1619,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   private func setFullScreen(_ value: Bool, animated: Bool = true) {
     guard fullScreen != value, let superview else { return }
-    superview.layoutIfNeeded()
+    layoutRoot.layoutIfNeeded()
     fullScreen = value
     if value {
       fullScreenDim.frame = superview.bounds
@@ -1629,7 +1630,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     let changes = {
       self.fullScreenDim.alpha = value ? 1 : 0
-      superview.layoutIfNeeded()
+      layoutRoot.layoutIfNeeded()
       self.input.scrollRangeToVisible(self.input.selectedRange)
     }
     let finish = { (_: Bool) in
@@ -1666,7 +1667,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       dragProgress = progress
       fullScreenDim.alpha = progress
       updateComposer()
-      superview.layoutIfNeeded()
+      layoutRoot.layoutIfNeeded()
     default:
       let velocity = pan.velocity(in: superview).y
       let progress = dragProgress ?? dragStart
@@ -1682,7 +1683,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       updateComposer()
       let settle = {
         self.fullScreenDim.alpha = target ? 1 : 0
-        superview.layoutIfNeeded()
+        self.layoutRoot.layoutIfNeeded()
         self.input.scrollRangeToVisible(self.input.selectedRange)
       }
       let finish = { (_: Bool) in
