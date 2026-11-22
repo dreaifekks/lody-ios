@@ -35,14 +35,16 @@ extension SessionController {
   /// Web share origin for app session URLs (`VITE_SITE_URL`, official Lody Cloud).
   static let appShareOrigin = "https://lody.ai"
 
-  func sessionMenuItems(_ session: SessionItem) -> [UIMenuElement] {
+  func sessionMenuItems(_ session: SessionItem, canManage: Bool) -> [UIMenuElement] {
     var items: [UIMenuElement] = []
     // The row's tier as the Home list renders it: Later and Settle, or Move to Focus when settled.
-    if !session.archived, let row = statusActions.row(session.id) {
+    // A Tab never lists; its status is its conversation's, so the menu acts on that root.
+    let root = DirectoryTabs.root(session, all: source.state.catalog.sessions)
+    if !session.archived, let row = statusActions.row(root) {
       let status = statusActions.tierItems(row, from: self)
       if !status.isEmpty { items.append(UIMenu(options: .displayInline, children: status)) }
     }
-    if !session.archived {
+    if canManage, !session.archived {
       items.append(UIAction(title: text("session.action.rename"), image: UIImage(systemName: "pencil")) { [weak self] _ in
         self?.perform("rename")
       })

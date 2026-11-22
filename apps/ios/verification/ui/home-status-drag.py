@@ -41,6 +41,15 @@ drag('pin-a', 'label:pinned:review')
 ordered('label:pinned:review', 'pin-a', 'label:focus')
 ui.capture('pin-moved-into-empty-section')
 
+drag('pin-a', 'focus-a', .12)
+ordered('label:pinned:review', 'label:focus', 'pin-a', 'focus-a')
+row = ui.element('pin-a')
+ui.axe('touch', '-x', str(row['frame']['width'] * .26), '-y', str(y(row)), '--down', '--up', '--delay', '.85')
+action(catalog.text('session.action.pin'))
+assert not any(node.get('AXLabel') == catalog.text('session.action.unpin') for node in ui.state())
+ui.capture('pinned-row-unpinned-in-focus')
+ui.axe('tap', '-x', str(row['frame']['width'] - 12), '-y', str(y(row)))
+
 row = ui.element('focus-woken')
 width = row['frame']['width']
 ui.axe('touch', '-x', str(width * .26), '-y', str(y(row)), '--down', '--up', '--delay', '.85')

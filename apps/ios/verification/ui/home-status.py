@@ -23,10 +23,14 @@ def menu_action(key):
 
 for section in ('focus', 'later', 'settled'):
     ui.element(f'label:{section}')
-assert not any(item.get('AXUniqueId') in {'later-a', 'settled-a'} for item in ui.state())
+assert not any(item.get('AXUniqueId') in {'later-a', 'later-child', 'settled-a'} for item in ui.state())
 ui.capture('collapsed')
+ui.axe('tap', *center(ui.element('label:later')))
+child_return = ui.element('later-child')['AXValue']
+ui.axe('tap', *center(ui.element('label:later')))
 
-for key, evidence in [('home.status.later', 'later-undo'), ('home.status.settle', 'settle-undo')]:
+for key, command in [('home.status.later', 'snooze'), ('home.status.settle', 'settle')]:
+    evidence = f'{command}-undo'
     ui.axe('touch', *center(ui.element('focus-a')), '--down', '--up', '--delay', '.85')
     ui.axe('tap', *center(menu_action(key)))
     if key == 'home.status.later':
@@ -35,13 +39,21 @@ for key, evidence in [('home.status.later', 'later-undo'), ('home.status.settle'
             assert menu_action(key)['AXLabel'].startswith(f'{catalog.text(key)}, '), 'Missing resolved preset time'
         ui.capture('later-presets')
         ui.axe('tap', *center(menu_action('home.status.later.oneHour')))
-    ui.wait(lambda items: not any(item.get('AXUniqueId') == 'focus-a' for item in items),
-            'The conversation remained in Focus')
+    ui.axe('tap', '--label', catalog.text(f'home.status.opened.{command}.all'))
     undo = catalog.text('home.status.toast.undo')
-    ui.wait(lambda items: any(item.get('AXLabel') == undo for item in items), 'Missing Undo')
-    ui.screenshot(evidence)
-    ui.axe('tap', '--label', undo)
+
+    def undo_button(items):
+        if any(item.get('AXUniqueId') == 'focus-a' for item in items):
+            return None
+        return next((item for item in items if item.get('AXLabel') == undo and item.get('type') == 'Button'), None)
+
+    ui.wait(undo_button, 'The opener should leave Focus and show Undo')
+    ui.axe('tap', '--label', undo, '--tap-style', 'simulator')
     ui.element('focus-a')
+    ui.axe('tap', *center(ui.element('label:later')))
+    assert ui.element('later-child')['AXValue'] == child_return, 'Undo did not restore the child’s original Later time'
+    ui.capture(f'{evidence}-restored-child')
+    ui.axe('tap', *center(ui.element('label:later')))
 
 ui.capture('restored-focus')
 
@@ -53,21 +65,27 @@ def check_first(first_id, second_id):
         if not {first_id, second_id} <= by_id.keys():
             return False
         first, second = by_id[first_id], by_id[second_id]
+        for row_id in (first_id, second_id):
+            assert sum(i.get('AXUniqueId') == row_id for i in items) == 1, (
+                f'Expected one accessibility button for {row_id}')
         return (first['frame']['y'] < second['frame']['y']
                 and catalog.text('home.status.moveDown') in first['custom_actions']
                 and catalog.text('home.status.moveUp') not in first['custom_actions']
-                and catalog.text('home.status.moveUp') in second['custom_actions'])
+                and catalog.text('home.status.moveUp') in second['custom_actions']
+                and catalog.text('home.status.moveDown') in second['custom_actions'])
     ui.wait(ordered, f'Expected {first_id} first and refreshed accessibility actions')
 
 
 ui.axe('touch', *center(ui.element('focus-woken')), '--down', '--up', '--delay', '.85')
 ui.axe('tap', *center(menu_action('home.status.moveToTop')))
-check_first('focus-woken', 'focus-a')
 ui.open_case('status-catalog-repeat')
 check_first('focus-woken', 'focus-a')
-ui.capture('held-move')
 ui.open_case('status-catalog-readback')
 check_first('focus-woken', 'focus-a')
 ui.capture('read-back-move')
-print('PASS: Later and Settled start collapsed, Later shows presets on first use, and both actions undo. '
+ui.axe('tap', *center(ui.element('label:settled')))
+ui.axe('touch', *center(ui.element('settled-a')), '--down', '--up', '--delay', '.85')
+menu_action('home.status.later')
+ui.capture('settled-offers-later')
+print('PASS: Later and Settled start collapsed, Later shows presets on first use, and both actions restore the opener to Focus and the child to its original Later time. '
       'The moved row keeps its place through catalog readback and the accessibility actions follow the new order.')

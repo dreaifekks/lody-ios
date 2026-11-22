@@ -24,6 +24,12 @@ import Foundation
     NotificationCenter.default.post(name: .lodyWorkspaceRoleDidChange, object: nil)
   }
 
+  static func learnFixtureViewer() {
+    guard LodyUIVerify.status else { return }
+    learn(["ui-home": WorkspaceMember(id: "ui-home", name: "UI fixture", image: nil, role: "viewer")],
+      userId: "ui-home", workspaceId: "ui-home")
+  }
+
   static func load(userId: String, workspaceId: String, receive: @escaping @MainActor ([String: WorkspaceMember]) -> Void) async {
     let generation = LocalStore.shared.generation
     func ownsScope() -> Bool {

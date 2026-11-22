@@ -71,10 +71,23 @@ enum InboxSections {
     }
     var buckets = home
     buckets.families = bucketed
-    let sections: [LodyListSection] = switch grouping {
+    var sections: [LodyListSection] = switch grouping {
     case .time: timeline(buckets)
     case .project: byProject(buckets)
     case .status: tiers(layout, home: home, index: index, pending: bucketed.filter { $0.session.pending && index[$0.session.id] == nil }, settledExpanded: settledExpanded)
+    }
+    if grouping != .status {
+      // Time and project rows keep their native actions, but never offer management the layout withholds.
+      sections = sections.map { section in
+        var section = section
+        section.rows = section.rows.map { row in
+          guard let source = index[row.id] else { return row }
+          var row = restrict(row, source)
+          row.menuActions.removeAll { $0.id == "pin" }
+          return row
+        }
+        return section
+      }
     }
     return pinned + sections
   }
@@ -192,13 +205,16 @@ enum InboxSections {
 
   static func decorate(_ row: LodyListRow, _ source: StatusViewRow, _ session: SessionItem, now: Double) -> LodyListRow {
     var row = row
+    // `row.unread` arrives with the conversation's own and its internal Tabs' unread output
+    // (`SessionRows.treeRows`); the layout adds a woken snooze. Either keeps the dot.
+    let tabsOrOwn = row.unread
     if source.activityAt.isFinite {
       row.value = LodyRelativeTime.compact(source.activityAt, now: now)
       row.accessibilityValue = LodyRelativeTime.text(source.activityAt, now: now)
       // The local viewed watermark clears emphasis before the read receipt syncs, as elsewhere.
-      row.unread = source.unread && (session.lastViewedMessageAt.map { $0 < source.activityAt } ?? true)
+      row.unread = tabsOrOwn || (source.unread && (session.lastViewedMessageAt.map { $0 < source.activityAt } ?? true))
     } else {
-      row.unread = source.unread
+      row.unread = tabsOrOwn || source.unread
     }
     if source.tier == .later, let until = source.snoozedUntil, let countdown = StatusViewFormat.countdown(until: until, now: now) {
       row.value = countdown
@@ -206,13 +222,11 @@ enum InboxSections {
       let date = Date(timeIntervalSince1970: until / 1000).formatted(date: .abbreviated, time: .shortened)
       row.accessibilityValue = String.localizedStringWithFormat(String(localized: "home.status.returns", bundle: .lody), date)
     }
-    row.pinned = source.tier == .pinned
-    row.leadingActions = source.canPrefer ? [SessionRows.pin(row.pinned)] : []
+    // An opened child carried under a pinned opener renders in the Pinned area without being pinned.
+    row.pinned = source.tier == .pinned && session.pinned
     switch source.tier {
     case .focus, .later:
-      row.actions = source.canManage
-        ? [listAction(statusActions.settle, "home.status.settle", "checkmark.circle"), listAction(statusActions.later, "home.status.later", "clock")]
-        : []
+      row.actions = [listAction(statusActions.settle, "home.status.settle", "checkmark.circle"), listAction(statusActions.later, "home.status.later", "clock")]
     case .settled:
       row.actions = [SessionRows.archive(false)]
     case .pinned:
@@ -220,6 +234,36 @@ enum InboxSections {
     }
     // Pin moves into the status menu beside Move to section; the rest of the menu stays.
     row.menuActions.removeAll { $0.id == "pin" }
+    return restrict(row, source)
+  }
+
+  /// Offers only what the layout row permits: pin and unpin need `canPrefer`; status actions and
+  /// session management (Settle, Later, Archive, Rename, Delete) need `canManage`, which a read-only
+  /// member or a conversation on a machine the user cannot manage never has. Share and Mark Read stay.
+  static func restrict(_ row: LodyListRow, _ source: StatusViewRow) -> LodyListRow {
+    var row = row
+    row.leadingActions = source.canPrefer ? [SessionRows.pin(row.pinned)] : []
+    return restrict(row, canManage: source.canManage, canPrefer: source.canPrefer)
+  }
+
+  static func readOnly(_ sections: [LodyListSection]) -> [LodyListSection] {
+    sections.map { section in
+      var section = section
+      section.headerMenu = []
+      section.rows = section.rows.map { restrict($0, canManage: false, canPrefer: false) }
+      return section
+    }
+  }
+
+  private static func restrict(_ row: LodyListRow, canManage: Bool, canPrefer: Bool) -> LodyListRow {
+    var row = row
+    let managed = ["archive", "rename", "delete", statusActions.settle, statusActions.later, statusActions.focus]
+    func permits(_ action: LodyListAction) -> Bool {
+      action.id == "pin" ? canPrefer : canManage || !managed.contains(action.id)
+    }
+    row.leadingActions = row.leadingActions.filter(permits)
+    row.actions = row.actions.filter(permits)
+    row.menuActions = row.menuActions.filter(permits)
     return row
   }
 

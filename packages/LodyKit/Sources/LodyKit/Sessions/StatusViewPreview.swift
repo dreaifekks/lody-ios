@@ -17,14 +17,18 @@ enum StatusViewPreview {
   static func reset() {
     let now = LodyRelativeTime.now()
     func row(_ id: String, _ tier: StatusViewRow.Tier, until: Double? = nil) -> StatusViewRow {
-      StatusViewRow(id: id, tier: tier, activityAt: now - hour, unread: id == "focus-woken",
-        snoozedUntil: until, woken: id == "focus-woken", canManage: true, canPrefer: true)
+      let woken = id == "focus-woken" || (id == "ui-design" && LodyUIVerify.has("--ui-review-status-woken-tab"))
+      return StatusViewRow(id: id, tier: tier, activityAt: now - hour, unread: woken,
+        snoozedUntil: until, woken: woken, canManage: true, canPrefer: true)
     }
     let extraFocus = LodyUIVerify.has("--ui-review-status-long")
       ? (1...24).map { row("focus-extra-\($0)", .focus) } : []
+    let family = LodyUIVerify.has("--ui-review-status-family")
+    var pinned = row("pin-a", .pinned)
+    if family { pinned.children = [row("pin-child", .pinned)] }
     layout = StatusViewLayout(
       pinned: [
-        .init(sectionId: nil, name: nil, rows: [row("pin-a", .pinned), row("pin-c", .pinned)]),
+        .init(sectionId: nil, name: nil, rows: [pinned, row("pin-c", .pinned)]),
         .init(sectionId: "maintenance", name: "Maintenance", rows: [row("pin-b", .pinned)], hiddenCount: 2),
         .init(sectionId: "review", name: "Review"),
       ],
@@ -33,6 +37,7 @@ enum StatusViewPreview {
       settled: [row("settled-a", .settled)],
       canManageSections: true
     )
+    if LodyUIVerify.has("--ui-review-status-undo") { layout.later.append(row("later-child", .later, until: now + 3 * hour)) }
     initialIds = layout.index.keys.sorted().filter { $0 != "ui-design" }
     archivedIds = []
     pendingMove = nil
@@ -46,8 +51,21 @@ enum StatusViewPreview {
     }
     let index = layout.index
     catalog.sessions += initialIds.map { id in
-      SessionItem(id: id, title: id, archived: archivedIds.contains(id), pinned: index[id]?.tier == .pinned,
-        userId: "ui-home", lastMessageAt: index[id]?.activityAt)
+      let activity = index[id]?.activityAt
+      let message = id == "focus-woken" ? activity.map { $0 - hour } : activity
+      return SessionItem(id: id, title: id, archived: archivedIds.contains(id),
+        pinned: id != "pin-child" && index[id]?.tier == .pinned, userId: "ui-home",
+        openedBySessionId: opener(of: id), lastMessageAt: message,
+        lastReadAt: id == "focus-woken" ? message : nil)
+    }
+    if let wake = index["ui-design"], wake.woken, let root = catalog.sessions.firstIndex(where: { $0.id == wake.id }) {
+      let message = wake.activityAt - hour
+      catalog.sessions[root].lastMessageAt = message
+      catalog.sessions[root].lastReadAt = message
+    }
+    if LodyUIVerify.has("--ui-review-status-pending") {
+      catalog.sessions.append(.init(id: "pending-new", title: "pending-new", userId: "ui-home",
+        lastMessageAt: LodyRelativeTime.now(), pending: true))
     }
   }
 
@@ -84,18 +102,11 @@ enum StatusViewPreview {
     case .setPinned(let id, let pinned):
       let move = StatusViewCommand.move(sessionId: id, to: pinned ? .pinned(nil) : .focus, beforeId: nil)
       if let hold = StatusViewHold(move, base: layout) { layout = hold.apply(to: layout) }
-    case .snooze(let id, let until, _):
-      guard until > LodyRelativeTime.now(), var row = layout.index[id] else { return 0 }
-      removeRow(id)
-      row.tier = .later
-      row.snoozedUntil = until
-      layout.later.append(row)
-    case .settle(let id, _):
-      guard var row = layout.index[id] else { return 0 }
-      removeRow(id)
-      row.tier = .settled
-      row.snoozedUntil = nil
-      layout.settled.append(row)
+    case .snooze(let id, let until, let includeOpened):
+      guard until > LodyRelativeTime.now() else { return 0 }
+      changeTier(id, includeOpened: includeOpened, until: until)
+    case .settle(let id, let includeOpened):
+      changeTier(id, includeOpened: includeOpened, until: nil)
     case .moveToFocus(let id, _):
       let move = StatusViewCommand.move(sessionId: id, to: .focus, beforeId: layout.focus.first?.id)
       if let hold = StatusViewHold(move, base: layout) { layout = hold.apply(to: layout) }
@@ -128,11 +139,36 @@ enum StatusViewPreview {
     publish()
   }
 
+  private static func opener(of id: String) -> String? {
+    switch id {
+    case "pin-child": return "pin-a"
+    case "later-child": return "focus-a"
+    default: return nil
+    }
+  }
+
+  private static func changeTier(_ id: String, includeOpened: Bool, until: Double?) {
+    let index = layout.index
+    let ids = [id] + (includeOpened ? initialIds.filter { opener(of: $0) == id } : [])
+    for id in ids {
+      guard var row = index[id] else { continue }
+      removeRow(id)
+      row.tier = until == nil ? .settled : .later
+      row.snoozedUntil = until
+      if until == nil { layout.settled.append(row) } else { layout.later.append(row) }
+    }
+  }
+
   private static func removeRow(_ id: String) {
     layout.focus.removeAll { $0.id == id }
     layout.later.removeAll { $0.id == id }
     layout.settled.removeAll { $0.id == id }
-    for index in layout.pinned.indices { layout.pinned[index].rows.removeAll { $0.id == id } }
+    for section in layout.pinned.indices {
+      layout.pinned[section].rows.removeAll { $0.id == id }
+      for row in layout.pinned[section].rows.indices {
+        layout.pinned[section].rows[row].children.removeAll { $0.id == id }
+      }
+    }
   }
 
   private static func publish() {

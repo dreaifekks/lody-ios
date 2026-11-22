@@ -114,10 +114,15 @@ final class ChatListView: UIView, UICollectionViewDelegate {
   private let dropFeedback = UISelectionFeedbackGenerator()
   private var dragScroll: CADisplayLink?
   private var dragScrollSpeed: CGFloat = 0
-  private var menuPress: (item: Item, origin: CGPoint)?
+  /// The drop session the edge scroll belongs to, so the target and haptics follow the rows that
+  /// scroll under a finger that stays still.
+  private weak var scrollingDrop: UIDropSession?
+  /// The opener whose opened children leave the list while it is dragged, so the family moves as one.
+  private var liftedFamily: String?
+  private var resignObserver: NSObjectProtocol?
+  private var menuPress: Item?
   private let rowMenuButton = UIButton(type: .system)
   private lazy var rowMenuPress = ChatRowMenuPress(target: self, action: #selector(finishRowMenuPress(_:)))
-  private lazy var rowEditMenu = UIEditMenuInteraction(delegate: self)
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -161,16 +166,17 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     collection.dragInteractionEnabled = false
     collection.accessibilityIdentifier = "home-chat-list"
     addSubview(collection)
-    rowMenuPress.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-    rowMenuPress.delegate = self
-    collection.addGestureRecognizer(rowMenuPress)
+    // iOS 17.4+ opens the row's menu on a stationary release so a held press drags first. Earlier
+    // systems cannot present a menu from code, so they keep the system context menu, which still
+    // turns into the drag when the lifted row moves.
     if #available(iOS 17.4, *) {
+      rowMenuPress.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+      rowMenuPress.delegate = self
+      collection.addGestureRecognizer(rowMenuPress)
       rowMenuButton.showsMenuAsPrimaryAction = true
       rowMenuButton.isUserInteractionEnabled = false
       rowMenuButton.accessibilityElementsHidden = true
       addSubview(rowMenuButton)
-    } else {
-      addInteraction(rowEditMenu)
     }
     topBackdrop.layer.zPosition = 1
     topBackdrop.isHidden = true
@@ -222,10 +228,15 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     detailsObserver = NotificationCenter.default.addObserver(forName: .lodyChatRowDetailsChanged, object: nil, queue: .main) {
       [weak self] _ in MainActor.assumeIsolated { self?.detailsChanged() }
     }
+    // A modal, the app switcher or a call interrupts the drag; the edge scroll must not keep running.
+    resignObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) {
+      [weak self] _ in MainActor.assumeIsolated { self?.stopDragScroll() }
+    }
   }
 
   isolated deinit {
     if let detailsObserver { NotificationCenter.default.removeObserver(detailsObserver) }
+    if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
   }
 
   /// The view menu changed which details rows show: re-render visible rows in place.
@@ -267,6 +278,10 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       return
     }
     deferredSections = nil
+    apply(sections)
+  }
+
+  private func apply(_ sections: [LodyListSection]) {
     projectIndex.cancel()
     projectIndex.update([])
     applyingSections = true
@@ -305,7 +320,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
           entry = Entry(kind: .link, row: row, expanded: nil, canToggle: false)
         } else if row.id.hasPrefix("project:") || row.id.hasPrefix("view:") {
           entry = Entry(kind: .more, row: row, expanded: nil, canToggle: false)
-        } else if !row.parentId.isEmpty, foldedOpeners.contains(row.parentId) {
+        } else if !row.parentId.isEmpty, foldedOpeners.contains(row.parentId) || row.parentId == liftedFamily {
           continue
         } else if row.treeParent {
           // The parent keeps its own state; hidden children have a separate summary.
@@ -491,8 +506,9 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     // iOS highlights rows on press; Android uses ripple.
     // The archived page is already as grey as fill.pressed, so it highlights with a translucent fill.
     let pressed = archivedStyle ? LodyUIColor.fillSelected : LodyUIColor.fillPressed
-    cell.accessibilityIdentifier = entry.row.id
-    cell.accessibilityTraits = current ? [.button, .selected] : .button
+    // The SwiftUI content is the row's one accessibility element (label, value, selection, actions);
+    // the cell stays a container so VoiceOver and UI checks never find a second, unlabelled button.
+    cell.isAccessibilityElement = false
     cell.configurationUpdateHandler = { cell, state in
       var background = UIBackgroundConfiguration.clear()
       background.backgroundColor = state.isHighlighted || state.isSelected ? pressed : current ? LodyUIColor.fillSelected : .clear
@@ -554,7 +570,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     guard let path = indexPaths.first, let item = dataSource.itemIdentifier(for: path) else { return nil }
     // While a finger is down on a movable row, the system menu would interpret motion over
     // its actions as selection. Let UIKit drag first and open the menu on a stationary release.
-    if rowMenuPress.isTrackingTouch, draggable(item) { return nil }
+    if #available(iOS 17.4, *), rowMenuPress.isTrackingTouch, draggable(item) { return nil }
     guard let menu = rowMenu(item) else { return nil }
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
   }
@@ -582,32 +598,28 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     return draggable(item)
   }
 
+  /// A held press that never became a drag opens the row's menu on release. Whether the finger
+  /// moved is UIKit's call: a drag that begins clears `menuPress` (`dragSessionWillBegin`), so there
+  /// is no distance threshold of our own that could disagree with UIKit's lift threshold.
   @objc private func finishRowMenuPress(_ press: UILongPressGestureRecognizer) {
-    let location = press.location(in: self)
     switch press.state {
     case .began:
       if let path = collection.indexPathForItem(at: press.location(in: collection)), let item = dataSource.itemIdentifier(for: path) {
-        menuPress = (item, location)
-      }
-    case .changed:
-      if let origin = menuPress?.origin, hypot(location.x - origin.x, location.y - origin.y) > 8 {
-        menuPress = nil
+        menuPress = item
       }
     case .ended:
       defer { menuPress = nil }
-      guard let (item, origin) = menuPress,
-        hypot(location.x - origin.x, location.y - origin.y) <= 8,
+      guard let item = menuPress, dragging == nil,
         draggable(item), let path = dataSource.indexPath(for: item),
         let cell = collection.cellForItem(at: path), let menu = rowMenu(item)
       else { return }
-      let frame = convert(cell.bounds, from: cell)
       rowMenuButton.menu = menu
       if #available(iOS 17.4, *) {
-        rowMenuButton.frame = frame
+        rowMenuButton.frame = convert(cell.bounds, from: cell)
         rowMenuButton.performPrimaryAction()
-      } else {
-        rowEditMenu.presentEditMenu(with: .init(identifier: nil, sourcePoint: CGPoint(x: frame.midX, y: frame.midY)))
       }
+    case .changed:
+      break
     default:
       menuPress = nil
     }
@@ -617,13 +629,6 @@ final class ChatListView: UIView, UICollectionViewDelegate {
 extension ChatListView: UIGestureRecognizerDelegate {
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
     gestureRecognizer === rowMenuPress
-  }
-}
-
-extension ChatListView: @preconcurrency UIEditMenuInteractionDelegate {
-  func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
-    suggestedActions: [UIMenuElement]) -> UIMenu? {
-    rowMenuButton.menu
   }
 }
 
@@ -678,9 +683,15 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
   func collectionView(_ collectionView: UICollectionView, dragSessionWillBegin session: UIDragSession) {
     guard let item = session.localContext as? Item else { return }
     menuPress = nil
-    dragging = item
     lastDropTarget = nil
     dropFeedback.prepare()
+    // Opened children travel with their opener: they leave the list for the drag and return with
+    // the next projection, instead of staying behind while the opener moves.
+    if entries[item]?.row.treeParent == true, !foldedOpeners.contains(item.row) {
+      liftedFamily = item.row
+      apply(lastSections)
+    }
+    dragging = item
   }
 
   func collectionView(_ collectionView: UICollectionView, dragSessionIsRestrictedToDraggingApplication session: UIDragSession) -> Bool { true }
@@ -699,7 +710,13 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
     stopDragScroll()
     dragging = nil
     lastDropTarget = nil
-    if let deferredSections { setSections(deferredSections) }
+    let restoresFamily = liftedFamily != nil
+    liftedFamily = nil
+    if let deferredSections {
+      setSections(deferredSections)
+    } else if restoresFamily {
+      apply(lastSections)
+    }
   }
 
   func collectionView(_ collectionView: UICollectionView, canHandle session: UIDropSession) -> Bool {
@@ -716,24 +733,39 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
   ) -> UICollectionViewDropProposal {
     guard dragging != nil else { return UICollectionViewDropProposal(operation: .forbidden) }
     let point = session.location(in: collectionView)
+    scrollingDrop = session
     updateDragScroll(at: point)
-    let command = dropCommand(at: point, suggested: destinationIndexPath)
-    updateDropFeedback(command)
-    return UICollectionViewDropProposal(operation: command == nil ? .forbidden : .move)
+    let target = dropTarget(at: point, suggested: destinationIndexPath)
+    updateDropFeedback(target?.command)
+    guard let target else { return UICollectionViewDropProposal(operation: .forbidden) }
+    // Between rows the list opens a gap where the row will land; on a label or a collapsed group
+    // there is no row position to open.
+    return UICollectionViewDropProposal(operation: .move, intent: target.betweenRows ? .insertAtDestinationIndexPath : .unspecified)
   }
 
   func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
     stopDragScroll()
     guard let status, let moving = dragging,
-      let command = dropCommand(at: coordinator.session.location(in: collectionView), suggested: coordinator.destinationIndexPath),
+      let command = dropTarget(at: coordinator.session.location(in: collectionView), suggested: coordinator.destinationIndexPath)?.command,
       case let .move(_, area, _) = command, let drag = coordinator.items.first?.dragItem
     else { return }
     // Apply the held order now, then animate the lifted row into its new cell.
     dragging = nil
+    liftedFamily = nil
     status.perform(command)
     if let path = dataSource.indexPath(for: Item(section: area.sectionId, row: moving.row)) {
       coordinator.drop(drag, toItemAt: path)
+    } else if let label = header(of: area.sectionId) {
+      // A collapsed group has no cell for the row: settle the lifted copy into its label, never the
+      // cancel animation that would read as a refused drop.
+      let center = CGPoint(x: label.frame.midX, y: label.frame.midY)
+      coordinator.drop(drag, to: UIDragPreviewTarget(container: collectionView, center: center, transform: CGAffineTransform(scaleX: 0.1, y: 0.1)))
     }
+  }
+
+  private func header(of sectionId: String) -> UICollectionReusableView? {
+    guard let section = dataSource.snapshot().indexOfSection(sectionId) else { return nil }
+    return collection.supplementaryView(forElementKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: section))
   }
 
   private func updateDropFeedback(_ command: StatusViewCommand?) {
@@ -747,12 +779,18 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
   private func updateDragScroll(at point: CGPoint) {
     let inset = collection.adjustedContentInset
     let safeArea = collection.safeAreaInsets
-    let edge: CGFloat = 96
+    let edge: CGFloat = 64
     let fromTop = point.y - (collection.bounds.minY + max(inset.top, safeArea.top))
     let fromBottom = collection.bounds.maxY - max(inset.bottom, safeArea.bottom) - point.y
     let top = min(edge, max(0, fromTop))
     let bottom = min(edge, max(0, fromBottom))
     dragScrollSpeed = (top - bottom) / edge * 420
+    // At the end of the content the edge band is just rows: hovering them must not count as scrolling.
+    let minimum = -inset.top
+    let maximum = max(minimum, collection.contentSize.height - collection.bounds.height + inset.bottom)
+    if (dragScrollSpeed < 0 && collection.contentOffset.y <= minimum) || (dragScrollSpeed > 0 && collection.contentOffset.y >= maximum) {
+      dragScrollSpeed = 0
+    }
     guard dragScrollSpeed != 0 else {
       stopDragScroll()
       return
@@ -769,7 +807,12 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
     let minimum = -inset.top
     let maximum = max(minimum, collection.contentSize.height - collection.bounds.height + inset.bottom)
     let y = min(maximum, max(minimum, offset.y + dragScrollSpeed * (link.targetTimestamp - link.timestamp)))
-    if y != offset.y { collection.contentOffset.y = y }
+    guard y != offset.y else { return stopDragScroll() }
+    collection.contentOffset.y = y
+    // UIKit only reports finger movement; rows scrolling under a still finger change the target too.
+    if let session = scrollingDrop, dragging != nil {
+      updateDropFeedback(dropTarget(at: session.location(in: collection), suggested: nil)?.command)
+    }
   }
 
   private func stopDragScroll() {
@@ -777,7 +820,9 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
     dragScroll = nil
   }
 
-  private func dropCommand(at point: CGPoint, suggested: IndexPath?) -> StatusViewCommand? {
+  /// The command a drop at `point` would run, and whether it lands between two rows (where the list
+  /// opens a gap) rather than on a label or a collapsed group.
+  private func dropTarget(at point: CGPoint, suggested: IndexPath?) -> (command: StatusViewCommand, betweenRows: Bool)? {
     guard let status, let moving = dragging else { return nil }
     let snapshot = dataSource.snapshot()
     let headerKind = UICollectionView.elementKindSectionHeader
@@ -791,7 +836,8 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
     guard destination.section < snapshot.numberOfSections else { return nil }
     let section = snapshot.sectionIdentifiers[destination.section]
     let before: String?
-    if groupFolds.isCollapsed(section) {
+    let collapsed = groupFolds.isCollapsed(section)
+    if collapsed {
       let rows = lastSections.first { $0.id == section }?.rows ?? []
       before = rows.first { $0.parentId.isEmpty && !$0.id.hasPrefix("view:") && $0.id != moving.row }?.id
     } else {
@@ -805,7 +851,8 @@ extension ChatListView: UICollectionViewDragDelegate, UICollectionViewDropDelega
       }
       before = StatusViewPlanning.beforeId(moving: moving.row, family: family, items: items.map(\.row), roots: roots, index: index)
     }
-    return status.drop(moving.row, section, before)
+    guard let command = status.drop(moving.row, section, before) else { return nil }
+    return (command, header == nil && !collapsed)
   }
 }
 

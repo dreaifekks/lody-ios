@@ -277,13 +277,20 @@ struct SessionCatalog: Equatable, Sendable {
       var statusView: Lossy<StatusViewLayouts>?
       var pinSections: [Lossy<StatusViewPinSection>]?
     }
-    struct Saved: Decodable { var catalog: Shape }
-    guard let shape = try? JSONDecoder().decode(Saved.self, from: saved).catalog else { return nil }
+    struct Saved: Decodable {
+      var catalog: Shape
+      /// Device time the catalog was received (`CatalogSession` wraps every saved catalog with it).
+      var syncedAt: Double?
+    }
+    guard let wrapper = try? JSONDecoder().decode(Saved.self, from: saved) else { return nil }
+    let shape = wrapper.catalog
+    var statusView = shape.statusView?.value
+    statusView?.receivedAt = wrapper.syncedAt
     return SessionCatalog(
       projects: shape.projects.compactMap(\.value), sessions: shape.sessions.compactMap(\.value) + pending,
       machineIds: shape.machineIds.compactMap(\.value), machineNames: shape.machineNames?.value ?? [:], machineOs: shape.machineOs?.value ?? [:], machineSimulators: shape.machineSimulators?.value ?? [:],
       machineEmulators: shape.machineEmulators?.value ?? [:], machineCapabilities: shape.machineCapabilities?.value ?? [:],
-      statusView: shape.statusView?.value, pinSections: (shape.pinSections ?? []).compactMap(\.value)
+      statusView: statusView, pinSections: (shape.pinSections ?? []).compactMap(\.value)
     )
   }
 }

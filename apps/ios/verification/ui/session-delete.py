@@ -29,7 +29,9 @@ def toggle_archived():
 
 if pad:
     pad_layout.show_list(ui)
-# Archived chats live behind the Chats view menu's Archived switch.
+# The archived fixture has no owner. Select Team explicitly on reused Simulators.
+tap_label(catalog.text('inbox.settings.section.view'))
+tap_label(catalog.text('home.scope.team'))
 toggle_archived()
 ui.element('ui-search')
 menu('ui-search')
@@ -47,6 +49,7 @@ ui.wait(lambda items: any(i.get('AXLabel') == catalog.text('home.archived.empty'
 ui.capture('archived-deleted')
 toggle_archived()
 
+ui.element('ui-design')
 ui.axe('tap', '--id', 'ui-design', '--post-delay', '.8')
 tap_label(catalog.text('common.more'))
 tap_label(delete)

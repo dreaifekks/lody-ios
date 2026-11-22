@@ -43,6 +43,10 @@ enum NativeDebug {
       StatusViewPreview.publishCatalog(readBackMove: scenario == "status-catalog-readback")
       return
     }
+    if scenario == "status-role-viewer" {
+      WorkspaceMembers.learnFixtureViewer()
+      return
+    }
     if scenario.hasPrefix("schedule-fixture-") {
       ScheduleFixture.shared.control(String(scenario.dropFirst("schedule-fixture-".count)))
       return

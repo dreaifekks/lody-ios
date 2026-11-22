@@ -3,7 +3,7 @@ import Foundation
 // The Status view (Focus / Later / Settled) and the pin sections, as the shared runtime computes
 // them (`catalog.statusView`, `catalog.pinSections`). Swift renders this layout and never sorts or
 // classifies these rows itself; writes go back as `StatusViewCommand`s that the runtime plans.
-// Shapes: Lody `.agents/notes/proposed/architecture/2026-11-21-status-view-on-phones.md`.
+// Shapes: Lody `.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md`.
 
 struct StatusViewRow: Equatable, Sendable {
   enum Tier: String, Decodable, Sendable { case pinned, focus, later, settled }
@@ -157,6 +157,9 @@ struct StatusViewLayouts: Decodable, Equatable, Sendable {
   var nowMs: Double = .nan
   /// False until the workspace `pinSection` rows have been read once.
   var sectionsLoaded = true
+  /// Device-clock instant this catalog was received (the saved catalog's `syncedAt`), so `nowMs`
+  /// calibrates the clock correctly even when the catalog is restored from cache later.
+  var receivedAt: Double?
 
   private enum CodingKeys: String, CodingKey { case mine, team, nowMs, sectionsLoaded }
 
@@ -196,19 +199,20 @@ struct StatusViewLayouts: Decodable, Equatable, Sendable {
   }
 }
 
-/// The runtime's server clock as the host sees it: an offset learned from the `nowMs` a catalog or
-/// `snoozePresets()` reply carries, applied to the device clock. An offset beyond `limit` comes from
-/// a snapshot restored from cache rather than clock skew, so it is ignored.
+/// The runtime's server clock as the host sees it: an offset learned from a `nowMs` paired with the
+/// device instant it was produced at, applied to the device clock. A catalog pairs its `nowMs` with
+/// the instant it was received (`receivedAt`), so a catalog restored from cache calibrates as well
+/// as a live one; `snoozePresets()` replies pair theirs with the reply's arrival. Any skew is
+/// accepted: a device clock hours off still gets server-correct countdowns and past-time checks.
 struct StatusViewClock: Equatable, Sendable {
-  static let limit = 10 * 60_000.0
   private(set) var offset = 0.0
-  private var lastServerNow: Double?
+  /// The device instant of the sample the offset came from; older samples never replace it.
+  private var sampledAt = -Double.infinity
 
   mutating func observe(serverNow: Double, deviceNow: Double) {
-    guard serverNow.isFinite, serverNow != lastServerNow else { return }
-    lastServerNow = serverNow
-    let next = serverNow - deviceNow
-    if abs(next) <= Self.limit { offset = next }
+    guard serverNow.isFinite, deviceNow.isFinite, deviceNow >= sampledAt else { return }
+    sampledAt = deviceNow
+    offset = serverNow - deviceNow
   }
 
   func now(device: Double) -> Double { device + offset }
@@ -335,16 +339,26 @@ enum StatusViewPlanning {
   }
 
   /// The command for dropping root row `id` into `area`, or nil when the drop is not allowed:
-  /// Focus takes Focus, Later and Settled rows (`canManage`); the Pinned area takes any row
-  /// (`canPrefer`). Pinned rows leave the Pinned area through Unpin, not by dragging.
+  /// Focus takes Focus, Later and Settled rows (`canManage`) and pinned rows, which it unpins
+  /// (`canManage` and `canPrefer`, Spec "Dragging a row from … the Pinned area (which unpins it)
+  /// into Focus"); the Pinned area takes any row (`canPrefer`).
   static func drop(_ row: StatusViewRow, into area: StatusViewArea, beforeId: String?) -> StatusViewCommand? {
     switch area {
     case .focus:
-      guard row.canManage, row.tier != .pinned else { return nil }
+      guard row.canManage, row.tier != .pinned || row.canPrefer else { return nil }
     case .pinned:
       guard row.canPrefer else { return nil }
     }
     return .move(sessionId: row.id, to: area, beforeId: beforeId == row.id ? nil : beforeId)
+  }
+
+  /// A drop target names a row the planner knows. Rows the layout does not list (an Outbox creation
+  /// shown at the top of Focus before it reads back) stand for the top of the area, never its end.
+  static func knownBefore(_ beforeId: String?, moving id: String, in area: StatusViewArea, of layout: StatusViewLayout) -> String? {
+    guard let beforeId else { return nil }
+    let ids = layout.rows(in: area).map(\.id)
+    if ids.contains(beforeId) { return beforeId }
+    return ids.first { $0 != id }
   }
 
   /// Accessibility Move up / Move down within the row's area: the command, or nil at the edge.
@@ -399,6 +413,14 @@ enum StatusViewPlanning {
     return .moveSection(sectionId: id, beforeId: position + 2 < sections.count ? sections[position + 2] : nil)
   }
 
+  /// The commands that undo a Settle or Later, one per conversation it changed, each restoring that
+  /// conversation's own prior tier (an opened child already settled stays settled). `previous` is
+  /// the acted-on row followed by the opened sub-conversations it carried, as they were rendered.
+  static func undo(_ previous: [StatusViewRow], now: Double) -> [StatusViewCommand] {
+    var seen = Set<String>()
+    return previous.filter { seen.insert($0.id).inserted }.map { undo($0, includeOpened: false, now: now) }
+  }
+
   /// The command that undoes a Settle or Later on `previous` (the row as it was rendered).
   static func undo(_ previous: StatusViewRow, includeOpened: Bool, now: Double) -> StatusViewCommand {
     switch previous.tier {
@@ -426,6 +448,8 @@ struct StatusViewHold: Equatable, Sendable {
   /// The runtime accepted the write.
   var acknowledged = false
   var failed = false
+  /// Other local moves in flight can change a neighbour without moving this row.
+  var concurrentMoves: Set<String> = []
 
   init?(_ command: StatusViewCommand, base: StatusViewLayout) {
     guard case let .move(id, area, before) = command else { return nil }
@@ -436,9 +460,28 @@ struct StatusViewHold: Equatable, Sendable {
   }
 
   /// Whether `layout`, the one now published, replaces the held order: the write failed, the row
-  /// already shows where it was dropped, or the write was accepted and a newer layout arrived.
+  /// already shows where it was dropped, or the write was accepted and the published layout moved
+  /// this row. Unrelated catalog updates that arrive before the write reads back leave the row where
+  /// it was in `base`, so they keep the hold instead of flashing the old order.
   func released(by layout: StatusViewLayout) -> Bool {
-    failed || landed(in: layout) || (acknowledged && layout != base)
+    failed || landed(in: layout) || (acknowledged && placement(in: layout) != placement(in: base))
+  }
+
+  /// Where the row renders: its area or tier and the row after it.
+  private func placement(in layout: StatusViewLayout) -> String {
+    for (name, rows) in [("focus", layout.focus), ("later", layout.later), ("settled", layout.settled)]
+      + layout.pinned.map({ ("pinned:" + ($0.sectionId ?? ""), $0.rows) }) {
+      if let position = rows.firstIndex(where: { $0.id == sessionId }) {
+        let next = rows[(position + 1)...].first { !concurrentMoves.contains($0.id) }
+        return name + ">" + (next?.id ?? "")
+      }
+    }
+    return ""
+  }
+
+  /// Several holds apply in order, so a second quick move never drops the first one's order.
+  static func apply(_ holds: [StatusViewHold], to layout: StatusViewLayout) -> StatusViewLayout {
+    holds.reduce(layout) { $1.apply(to: $0) }
   }
 
   /// The published layout already shows the row where it was dropped.
@@ -478,6 +521,40 @@ struct StatusViewHold: Equatable, Sendable {
         // The default section is omitted from the layout while it is empty.
         result.pinned.insert(StatusViewPinnedSection(sectionId: id, name: nil, rows: rows), at: id == nil ? 0 : result.pinned.count)
       }
+    }
+    return result
+  }
+}
+
+/// What opening a conversation marks read. The page's own conversation is read up to its latest
+/// message; its root conversation (itself, or the conversation a Tab belongs to) is also read up to
+/// a woken snooze, the unread the Status view derives from `max(lastMessageAt, snoozedUntil)`. A Tab
+/// never clears its root's own unread messages, which the person has not seen.
+enum StatusViewRead {
+  struct Receipt: Equatable, Sendable {
+    var sessionId: String
+    /// `lastReadAt` to write (server clock).
+    var at: Double
+    /// The watermark the local viewed store records, so the list clears before the receipt syncs.
+    var viewed: Double
+  }
+
+  static func receipts(page: SessionItem, root: SessionItem, rootRow: StatusViewRow?, now: Double) -> [Receipt] {
+    var result: [Receipt] = []
+    if let message = page.lastMessageAt, message.isFinite, !page.isTabClosed, message > (page.lastReadAt ?? -.infinity) {
+      result.append(Receipt(sessionId: page.id, at: max(now, message), viewed: message))
+    }
+    guard let rootRow, rootRow.id == root.id, rootRow.unread, rootRow.activityAt.isFinite else { return result }
+    let read = root.lastReadAt ?? -.infinity
+    // Only the wake-up is unread: the root's own messages are read, or this is the root's page.
+    let messagesRead = (root.lastMessageAt ?? -.infinity) <= read || page.id == root.id
+    guard messagesRead, rootRow.activityAt > read else { return result }
+    let at = max(now, rootRow.activityAt)
+    if let index = result.firstIndex(where: { $0.sessionId == root.id }) {
+      result[index].at = max(result[index].at, at)
+      result[index].viewed = max(result[index].viewed, rootRow.activityAt)
+    } else {
+      result.append(Receipt(sessionId: root.id, at: at, viewed: rootRow.activityAt))
     }
     return result
   }
