@@ -30,6 +30,13 @@ final class ChatOverlay: UIView {
       apply()
     }
   }
+  /// The composer has grown up to the page header: no room above it for the controls.
+  var crowded = false {
+    didSet {
+      guard oldValue != crowded else { return }
+      apply()
+    }
+  }
   var onReconnect: (() -> Void)?
   var onScrollToBottom: (() -> Void)?
 
@@ -133,8 +140,8 @@ final class ChatOverlay: UIView {
   }
 
   private func apply(animated: Bool? = nil) {
-    let showStatus = slot != .idle
-    let showScroll = scrollVisible
+    let showStatus = slot != .idle && !crowded
+    let showScroll = scrollVisible && !crowded
     let active = showStatus || showScroll
     var configuration = statusButton.configuration ?? .plain()
     if showStatus {

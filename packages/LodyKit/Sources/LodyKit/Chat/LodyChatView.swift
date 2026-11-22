@@ -598,6 +598,8 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       width: bounds.width - safeAreaInsets.left - safeAreaInsets.right,
       height: max(0, composer.frame.minY - safeAreaInsets.top - pageHeaderHeight - 40)))
     bringSubviewToFront(simulatorPreview)
+    composer.fitPageRoom()
+    overlay.crowded = composer.frame.minY - 8 - ChatOverlay.controlSize < safeAreaInsets.top + pageHeaderHeight
     adoptComposerIfNeeded()
     bindScrollOwnerIfNeeded()
     attachTitle()

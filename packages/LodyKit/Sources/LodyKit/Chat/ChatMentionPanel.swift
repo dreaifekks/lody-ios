@@ -77,6 +77,8 @@ enum ChatMentionLevel: Hashable {
 final class ChatMentionPanel: UIView {
   /// The panel's height while shown; the keyboard sits right below it.
   static let dockHeight: CGFloat = 280
+  /// The least the composer shrinks it to when the conversation runs out of room; the lists scroll.
+  static let minimumDockHeight: CGFloat = 120
   private let navigation = UINavigationController()
   private let root: ChatMentionLevelController
   private var catalog: [ChatMentionItem] = []

@@ -784,6 +784,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   /// Host chrome below the safe area (a page-owned header) that full screen must stay under.
   var fullScreenTopInset: CGFloat = 0 { didSet { if fullScreen { updateComposer() } } }
   private var fullScreen = false
+  private var fittedRoom: CGFloat?
+  private var fittingRoom = false
   private let grabber = ChatComposerGrabber(frame: .zero)
   private var grabberHeight: NSLayoutConstraint!
   private var dragProgress: CGFloat?
@@ -1551,11 +1553,28 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     return nil
   }
-  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
-    guard let superview, let host = owningController()?.view else { return ChatMessageContent.maximumCollapsedHeight }
+  /// The highest edge the composer may reach, in its superview: under the safe area and the page's header.
+  private func pageTop() -> CGFloat? {
+    guard let superview, let host = owningController()?.view else { return nil }
     // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
-    let top = max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
+    return max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
+  }
+  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
+    guard let top = pageTop() else { return ChatMessageContent.maximumCollapsedHeight }
     return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
+  }
+  /// Room above the keyboard in hosts that let the composer grow up to their header (the conversation).
+  private var pageRoom: CGFloat? {
+    guard allowsFullScreen, let top = pageTop() else { return nil }
+    return frame.maxY - top
+  }
+  /// The keyboard or the header moved: fit the docked panel and the input to the new room.
+  func fitPageRoom() {
+    guard let room = pageRoom, abs(room - (fittedRoom ?? 0)) > 0.5 else { return }
+    // Called from the host's layout pass, which already carries any keyboard animation.
+    fittingRoom = true
+    updateComposer()
+    fittingRoom = false
   }
   @objc private func toggleFullScreen() {
     setFullScreen(!fullScreen)
@@ -1677,15 +1696,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     input.hydrateReferences(activeMentionItems ?? [])
     mentionPanel.update(input: input, items: activeMentionItems ?? [], enabled: activeMentionItems != nil)
-    let dockChanged = mentionHeight.constant != mentionPanel.panelHeight
-    mentionHeight.constant = mentionPanel.panelHeight
-    // The prompt (and everything above it) sits on top of the docked panel.
-    (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(mentionPanel.panelHeight)
-    if dockChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
-      UIView.lodySpring(duration: 0.32, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-        (self.window ?? self.superview ?? self).layoutIfNeeded()
-      }
-    }
     // Card style (new session) has no @ button, like web: typing @ still opens mentions.
     mentionButton.isHidden = cardStyle || activeMentionItems == nil || !input.isFirstResponder
     mentionButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
@@ -1836,8 +1846,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     hintLeading.constant = leadingInset + input.textContainer.lineFragmentPadding
     hintTop.constant = topInset
     let height = input.sizeThatFits(CGSize(width: max(1, input.bounds.width), height: .greatestFiniteMagnitude)).height
-    let overflows = height > ChatMessageContent.maximumCollapsedHeight
-    let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
+    let others = queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
     // Attached media takes the third line's room so larger previews grow upward
     // without adding an empty writing line. Typed text can still grow naturally.
     var minimumHeight: CGFloat = 132
@@ -1846,7 +1855,20 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       if input.isFirstResponder { lines = showsAttachmentRow ? 2 : 3 }
       minimumHeight = topInset + verticalInset + lines * input.font!.lineHeight
     }
-    let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
+    var inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
+    // Below the page header: the docked panel gives up rows first (its lists scroll), then the
+    // input stops growing and scrolls, down to one line.
+    var dock = mentionPanel.panelHeight
+    fittedRoom = pageRoom
+    if let room = fittedRoom, expanded {
+      if dock > 0 { dock = min(dock, max(ChatMentionPanel.minimumDockHeight, room - others - inlineHeight)) }
+      inlineHeight = min(inlineHeight, max(topInset + verticalInset + input.font!.lineHeight, room - others - dock))
+    }
+    let dockChanged = mentionHeight.constant != dock
+    mentionHeight.constant = dock
+    // The prompt (and everything above it) sits on top of the docked panel.
+    (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(dock)
+    let chrome = others + dock
     // A conversation's card opens with focus (the expansion's own animation carries it).
     // A conversation's card can also stay open across a focus change when a draft keeps it open.
     let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
@@ -1859,14 +1881,14 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       dragDistance = max(1, fullScreenInputHeight(chrome: chrome) - inlineHeight)
       inputHeight.constant = inlineHeight
     }
-    input.isScrollEnabled = expanded && (fullProgress > 0 || overflows)
+    input.isScrollEnabled = expanded && (fullProgress > 0 || height > inputHeight.constant + 0.5)
     if !expanded { input.contentOffset = .zero }
     updateComposerOptions()
     onHeightChange?(chrome + inputHeight.constant)
     setNeedsLayout()
     // The card is always "expanded", so its focus change grows the input here: ride along with
     // the keyboard on the same spring rather than jumping.
-    if cardFocusChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
+    if (cardFocusChanged || dockChanged) && !fittingRoom && window != nil && !UIAccessibility.isReduceMotionEnabled {
       UIView.lodySpring(duration: 0.35, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
         (self.window ?? self.superview ?? self).layoutIfNeeded()
       }
