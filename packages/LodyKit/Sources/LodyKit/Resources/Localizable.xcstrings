@@ -4170,6 +4170,7 @@
       }
     },
     "send.error.mentions": {
+      "comment": "Persisted by older Outboxes. Keep both translations unchanged for draft recovery.",
       "extractionState": "manual",
       "localizations": {
         "zh-Hans": {
@@ -4182,6 +4183,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Could not resolve the references. Your draft is saved. Check the connection and try again."
+          }
+        }
+      }
+    },
+    "send.error.referencesUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法解析这条消息中的引用。你可以重试，也可以点消息下方的“按纯文本发送”，直接发送看到的文字。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The references could not be resolved. Retry, or tap “Send as plain text” below the message to send the words as shown."
+          }
+        }
+      }
+    },
+    "send.references.asText": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按纯文本发送"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send as plain text"
           }
         }
       }

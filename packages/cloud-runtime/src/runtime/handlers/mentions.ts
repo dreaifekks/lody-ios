@@ -74,7 +74,7 @@ export function registerMentions(ctx: RuntimeContext) {
     if (
       args.workspaceId !== state.workspace ||
       !state.metaReplica ||
-      state.unhealthy.size
+      state.unhealthy.has('meta')
     )
       throw new Error('metadata_not_ready');
     if (args.category === 'role') {
@@ -87,6 +87,8 @@ export function registerMentions(ctx: RuntimeContext) {
           state.userId !== sourceUserId
         )
           throw new Error('workspace_changed');
+        if (!state.metaReplica || state.unhealthy.has('meta'))
+          throw new Error('metadata_not_ready');
       };
       const result = await workspaceRoleMentions(
         sourceWorkspace,
@@ -100,6 +102,7 @@ export function registerMentions(ctx: RuntimeContext) {
         },
         () => state.presence,
         catalogs.get('meta')?.machineNames,
+        state.unhealthy,
       );
       check();
       return result;
@@ -127,7 +130,11 @@ export function registerMentions(ctx: RuntimeContext) {
         ? args.machineId
         : project?.machineId) ??
       args.machineId;
-    if (!machineId || !machineReplicas.has(machineId))
+    if (
+      !machineId ||
+      state.unhealthy.has(machineId) ||
+      !machineReplicas.has(machineId)
+    )
       throw new Error('machine_unavailable');
     const prefix = `${machineId}:local:`;
     const localProjectId = projectId?.startsWith(prefix)
@@ -183,7 +190,8 @@ export function registerMentions(ctx: RuntimeContext) {
       if (
         !currentMeta ||
         state.workspace !== sourceWorkspace ||
-        state.unhealthy.size
+        state.unhealthy.has('meta') ||
+        state.unhealthy.has(machineId)
       )
         throw new Error('metadata_not_ready');
       const commands = () => {

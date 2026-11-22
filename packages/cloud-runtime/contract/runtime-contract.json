@@ -3521,6 +3521,7 @@
         "machineId": { "type": "string" },
         "userId": { "type": "string" },
         "text": { "type": "string" },
+        "literalReferences": { "type": "boolean" },
         "attachmentBlocks": {
           "type": "array",
           "items": {

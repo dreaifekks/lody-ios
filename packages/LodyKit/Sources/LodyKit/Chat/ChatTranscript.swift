@@ -1194,6 +1194,10 @@ extension ChatPendingSend {
     if failed == true {
       result.append(ChatRow(id: id + ":pending", entryID: id, kind: "pending", text: status,
         actionable: true, attention: true))
+      if reason == "mention_expansion_failed" {
+        result.append(ChatRow(id: id + ":plainText", entryID: id, kind: "pending",
+          text: String(localized: "send.references.asText", bundle: .lody), actionable: true))
+      }
       return result
     }
     var precedingUserID: String?

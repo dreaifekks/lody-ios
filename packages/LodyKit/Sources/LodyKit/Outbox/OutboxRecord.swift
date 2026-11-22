@@ -42,6 +42,13 @@ struct OutboxRecord: Codable, Sendable, Equatable {
     return next
   }
 
+  // Older Outboxes persisted the alert in the language active when sending.
+  private static let legacyReferenceFailures = Set(Bundle.lody.localizations.compactMap { locale -> String? in
+    guard let url = Bundle.lody.url(forResource: locale, withExtension: "lproj"),
+          let bundle = Bundle(url: url) else { return nil }
+    return bundle.localizedString(forKey: "send.error.mentions", value: nil, table: nil)
+  })
+
   static func restore(_ raw: String?, awaitingConfirmation: String) -> [OutboxRecord] {
     guard let raw, let saved = try? JSONDecoder().decode(OutboxValue.self, from: Data(raw.utf8)),
           case .array(let items) = saved else { return [] }
@@ -51,6 +58,9 @@ struct OutboxRecord: Codable, Sendable, Equatable {
             send["text"]?.string != nil, case .array? = send["attachments"],
             send["choice"]?.truthy == true else { return nil }
       let record = OutboxRecord(session: session, send: send)
+      if record.phase == "failed", let reason = send["reason"]?.string, legacyReferenceFailures.contains(reason) {
+        return record.with(phase: "failed", reason: "mention_expansion_failed")
+      }
       guard record.phase == "creating" || record.phase == "sending" else { return record }
       return record.with(phase: "unknown", reason: awaitingConfirmation)
     }

@@ -229,27 +229,6 @@ struct StatusViewPinSection: Decodable, Equatable, Sendable {
 enum StatusViewArea: Hashable, Sendable {
   case focus
   case pinned(String?)
-
-  /// The Home list section rendering this area.
-  var sectionId: String {
-    switch self {
-    case .focus: InboxSections.focusId
-    case .pinned(nil): InboxSections.pinnedId
-    case .pinned(let id?): InboxSections.pinSectionPrefix + id
-    }
-  }
-
-  init?(sectionId: String) {
-    if sectionId == InboxSections.focusId {
-      self = .focus
-    } else if sectionId == InboxSections.pinnedId {
-      self = .pinned(nil)
-    } else if sectionId.hasPrefix(InboxSections.pinSectionPrefix) {
-      self = .pinned(String(sectionId.dropFirst(InboxSections.pinSectionPrefix.count)))
-    } else {
-      return nil
-    }
-  }
 }
 
 /// The runtime's command union; encodes to the note's JSON shape.

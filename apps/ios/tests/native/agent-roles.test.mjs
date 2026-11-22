@@ -8,7 +8,8 @@ const bundle = await build({
   stdin: {
     contents: `export {roleSettings,roleSnapshot} from './packages/cloud-runtime/src/runtime/role-settings.ts';
 export {roleMentions,workspaceRoleMentions} from './packages/cloud-runtime/src/runtime/agent-roles.ts';
-export {expandMentions} from './packages/cloud-runtime/src/runtime/mention-expansion.ts';`,
+export {expandMentions} from './packages/cloud-runtime/src/runtime/mention-expansion.ts';
+export {registerMentions} from './packages/cloud-runtime/src/runtime/handlers/mentions.ts';`,
     resolveDir: process.cwd(),
   },
   bundle: true,
@@ -487,4 +488,47 @@ test('Role references are global across authorized machines and require current 
     /mention_expansion_failed/,
   );
   assert.equal(c.writes(), 0);
+});
+
+test('a Role on a healthy computer still expands while another catalog cannot sync', async () => {
+  const c = catalog();
+  c.put('reviewer');
+  c.put('other', { machineId: 'm2', agentConfigId: 'a2' });
+  const unhealthy = new Set(['m2']);
+  const catalogFor = runtime.registerMentions({
+    state: {
+      workspace: 'w',
+      userId: 'me',
+      metaReplica: { flock: c.meta },
+      catalogs: new Map(),
+      machineReplicas: c.machines,
+      unhealthy,
+      presence: { state: 'live', onlineMachineIds: ['m1', 'm2'] },
+    },
+    channel: { handle() {} },
+    getGrant: grant,
+  });
+  const partial = await catalogFor({
+    category: 'role',
+    workspaceId: 'w',
+    userId: 'me',
+  });
+  assert.deepEqual(
+    partial.items.map((item) => item.path),
+    ['reviewer'],
+  );
+  assert.equal(partial.incomplete, true);
+  const expand = () =>
+    runtime.expandMentions('@role:reviewer', (category) =>
+      catalogFor({ category, workspaceId: 'w', userId: 'me' }),
+    );
+  assert.equal(
+    await expand(),
+    '[Agent Role: reviewer (agentRoleId: reviewer)]',
+  );
+  unhealthy.add('m1');
+  await assert.rejects(expand(), /mention_expansion_failed/);
+  unhealthy.clear();
+  unhealthy.add('meta');
+  await assert.rejects(expand(), /mention_expansion_failed/);
 });

@@ -192,6 +192,7 @@ export const SendTurnParams = z
     machineId: z.string(),
     userId: z.string().optional(),
     text: z.string(),
+    literalReferences: z.boolean().optional(),
     attachmentBlocks: blocks.optional(),
     /** Quote cards; the runtime appends them after the rewritten text. */
     quotes: z.array(MessageQuoteInput).optional(),

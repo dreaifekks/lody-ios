@@ -97,8 +97,8 @@ extension LodyChatView {
       onRetrySend(["forget": true, "id": row.entryID])
       return
     }
-    if let pendingSend, id == pendingSend.id + ":pending", pendingSend.failed == true {
-      onRetrySend([:])
+    if let pendingSend, pendingSend.failed == true, id == pendingSend.id + ":pending" || id == pendingSend.id + ":plainText" {
+      onRetrySend(["id": pendingSend.id, "asPlainText": id == pendingSend.id + ":plainText"])
       return
     }
     onActivityPress(["entryId": row.entryID, "itemId": row.itemID, "processStartId": row.processStartID])

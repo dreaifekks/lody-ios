@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { Flock } from '@loro-dev/flock-wasm/base64';
 import { openTestSession } from '../helpers.mjs';
 
 const bundle = await build({
@@ -357,6 +358,59 @@ test('first turn, queue and Steer persist the same expansion before delivery; fa
       'Steer must not reinterpret an already expanded queued prompt',
     );
     assert.equal(args.text, text, 'Failure/retry state retains the raw draft');
+  } finally {
+    fixture.close();
+  }
+});
+
+test('explicit plain-text retry delivers the displayed message once after reference resolution fails', async () => {
+  const flock = new Flock('retry-meta');
+  flock.set(['m', 'session-s1'], { machineId: 'm1', agentConfigId: 'a1' });
+  const fixture = await openTestSession({
+    settings: () => new Flock('retry-settings').exportFile(),
+    onRpc: () => ({ result: { accepted: true } }),
+  });
+  try {
+    const handlers = new Map();
+    fixture.runtime.registerSessions(
+      {
+        channel: { handle: (name, fn) => handlers.set(name, fn) },
+        state: { workspace: 'w1', userId: 'u1', metaReplica: { flock } },
+        getGrant: async () => ({
+          token: 'fixture',
+          gatewayBaseUrl: 'https://example.invalid',
+        }),
+      },
+      async () => ({ items: [], incomplete: true, truncated: false }),
+    );
+    const send = handlers.get('sendTurn');
+    const args = {
+      id: '00000000-0000-4000-8000-000000000012',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Use $audit with @role:reviewer',
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const rejected = await send(args);
+      assert.equal(rejected.reason, 'mention_expansion_failed');
+      assert.equal(rejected.state, 'not_sent');
+    }
+    assert.equal(fixture.appends.length, 0);
+    const displayed = 'Use $audit with 🧪 Reviewer';
+    const result = await send({
+      ...args,
+      text: displayed,
+      literalReferences: true,
+    });
+    assert.equal(result.state, 'accepted', result.reason);
+    const history = fixture.server.toJSON().history;
+    assert.deepEqual(
+      history.map((entry) => [entry.id, entry.inputConfig.prompt]),
+      [[args.id, displayed]],
+    );
   } finally {
     fixture.close();
   }

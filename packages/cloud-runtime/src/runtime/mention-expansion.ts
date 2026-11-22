@@ -27,10 +27,16 @@ export async function expandMentions(
     if (token) categories.add(categoryOf(token));
   }
   try {
-    const catalogs = await Promise.all([...categories].map(load));
-    // A partial skill scan can hide the project override of a global token.
-    if (catalogs.some((catalog) => catalog.incomplete || catalog.truncated))
-      throw new Error('mention_catalog_incomplete');
+    const catalogs = await Promise.all(
+      [...categories].map(async (category) => {
+        const catalog = await load(category);
+        // A partial skill scan can hide a project override. Role IDs bind to an
+        // exact live target, so missing rows on another machine cannot shadow it.
+        if (catalog.truncated || (catalog.incomplete && category !== 'role'))
+          throw new Error('mention_catalog_incomplete');
+        return catalog;
+      }),
+    );
     const items = catalogs.flatMap((catalog) => catalog.items);
     for (const match of text.matchAll(referencePattern))
       if (

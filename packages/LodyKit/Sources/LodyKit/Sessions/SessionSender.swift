@@ -128,9 +128,13 @@ final class SessionSender {
     try await store.put(record.with(phase: "uploaded")).value
   }
 
-  func retry() {
-    guard let store, let record, record.phase == "failed", !dispatching else { return }
+  func retry(_ id: String, asPlainText: Bool) {
+    guard let store, let record, record.sendId == id, record.phase == "failed", canSend else { return }
     var next = record.with(phase: "waiting")
+    if asPlainText {
+      guard record.send["reason"] == .string("mention_expansion_failed"), record.creation == nil else { return }
+      next.send["literalReferences"] = .bool(true)
+    }
     next.send["reason"] = nil
     store.put(next)
   }

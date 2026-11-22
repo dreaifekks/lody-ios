@@ -28,7 +28,7 @@ final class SendPreviewFixture {
   private(set) var entries: [[String: Any]]
   private var receive: (@MainActor (SessionRuntimeEvent) -> Void)?
   private var completion: CheckedContinuation<String, Error>?
-  private var submitted: (id: String, guide: Bool)?
+  private var submitted: [String: OutboxValue]?
   private var guideReceipts: [String] = []
   private var optionsReads = 0
   private var control: (action: String, messageId: String?, resume: CheckedContinuation<String, Error>?)?
@@ -126,7 +126,7 @@ final class SendPreviewFixture {
       ensureSession: { _ in },
       sendSessionTurn: { [weak self] payload in
         let args = SessionSender.object((try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]) ?? [:])
-        return try await self?.wait((args?["id"]?.string ?? "", args?["guide"] == .bool(true))) ?? #"{"state":"unknown"}"#
+        return try await self?.wait(args) ?? #"{"state":"unknown"}"#
       },
       releaseReserve: { _ in },
       alert: { [weak self] title, message in
@@ -137,7 +137,7 @@ final class SendPreviewFixture {
     )
   }
 
-  private func wait(_ submission: (id: String, guide: Bool)?) async throws -> String {
+  private func wait(_ submission: [String: OutboxValue]?) async throws -> String {
     submitted = submission
     calls += 1
     changed?()
@@ -182,8 +182,11 @@ final class SendPreviewFixture {
     guard let resume = completion else { return }
     completion = nil
     guard let record else { return resume.resume(returning: Self.result(failure ? "not_sent" : "accepted", failure)) }
-    let text = record.send["text"]?.string ?? ""
-    if submitted?.guide == true {
+    let text = submitted?["text"]?.string ?? record.send["text"]?.string ?? ""
+    if text.contains("$audit"), submitted?["literalReferences"] != .bool(true) {
+      return resume.resume(returning: #"{"state":"not_sent","reason":"mention_expansion_failed"}"#)
+    }
+    if submitted?["guide"] == .bool(true) {
       if !failure, let target = entries.last(where: { $0["role"] as? String == "assistant" && $0["finished"] as? Bool != true }) {
         guideReceipts.append(record.sendId)
         controlRequest = SessionController.json(["action": "steer", "turnId": target["id"] ?? "", "messageId": record.sendId])
