@@ -6965,7 +6965,6 @@ extension RuntimeContract {
     public var machineId: String
     public var userId: String?
     public var text: String
-    public var literalReferences: Bool?
     public var attachmentBlocks: [[String: JSONValue]]?
     public var quotes: [MessageQuoteInput]?
     public var cliType: String?
@@ -6978,7 +6977,7 @@ extension RuntimeContract {
     public var configOptionValues: [String: JSONValue]?
     public var agentRoleId: ClearableString?
     public var billingEntitlement: BillingEntitlement?
-    public init(sessionId: String, id: String? = nil, backgroundTaskId: String? = nil, queue: Bool? = nil, guide: Bool? = nil, machineId: String, userId: String? = nil, text: String, literalReferences: Bool? = nil, attachmentBlocks: [[String: JSONValue]]? = nil, quotes: [MessageQuoteInput]? = nil, cliType: String? = nil, agentType: String? = nil, resume: String? = nil, modelId: ClearableString? = nil, modeId: String? = nil, reasoningEffort: ClearableString? = nil, reasoningEffortConfigId: String? = nil, configOptionValues: [String: JSONValue]? = nil, agentRoleId: ClearableString? = nil, billingEntitlement: BillingEntitlement?) {
+    public init(sessionId: String, id: String? = nil, backgroundTaskId: String? = nil, queue: Bool? = nil, guide: Bool? = nil, machineId: String, userId: String? = nil, text: String, attachmentBlocks: [[String: JSONValue]]? = nil, quotes: [MessageQuoteInput]? = nil, cliType: String? = nil, agentType: String? = nil, resume: String? = nil, modelId: ClearableString? = nil, modeId: String? = nil, reasoningEffort: ClearableString? = nil, reasoningEffortConfigId: String? = nil, configOptionValues: [String: JSONValue]? = nil, agentRoleId: ClearableString? = nil, billingEntitlement: BillingEntitlement?) {
       self.sessionId = sessionId
       self.id = id
       self.backgroundTaskId = backgroundTaskId
@@ -6987,7 +6986,6 @@ extension RuntimeContract {
       self.machineId = machineId
       self.userId = userId
       self.text = text
-      self.literalReferences = literalReferences
       self.attachmentBlocks = attachmentBlocks
       self.quotes = quotes
       self.cliType = cliType
@@ -7011,7 +7009,6 @@ extension RuntimeContract {
       self.machineId = try c.decode(String.self, forKey: Key("machineId"))
       self.userId = try c.decodeIfPresent(String.self, forKey: Key("userId"))
       self.text = try c.decode(String.self, forKey: Key("text"))
-      self.literalReferences = try c.decodeIfPresent(Bool.self, forKey: Key("literalReferences"))
       self.attachmentBlocks = try c.decodeIfPresent([[String: JSONValue]].self, forKey: Key("attachmentBlocks"))
       self.quotes = try c.decodeIfPresent([MessageQuoteInput].self, forKey: Key("quotes"))
       self.cliType = try c.decodeIfPresent(String.self, forKey: Key("cliType"))
@@ -7035,7 +7032,6 @@ extension RuntimeContract {
       try c.encode(self.machineId, forKey: Key("machineId"))
       try c.encodeIfPresent(self.userId, forKey: Key("userId"))
       try c.encode(self.text, forKey: Key("text"))
-      try c.encodeIfPresent(self.literalReferences, forKey: Key("literalReferences"))
       try c.encodeIfPresent(self.attachmentBlocks, forKey: Key("attachmentBlocks"))
       try c.encodeIfPresent(self.quotes, forKey: Key("quotes"))
       try c.encodeIfPresent(self.cliType, forKey: Key("cliType"))

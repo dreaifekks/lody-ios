@@ -80,7 +80,7 @@ assert ui.element('queue-count')['AXLabel'] == 'Queue: 0'
 assert not ui.element('session-input').get('AXValue'), 'Guide send reappeared as a draft'
 ui.capture('guide-applied')
 
-# A reference failure retains the guide and can send the displayed text under its original ID.
+# Retry resolves the retained guide using its original input ID.
 ui.axe('tap', '--id', 'session-input')
 ui.type_into('session-input', 'use $audit')
 assert ui.element('inputView')['frame']['height'] > 200, 'Retry must be exercised with the software keyboard visible'
@@ -95,9 +95,8 @@ retry = ui.wait(lambda items: next((i for i in items if (i.get('AXUniqueId') or 
 retry_id = retry['AXUniqueId'].removesuffix(':pending')
 assert user_text(retry_id) == retry_text
 ui.capture('guide-failure-retained')
-plain = ui.element(retry_id + ':plainText')
-assert plain['AXLabel'] == catalog.text('send.references.asText')
-ui.axe('tap', '--id', retry_id + ':plainText')
+assert not any(i.get('AXUniqueId') == retry_id + ':plainText' for i in ui.state())
+ui.axe('tap', '--id', retry_id + ':pending')
 ui.wait(lambda items: any(i.get('AXLabel') == 'Calls: 3 · sending' for i in items), 'Guide retry did not start')
 ui.axe('tap', '--id', 'send-complete')
 retried = json.loads(ui.element('control-request')['AXLabel'])

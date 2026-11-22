@@ -154,7 +154,7 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     try await foreground()
     try await handoff()
     try await failedSendRecovery()
-    try await retryReferencesAsText()
+    try await retryReferences()
     try await reconciledDelivery()
   }
 
@@ -182,7 +182,7 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     print("PASS: explicit handoff reconciliation confirms delivery without replay, survives restart, and fences late results by exact input")
   }
 
-  @MainActor static func retryReferencesAsText() async throws {
+  @MainActor static func retryReferences() async throws {
     let disk = Disk(), network = Network()
     let store = OutboxStore(key: "references", generation: 0, persistence: disk.persistence, awaitingConfirmation: "unknown")
     store.onChange = { NotificationCenter.default.post(name: .lodyOutboxDidChange, object: store) }
@@ -191,24 +191,24 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
       "quotes": .array([.object(["id": .string("q"), "text": .string("Quote")])]),
       "reason": .string("mention_expansion_failed"),
     ])
-    for legacyReason in [
-      "Could not resolve the references. Your draft is saved. Check the connection and try again.",
-      "无法展开引用，草稿已保留。请检查连接后重试。",
-    ] {
-      let legacy = draft.with(phase: "failed", reason: legacyReason)
-      let restored = OutboxRecord.restore(OutboxRecord.encode([legacy]), awaitingConfirmation: "unknown")
-      precondition(restored == [draft], "An existing failed draft must offer recovery immediately after upgrading")
-    }
-    try await store.put(draft).value
+    var legacy = draft.with(phase: "waiting")
+    legacy.send["reason"] = nil
+    legacy.send["literalReferences"] = .bool(true)
+    let restored = OutboxRecord.restore(OutboxRecord.encode([legacy]), awaitingConfirmation: "unknown")
+    precondition(restored == [draft], "An old queued literal send must wait for explicit retry before expanding references")
+    legacy.send["phase"] = .string("sending")
+    let uncertain = OutboxRecord.restore(OutboxRecord.encode([legacy]), awaitingConfirmation: "unknown")
+    precondition(uncertain == [draft.with(phase: "unknown", reason: "unknown")])
+    try await store.put(restored[0]).value
     let sender = SessionSender(sessionId: "s1", store: store, services: network.services, inflight: OutboxInflight())
     sender.update(.init(userId: "u1", connected: true, session: SessionItem(id: "s1"), context: OutboxForeground(live: true)))
     defer { store.onChange = nil; sender.changed = nil }
-    sender.retry("replaced", asPlainText: true)
+    sender.retry("replaced")
     precondition(sender.record == draft)
     let accepted = Gate()
     sender.changed = { if sender.record?.phase == "accepted", sender.canSend { accepted.open() } }
-    sender.retry(draft.sendId, asPlainText: true)
-    sender.retry(draft.sendId, asPlainText: true)
+    sender.retry(draft.sendId)
+    sender.retry(draft.sendId)
     try await accepted.wait()
     precondition(network.sent.count == 1)
     var payload = network.sent[0]
@@ -216,13 +216,13 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     payload["billingEntitlement"] = .null
     let params = try JSONDecoder().decode(RuntimeContract.SendTurnParams.self, from: JSONEncoder().encode(payload))
     let wire = try JSONDecoder().decode([String: OutboxValue].self, from: JSONEncoder().encode(params))
-    precondition(wire["literalReferences"] == .bool(true) && wire["text"] == draft.send["displayText"])
+    precondition(wire["text"] == draft.send["text"])
     precondition(wire["quotes"] == draft.send["quotes"])
     draft.send["phase"] = .string("unknown")
     try await store.put(draft).value
-    sender.retry(draft.sendId, asPlainText: true)
+    sender.retry(draft.sendId)
     precondition(sender.record == draft)
-    print("PASS: explicit reference recovery sends the displayed text once, preserving identity, quotes and attachments")
+    print("PASS: explicit retry sends the original reference tokens once, preserving identity, quotes and attachments")
   }
 
   @MainActor static func failedSendRecovery() async throws {

@@ -183,7 +183,7 @@ final class SendPreviewFixture {
     completion = nil
     guard let record else { return resume.resume(returning: Self.result(failure ? "not_sent" : "accepted", failure)) }
     let text = submitted?["text"]?.string ?? record.send["text"]?.string ?? ""
-    if text.contains("$audit"), submitted?["literalReferences"] != .bool(true) {
+    if failure, text.contains("$audit") {
       return resume.resume(returning: #"{"state":"not_sent","reason":"mention_expansion_failed"}"#)
     }
     if submitted?["guide"] == .bool(true) {

@@ -33,7 +33,6 @@ struct ChatPendingSend: Decodable {
   var references: [ChatTextReference]? = nil
   var startedAt: Double? = nil
   var failed: Bool? = nil
-  var reason: String? = nil
   var reconnect: Bool? = nil
   var queue: Bool? = nil
   var guide: Bool? = nil

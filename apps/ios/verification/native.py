@@ -329,10 +329,6 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
                 'LodyBackends': {'CONVEX_SITE_URL': 'https://local.example.test'},
             }))
             subprocess.run([str(executable)], check=True, timeout=60)
-        elif name == 'outbox':
-            subprocess.run(['xcrun', 'xcstringstool', 'compile', str(kit / 'Sources/LodyKit/Resources/Localizable.xcstrings'),
-                            '--output-directory', output], check=True)
-            subprocess.run(command, check=True, timeout=60)
         elif name == 'strings':
             resources = Path(output) / 'Localization.bundle'
             resources.mkdir()

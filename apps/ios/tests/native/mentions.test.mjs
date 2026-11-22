@@ -363,7 +363,7 @@ test('first turn, queue and Steer persist the same expansion before delivery; fa
   }
 });
 
-test('explicit plain-text retry delivers the displayed message once after reference resolution fails', async () => {
+test('retry keeps the original references and writes the same input once the catalog recovers', async () => {
   const flock = new Flock('retry-meta');
   flock.set(['m', 'session-s1'], { machineId: 'm1', agentConfigId: 'a1' });
   const fixture = await openTestSession({
@@ -371,6 +371,7 @@ test('explicit plain-text retry delivers the displayed message once after refere
     onRpc: () => ({ result: { accepted: true } }),
   });
   try {
+    let recovered = false;
     const handlers = new Map();
     fixture.runtime.registerSessions(
       {
@@ -381,7 +382,10 @@ test('explicit plain-text retry delivers the displayed message once after refere
           gatewayBaseUrl: 'https://example.invalid',
         }),
       },
-      async () => ({ items: [], incomplete: true, truncated: false }),
+      async ({ category }) =>
+        recovered
+          ? load(category)
+          : { items: [], incomplete: true, truncated: false },
     );
     const send = handlers.get('sendTurn');
     const args = {
@@ -391,25 +395,21 @@ test('explicit plain-text retry delivers the displayed message once after refere
       userId: 'u1',
       cliType: 'builtin',
       agentType: 'codex',
-      text: 'Use $audit with @role:reviewer',
+      text,
     };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const rejected = await send(args);
-      assert.equal(rejected.reason, 'mention_expansion_failed');
+    for (const attempt of [args, { ...args, literalReferences: true }]) {
+      const rejected = await send(attempt);
       assert.equal(rejected.state, 'not_sent');
+      assert.equal(rejected.reason, 'mention_expansion_failed');
     }
     assert.equal(fixture.appends.length, 0);
-    const displayed = 'Use $audit with 🧪 Reviewer';
-    const result = await send({
-      ...args,
-      text: displayed,
-      literalReferences: true,
-    });
+    recovered = true;
+    const result = await send(args);
     assert.equal(result.state, 'accepted', result.reason);
     const history = fixture.server.toJSON().history;
     assert.deepEqual(
       history.map((entry) => [entry.id, entry.inputConfig.prompt]),
-      [[args.id, displayed]],
+      [[args.id, expected]],
     );
   } finally {
     fixture.close();

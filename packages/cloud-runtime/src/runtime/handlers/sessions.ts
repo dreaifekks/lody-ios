@@ -491,7 +491,6 @@ export function registerSessions(
     return sendTurn(
       args,
       async (text) => {
-        if (wire.literalReferences) return text;
         const items: MentionItem[] = [];
         const expanded = await expandShortcuts(
           text,

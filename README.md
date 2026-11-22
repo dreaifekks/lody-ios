@@ -119,9 +119,8 @@ as their duration, without a leading loading icon. The final visible command gro
 shimmers while its turn runs, even after its tools complete or record a duration,
 and when hidden thinking calls follow it.
 
-When a message’s references cannot be resolved, tap **Retry** to resolve them
-again, or **Send as plain text** to send the wording shown in the bubble. Both
-actions keep the original attachments and quote cards.
+If a reference cannot be resolved, tap **Retry** below the message. The app
+resolves the original references again and keeps the attachments and quote cards.
 
 User bubbles collapse to six measured lines. Agent footer icons align with the
 message edge: Copy, Info and Fork, 32 pt apart, followed by time 12 pt after

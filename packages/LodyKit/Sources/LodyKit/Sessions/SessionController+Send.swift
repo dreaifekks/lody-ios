@@ -76,7 +76,7 @@ extension SessionController {
       if body["pendingActions"] as? Bool == true { self?.presentPendingActions(body["id"] as? String) }
       else if body["forget"] as? Bool == true { self?.confirmForgetPendingInput(body["id"] as? String) }
       else if body["retryPending"] as? Bool == true, let id = body["id"] as? String { self?.retryPendingInput(id) }
-      else if let id = body["id"] as? String { self?.sender?.retry(id, asPlainText: body["asPlainText"] as? Bool == true) }
+      else if let id = body["id"] as? String { self?.sender?.retry(id) }
     }
     chat.onComposerOptionChange = { [weak self] body in self?.composerModel.change(body) }
     // The conversation composer is the new-chat composer (web's mobile session page): a card
