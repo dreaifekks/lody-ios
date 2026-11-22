@@ -465,3 +465,78 @@ test('a LAN Role retains same-machine v2 target identities in mentions', () => {
     '[Agent Role: Review (agentRoleId: review, agentRoleInstanceId: sol)]',
   );
 });
+
+test('single-target and cross-machine Role targets carry stable agentRoleInstanceId and keep legacy draft compatibility', async () => {
+  const machines = new Map(
+    ['mac', 'nuc'].map((machineId) => [
+      machineId,
+      { get: (key) => ({ id: key[1], machineId, name: key[1] }) },
+    ]),
+  );
+  const rows = [
+    {
+      key: ['agentRole', 'solo'],
+      value: {
+        v: 2,
+        id: 'solo',
+        name: 'Solo',
+        ownerUserId: 'me',
+        visibility: 'private',
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        targets: [{ id: 'solo-target', machineId: 'mac', agentConfigId: 'a' }],
+      },
+    },
+    {
+      key: ['agentRole', 'cross'],
+      value: {
+        v: 2,
+        id: 'cross',
+        name: 'Cross',
+        ownerUserId: 'me',
+        visibility: 'private',
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        targets: [
+          { id: 'mac-t', machineId: 'mac', agentConfigId: 'a' },
+          { id: 'nuc-t', machineId: 'nuc', agentConfigId: 'b' },
+        ],
+      },
+    },
+  ];
+  const catalog = mentions.roleMentions(rows, 'me', machines, {
+    state: 'live',
+    onlineMachineIds: ['mac', 'nuc'],
+  });
+  assert.deepEqual(
+    catalog.items.map((item) => item.path),
+    ['cross@mac@mac-t', 'cross@nuc@nuc-t', 'solo@mac@solo-target'],
+  );
+  assert.equal(
+    mentions.expandMentionText('@role:solo@mac@solo-target', catalog.items),
+    '[Agent Role: Solo (agentRoleId: solo, agentRoleMachineId: mac, agentRoleInstanceId: solo-target)]',
+  );
+  assert.equal(
+    mentions.expandMentionText('@role:cross@nuc@nuc-t', catalog.items),
+    '[Agent Role: Cross (agentRoleId: cross, agentRoleMachineId: nuc, agentRoleInstanceId: nuc-t)]',
+  );
+  // Legacy draft tokens without `@<targetId>` resolve when unambiguous.
+  assert.equal(
+    await mentions.expandMentions(
+      '@role:solo and @role:cross@nuc',
+      async () => catalog,
+    ),
+    '[Agent Role: Solo (agentRoleId: solo, agentRoleMachineId: mac, agentRoleInstanceId: solo-target)] and [Agent Role: Cross (agentRoleId: cross, agentRoleMachineId: nuc, agentRoleInstanceId: nuc-t)]',
+  );
+  // Ambiguous legacy `@role:cross` (two targets across machines) is rejected.
+  await assert.rejects(
+    mentions.expandMentions('@role:cross', async () => catalog),
+    /mention_expansion_failed/,
+  );
+  assert.throws(
+    () => mentions.expandMentionText('@role:cross', catalog.items),
+    /ambiguous_mention/,
+  );
+});

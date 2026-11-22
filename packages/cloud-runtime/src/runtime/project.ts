@@ -17,6 +17,7 @@ import {
   type TurnMetadata,
 } from '../protocol/turnMetadata.ts';
 import { executionProjection, type SteerReceipt } from './execution';
+import { userTurnItems } from './edit-session.ts';
 import type {
   ContainerID,
   LoroDoc,
@@ -998,13 +999,10 @@ function summarizeEntry(
     container && typeof (container as any).get === 'function'
       ? ((container as any).get('items') as LoroList | undefined)
       : undefined;
-  let list: any[] = [];
-  if (Array.isArray(entry?.items)) list = entry.items;
-  else if (
-    entry?.role === 'user' &&
-    Array.isArray(entry?.inputConfig?.inputBlocks)
-  )
-    list = entry.inputConfig.inputBlocks;
+  const rawItems = Array.isArray(entry?.items) ? entry.items : [];
+  const list: any[] = entry?.role === 'user' ? userTurnItems(entry) : rawItems;
+  const useLoroIdentity =
+    rawItems.length > 0 && items && typeof items.getIdAt === 'function';
   const summarizedItems: ItemSummary[] = list.map((item: any, i: number) =>
     summarizeItem(
       projection,
@@ -1012,7 +1010,7 @@ function summarizeEntry(
         ? { ...item, ...presentMessageText(item.text ?? '', item.spans) }
         : item,
       id,
-      items && typeof items.getIdAt === 'function'
+      useLoroIdentity && i < rawItems.length
         ? identityAt(items, i)
         : fallbackItemId(i),
     ),

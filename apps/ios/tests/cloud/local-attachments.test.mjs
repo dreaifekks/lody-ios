@@ -64,6 +64,50 @@ test('edit-session preserves local_attachment and transport:local localImageId b
   );
   assert.deepEqual(replacement.inputBlocks[1], localAttachment);
   assert.deepEqual(replacement.inputBlocks[2], localImage);
+
+  // Turns whose attachments live only in inputConfig.inputBlocks (either with
+  // items absent or with text-only items) retain them across edit and resend.
+  for (const inputBlocksOnlyTurn of [
+    {
+      inputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        inputBlocks: [
+          { type: 'text', text: 'From inputBlocks only' },
+          localAttachment,
+          localImage,
+        ],
+      },
+    },
+    {
+      items: [{ type: 'text', text: 'Text-only items' }],
+      inputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        inputBlocks: [
+          { type: 'text', text: 'Text-only items' },
+          localAttachment,
+          localImage,
+        ],
+      },
+    },
+  ]) {
+    const extracted = editAttachments(inputBlocksOnlyTurn);
+    assert.equal(extracted.length, 2);
+    assert.equal(extracted[0].type, 'local_attachment');
+    assert.equal(extracted[1].localImageId, localImage.localImageId);
+    const rebuilt = replacementInput(
+      inputBlocksOnlyTurn,
+      'Edited text',
+      ['original:0', 'original:1'],
+      [],
+    );
+    assert.deepEqual(rebuilt.inputBlocks, [
+      { type: 'text', text: 'Edited text' },
+      localAttachment,
+      localImage,
+    ]);
+  }
 });
 
 test('Antigravity mode migration and agy permission tiers', () => {
@@ -76,6 +120,8 @@ test('Antigravity mode migration and agy permission tiers', () => {
 
   assert.equal(permissionTierOf('accept-edits'), 'edit');
   assert.equal(permissionTierOf('acceptEdits'), 'edit');
+  assert.equal(permissionTierOf('agent'), 'edit');
+  assert.equal(permissionTierOf('dontAsk'), 'ask');
   assert.equal(permissionTierOf('yolo'), 'full');
   assert.equal(permissionTierOf('auto'), 'auto');
   assert.equal(permissionTierOf('auto_review'), 'auto');

@@ -57,6 +57,8 @@
 // in step with web. History is untyped Loro JSON here, so the item types are loose.
 // Link normalization skips code without a Markdown parser (see `exportLinks`).
 
+import { buildSessionLink, parseSessionLink } from './sessionLink.ts';
+
 type Row = Record<string, any>;
 type MessageContent = Row;
 type ToolCallContent = Row;
@@ -1263,50 +1265,23 @@ const sessionUri = new RegExp(
   'gu',
 );
 const LINK_ID = /^[A-Za-z0-9_-]+$/u;
-const TURN_ID = /^[A-Za-z0-9_.:-]+$/u;
 
 /** Web `parseSessionLink` + `buildSessionLink`: one portable `lody://session/<id>?workspace=&turn=` form. */
 function portableSessionLink(raw: string, workspaceId?: string): string | null {
-  if (raw.length > 8192 || /[\s\\%]/u.test(raw)) return null;
-  const legacy = /^session:\/\/([A-Za-z0-9_-]+)\/?$/u.exec(raw);
-  let sessionId: string | undefined;
-  let workspace: string | undefined;
-  let turnId: string | undefined;
-  if (legacy) sessionId = legacy[1];
-  else {
-    if (!/^[a-zA-Z.-]+:\/\/session\/[A-Za-z0-9_-]+(?:\?[^#]*)?$/u.test(raw))
-      return null;
-    let url: URL;
-    try {
-      url = new URL(raw);
-    } catch {
-      return null;
-    }
-    if (!SESSION_LINK_SCHEMES.slice(0, -1).includes(url.protocol.slice(0, -1)))
-      return null;
-    const id = /^\/([A-Za-z0-9_-]+)\/?$/u.exec(url.pathname)?.[1];
-    if (!id) return null;
-    const tab = url.searchParams.get('tab');
-    sessionId = tab && LINK_ID.test(tab) ? tab : id;
-    const ws = url.searchParams.get('workspace');
-    if (ws && LINK_ID.test(ws)) workspace = ws;
-    const turn = url.searchParams.get('turn');
-    if (
-      turn &&
-      url.searchParams.getAll('turn').length === 1 &&
-      TURN_ID.test(turn)
-    )
-      turnId = turn;
+  const parsed = parseSessionLink(raw);
+  if (!parsed) return null;
+  const workspace =
+    parsed.workspaceId ??
+    (workspaceId && LINK_ID.test(workspaceId) ? workspaceId : undefined);
+  try {
+    return buildSessionLink({
+      sessionId: parsed.tabSessionId ?? parsed.sessionId,
+      workspaceId: workspace,
+      turnId: parsed.turnId,
+    });
+  } catch {
+    return null;
   }
-  workspace ??=
-    workspaceId && LINK_ID.test(workspaceId) ? workspaceId : undefined;
-  const search = [
-    workspace ? `workspace=${workspace}` : '',
-    turnId ? `turn=${turnId}` : '',
-  ]
-    .filter(Boolean)
-    .join('&');
-  return `lody://session/${sessionId}${search ? `?${search}` : ''}`;
 }
 
 /**

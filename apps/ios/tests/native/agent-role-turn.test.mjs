@@ -198,3 +198,91 @@ test('a Role another user keeps private is never applied', async () => {
     f.close();
   }
 });
+
+test('replying in a legacy Antigravity auto_review session preserves inherited Role and memory', async () => {
+  const calls = [];
+  const f = await openTestSession({
+    onRpc(request) {
+      calls.push(request);
+      return { result: { accepted: true } };
+    },
+  });
+  const roleSnapshot = {
+    id: 'agy-reviewer',
+    revision: 2,
+    name: 'Agy Reviewer',
+    emoji: '🪼',
+  };
+  const memory = { providerId: 'p', memoryId: 'mem-agy' };
+  try {
+    f.server.getList('history').push({
+      id: 'legacy-u1',
+      role: 'user',
+      status: 'handled',
+      items: [{ type: 'text', text: 'First legacy agy turn' }],
+      inputConfig: {
+        cliType: 'registry',
+        agentType: 'antigravity-acp',
+        modelId: 'gemini-3.8-flash',
+        modeId: 'auto_review',
+        configOptionValues: { mode: 'auto_review', thought_level: 'high' },
+        mcpServerIds: [],
+        agentRoleId: 'agy-reviewer',
+        agentRoleRevision: 2,
+        agentRoleSnapshot: roleSnapshot,
+        memory,
+      },
+    });
+    f.server.getList('history').push({
+      id: 'legacy-a1',
+      role: 'assistant',
+      finished: true,
+      items: [{ type: 'text', text: 'Done.' }],
+    });
+    f.server.commit();
+    await f.pushUpdate();
+
+    // Inherited reply (no explicit modeId/configOptionValues): auto_review -> auto must NOT clear Role or memory.
+    const inherited = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity-acp',
+      text: 'Continue review',
+    });
+    assert.equal(inherited.state, 'accepted');
+    const firstReplyConfig = calls[0].params.inputConfig;
+    assert.equal(firstReplyConfig.modeId, 'auto');
+    assert.deepEqual(firstReplyConfig.configOptionValues, {
+      mode: 'auto',
+      thought_level: 'high',
+    });
+    assert.equal(firstReplyConfig.agentRoleId, 'agy-reviewer');
+    assert.equal(firstReplyConfig.agentRoleRevision, 2);
+    assert.deepEqual(firstReplyConfig.agentRoleSnapshot, roleSnapshot);
+    assert.deepEqual(firstReplyConfig.memory, memory);
+
+    // Explicitly switching away from auto to yolo still clears Role and memory.
+    const switched = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity-acp',
+      modeId: 'yolo',
+      configOptionValues: { mode: 'yolo' },
+      text: 'Switch mode',
+      queue: true,
+    });
+    assert.notEqual(switched.state, 'not_sent', switched.reason);
+    const switchedConfig = laterConfig(f, calls);
+    assert.equal(switchedConfig.modeId, 'yolo');
+    assert.equal(switchedConfig.agentRoleId, null);
+    assert.equal(switchedConfig.agentRoleRevision, undefined);
+    assert.equal(switchedConfig.agentRoleSnapshot, undefined);
+    assert.equal(switchedConfig.memory, undefined);
+  } finally {
+    f.close();
+  }
+});

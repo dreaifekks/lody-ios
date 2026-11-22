@@ -6,6 +6,13 @@ import LodyCore
 /// and a total byte ceiling.
 enum LocalAttachmentDownloader {
   static let defaultMaxBytes = 100 * 1024 * 1024
+  static let maxChunkBytes = 512 * 1024
+  static let maxChunkBase64Length = 4 * ((maxChunkBytes + 2) / 3)
+
+  private static func isValidRevision(_ value: String) -> Bool {
+    guard value.utf8.count == 64 else { return false }
+    return value.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }
+  }
 
   typealias FetchChunk = @MainActor (RuntimeContract.DownloadFileChunkParams) async throws -> RuntimeContract.DownloadFileChunkResult
 
@@ -70,13 +77,13 @@ enum LocalAttachmentDownloader {
       case .error(let failure):
         throw error(for: failure.code)
       case .ok(let chunk):
-        guard !chunk.revision.isEmpty else {
+        guard Self.isValidRevision(chunk.revision) else {
           throw SessionAttachments.error(String(localized: "native.file.error.decode", bundle: .lody))
         }
         guard chunk.sizeBytes >= 0, chunk.sizeBytes <= maxBytes else {
           throw SessionAttachments.error(String(localized: "native.file.error.tooLarge", bundle: .lody))
         }
-        guard chunk.offset == offset else {
+        guard chunk.offset == offset, chunk.data.utf8.count <= Self.maxChunkBase64Length else {
           throw SessionAttachments.error(String(localized: "native.file.error.decode", bundle: .lody))
         }
         if let expectedRevision = revision {

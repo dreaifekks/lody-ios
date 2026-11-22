@@ -68,4 +68,32 @@ test('session links reject malformed, duplicate, empty or percent-encoded turn p
   assert.throws(() => buildSessionLink({ sessionId: 'Ab_c', turnId: 'a b' }));
   assert.throws(() => buildSessionLink({ sessionId: 'Ab_c', turnId: '' }));
   assert.throws(() => buildSessionLink({ sessionId: 'Ab_c', turnId: 'a/b' }));
+
+  // Markdown export rejects malformed/duplicate turn links verbatim instead of stripping `turn`.
+  for (const invalid of [
+    'lody://session/Ab_c?turn=a&turn=b',
+    'lody://session/Ab_c?turn=a/b',
+    'lody://session/Ab_c?turn=assistant%3Ainbox',
+    'lody://session/Ab_c?turn=',
+  ]) {
+    const exported = buildConversationMarkdown({
+      history: [
+        {
+          id: 'a1',
+          role: 'assistant',
+          items: [{ type: 'text', text: `Keep ${invalid} intact.` }],
+        },
+      ],
+      workspaceId: 'ws_1',
+    }).markdown;
+    assert.ok(
+      exported.includes(`Keep ${invalid} intact.`),
+      `Expected ${invalid} to remain untouched, got: ${exported}`,
+    );
+    assert.equal(
+      exported.includes('workspace=ws_1'),
+      false,
+      `Malformed link ${invalid} must not be rewritten with stripped turn`,
+    );
+  }
 });

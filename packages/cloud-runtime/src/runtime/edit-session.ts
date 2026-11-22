@@ -192,22 +192,60 @@ export type EditableAttachmentBlock =
   | (RecordValue & { type: 'file'; editId: string })
   | (RecordValue & { type: 'local_attachment'; editId: string });
 
+function rawAttachmentItems(list: unknown): RecordValue[] {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item: RecordValue) => {
+    if (!item || typeof item !== 'object') return [];
+    if (item.type === 'image_group')
+      return Array.isArray(item.images) ? item.images : [];
+    if (
+      item.type === 'image' ||
+      item.type === 'file' ||
+      item.type === 'local_attachment'
+    )
+      return [item];
+    return [];
+  });
+}
+
+function rawReferenceItems(list: unknown): RecordValue[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (item: RecordValue) =>
+      item &&
+      typeof item === 'object' &&
+      ['comment_reference', 'visual_annotation_reference'].includes(item.type),
+  );
+}
+
+/**
+ * Shared user-turn block view for transcript display, edit drafts and resends:
+ * falls back to `inputConfig.inputBlocks` when `items` is absent/empty or
+ * carries no attachments while `inputConfig.inputBlocks` does.
+ */
+export function userTurnItems(turn: RecordValue): RecordValue[] {
+  const items = Array.isArray(turn?.items) ? turn.items : [];
+  const blocks = Array.isArray(turn?.inputConfig?.inputBlocks)
+    ? turn.inputConfig.inputBlocks
+    : [];
+  if (items.length === 0) return blocks;
+  if (rawAttachmentItems(items).length > 0) return items;
+  const fallbackAttachments = rawAttachmentItems(blocks);
+  if (fallbackAttachments.length === 0) return items;
+  return [...items, ...fallbackAttachments];
+}
+
+export function turnAttachmentItems(turn: RecordValue): RecordValue[] {
+  const fromItems = rawAttachmentItems(turn?.items);
+  if (fromItems.length > 0) return fromItems;
+  return rawAttachmentItems(turn?.inputConfig?.inputBlocks);
+}
+
 export function editAttachments(turn: RecordValue): EditableAttachmentBlock[] {
-  return (turn.items ?? [])
-    .flatMap((item: RecordValue) => {
-      if (item.type === 'image_group') return item.images ?? [];
-      if (
-        item.type === 'image' ||
-        item.type === 'file' ||
-        item.type === 'local_attachment'
-      )
-        return [item];
-      return [];
-    })
-    .map((item: RecordValue, index: number) => ({
-      ...inputBlock({ ...item, type: item.type ?? 'image' }),
-      editId: `original:${index}`,
-    })) as EditableAttachmentBlock[];
+  return turnAttachmentItems(turn).map((item: RecordValue, index: number) => ({
+    ...inputBlock({ ...item, type: item.type ?? 'image' }),
+    editId: `original:${index}`,
+  })) as EditableAttachmentBlock[];
 }
 
 export function replacementInput(
@@ -242,6 +280,11 @@ export function replacementInput(
   // Restored quote cards follow the main text, as on a fresh send.
   const composed = appendMessageQuotes(text.trim(), [], quotes);
   if (!composed.text && !attachments.length) throw new Error('empty_message');
+  const itemReferences = rawReferenceItems(turn.items);
+  const references =
+    itemReferences.length > 0
+      ? itemReferences
+      : rawReferenceItems(turn.inputConfig?.inputBlocks);
   return {
     ...turn.inputConfig,
     prompt: composed.text,
@@ -256,13 +299,7 @@ export function replacementInput(
           ]
         : []),
       ...attachments,
-      ...(turn.items ?? [])
-        .filter((item: RecordValue) =>
-          ['comment_reference', 'visual_annotation_reference'].includes(
-            item.type,
-          ),
-        )
-        .map(inputBlock),
+      ...references.map(inputBlock),
     ],
   };
 }

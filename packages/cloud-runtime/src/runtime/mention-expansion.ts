@@ -19,6 +19,43 @@ function categoryOf(token: string): MentionCategory {
   return 'role';
 }
 
+type TokenResolution =
+  | { status: 'found'; item: MentionItem }
+  | { status: 'ambiguous' }
+  | { status: 'missing' };
+
+function createMentionResolver(items: readonly MentionItem[]) {
+  const byToken = new Map<string, MentionItem>();
+  const ambiguous = new Set<string>();
+  for (const item of items) {
+    if (!item.insertText) continue;
+    if (byToken.has(item.insertText)) ambiguous.add(item.insertText);
+    byToken.set(item.insertText, item);
+  }
+  return (token: string): TokenResolution => {
+    if (ambiguous.has(token)) return { status: 'ambiguous' };
+    const exact = byToken.get(token);
+    if (exact) return { status: 'found', item: exact };
+    // Compatibility for saved drafts / shortcuts using legacy `@role:<id>` or
+    // `@role:<id>@<machineId>` tokens after targets gained stable `@<targetId>`.
+    if (token.startsWith('@role:')) {
+      const parts = token.slice('@role:'.length).split('@');
+      if (parts.length === 1 || parts.length === 2) {
+        const matches = items.filter((item) => {
+          if (item.kind !== 'role') return false;
+          const segments = item.path.split('@');
+          if (segments[0] !== parts[0]) return false;
+          if (parts.length === 2 && segments[1] !== parts[1]) return false;
+          return true;
+        });
+        if (matches.length === 1) return { status: 'found', item: matches[0]! };
+        if (matches.length > 1) return { status: 'ambiguous' };
+      }
+    }
+    return { status: 'missing' };
+  };
+}
+
 export async function expandMentions(
   text: string,
   load: (category: MentionCategory) => Promise<MentionCatalog>,
@@ -35,10 +72,11 @@ export async function expandMentions(
     if (catalogs.some((catalog) => catalog.incomplete || catalog.truncated))
       throw new Error('mention_catalog_incomplete');
     const items = catalogs.flatMap((catalog) => catalog.items);
+    const resolve = createMentionResolver(items);
     for (const match of text.matchAll(referencePattern))
       if (
         match[4]?.startsWith('@role:') &&
-        !items.some((item) => item.insertText === match[4])
+        resolve(match[4]).status !== 'found'
       )
         throw new Error('role_unavailable');
     return expandMentionText(text, items, workspaceId);
@@ -52,13 +90,7 @@ export function expandMentionText(
   items: readonly MentionItem[],
   workspaceId?: string,
 ): string {
-  const byToken = new Map<string, MentionItem>();
-  const ambiguous = new Set<string>();
-  for (const item of items) {
-    if (!item.insertText) continue;
-    if (byToken.has(item.insertText)) ambiguous.add(item.insertText);
-    byToken.set(item.insertText, item);
-  }
+  const resolve = createMentionResolver(items);
   // One pass over the original text: expansion text is never re-interpreted.
   return text.replace(
     referencePattern,
@@ -73,9 +105,10 @@ export function expandMentionText(
       const token = skill ?? reference;
       const space = skillSpace ?? referenceSpace ?? '';
       if (!token) return whole;
-      const item = byToken.get(token);
-      if (!item) return whole;
-      if (ambiguous.has(token)) throw new Error('ambiguous_mention');
+      const resolved = resolve(token);
+      if (resolved.status === 'ambiguous') throw new Error('ambiguous_mention');
+      if (resolved.status === 'missing') return whole;
+      const item = resolved.item;
       if (
         item.kind === 'skill' &&
         /^\s*\[Skill Path\]\(/.test(text.slice(offset + whole.length))

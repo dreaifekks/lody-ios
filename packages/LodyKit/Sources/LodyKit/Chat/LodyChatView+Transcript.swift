@@ -43,23 +43,26 @@ extension LodyChatView {
 
   func setEntries(_ json: String, animate: Bool = true) {
     if historyLoadStarted == 0 { historyLoadStarted = CACurrentMediaTime() }
-    pendingEntries = (json, animate && (pendingEntries?.animate ?? true))
+    pendingSnapshotEpoch += 1
+    if transcriptLive { liveSnapshotEpoch = pendingSnapshotEpoch }
+    pendingEntries = (json, animate && (pendingEntries?.animate ?? true), pendingSnapshotEpoch)
   }
 
   func scheduleUpdate() {
     // All props have arrived. Cached first content is already decoded before push.
     guard !decoding, let input = pendingEntries else { return }
     let json = input.json
+    let epoch = input.epoch
     pendingEntries = nil
     if let prepared = preparedEntries {
       preparedEntries = nil
       if prepared.json == json {
-        receiveEntries(prepared.entries, animate: false)
+        receiveEntries(prepared.entries, animate: false, epoch: epoch)
         return
       }
       // Live props can overtake mounting. Keep the prepared first frame while
       // decoding that newer snapshot, just as an already-visible chat would.
-      if !hasPositionedContent { receiveEntries(prepared.entries, animate: false) }
+      if !hasPositionedContent { receiveEntries(prepared.entries, animate: false, epoch: decodedSnapshotEpoch) }
     }
     decoding = true
     preparation.async { [weak self] in
@@ -68,7 +71,7 @@ extension LodyChatView {
         guard let self else { return }
         self.decoding = false
         switch decoded {
-        case .success(let entries): self.receiveEntries(entries, animate: input.animate)
+        case .success(let entries): self.receiveEntries(entries, animate: input.animate, epoch: epoch)
         case .failure: self.displayError = String(localized: "native.chat.error.transcript", bundle: .lody)
         }
         self.scheduleUpdate()
@@ -76,7 +79,8 @@ extension LodyChatView {
     }
   }
 
-  private func receiveEntries(_ received: [ChatEntry], animate: Bool) {
+  private func receiveEntries(_ received: [ChatEntry], animate: Bool, epoch: Int) {
+    decodedSnapshotEpoch = max(decodedSnapshotEpoch, epoch)
     if !animate { pendingSnapshotEntries.formUnion(received.map(\.id)) }
     // Web shows reasoning only for builtin DSH; other providers' thoughts and `think` steps
     // never reach the transcript.
@@ -133,11 +137,13 @@ extension LodyChatView {
     let animating = Set(rows.values.filter { store.isAnimating(id: $0.id) }.map(\.entryID))
     stream.advance(animatingEntries: animating)
     let entries = stream.presentation
+    let epoch = decodedSnapshotEpoch
     let snapshots = pendingSnapshotEntries
     pendingSnapshotEntries.removeAll()
     if !hasPositionedContent {
       // The first snapshot belongs to this layout transaction, not a later timer.
       transcript.entries = entries
+      renderedSnapshotEpoch = max(renderedSnapshotEpoch, epoch)
       snapshotEntries.formUnion(snapshots)
       applyRows()
       rendering = false
@@ -161,6 +167,7 @@ extension LodyChatView {
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         self.transcript.entries = entries
+        self.renderedSnapshotEpoch = max(self.renderedSnapshotEpoch, epoch)
         self.snapshotEntries.formUnion(snapshots)
         self.applyRows()
         self.rendering = false
@@ -220,6 +227,7 @@ extension LodyChatView {
     catchingUpEntries.formUnion(snapshotEntries)
     snapshotEntries.removeAll()
     applying = true
+    let commitEpoch = renderedSnapshotEpoch
     let commitStart = CACurrentMediaTime()
     let previousOffset = collection.contentOffset.y
     let previousHistoryStart = historyStartID
@@ -430,7 +438,9 @@ extension LodyChatView {
     let previous = rows
     if !deferredRows.isEmpty, dataSource.snapshot().itemIdentifiers == projected.map(\.id),
        projected.allSatisfy({ previous[$0.id] == $0 }) {
+      appliedSnapshotEpoch = max(appliedSnapshotEpoch, commitEpoch)
       applying = false
+      scrollToTargetTurn()
       updateBottomButton()
       return
     }
@@ -492,6 +502,7 @@ extension LodyChatView {
         if folding { ChatContextViewProbe.checkHitTesting() }
         self.recordHistoryCommit()
         self.streamPerformanceProbe?.commit(milliseconds: (CACurrentMediaTime() - commitStart) * 1000)
+        self.appliedSnapshotEpoch = max(self.appliedSnapshotEpoch, commitEpoch)
         self.applying = false
         self.scrollToEditedMessage()
         self.scrollToTargetTurn()
@@ -583,7 +594,12 @@ extension LodyChatView {
       return projected
     }
     let retainedStart = historyStartID.flatMap { entryIDs.firstIndex(of: $0) }
-    let start = retainedStart ?? max(0, entryIDs.count - 50)
+    var start = retainedStart ?? max(0, entryIDs.count - 50)
+    if !targetTurnID.isEmpty,
+       let targetIndex = entryIDs.firstIndex(of: targetTurnID),
+       targetIndex < start {
+      start = targetIndex
+    }
     historyStartID = entryIDs[start]
     hasEarlierHistory = start > 0 || remoteHasEarlierHistory
     hasPagedHistory = hasEarlierHistory || (retainedStart != nil && hasPagedHistory)

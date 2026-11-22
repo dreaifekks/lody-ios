@@ -12,7 +12,13 @@ final class LANSchemeTests: XCTestCase {
 
     let time = LanHubSchemeHandler.route(URL(string: origin + "/api/time")!, method: "GET", invite: invite)
     XCTAssertEqual(time?.url.absoluteString, "http://hub:8788/api/time")
-    XCTAssertEqual(time?.authorized, false)
+    XCTAssertEqual(time?.authorized, true)
+    let timeHead = LanHubSchemeHandler.route(URL(string: origin + "/api/time")!, method: "HEAD", invite: invite)
+    XCTAssertEqual(timeHead?.url.absoluteString, "http://hub:8788/api/time")
+    XCTAssertEqual(timeHead?.authorized, true)
+    let timeOptions = LanHubSchemeHandler.route(URL(string: origin + "/api/time")!, method: "OPTIONS", invite: invite)
+    XCTAssertEqual(timeOptions?.url.absoluteString, "http://hub:8788/api/time")
+    XCTAssertEqual(timeOptions?.authorized, false)
     XCTAssertNil(LanHubSchemeHandler.route(URL(string: origin + "/api/time")!, method: "POST", invite: invite))
     XCTAssertNil(LanHubSchemeHandler.route(URL(string: origin + "/api/time/extra")!, method: "GET", invite: invite))
 

@@ -59,6 +59,7 @@ import {
   editAttachments,
   validAttachmentBlocks,
   replacementInput,
+  userTurnItems,
 } from './edit-session';
 import {
   billableTurnCount,
@@ -1984,12 +1985,29 @@ export async function sendTurn(
       inputConfig.agentRoleSnapshot = undefined;
       inputConfig.memory = undefined;
     } else if (!role && inputConfig.agentRoleId) {
-      const previousOptions = previous.configOptionValues ?? {};
+      const previousOptions = migrateLegacyAntigravityModeOption(
+        previous.configOptionValues &&
+          typeof previous.configOptionValues === 'object' &&
+          !Array.isArray(previous.configOptionValues)
+          ? previous.configOptionValues
+          : {},
+      );
+      const previousModeId =
+        typeof previous.modeId === 'string'
+          ? migrateLegacyAntigravityModeId(previous.modeId)
+          : previous.modeId;
+      const previousComparable: Record<string, unknown> = {
+        cliType: previous.cliType,
+        agentType: previous.agentType,
+        modelId: previous.modelId,
+        modeId: previousModeId,
+      };
       const changed =
         ['cliType', 'agentType', 'modelId', 'modeId'].some(
           (key) =>
-            previous[key] !== undefined &&
-            inputConfig[key as keyof typeof inputConfig] !== previous[key],
+            previousComparable[key] !== undefined &&
+            inputConfig[key as keyof typeof inputConfig] !==
+              previousComparable[key],
         ) ||
         JSON.stringify(inputConfig.mcpServerIds) !==
           JSON.stringify(previous.mcpServerIds ?? []) ||
@@ -2682,7 +2700,7 @@ export async function editSession(
     // Quote spans restore into composer cards; the rest is the main text.
     let joined = '';
     const spans: Record<string, any>[] = [];
-    for (const item of (turn.items ?? []) as any[]) {
+    for (const item of userTurnItems(turn)) {
       if (item.type !== 'text') continue;
       if (joined) joined += '\n\n';
       const offset = joined.length;

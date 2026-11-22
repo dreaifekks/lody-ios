@@ -22,10 +22,10 @@ const MODE_TIERS: Readonly<Record<string, PermissionTier>> = {
   plan: 'ask',
   acceptEdits: 'edit',
   auto: 'auto',
-  dontAsk: 'full',
+  dontAsk: 'ask',
   bypassPermissions: 'full',
   // Codex
-  agent: 'ask',
+  agent: 'edit',
   'read-only': 'ask',
   'agent-auto-review': 'auto',
   'agent-full-access': 'full',

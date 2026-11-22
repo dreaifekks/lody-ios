@@ -97,8 +97,9 @@ final class LanHubSchemeHandler: NSObject, WKURLSchemeHandler {
     task.cancel()
   }
 
-  /// Only the Streams API (`/ds/*`, authenticated) and the unauthenticated clock endpoint
-  /// (`GET /api/time`) are forwarded; the page itself is loaded from the bundle.
+  /// Only the Streams API (`/ds/*`) and the clock endpoint (`GET`/`HEAD /api/time`)
+  /// are forwarded, both with native Hub bearer injection (never exposing the token
+  /// to the WebView); `OPTIONS` preflight stays local and unauthenticated.
   static func forward(_ url: URL, invite: LanInvite) -> URL? {
     route(url, method: "GET", invite: invite)?.url
   }
@@ -119,7 +120,7 @@ final class LanHubSchemeHandler: NSObject, WKURLSchemeHandler {
       let verb = (method ?? "GET").uppercased()
       guard verb == "GET" || verb == "HEAD" || verb == "OPTIONS" else { return nil }
       guard let target = URL(string: invite.url + suffix) else { return nil }
-      return ForwardTarget(url: target, authorized: false)
+      return ForwardTarget(url: target, authorized: verb != "OPTIONS")
     }
     return nil
   }

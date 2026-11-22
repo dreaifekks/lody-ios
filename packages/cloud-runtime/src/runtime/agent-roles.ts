@@ -74,7 +74,7 @@ export function roleMentions(
         role.targets.filter((item) => item.machineId === target.machineId)
           .length > 1;
       let path = multi ? `${role.id}@${target.machineId}` : role.id;
-      if (sameMachine && target.id) path += `@${target.id}`;
+      if (target.id) path = `${role.id}@${target.machineId}@${target.id}`;
       let name = role.name;
       if (
         sameMachine &&

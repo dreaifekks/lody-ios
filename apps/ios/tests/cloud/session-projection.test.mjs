@@ -658,6 +658,71 @@ test('projects local_attachment items and transport:local localImageId images in
   releaseProjection(doc);
 });
 
+test('projects user attachments stored only in inputConfig.inputBlocks even when items has text only', () => {
+  const doc = new LoroDoc();
+  const localImageId = '22222222-3333-4444-8555-666666666666';
+  const inputBlocks = [
+    { type: 'text', text: 'Inspect both' },
+    {
+      type: 'local_attachment',
+      machineId: 'mac-mini',
+      path: '/Users/dev/only-in-blocks.pdf',
+      kind: 'file',
+      fileName: 'only-in-blocks.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 2048,
+    },
+    {
+      type: 'image',
+      imageId: localImageId,
+      transport: 'local',
+      machineId: 'mac-mini',
+      localImageId,
+      mimeType: 'image/png',
+      fileName: 'only-in-blocks.png',
+      sizeBytes: 512,
+    },
+  ];
+  const noItems = setAll(doc.getList('history').pushContainer(new LoroMap()), {
+    id: 'u-no-items',
+    role: 'user',
+    status: 'handled',
+  });
+  setAll(noItems.setContainer('inputConfig', new LoroMap()), {
+    cliType: 'builtin',
+    agentType: 'codex',
+    inputBlocks,
+  });
+
+  const textOnlyItems = setAll(
+    doc.getList('history').pushContainer(new LoroMap()),
+    { id: 'u-text-only', role: 'user', status: 'handled' },
+  );
+  setAll(
+    textOnlyItems
+      .setContainer('items', new LoroList())
+      .pushContainer(new LoroMap()),
+    { type: 'text', text: 'Inspect both' },
+  );
+  setAll(textOnlyItems.setContainer('inputConfig', new LoroMap()), {
+    cliType: 'builtin',
+    agentType: 'codex',
+    inputBlocks,
+  });
+  doc.commit();
+
+  const projected = projectSession(doc, 'input-blocks-fallback');
+  for (const entry of projected.entries) {
+    assert.equal(entry.items.length, 3);
+    assert.equal(entry.items[0].type, 'text');
+    assert.equal(entry.items[1].type, 'local_attachment');
+    assert.equal(entry.items[1].file.path, '/Users/dev/only-in-blocks.pdf');
+    assert.equal(entry.items[2].type, 'image');
+    assert.equal(entry.items[2].image.localImageId, localImageId);
+  }
+  releaseProjection(doc);
+});
+
 test('normalizes legacy Antigravity auto_review mode to auto in turn metadata and composer', () => {
   const doc = new LoroDoc();
   const user = setAll(doc.getList('history').pushContainer(new LoroMap()), {

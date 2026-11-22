@@ -355,3 +355,89 @@ test('an accepted edit and resend counts as a send; a refused or uncertain one d
     fixture.close();
   }
 });
+
+test('editing and resending preserves local_attachment and local image stored only in inputConfig.inputBlocks', async () => {
+  const requests = [];
+  const fixture = await openTestSession({
+    onRpc: (request) => {
+      requests.push(request);
+      return { result: { success: true } };
+    },
+  });
+  const localAttachment = {
+    type: 'local_attachment',
+    machineId: 'm1',
+    path: '/Users/dev/report.md',
+    kind: 'file',
+    fileName: 'report.md',
+    mimeType: 'text/markdown',
+    sizeBytes: 128,
+  };
+  const localImage = {
+    type: 'image',
+    imageId: '33333333-4444-4555-8666-777777777777',
+    transport: 'local',
+    machineId: 'm1',
+    localImageId: '33333333-4444-4555-8666-777777777777',
+    mimeType: 'image/png',
+    fileName: 'paste.png',
+    sizeBytes: 640,
+  };
+  const turnOnlyInInputBlocks = {
+    id: 'blocks-only',
+    role: 'user',
+    status: 'handled',
+    inputConfig: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      prompt: 'Original text',
+      inputBlocks: [
+        { type: 'text', text: 'Original text' },
+        localAttachment,
+        localImage,
+      ],
+    },
+  };
+  try {
+    fixture.server.getList('history').push(turnOnlyInInputBlocks);
+    await fixture.pushUpdate();
+    const read = await fixture.runtime.editSession(
+      {
+        sessionId: 's1',
+        userId: 'u1',
+        expectedUserTurnId: 'blocks-only',
+        action: 'read',
+      },
+      meta,
+    );
+    assert.equal(read.state, 'ready');
+    assert.equal(read.text, 'Original text');
+    assert.deepEqual(
+      read.attachments.map((item) => [item.editId, item.type]),
+      [
+        ['original:0', 'local_attachment'],
+        ['original:1', 'image'],
+      ],
+    );
+    const resent = await fixture.runtime.editSession(
+      {
+        sessionId: 's1',
+        userId: 'u1',
+        expectedUserTurnId: 'blocks-only',
+        action: 'send',
+        id: 'blocks-only-edited',
+        text: 'Updated text',
+        retainedIds: ['original:0', 'original:1'],
+      },
+      meta,
+    );
+    assert.equal(resent.state, 'accepted');
+    assert.deepEqual(requests[0].params.inputConfig.inputBlocks, [
+      { type: 'text', text: 'Updated text' },
+      localAttachment,
+      localImage,
+    ]);
+  } finally {
+    fixture.close();
+  }
+});

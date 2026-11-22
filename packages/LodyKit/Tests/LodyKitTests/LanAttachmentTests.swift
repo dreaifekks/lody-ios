@@ -221,6 +221,31 @@ final class LanAttachmentTests: XCTestCase {
     } catch {
       XCTAssertEqual(error.localizedDescription, String(localized: "native.file.error.tooLarge", bundle: .lody))
     }
+
+    // Non-64-hex revision and oversized chunk payloads are rejected cleanly.
+    let badRevDir = directory.appendingPathComponent("bad-rev", isDirectory: true)
+    do {
+      _ = try await LocalAttachmentDownloader.download(
+        sessionId: "s1", attachment: attachment, directory: badRevDir
+      ) { _ in
+        .ok(.init(path: "doc.txt", revision: "bad-revision", sizeBytes: 5, offset: 0, data: Data("hello".utf8).base64EncodedString()))
+      }
+      XCTFail("Non-64-hex revision must throw")
+    } catch {
+      XCTAssertEqual(error.localizedDescription, String(localized: "native.file.error.decode", bundle: .lody))
+    }
+
+    let oversizeChunkDir = directory.appendingPathComponent("oversize-chunk", isDirectory: true)
+    do {
+      _ = try await LocalAttachmentDownloader.download(
+        sessionId: "s1", attachment: attachment, directory: oversizeChunkDir
+      ) { _ in
+        .ok(.init(path: "doc.txt", revision: rev, sizeBytes: 11, offset: 0, data: String(repeating: "A", count: LocalAttachmentDownloader.maxChunkBase64Length + 4)))
+      }
+      XCTFail("Oversized chunk payload must throw")
+    } catch {
+      XCTAssertEqual(error.localizedDescription, String(localized: "native.file.error.decode", bundle: .lody))
+    }
   }
 
   func testTurnLinksAndAntigravityModes() {
@@ -240,6 +265,8 @@ final class LanAttachmentTests: XCTestCase {
     XCTAssertEqual(CreateLogic.normalizedModeId("auto_review"), "auto")
     XCTAssertEqual(CreateLogic.normalizedConfigValue(.string("auto_review"), optionId: "mode"), .string("auto"))
     XCTAssertEqual(CreateLogic.permissionTier(for: "accept-edits"), .edit)
+    XCTAssertEqual(CreateLogic.permissionTier(for: "agent"), .edit)
+    XCTAssertEqual(CreateLogic.permissionTier(for: "dontAsk"), .ask)
     XCTAssertEqual(CreateLogic.permissionTier(for: "yolo"), .full)
     XCTAssertEqual(CreateLogic.permissionTier(for: "auto"), .auto)
     XCTAssertEqual(CreateLogic.permissionTier(for: "auto_review"), .auto)

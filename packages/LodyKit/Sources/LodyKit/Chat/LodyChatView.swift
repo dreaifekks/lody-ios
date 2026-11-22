@@ -66,20 +66,101 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     pauseTracking()
     collection.scrollToItem(at: index, at: .top, animated: false)
   }
-  var targetTurnID = "" { didSet { scrollToTargetTurn() } }
-  var transcriptLive = false
+  static let maxTargetTurnHistoryLoads = 20
+  var targetTurnID = "" {
+    didSet {
+      guard targetTurnID != oldValue else { return }
+      targetTurnLoadAttempts = 0
+      targetTurnPendingLoadFrom = nil
+      targetTurnSawRemoteLoading = false
+      targetTurnLocalRevealAttempted = false
+      scrollToTargetTurn()
+    }
+  }
+  var transcriptLive = false {
+    didSet {
+      if transcriptLive {
+        if liveSnapshotEpoch == nil { liveSnapshotEpoch = pendingSnapshotEpoch }
+      } else {
+        liveSnapshotEpoch = nil
+      }
+    }
+  }
+  var targetTurnLoadAttempts = 0
+  var targetTurnPendingLoadFrom: String?
+  var targetTurnSawRemoteLoading = false
+  var targetTurnLocalRevealAttempted = false
+  var lastScrolledTurnID: String?
+  var pendingSnapshotEpoch = 0
+  var decodedSnapshotEpoch = 0
+  var renderedSnapshotEpoch = 0
+  var appliedSnapshotEpoch = 0
+  var liveSnapshotEpoch: Int?
+
+  private func clearTargetTurn() {
+    targetTurnLoadAttempts = 0
+    targetTurnPendingLoadFrom = nil
+    targetTurnSawRemoteLoading = false
+    targetTurnLocalRevealAttempted = false
+    if !targetTurnID.isEmpty { targetTurnID = "" }
+  }
+
   func scrollToTargetTurn() {
     guard !targetTurnID.isEmpty, !applying else { return }
     let items = dataSource.snapshot().itemIdentifiers
     if let row = items.compactMap({ rows[$0] }).first(where: { $0.entryID == targetTurnID }),
        let index = dataSource.indexPath(for: row.id) {
-      targetTurnID = ""
+      let scrolled = targetTurnID
+      clearTargetTurn()
+      lastScrolledTurnID = scrolled
       pauseTracking()
       collection.scrollToItem(at: index, at: .top, animated: false)
-    } else if transcriptLive, !items.isEmpty {
-      // Quietly stay in the conversation when the linked turn is outside the loaded window.
-      targetTurnID = ""
+      return
     }
+    // Wait until the live transcript snapshot has finished decoding, rendering and committing.
+    guard transcriptLive,
+          let liveEpoch = liveSnapshotEpoch,
+          appliedSnapshotEpoch >= liveEpoch,
+          appliedSnapshotEpoch == pendingSnapshotEpoch,
+          !decoding, !rendering, pendingEntries == nil,
+          frameTimer == nil, !framePending, !needsApply, !preparingHistory else { return }
+    // Reveal an already-loaded turn that sits earlier than the 50-entry display boundary.
+    if let targetIndex = transcript.entries.firstIndex(where: { $0.id == targetTurnID }) {
+      let visibleStart = historyStartID.flatMap { id in
+        transcript.entries.firstIndex(where: { $0.id == id })
+      } ?? 0
+      if !targetTurnLocalRevealAttempted, targetIndex < visibleStart {
+        targetTurnLocalRevealAttempted = true
+        applyRows()
+      } else {
+        clearTargetTurn()
+      }
+      return
+    }
+    if remoteHistoryLoading {
+      targetTurnSawRemoteLoading = true
+      return
+    }
+    let currentEdge = historyFirstID ?? ""
+    if let requestedFrom = targetTurnPendingLoadFrom {
+      if currentEdge == requestedFrom {
+        if targetTurnSawRemoteLoading || !remoteHasEarlierHistory {
+          clearTargetTurn()
+        }
+        return
+      }
+      targetTurnPendingLoadFrom = nil
+      targetTurnSawRemoteLoading = false
+    }
+    if remoteHasEarlierHistory, targetTurnLoadAttempts < Self.maxTargetTurnHistoryLoads {
+      targetTurnLoadAttempts += 1
+      targetTurnPendingLoadFrom = currentEdge
+      targetTurnSawRemoteLoading = false
+      onLoadEarlierHistory()
+      return
+    }
+    // Quietly stay in the conversation once history is exhausted or the safety cap is reached.
+    clearTargetTurn()
   }
   var onStop: ([String: Any]) -> Void = { _ in }
   var onSteer: ([String: Any]) -> Void = { _ in }
@@ -207,7 +288,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var lastRenderTime = 0.0
   var renderTailLength = 0
   var rows: [String: ChatRow] = [:]
-  var pendingEntries: (json: String, animate: Bool)?
+  var pendingEntries: (json: String, animate: Bool, epoch: Int)?
   var pendingSnapshotEntries: Set<String> = []
   var snapshotEntries: Set<String> = []
   var preparedEntries: PreparedChatEntries?

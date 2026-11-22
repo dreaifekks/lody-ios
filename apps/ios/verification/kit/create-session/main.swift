@@ -439,6 +439,8 @@ do {
   let applicable = CreateLogic.applicableChoice(legacyChoice, capability: agyCap)
   check(applicable.modeId == "auto" && applicable.configOptionValues?["mode"] == .string("auto"), "applicableChoice migrates auto_review to auto")
   check(CreateLogic.permissionTier(for: "accept-edits") == .edit, "agy accept-edits maps to edit tier")
+  check(CreateLogic.permissionTier(for: "agent") == .edit, "codex agent maps to edit tier")
+  check(CreateLogic.permissionTier(for: "dontAsk") == .ask, "claude dontAsk maps to ask tier")
   check(CreateLogic.permissionTier(for: "yolo") == .full, "agy yolo maps to full tier")
   check(CreateLogic.permissionTier(for: "auto") == .auto && CreateLogic.permissionTier(for: "auto_review") == .auto, "auto and auto_review map to auto tier")
 }

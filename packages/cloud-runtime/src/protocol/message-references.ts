@@ -136,7 +136,7 @@ export function presentMessageText(
   // generated grammar; ordinary prose and code must remain untouched.
   if (input === undefined) {
     const legacy =
-      /use lody mcp to query session\[id: [^\]\n]+\] history|use lody mcp to create a session with agent role\[id: [^\]\n]+?, name: ([^\]\n]+)\]|@session:[\w-]+|@role:[\w-]+(?:@[\w-]+)?/g;
+      /use lody mcp to query session\[id: [^\]\n]+\] history|use lody mcp to create a session with agent role\[id: [^\]\n]+?, name: ([^\]\n]+)\]|@session:[\w-]+|@role:[\w.-]+(?:@[\w.-]+){0,2}/g;
     for (const m of source.matchAll(legacy))
       spans.push({
         start: m.index!,

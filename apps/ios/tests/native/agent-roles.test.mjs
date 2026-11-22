@@ -558,10 +558,14 @@ test('same-machine v2 targets keep separate mention identities, with the preferr
     ]),
     'm2',
   );
-  assert.equal(mentions.items[0].path, 'instances@m2');
+  assert.equal(mentions.items[0].path, 'instances@m2@remote');
   assert.deepEqual(
     new Set(mentions.items.map((item) => item.path)),
-    new Set(['instances@m1@first', 'instances@m1@second', 'instances@m2']),
+    new Set([
+      'instances@m1@first',
+      'instances@m1@second',
+      'instances@m2@remote',
+    ]),
   );
   assert.match(
     mentions.items.find((item) => item.path.endsWith('@first')).name,
@@ -572,6 +576,25 @@ test('same-machine v2 targets keep separate mention identities, with the preferr
     async () => mentions,
   );
   assert.match(expanded, /agentRoleMachineId: m1, agentRoleInstanceId: second/);
+  const expandedRemote = await runtime.expandMentions(
+    '@role:instances@m2@remote',
+    async () => mentions,
+  );
+  assert.match(
+    expandedRemote,
+    /agentRoleMachineId: m2, agentRoleInstanceId: remote/,
+  );
+  // Legacy `@role:<id>@<machineId>` draft token uniquely resolves to the single target on m2.
+  const expandedLegacyRemote = await runtime.expandMentions(
+    '@role:instances@m2',
+    async () => mentions,
+  );
+  assert.equal(expandedLegacyRemote, expandedRemote);
+  // Legacy `@role:<id>@<machineId>` with multiple targets on m1 fails instead of guessing.
+  await assert.rejects(
+    runtime.expandMentions('@role:instances@m1', async () => mentions),
+    /mention_expansion_failed/,
+  );
 });
 
 test('fork v1 instances retain every machine and same-machine identity through discovery, editing and expansion', async () => {
@@ -619,7 +642,7 @@ test('fork v1 instances retain every machine and same-machine identity through d
   assert.equal(mentions.incomplete, true);
   assert.deepEqual(
     mentions.items.map((item) => item.path),
-    ['fork@m2', 'fork@m1@nuc-opus', 'fork@m1@nuc-sol'],
+    ['fork@m2@mini-sol', 'fork@m1@nuc-opus', 'fork@m1@nuc-sol'],
   );
   await c.save(base, { name: 'Changed on iOS' });
   assert.deepEqual(c.remote.get(['agentRole', 'fork']).instances, instances);

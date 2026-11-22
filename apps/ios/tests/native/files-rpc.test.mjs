@@ -1203,5 +1203,56 @@ test('downloadFileChunk sends file/download-chunk with attachment and revision a
     offset: 5,
   });
   assert.deepEqual(missingRevision, { status: 'error', code: 'invalid_path' });
+
+  const invalidRequestRevision = await runtime.downloadFileChunk(ctx(), {
+    sessionId: 's1',
+    path: attachment.path,
+    attachment,
+    offset: 5,
+    revision: 'not-a-sha256',
+  });
+  assert.deepEqual(invalidRequestRevision, {
+    status: 'error',
+    code: 'invalid_path',
+  });
   assert.equal(calls.length, 3);
+});
+
+test('downloadFileChunk rejects non-64-hex revision and oversized base64 chunk payloads', async () => {
+  let response;
+  machine(async () => ({ result: response }));
+
+  response = {
+    status: 'ok',
+    path: 'notes.txt',
+    revision: 'SHORT-OR-UPPER',
+    sizeBytes: 5,
+    offset: 0,
+    data: Buffer.from('hello').toString('base64'),
+  };
+  assert.deepEqual(
+    await runtime.downloadFileChunk(ctx(), {
+      sessionId: 's1',
+      path: '/Users/dev/notes.txt',
+      offset: 0,
+    }),
+    { status: 'error', code: 'decode_error' },
+  );
+
+  response = {
+    status: 'ok',
+    path: 'notes.txt',
+    revision: 'a'.repeat(64),
+    sizeBytes: 600 * 1024,
+    offset: 0,
+    data: 'A'.repeat(runtime.FILE_DOWNLOAD_CHUNK_MAX_BASE64 + 4),
+  };
+  assert.deepEqual(
+    await runtime.downloadFileChunk(ctx(), {
+      sessionId: 's1',
+      path: '/Users/dev/notes.txt',
+      offset: 0,
+    }),
+    { status: 'error', code: 'decode_error' },
+  );
 });

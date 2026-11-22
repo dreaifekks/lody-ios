@@ -371,6 +371,9 @@ export async function readFile(
 
 export const FILE_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024;
 export const FILE_DOWNLOAD_CHUNK_BYTES = 512 * 1024;
+export const FILE_DOWNLOAD_CHUNK_MAX_BASE64 =
+  4 * Math.ceil(FILE_DOWNLOAD_CHUNK_BYTES / 3);
+const FILE_DOWNLOAD_REVISION_HEX = /^[0-9a-f]{64}$/u;
 
 export type LocalAttachmentDownloadRef = {
   type: 'local_attachment';
@@ -412,7 +415,9 @@ export async function downloadFileChunk(
     !Number.isInteger(args.offset) ||
     args.offset < 0 ||
     args.offset > FILE_DOWNLOAD_MAX_BYTES ||
-    (args.offset > 0 && !args.revision)
+    (args.offset > 0 && !args.revision) ||
+    (args.revision !== undefined &&
+      !FILE_DOWNLOAD_REVISION_HEX.test(args.revision))
   ) {
     return { status: 'error', code: 'invalid_path' };
   }
@@ -456,13 +461,14 @@ export async function downloadFileChunk(
   if (
     typeof response.path !== 'string' ||
     typeof response.revision !== 'string' ||
-    !response.revision ||
+    !FILE_DOWNLOAD_REVISION_HEX.test(response.revision) ||
     !Number.isInteger(response.sizeBytes) ||
     response.sizeBytes < 0 ||
     response.sizeBytes > FILE_DOWNLOAD_MAX_BYTES ||
     !Number.isInteger(response.offset) ||
     response.offset !== args.offset ||
-    typeof response.data !== 'string'
+    typeof response.data !== 'string' ||
+    response.data.length > FILE_DOWNLOAD_CHUNK_MAX_BASE64
   ) {
     return { status: 'error', code: 'decode_error' };
   }
