@@ -1478,6 +1478,19 @@ export async function openSession(
   })();
   return 'watching';
 }
+function activeAssistantTurn<T extends Record<string, any>>(
+  entries: readonly T[],
+): T | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (!entry || entry.role !== 'assistant') continue;
+    if (entry.finished === true || typeof entry.endedAt === 'number')
+      return undefined;
+    return entry;
+  }
+  return undefined;
+}
+
 export function appendUserTurn(
   doc: LoroDoc,
   id: string,
@@ -1823,21 +1836,17 @@ export async function sendTurn(
     const lastUser = history.findLastIndex((entry) => entry.role === 'user');
     // Re-evaluate after attachment upload and mention expansion. A completed
     // target must follow the ordinary dispatch/queue path, never orphan a guide.
-    const guide =
-      args.guide === true
-        ? history.findLast(
-            (entry) => entry.role === 'assistant' && !entry.finished,
-          )
-        : undefined;
+    const activeAssistant = activeAssistantTurn(history);
+    const guide = args.guide === true ? activeAssistant : undefined;
     const queued =
       !guide &&
       (args.queue === true ||
         (raw.mq as any[] | undefined)?.length ||
-        history.some(
-          (entry) => entry.role === 'assistant' && !entry.finished,
-        ) ||
+        Boolean(activeAssistant) ||
         (lastUser >= 0 &&
-          history[lastUser].status === 'pending' &&
+          ['pending', 'seen', 'processing'].includes(
+            history[lastUser].status,
+          ) &&
           !history
             .slice(lastUser + 1)
             .some((entry) => entry.role === 'assistant')));
@@ -1901,10 +1910,9 @@ export async function sendTurn(
         if (!targetIsCurrent(state)) throw new Error('workspace_changed');
         const before = state.doc.version();
         writeStarted = true;
-        if (state.target?.backend === 'roost')
-          state.doc
-            .getMap('humanInputReceipts')
-            .set(id, { userId: args.userId!.trim() });
+        state.doc
+          .getMap('humanInputReceipts')
+          .set(id, { userId: args.userId!.trim() });
         const item = state.doc
           .getMovableList('mq')
           .pushContainer(new LoroMap());
@@ -1978,6 +1986,9 @@ export async function sendTurn(
     }
     const before = state.doc.version();
     writeStarted = true;
+    state.doc
+      .getMap('humanInputReceipts')
+      .set(id, { userId: args.userId.trim() });
     if (guide)
       state.doc
         .getMap('lodySteerLinks')
@@ -1987,7 +1998,7 @@ export async function sendTurn(
       id,
       text,
       args.userId,
-      guide ? { ...inputConfig, _lodyDeliveryKind: 'steer' } : inputConfig,
+      inputConfig,
       timestamp,
       guide ? 'pending_apply' : 'pending',
     );
@@ -2126,14 +2137,17 @@ export async function sendTurn(
   }
 }
 
-export async function controlTurn(args: {
-  action: 'stop' | 'steer';
-  sessionId: string;
-  machineId: string;
-  turnId: string;
-  messageId?: string;
-  interrupt?: boolean;
-}): Promise<ControlTurnResult> {
+export async function controlTurn(
+  args: {
+    action: 'stop' | 'steer';
+    sessionId: string;
+    machineId: string;
+    turnId: string;
+    messageId?: string;
+    interrupt?: boolean;
+  },
+  options?: { supportsOperationInbox?: boolean },
+): Promise<ControlTurnResult> {
   const state = active;
   if (!state || state.id !== args.sessionId || !state.ready || state.sending)
     throw new Error('session_not_ready');
@@ -2153,16 +2167,11 @@ export async function controlTurn(args: {
     throw new Error('invalid_control');
   const history = historyList(state);
   const entries = history.toJSON() as any[];
-  if (
-    !entries.some(
-      (entry) =>
-        entry.id === args.turnId &&
-        entry.role === 'assistant' &&
-        !entry.finished,
-    )
-  )
+  const activeTurn = activeAssistantTurn(entries);
+  if (!activeTurn || activeTurn.id !== args.turnId)
     throw new Error('stale_turn');
   state.sending = true;
+  let trackedSteerId = args.messageId;
   try {
     let params: Record<string, unknown> = {
       sessionId: state.id,
@@ -2176,11 +2185,12 @@ export async function controlTurn(args: {
         (item) => item.userTurnId === args.messageId,
       );
       const entry = entries.find((item) => item.id === args.messageId);
+      const linked = state.doc.getMap('lodySteerLinks').get(args.messageId);
       if (
         entry &&
         (entry.role !== 'user' ||
           entry.status !== 'pending' ||
-          entry.inputConfig?._lodyDeliveryKind !== 'steer' ||
+          (entry.inputConfig?._lodyDeliveryKind !== 'steer' && !linked) ||
           entries.some(
             (item) =>
               item.role === 'assistant' && item.userTurnId === args.messageId,
@@ -2267,10 +2277,6 @@ export async function controlTurn(args: {
         return { state: 'not_applied', reason: 'steer_pending' };
       }
       const before = state.doc.version();
-      state.doc.getMap('lodySteerLinks').set(args.messageId, {
-        targetId: args.turnId,
-        mode: args.interrupt ? 'interrupt' : 'native',
-      });
       if (args.interrupt) {
         // Cancellation resumes the existing FIFO queue. Persist the exact edge
         // before cancellation; do not move/replay the machine-owned queue.
@@ -2279,7 +2285,28 @@ export async function controlTurn(args: {
         const queuedConfig = queued.get('acpSessionConfig');
         if (!(queuedConfig instanceof LoroMap))
           throw new Error('invalid_queue');
-        queuedConfig.set('_lodyDeliveryKind', 'steer');
+        const paused = queued.get('paused') === true;
+        const steerMessageId = paused
+          ? `queue-resend:${args.messageId}`
+          : args.messageId;
+        trackedSteerId = steerMessageId;
+        if (paused) {
+          queued.delete('paused');
+          queued.set('userTurnId', steerMessageId);
+          state.steerReceipts.delete(args.messageId);
+          state.steerReceipts.set(steerMessageId, {
+            targetId: args.turnId,
+            state: 'confirming',
+          });
+        }
+        state.doc
+          .getMap('humanInputReceipts')
+          .set(steerMessageId, { userId: userId.trim() });
+        state.doc.getMap('lodySteerLinks').set(steerMessageId, {
+          targetId: args.turnId,
+          mode: 'interrupt',
+        });
+        queuedConfig.delete('_lodyDeliveryKind');
         queuedConfig.set('_lodySteerTarget', args.turnId);
         queuedConfig.set('_lodySteerMode', 'interrupt');
         state.doc.commit();
@@ -2297,7 +2324,11 @@ export async function controlTurn(args: {
           state.workspace,
           args.machineId,
           'session/cancel',
-          { sessionId: state.id, turnId: args.turnId },
+          {
+            sessionId: state.id,
+            turnId: args.turnId,
+            ...(options?.supportsOperationInbox ? { pauseInbox: false } : {}),
+          },
           () => sessionGrant(state),
           AbortSignal.any([
             state.controller.signal,
@@ -2311,15 +2342,24 @@ export async function controlTurn(args: {
           throw new Error('steer_unconfirmed');
         return { state: 'applied' };
       }
+      state.doc
+        .getMap('humanInputReceipts')
+        .set(args.messageId, { userId: userId.trim() });
+      state.doc.getMap('lodySteerLinks').set(args.messageId, {
+        targetId: args.turnId,
+        mode: 'native',
+      });
       // Move the same id atomically. pending_apply is durable intent, not delivery.
       // A lost append/RPC ACK must never trigger an automatic replay.
+      const { _lodyDeliveryKind: _ignoredDeliveryKind, ...steerConfig } =
+        config;
       if (!entry) {
         appendUserTurn(
           state.doc,
           args.messageId,
           item.task,
           userId,
-          { ...config, _lodyDeliveryKind: 'steer' },
+          steerConfig,
           timestamp,
           'pending_apply',
         );
@@ -2345,7 +2385,7 @@ export async function controlTurn(args: {
         userTurnId: args.messageId,
         userId,
         timestamp,
-        inputConfig: config,
+        inputConfig: steerConfig,
       };
       // Release the write lock in finally while this message awaits its receipt.
       return steerTurn(state, args.machineId, params);
@@ -2367,10 +2407,10 @@ export async function controlTurn(args: {
   } catch (error) {
     if (
       args.action === 'steer' &&
-      args.messageId &&
-      state.steerReceipts?.has(args.messageId)
+      trackedSteerId &&
+      state.steerReceipts?.has(trackedSteerId)
     ) {
-      state.steerReceipts?.set(args.messageId, {
+      state.steerReceipts?.set(trackedSteerId, {
         targetId: args.turnId,
         state: 'unknown',
       });
@@ -2380,6 +2420,60 @@ export async function controlTurn(args: {
     state.sending = false;
     scheduleEmit(state, state.status);
   }
+}
+
+async function promoteUndeliveredSteer(
+  state: SessionState,
+  machineId: string,
+  params: Record<string, unknown>,
+) {
+  const history = state.doc.getList('history');
+  const before = state.doc.version();
+  let promoted = false;
+  for (let i = 0; i < history.length; i++) {
+    const entry = history.get(i);
+    if (
+      entry instanceof LoroMap &&
+      entry.get('id') === params.userTurnId &&
+      entry.get('status') === 'pending_apply'
+    ) {
+      entry.set('status', 'pending');
+      entry.set('read', false);
+      promoted = true;
+    }
+  }
+  if (!promoted) return;
+  state.doc.commit();
+  scheduleEmit(state, state.status);
+  const uploaded = await state.client
+    .append({
+      part: {
+        contentType: 'application/octet-stream',
+        body: encodeFrame(state.doc.export({ mode: 'update', from: before })),
+      },
+    })
+    .catch(() => null);
+  if (
+    !uploaded?.ok ||
+    sessions.get(state.id) !== state ||
+    !targetIsCurrent(state)
+  )
+    return;
+  await state.markDispatch(state.id, String(params.userTurnId)).catch(() => {});
+  await machineRpc(
+    state.workspace,
+    machineId,
+    'session/dispatch-turn',
+    {
+      sessionId: state.id,
+      userTurnId: params.userTurnId,
+      userId: params.userId,
+      timestamp: params.timestamp,
+      inputConfig: params.inputConfig,
+    },
+    () => sessionGrant(state),
+    AbortSignal.any([state.controller.signal, AbortSignal.timeout(15000)]),
+  ).catch(() => {});
 }
 
 async function steerTurn(
@@ -2416,7 +2510,17 @@ async function steerTurn(
     | { applied?: boolean; disposition?: string; recoveryOwned?: boolean }
     | undefined;
   if (result?.applied !== true) {
-    record('unknown');
+    if (!result?.recoveryOwned && result?.disposition === 'promotion-failed') {
+      await promoteUndeliveredSteer(state, machineId, params);
+      record('waiting');
+      return { state: 'not_applied', reason: result.disposition };
+    }
+    const requeued =
+      result?.recoveryOwned === true &&
+      ['no-active-turn', 'stale-turn', 'unsupported', 'busy'].includes(
+        result.disposition ?? '',
+      );
+    record(requeued ? 'waiting' : 'unknown');
     return { state: 'not_applied', reason: result?.disposition ?? 'unknown' };
   }
   record('accepted');
@@ -2431,6 +2535,8 @@ async function steerTurn(
     ) {
       entry.set('status', 'processing');
       entry.set('read', true);
+      const input = entry.get('inputConfig');
+      if (input instanceof LoroMap) input.set('_lodyDeliveryKind', 'steer');
     }
   }
   state.doc.commit();

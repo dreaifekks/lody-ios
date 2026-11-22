@@ -152,7 +152,8 @@ final class SessionSender {
       clear(previous)
     }
     if let record {
-      let uploaded = record.phase == "uploaded" && previous?.sendId == record.sendId && previous?.phase == "sending"
+      let guideUploaded = record.send["guide"]?.truthy == true && record.phase == "uploaded"
+      let uploaded = guideUploaded || (record.phase == "uploaded" && previous?.sendId == record.sendId && previous?.phase == "sending")
       if ["accepted", "queued"].contains(record.phase) || uploaded { clear(record) }
     }
     previous = record

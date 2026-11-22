@@ -103,6 +103,7 @@ struct SessionTranscriptFacts: Equatable, Sendable {
   var permissionError: String?
   var entryIds: Set<String> = []
   var replied: Set<String> = []
+  var settled: Set<String> = []
   var delivered: Set<String> = []
   var answered: Set<String> = []
   var unfinishedTurnId: String?
@@ -143,10 +144,18 @@ struct SessionTranscriptFacts: Equatable, Sendable {
       case "user":
         preceding = id
         conversational = true
+        if let status = entry["status"] as? String,
+           ["handled", "failed", "canceled", "delivery_unknown"].contains(status) {
+          settled.insert(id)
+        }
       case "assistant":
         conversational = true
         if let target = entry["userTurnId"] as? String ?? preceding { replied.insert(target) }
-        if entry["finished"] as? Bool != true { unfinishedTurnId = id }
+        if entry["finished"] as? Bool == true || entry["endedAt"] is NSNumber {
+          unfinishedTurnId = nil
+        } else {
+          unfinishedTurnId = id
+        }
       default:
         break
       }

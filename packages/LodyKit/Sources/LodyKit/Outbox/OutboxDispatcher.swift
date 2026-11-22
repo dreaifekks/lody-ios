@@ -146,7 +146,8 @@ final class OutboxDispatcher {
   private func considerForeground(_ record: OutboxRecord, store: OutboxStore) {
     let id = record.sessionId, phase = record.phase, context = inputs.context
     guard !inflight.contains(id) else { return }
-    if record.creation == nil, context.transcript.replied.contains(record.sendId) {
+    if record.creation == nil,
+       context.transcript.replied.contains(record.sendId) || context.transcript.settled.contains(record.sendId) {
       store.remove(id)
       return
     }

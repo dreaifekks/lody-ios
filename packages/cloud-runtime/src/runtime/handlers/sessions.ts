@@ -16,7 +16,7 @@ import {
   renameSession,
   setSessionOwner,
 } from '../archive-session';
-import { creationOptions, createSession } from '../create-session';
+import { creationOptions, createSession, machineMeta } from '../create-session';
 import { planCommand } from '../status-view.ts';
 import { readWorkspaceProjects } from '../project-groups';
 import { sessionMcpSelection } from '../mcp';
@@ -428,7 +428,17 @@ export function registerSessions(
     };
   });
   channel.handle('respondPermission', respondPermission);
-  channel.handle('controlTurn', controlTurn);
+  channel.handle('controlTurn', (args) => {
+    const flock = state.metaReplica?.flock;
+    const capabilities = flock
+      ? machineMeta(flock, args.machineId).protocolCapabilities
+      : undefined;
+    const supportsOperationInbox =
+      !!capabilities &&
+      typeof capabilities === 'object' &&
+      Number((capabilities as Record<string, unknown>).operationInbox) >= 1;
+    return controlTurn(args, { supportsOperationInbox });
+  });
   channel.handle('checkTurnQuota', checkTurnQuota);
   channel.handle('editSession', (args) => {
     if (!state.metaReplica || state.unhealthy.size)
