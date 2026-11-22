@@ -32841,6 +32841,23 @@
           }
         }
       }
+    },
+    "native.attachment.markdown.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save to Files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存储到文件"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

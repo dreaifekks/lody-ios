@@ -156,7 +156,12 @@ extension LodyChatView {
   func openAttachment(_ attachment: ChatMessageAttachment) {
     guard let controller = presenter(), controller.presentedViewController == nil else { return }
     pauseTracking()
-    if let uri = attachment.localURI, let url = URL(string: uri), url.isFileURL {
+    let local = attachment.localURI.flatMap(URL.init(string:)).flatMap { $0.isFileURL ? $0 : nil }
+    if ChatMarkdownAttachmentSheet.handles(attachment) {
+      ChatMarkdownAttachmentSheet.present(file: attachment, localURL: local, workspace: imageWorkspace, session: imageSession, from: controller)
+      return
+    }
+    if let url = local {
       controller.present(ChatAttachmentPreview([ChatAttachment(id: attachment.id, name: attachment.fileName, url: url, isImage: false)], index: 0), animated: true)
       return
     }
