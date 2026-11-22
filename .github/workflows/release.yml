@@ -23,8 +23,8 @@ permissions:
 
 env:
   IOS_DIR: apps/ios
-  APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || 'KAMM5N88X3' }}
-  LODY_APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || 'KAMM5N88X3' }}
+  APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || vars.APPLE_TEAM_ID || 'KAMM5N88X3' }}
+  LODY_APPLE_TEAM_ID: ${{ vars.LODY_APPLE_TEAM_ID || vars.APPLE_TEAM_ID || 'KAMM5N88X3' }}
   LODY_BUNDLE_ID: ${{ vars.LODY_BUNDLE_ID || 'app.innei.lody' }}
   ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
   ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
