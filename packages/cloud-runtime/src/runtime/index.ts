@@ -13,6 +13,7 @@ import {
   retainedSessionIds,
   setSessionTraceSink,
   setSessionUsageReader,
+  setSessionSendObserver,
   refreshSessionUsage,
 } from './session';
 import { machineRpc } from './machine-rpc';
@@ -27,10 +28,13 @@ import {
 } from './catalog-sync';
 import { watchMachinePresence } from './machine-presence';
 import {
+  applyStatusViewWrites,
   catalogStatusView,
+  conversationOf,
   pinSectionRows,
   planCommand,
   setSessionPatch,
+  type StatusViewDirtyReplica,
   statusViewNextChangeAt,
   WORKSPACE_STREAM,
   type StatusViewSources,
@@ -162,19 +166,66 @@ function statusSources(): StatusViewSources | undefined {
   };
 }
 
+/**
+ * A failed append left a local commit the server never accepted. Drop that
+ * replica and bootstrap it again so the commit is neither shown nor replayed.
+ * A newer replica (the stream already reconnected) is left alone.
+ */
+function discardReplica(replica: StatusViewDirtyReplica, flock: Flock) {
+  const current =
+    replica === 'meta' ? state.metaReplica : state.workspaceReplica;
+  if (current?.flock !== flock) return;
+  const mode = replica === 'meta' ? 'meta' : WORKSPACE_STREAM;
+  watchers.get(mode)?.abort();
+  watchers.delete(mode);
+  if (replica === 'meta') state.metaReplica = undefined;
+  else state.workspaceReplica = undefined;
+  channel.emit('diagnostic', { stage: 'replica_discarded', stream: mode });
+  watch(mode);
+}
+
+/** The Status view plans for the conversation a Tab or side chat belongs to. */
+function touchWrites(sessionId: string) {
+  const sources = statusSources();
+  return sources
+    ? planCommand(sources, {
+        type: 'touchOnSend',
+        sessionId: conversationOf(sources.catalog.sessions, sessionId),
+      })
+    : [];
+}
+
+/** A send outside the dispatch pointer (guide, edit and resend): `touchOnSend` alone. */
+async function touchOnSend(sessionId: string) {
+  const meta = state.metaReplica;
+  if (!meta || state.unhealthy.has('meta')) return;
+  const writes = touchWrites(sessionId);
+  if (!writes.length) return;
+  await applyStatusViewWrites(writes, meta, undefined, (replica) =>
+    discardReplica(replica, meta.flock),
+  );
+  if (state.metaReplica === meta) {
+    catalogs.set('meta', projectRows(meta.flock.scan(), 'meta'));
+    publish();
+  }
+}
+setSessionSendObserver((sessionId) => {
+  void touchOnSend(sessionId).catch(() =>
+    channel.emit('diagnostic', {
+      stage: 'touch_on_send_failed',
+      stream: 'meta',
+    }),
+  );
+});
+
 async function markDispatch(sessionId: string, turnId: string, queued = false) {
   if (!state.metaReplica) throw new Error('metadata_not_ready');
   const { flock, client } = state.metaReplica;
   const version = flock.version();
   // A sent message brings a Later or Settled conversation back (`touchOnSend`),
   // in the same append as the dispatch pointer.
-  const sources = statusSources();
-  if (sources)
-    for (const write of planCommand(sources, {
-      type: 'touchOnSend',
-      sessionId,
-    }))
-      if (write.type === 'session') setSessionPatch(flock, write);
+  for (const write of touchWrites(sessionId))
+    if (write.type === 'session') setSessionPatch(flock, write);
   if (queued) {
     const key = ['m', `session-${sessionId}`, 'messageQueueUpdatedAt'];
     const previous = flock.get(key);
@@ -195,15 +246,22 @@ async function markDispatch(sessionId: string, turnId: string, queued = false) {
     );
   }
   flock.commit();
-  const result = await client.append({
-    part: {
-      contentType: 'application/octet-stream',
-      body: encodeFrame(
-        new TextEncoder().encode(JSON.stringify(flock.exportJson(version))),
-      ),
-    },
-  });
-  if (!result.ok) throw new Error(result.result.code);
+  try {
+    const result = await client.append({
+      part: {
+        contentType: 'application/octet-stream',
+        body: encodeFrame(
+          new TextEncoder().encode(JSON.stringify(flock.exportJson(version))),
+        ),
+      },
+    });
+    if (!result.ok) throw new Error(result.result.code);
+  } catch (error) {
+    // An unsent dispatch pointer left in the replica would read as delivered
+    // and stop the owner from retrying it.
+    discardReplica('meta', flock);
+    throw error;
+  }
 }
 const watchers = new Map<string, AbortController>();
 const broker = async (operation: string, args: object) => {
@@ -374,10 +432,12 @@ function publishNow() {
     pinSections: state.pinSections.sections,
     ...(statusView ? { statusView } : {}),
   };
-  // The computation instant alone is not a change worth a new revision.
+  // The computation instant alone is not a change worth a new revision, but a
+  // new server-clock calibration is: hosts learn the offset from `nowMs`.
   const signature = JSON.stringify({
     ...published,
     ...(statusView ? { statusView: { ...statusView, nowMs: 0 } } : {}),
+    clockOffset: serverClock.offset(),
   });
   if (signature !== lastPublished) {
     lastPublished = signature;
@@ -453,8 +513,17 @@ function watch(mode: string) {
         });
         if (!initial.ok) {
           if (initial.result.code === 'not_found' && workspaceStream) {
-            state.workspaceReplica = undefined;
-            state.pinSections = { sections: [], loaded: true };
+            // No settings stream yet: sections are known to be empty, and the
+            // first section write creates the stream (`missing`). A replica
+            // that has just created it keeps its rows until a read returns them.
+            if (!state.workspaceReplica || state.workspaceReplica.missing) {
+              state.workspaceReplica = {
+                flock: new Flock(`lody-ios-${crypto.randomUUID()}`),
+                client,
+                missing: true,
+              };
+              state.pinSections = { sections: [], loaded: true };
+            }
             publish();
             await delay(30000, signal);
             continue;
@@ -683,6 +752,12 @@ const ctx: RuntimeContext = {
   emitSession,
   markDispatch,
   statusSources,
+  discardReplica,
+  refreshWorkspace() {
+    watchers.get(WORKSPACE_STREAM)?.abort();
+    watchers.delete(WORKSPACE_STREAM);
+    watch(WORKSPACE_STREAM);
+  },
   syncClock: () => serverClock.sync(),
   setForeground(active) {
     foreground = active;

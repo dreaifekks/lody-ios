@@ -11,6 +11,8 @@ const workerOrigin =
  */
 export type ServerClock = {
   now(): number;
+  /** The calibrated `server - device` offset in ms; 0 until a sample succeeds. */
+  offset(): number;
   synced(): boolean;
   /** One calibration sample; resolves whether it was accepted. */
   sync(signal?: AbortSignal): Promise<boolean>;
@@ -29,6 +31,7 @@ export function createServerClock(sources: ClockSources): ServerClock {
   let calibrated = false;
   return {
     now: () => sources.wallNow() + offset,
+    offset: () => offset,
     synced: () => calibrated,
     async sync(signal) {
       try {

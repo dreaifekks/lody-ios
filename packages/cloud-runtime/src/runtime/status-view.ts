@@ -15,6 +15,7 @@ import {
   buildSnoozePresets,
   buildStatusViewLayout,
   planStatusViewCommand,
+  statusViewPinnedIds,
   type StatusViewCommand,
   type StatusViewLayoutInput,
   type StatusViewSession,
@@ -41,31 +42,49 @@ export function pinSectionRows(rows: readonly Row[]): PinSection[] {
 
 /**
  * Port of the web session-management guard (`isSessionEditableToUser`) with
- * what the runtime knows. A machine counts as visible once its machine stream
- * was readable (a catalog exists for it); its own owner may always manage.
- * Preferences (pin) additionally admit the session's own author. Read grants
- * on another member's machine are not discoverable here and are refused.
+ * what the runtime knows. The machine's owner may always manage. Another member
+ * may manage once the machine stream was readable (a catalog exists for it),
+ * except for a local-project conversation, a Project group with a local member
+ * included: whether that project is shared with the team is server access
+ * state the runtime cannot read, and a machine Flock lists private projects
+ * too. Preferences (pin) additionally admit the session's own author. Read
+ * grants on another member's machine are not discoverable here and are refused.
  */
 export function sessionPermissions(
-  session: Pick<Session, 'machineId' | 'projectId' | 'userId'>,
+  session: Pick<Session, 'machineId' | 'projectId' | 'userId' | 'projectRun'>,
   meta: Pick<Catalog, 'machineOwners'>,
-  machineCatalogs: ReadonlyMap<string, Pick<Catalog, 'projects'>>,
+  machineCatalogs: ReadonlyMap<string, unknown>,
   userId: string,
 ): { canManage: boolean; canPrefer: boolean } {
   const machineId = session.machineId;
   const owned =
     !!userId && !!machineId && meta.machineOwners?.[machineId] === userId;
-  let canManage = owned;
-  if (!canManage && machineId) {
-    const machine = machineCatalogs.get(machineId);
-    if (machine) {
-      const local = session.projectId.startsWith(`${machineId}:local:`);
-      canManage =
-        !local || machine.projects.some((p) => p.id === session.projectId);
-    }
-  }
+  const local =
+    session.projectId.startsWith(`${machineId}:local:`) ||
+    !!session.projectRun?.members.some((member) => member.kind === 'local');
+  const canManage =
+    owned || (!!machineId && machineCatalogs.has(machineId) && !local);
   const canPrefer = canManage || (!!userId && session.userId === userId);
   return { canManage, canPrefer };
+}
+
+/**
+ * The listed conversation a session id stands for: a Tab or side chat
+ * (`parentSessionId`) resolves to the conversation it belongs to.
+ */
+export function conversationOf(
+  sessions: readonly Pick<Session, 'id' | 'parentSessionId'>[],
+  id: string,
+) {
+  const indexed = new Map(sessions.map((s) => [s.id, s]));
+  let current = id;
+  const seen = new Set([id]);
+  for (;;) {
+    const parent = indexed.get(current)?.parentSessionId;
+    if (!parent || seen.has(parent)) return current;
+    seen.add(parent);
+    current = parent;
+  }
 }
 
 /** Synced durable status, as the native lists read it (`SessionRows.swift` `SessionState`). */
@@ -106,8 +125,11 @@ export type StatusViewScope = 'mine' | 'team';
  * (Sessions/AGENTS.md): Tabs and side chats (`parentSessionId`) never list and
  * lend their running / waiting state to their conversation; a row nests under
  * `openedBySessionId`, then `openedByRootSessionId`, resolved through Tabs to a
- * listed conversation; My tasks keeps whole families containing the user's own
- * conversations. Archived and scope-hidden rows stay reachable as `related`.
+ * listed conversation. As on desktop, a conversation's activity is the latest of
+ * its own and its non-archived Tabs' and side chats' (`getEffectiveLatestMessageAt`),
+ * while unread stays its own; My tasks lists each conversation the user owns
+ * (`isSessionInMyScope`) and counts, by pinned root section, the Pinned-area
+ * rows it hid. Archived and scope-hidden rows stay reachable as `related`.
  */
 export function statusViewState(
   sources: StatusViewSources,
@@ -142,8 +164,12 @@ export function statusViewState(
   };
   // Internal Tabs on the same machine contribute their status (not side chats).
   const tabs = new Map<string, Session[]>();
+  const childActivity = new Map<string, number>();
   for (const session of catalog.sessions) {
     if (!isTab(session) || session.archived) continue;
+    const at = session.lastMessageAt ?? createdMs(session) ?? 0;
+    const parent = session.parentSessionId!;
+    childActivity.set(parent, Math.max(childActivity.get(parent) ?? 0, at));
     if (session.childSessionPlacement === 'side-panel') continue;
     const owner = listed.get(conversation(session.id));
     if (!owner || owner.machineId !== session.machineId) continue;
@@ -161,7 +187,10 @@ export function statusViewState(
       id: session.id,
       title: session.title,
       lastMessageAt: session.lastMessageAt ?? null,
-      activityAt: session.lastMessageAt ?? createdMs(session),
+      activityAt: Math.max(
+        session.lastMessageAt ?? createdMs(session) ?? 0,
+        childActivity.get(session.id) ?? 0,
+      ),
       lastReadAt: session.lastReadAt ?? null,
       isPinned: session.pinned,
       pinSectionId: session.pinSectionId ?? null,
@@ -176,33 +205,33 @@ export function statusViewState(
     };
   };
   const all = [...listed.values()].map(toInput);
-  const byId = new Map(all.map((s) => [s.id, s]));
-  const rootOf = (session: StatusViewSession) => {
-    let current = session;
-    const seen = new Set([session.id]);
-    while (current.openedById && !seen.has(current.openedById)) {
-      const next = byId.get(current.openedById);
-      if (!next) break;
-      seen.add(next.id);
-      current = next;
-    }
-    return current.id;
-  };
   const active = all.filter((s) => !listed.get(s.id)!.archived);
   let visible = active;
   const scopeHiddenCounts: Record<string, number> = {};
   if (scope === 'mine') {
-    const ownedRoots = new Set(
-      active
-        .filter((s) => listed.get(s.id)!.userId === userId && userId)
-        .map(rootOf),
+    visible = active.filter(
+      (s) => !!userId && listed.get(s.id)!.userId === userId,
     );
-    visible = active.filter((s) => ownedRoots.has(rootOf(s)));
-    for (const session of active)
-      if (session.isPinned && !ownedRoots.has(rootOf(session))) {
-        const key = session.pinSectionId ?? '';
-        scopeHiddenCounts[key] = (scopeHiddenCounts[key] ?? 0) + 1;
+    // Desktop's rule: every row the unscoped Pinned area holds (pinned roots and
+    // the rows they carry) that this scope does not, under its pinned root's section.
+    const activeById = new Map(active.map((s) => [s.id, s]));
+    const shownPinned = statusViewPinnedIds(visible);
+    for (const id of statusViewPinnedIds(active)) {
+      if (shownPinned.has(id)) continue;
+      let root = activeById.get(id);
+      const seen = new Set<string>();
+      while (root && !root.isPinned) {
+        const opener = root.openedById;
+        if (!opener || seen.has(opener)) {
+          root = undefined;
+          break;
+        }
+        seen.add(opener);
+        root = activeById.get(opener);
       }
+      const key = root?.pinSectionId ?? '';
+      scopeHiddenCounts[key] = (scopeHiddenCounts[key] ?? 0) + 1;
+    }
   }
   const shown = new Set(visible.map((s) => s.id));
   return {
@@ -210,7 +239,8 @@ export function statusViewState(
     related: all.filter((s) => !shown.has(s.id)),
     sections: sources.sections,
     sectionsLoaded: sources.sectionsLoaded,
-    canManageSections: !readOnly,
+    // Section management waits for the rows it would order against.
+    canManageSections: !readOnly && sources.sectionsLoaded,
     scopeHiddenCounts,
     nowMs,
   };
@@ -294,21 +324,35 @@ async function appendSince(replica: Replica, version: unknown) {
   if (!result.ok) throw new Error(result.result.code);
 }
 
+/** A replica that has a local commit the server never accepted. */
+export type StatusViewDirtyReplica = 'meta' | 'workspace';
+
 /**
  * Applies planned writes: session patches to the meta Flock (`null` deletes a
- * field), sections to the workspace Flock, each committed and appended once.
- * Section writes need the live workspace replica; nothing is written without it.
+ * field, as loro-repo does), sections to the workspace Flock, each committed and
+ * appended once. A workspace stream that does not exist yet (`missing`) is
+ * created first, as Agent Role saves do. When an append fails after its local
+ * commit, `dirty` names that replica so the caller rebuilds it from the server;
+ * the commit is never replayed.
  */
 export async function applyStatusViewWrites(
   writes: readonly StatusViewWrite[],
   meta: Replica,
-  workspace: Replica | undefined,
+  workspace: (Replica & { missing?: boolean }) | undefined,
+  dirty: (replica: StatusViewDirtyReplica) => void = () => {},
 ) {
   const sessionWrites = writes.filter((w) => w.type === 'session');
   const sectionWrites = writes.filter((w) => w.type !== 'session');
   if (sectionWrites.length && !workspace)
     throw new Error('workspace_not_ready');
   if (workspace && sectionWrites.length) {
+    if (workspace.missing) {
+      const created = await workspace.client.create({
+        contentType: 'application/octet-stream',
+      });
+      if (!created.ok) throw new Error(created.result.code);
+      workspace.missing = false;
+    }
     const version = workspace.flock.version();
     for (const write of sectionWrites) {
       if (write.type === 'deleteSection')
@@ -320,13 +364,23 @@ export async function applyStatusViewWrites(
         );
     }
     workspace.flock.commit();
-    await appendSince(workspace, version);
+    try {
+      await appendSince(workspace, version);
+    } catch (error) {
+      dirty('workspace');
+      throw error;
+    }
   }
   if (sessionWrites.length) {
     const version = meta.flock.version();
     for (const write of sessionWrites) setSessionPatch(meta.flock, write);
     meta.flock.commit();
-    await appendSince(meta, version);
+    try {
+      await appendSince(meta, version);
+    } catch (error) {
+      dirty('meta');
+      throw error;
+    }
   }
   return writes.length;
 }

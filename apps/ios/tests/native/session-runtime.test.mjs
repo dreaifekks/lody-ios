@@ -1219,15 +1219,21 @@ for (const steerResult of [
         },
       });
       try {
-        const sent = await fixture.runtime.sendTurn({
-          sessionId: 's1',
-          machineId: 'm1',
-          userId: 'u1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          text: 'Guide',
-          guide: true,
-        });
+        const sends = [];
+        fixture.runtime.setSessionSendObserver((id) => sends.push(id));
+        const sent = await fixture.runtime
+          .sendTurn({
+            sessionId: 's1',
+            machineId: 'm1',
+            userId: 'u1',
+            cliType: 'builtin',
+            agentType: 'codex',
+            text: 'Guide',
+            guide: true,
+          })
+          .finally(() => fixture.runtime.setSessionSendObserver(() => {}));
+        // The owner accepted the Roost guide: it counts as a send.
+        assert.deepEqual(sends, ['s1']);
         if (steerResult.inactive) {
           assert.equal(sent.state, 'uploaded');
           return;
@@ -4214,16 +4220,23 @@ test('guide writes a steer history turn instead of the FIFO queue and retains it
     });
     fixture.server.commit();
     await fixture.pushUpdate();
-    const result = await fixture.runtime.sendTurn({
-      sessionId: 's1',
-      machineId: 'm1',
-      userId: 'u1',
-      text: 'steer now',
-      cliType: 'builtin',
-      agentType: 'codex',
-      guide: true,
-    });
+    // A guide never moves the dispatch pointer, yet it is a send: the runtime
+    // must hear of it to clear Later / Settled.
+    const sends = [];
+    fixture.runtime.setSessionSendObserver((id) => sends.push(id));
+    const result = await fixture.runtime
+      .sendTurn({
+        sessionId: 's1',
+        machineId: 'm1',
+        userId: 'u1',
+        text: 'steer now',
+        cliType: 'builtin',
+        agentType: 'codex',
+        guide: true,
+      })
+      .finally(() => fixture.runtime.setSessionSendObserver(() => {}));
     assert.equal(result.state, 'uploaded');
+    assert.deepEqual(sends, ['s1']);
     await new Promise((resolve) => setImmediate(resolve));
     const raw = fixture.server.toJSON();
     assert.equal((raw.mq ?? []).length, 0);

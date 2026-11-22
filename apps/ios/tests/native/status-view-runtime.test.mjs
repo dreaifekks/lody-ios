@@ -7,7 +7,13 @@ const DAY = 86_400_000;
 
 // The production runtime bundle over synthetic streams: meta, the workspace
 // settings Flock and one machine. Nothing reaches the network.
-async function runtimeFixture({ serverOffset }) {
+async function runtimeFixture({
+  signal,
+  serverOffset,
+  workspaceMissing = false,
+  failAppend = () => false,
+  serverTime = () => Date.now() + serverOffset,
+}) {
   const now = Date.now();
   const meta = new Flock('meta');
   meta.set(['e', 'machine-m1'], true);
@@ -37,45 +43,63 @@ async function runtimeFixture({ serverOffset }) {
   });
   const snapshots = {
     'w1:meta': meta.exportFile(),
-    'w1:wf:workspace': workspace.exportFile(),
+    ...(workspaceMissing ? {} : { 'w1:wf:workspace': workspace.exportFile() }),
     'w1:mf:m1': new Flock('machine').exportFile(),
   };
+  // A stream is its snapshot plus every accepted append, as the server keeps it.
+  const accepted = new Map();
+  const created = [];
   const appends = [];
+  const bootstraps = [];
   globalThis.__statusClient = class {
     constructor({ url }) {
       this.stream = decodeURIComponent(url.split('/ds/lody/')[1]);
     }
     async bootstrap() {
+      bootstraps.push(this.stream);
       const body = snapshots[this.stream];
-      if (!body) return { ok: false, result: { code: 'not_found' } };
+      const parts = accepted.get(this.stream) ?? [];
+      if (!body && !created.includes(this.stream))
+        return { ok: false, result: { code: 'not_found' } };
       return {
         ok: true,
         result: {
-          snapshotOffset: '1',
-          nextOffset: '1',
+          snapshotOffset: body ? '1' : '-1',
+          nextOffset: String(1 + parts.length),
           upToDate: true,
-          snapshot: { body },
-          updates: [],
+          ...(body ? { snapshot: { body } } : {}),
+          updates: parts.map((part) => ({ body: part })),
         },
       };
     }
     readOnce() {
       return new Promise(() => {});
     }
+    async create() {
+      const exists = !!snapshots[this.stream] || created.includes(this.stream);
+      if (!exists) created.push(this.stream);
+      return { ok: true, result: { created: !exists } };
+    }
     async append({ part }) {
-      appends.push({
-        stream: this.stream,
-        update: JSON.parse(new TextDecoder().decode(part.body.subarray(4))),
-      });
+      const update = JSON.parse(
+        new TextDecoder().decode(part.body.subarray(4)),
+      );
+      if (failAppend(this.stream, update))
+        return { ok: false, result: { code: 'network_error' } };
+      if (!snapshots[this.stream] && !created.includes(this.stream))
+        return { ok: false, result: { code: 'not_found' } };
+      appends.push({ stream: this.stream, update });
+      accepted.set(this.stream, [
+        ...(accepted.get(this.stream) ?? []),
+        part.body,
+      ]);
       return { ok: true };
     }
   };
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     assert.match(String(url), /\/api\/time$/);
-    return new Response(
-      JSON.stringify({ serverTime: Date.now() + serverOffset }),
-    );
+    return new Response(JSON.stringify({ serverTime: serverTime() }));
   };
   const catalogs = [];
   const waiters = [];
@@ -165,7 +189,7 @@ async function runtimeFixture({ serverOffset }) {
   const previousBroadcastChannel = globalThis.BroadcastChannel;
   globalThis.BroadcastChannel = undefined;
   await import(
-    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+    `data:text/javascript;base64,${Buffer.from(`${bundle.outputFiles[0].text}\n// ${crypto.randomUUID()}`).toString('base64')}`
   );
   let next = 0;
   const call = (method, payload = {}) => {
@@ -176,13 +200,22 @@ async function runtimeFixture({ serverOffset }) {
     );
     return reply;
   };
+  // Waits end with the test: a missing catalog fails the test, never hangs it.
   const catalog = (match) =>
     catalogs.find(match) ??
-    new Promise((resolve) => waiters.push({ match, resolve }));
+    new Promise((resolve, reject) => {
+      waiters.push({ match, resolve });
+      signal?.addEventListener('abort', () => reject(signal.reason), {
+        once: true,
+      });
+    });
   return {
     call,
     catalog,
     appends,
+    created,
+    bootstraps,
+    catalogs,
     events,
     dispose() {
       delete globalThis.webkit;
@@ -194,100 +227,271 @@ async function runtimeFixture({ serverOffset }) {
   };
 }
 
-test('the runtime publishes the Status view on the server clock and applies commands to both Flocks', async () => {
-  const serverOffset = 10 * DAY;
-  const runtime = await runtimeFixture({ serverOffset });
-  try {
-    await runtime.call('hello', { protocol: 1, gen: 1 });
-    await runtime.call('start', {
-      workspaceId: 'w1',
-      userId: 'u1',
-      active: true,
-    });
-    const ready = await runtime.catalog(
-      (c) =>
-        c.statusView?.sectionsLoaded &&
-        c.statusView.team.settled.some((row) => row.id === 'recent'),
-    );
-    // Eleven quiet days on the server clock settle a row the device sees as recent.
-    assert.ok(ready.statusView.nowMs >= Date.now() + serverOffset - 60_000);
-    assert.deepEqual(
-      ready.pinSections.map((s) => s.id),
-      ['s1'],
-    );
-    assert.deepEqual(
-      ready.statusView.team.pinned.map((s) => s.sectionId),
-      [null, 's1'],
-    );
-    assert.deepEqual(
-      ready.statusView.mine.focus.map((row) => [row.id, row.canManage]),
-      [['other', true]],
-    );
-    assert.equal(ready.statusView.team.canManageSections, true);
+test(
+  'the runtime publishes the Status view on the server clock and applies commands to both Flocks',
+  { timeout: 30_000 },
+  async (t) => {
+    const serverOffset = 10 * DAY;
+    const runtime = await runtimeFixture({ signal: t.signal, serverOffset });
+    try {
+      await runtime.call('hello', { protocol: 1, gen: 1 });
+      await runtime.call('start', {
+        workspaceId: 'w1',
+        userId: 'u1',
+        active: true,
+      });
+      const ready = await runtime.catalog(
+        (c) =>
+          c.statusView?.sectionsLoaded &&
+          c.statusView.team.settled.some((row) => row.id === 'recent'),
+      );
+      // Eleven quiet days on the server clock settle a row the device sees as recent.
+      assert.ok(ready.statusView.nowMs >= Date.now() + serverOffset - 60_000);
+      assert.deepEqual(
+        ready.pinSections.map((s) => s.id),
+        ['s1'],
+      );
+      assert.deepEqual(
+        ready.statusView.team.pinned.map((s) => s.sectionId),
+        [null, 's1'],
+      );
+      assert.deepEqual(
+        ready.statusView.mine.focus.map((row) => [row.id, row.canManage]),
+        [['other', true]],
+      );
+      assert.equal(ready.statusView.team.canManageSections, true);
 
-    const created = await runtime.call('statusViewCommand', {
-      workspaceId: 'w1',
-      command: { type: 'createSection', sectionId: 's2', name: 'Two' },
-    });
-    assert.deepEqual(created.payload, { writes: 1 });
-    assert.deepEqual(
-      runtime.appends.map((a) => a.stream),
-      ['w1:wf:workspace'],
-    );
-    await runtime.catalog((c) => c.pinSections.some((s) => s.id === 's2'));
+      const created = await runtime.call('statusViewCommand', {
+        workspaceId: 'w1',
+        command: { type: 'createSection', sectionId: 's2', name: 'Two' },
+      });
+      assert.deepEqual(created.payload, { writes: 1 });
+      assert.deepEqual(
+        runtime.appends.map((a) => a.stream),
+        ['w1:wf:workspace'],
+      );
+      await runtime.catalog((c) => c.pinSections.some((s) => s.id === 's2'));
 
-    const moved = await runtime.call('statusViewCommand', {
-      workspaceId: 'w1',
-      scope: 'mine',
-      command: {
-        type: 'move',
-        sessionId: 'other',
-        to: { area: 'pinned', sectionId: 's2' },
-        beforeId: null,
-      },
-    });
-    assert.deepEqual(moved.payload, { writes: 1 });
-    assert.equal(runtime.appends.at(-1).stream, 'w1:meta');
-    const pinned = await runtime.catalog(
-      (c) =>
-        c.statusView?.team.pinned.find((s) => s.sectionId === 's2')?.rows[0]
-          ?.id === 'other',
-    );
-    assert.equal(
-      pinned.sessions.find((s) => s.id === 'other').pinSectionId,
-      's2',
-    );
+      const moved = await runtime.call('statusViewCommand', {
+        workspaceId: 'w1',
+        scope: 'mine',
+        command: {
+          type: 'move',
+          sessionId: 'other',
+          to: { area: 'pinned', sectionId: 's2' },
+          beforeId: null,
+        },
+      });
+      assert.deepEqual(moved.payload, { writes: 1 });
+      assert.equal(runtime.appends.at(-1).stream, 'w1:meta');
+      const pinned = await runtime.catalog(
+        (c) =>
+          c.statusView?.team.pinned.find((s) => s.sectionId === 's2')?.rows[0]
+            ?.id === 'other',
+      );
+      assert.equal(
+        pinned.sessions.find((s) => s.id === 'other').pinSectionId,
+        's2',
+      );
 
-    // A command the planner refuses writes nothing.
-    const refused = await runtime.call('statusViewCommand', {
-      workspaceId: 'w1',
-      command: {
-        type: 'snooze',
-        sessionId: 'other',
-        until: 1,
-        includeOpened: false,
-      },
-    });
-    assert.deepEqual(refused.payload, { writes: 0 });
-    const wrong = await runtime.call('statusViewCommand', {
-      workspaceId: 'w2',
-      command: { type: 'deleteSection', sectionId: 's2' },
-    });
-    assert.equal(wrong.kind, 'error');
+      // A command the planner refuses writes nothing.
+      const refused = await runtime.call('statusViewCommand', {
+        workspaceId: 'w1',
+        command: {
+          type: 'snooze',
+          sessionId: 'other',
+          until: 1,
+          includeOpened: false,
+        },
+      });
+      assert.deepEqual(refused.payload, { writes: 0 });
+      const wrong = await runtime.call('statusViewCommand', {
+        workspaceId: 'w2',
+        command: { type: 'deleteSection', sectionId: 's2' },
+      });
+      assert.equal(wrong.kind, 'error');
 
-    const presets = await runtime.call('snoozePresets');
-    assert.ok(presets.payload.nowMs >= Date.now() + serverOffset - 60_000);
-    assert.equal(
-      presets.payload.presets[0].until,
-      presets.payload.nowMs + 3_600_000,
-    );
-    // The settings stream is not a workspace sync failure.
-    assert.equal(
-      runtime.events.some((e) => e.method === 'syncError'),
-      false,
-    );
-    await runtime.call('setActive', { active: false });
-  } finally {
-    runtime.dispose();
+      const presets = await runtime.call('snoozePresets');
+      assert.ok(presets.payload.nowMs >= Date.now() + serverOffset - 60_000);
+      assert.equal(
+        presets.payload.presets[0].until,
+        presets.payload.nowMs + 3_600_000,
+      );
+      // The settings stream is not a workspace sync failure.
+      assert.equal(
+        runtime.events.some((e) => e.method === 'syncError'),
+        false,
+      );
+    } finally {
+      await runtime.call('setActive', { active: false });
+      runtime.dispose();
+    }
+  },
+);
+
+// Event-loop turns only, bounded: the runtime's own work settles in microtasks
+// and zero-delay checkpoints.
+async function until(condition, turns = 2000) {
+  for (let turn = 0; turn < turns; turn++) {
+    if (condition()) return;
+    await new Promise((resolve) => setImmediate(resolve));
   }
-});
+  throw new Error('condition not reached');
+}
+
+test(
+  'the first pin section in a workspace without a settings stream creates that stream',
+  { timeout: 30_000 },
+  async (t) => {
+    const runtime = await runtimeFixture({
+      signal: t.signal,
+      serverOffset: 0,
+      workspaceMissing: true,
+    });
+    try {
+      await runtime.call('hello', { protocol: 1, gen: 1 });
+      await runtime.call('start', {
+        workspaceId: 'w1',
+        userId: 'u1',
+        active: true,
+      });
+      const empty = await runtime.catalog(
+        (c) =>
+          c.statusView?.sectionsLoaded && c.statusView.team.canManageSections,
+      );
+      assert.deepEqual(empty.pinSections, []);
+      const first = await runtime.call('statusViewCommand', {
+        workspaceId: 'w1',
+        command: { type: 'createSection', sectionId: 's9', name: 'New' },
+      });
+      assert.deepEqual(first.payload, { writes: 1 });
+      assert.deepEqual(runtime.created, ['w1:wf:workspace']);
+      assert.equal(runtime.appends.at(-1).stream, 'w1:wf:workspace');
+      await runtime.catalog((c) => c.pinSections.some((s) => s.id === 's9'));
+      // The read restarts at once and gets the section back from the stream.
+      await until(
+        () =>
+          runtime.bootstraps.filter((s) => s === 'w1:wf:workspace').length >= 2,
+      );
+      const second = await runtime.call('statusViewCommand', {
+        workspaceId: 'w1',
+        command: { type: 'createSection', sectionId: 's10', name: 'Next' },
+      });
+      assert.deepEqual(second.payload, { writes: 1 });
+      assert.deepEqual(runtime.created, ['w1:wf:workspace'], 'created once');
+      const both = await runtime.catalog((c) => c.pinSections.length === 2);
+      assert.deepEqual(
+        both.pinSections.map((s) => s.id),
+        ['s9', 's10'],
+      );
+    } finally {
+      await runtime.call('setActive', { active: false });
+      runtime.dispose();
+    }
+  },
+);
+
+test(
+  'a failed append drops its unsent commit: the replica is read again and never shows it',
+  { timeout: 30_000 },
+  async (t) => {
+    let failing = true;
+    const runtime = await runtimeFixture({
+      signal: t.signal,
+      serverOffset: 0,
+      failAppend: (stream) => failing && stream === 'w1:meta',
+    });
+    try {
+      await runtime.call('hello', { protocol: 1, gen: 1 });
+      await runtime.call('start', {
+        workspaceId: 'w1',
+        userId: 'u1',
+        active: true,
+      });
+      await runtime.catalog((c) =>
+        c.statusView?.team.focus.some((row) => row.id === 'other'),
+      );
+      const refused = await runtime.call('statusViewCommand', {
+        workspaceId: 'w1',
+        command: { type: 'settle', sessionId: 'other', includeOpened: false },
+      });
+      assert.equal(refused.kind, 'error');
+      await until(
+        () => runtime.bootstraps.filter((s) => s === 'w1:meta').length >= 2,
+      );
+      failing = false;
+      // A later, successful write republishes from the rebuilt replica (retried
+      // over event-loop turns while that replica is still being read).
+      const pin = () =>
+        runtime.call('statusViewCommand', {
+          workspaceId: 'w1',
+          command: { type: 'setPinned', sessionId: 'recent', pinned: true },
+        });
+      let reply = await pin();
+      for (
+        let attempt = 0;
+        reply.kind === 'error' && attempt < 200;
+        attempt++
+      ) {
+        await new Promise((resolve) => setImmediate(resolve));
+        reply = await pin();
+      }
+      assert.deepEqual(reply.payload, { writes: 1 });
+      const after = await runtime.catalog((c) =>
+        c.sessions.some((s) => s.id === 'recent' && s.pinned),
+      );
+      assert.equal(
+        after.sessions.find((s) => s.id === 'other').settledAt,
+        undefined,
+      );
+      assert.ok(after.statusView.team.focus.some((row) => row.id === 'other'));
+      assert.ok(
+        runtime.catalogs.every((c) =>
+          c.sessions.every(
+            (s) => s.id !== 'other' || s.settledAt === undefined,
+          ),
+        ),
+      );
+    } finally {
+      await runtime.call('setActive', { active: false });
+      runtime.dispose();
+    }
+  },
+);
+
+test(
+  'a new server-clock calibration republishes the catalog even when nothing else changed',
+  { timeout: 30_000 },
+  async (t) => {
+    let offset = 10 * 60_000;
+    const runtime = await runtimeFixture({
+      signal: t.signal,
+      serverOffset: offset,
+      serverTime: () => Date.now() + offset,
+    });
+    try {
+      await runtime.call('hello', { protocol: 1, gen: 1 });
+      await runtime.call('start', {
+        workspaceId: 'w1',
+        userId: 'u1',
+        active: true,
+      });
+      const first = await runtime.catalog(
+        (c) =>
+          c.statusView?.sectionsLoaded &&
+          c.statusView.nowMs - Date.now() > 9 * 60_000,
+      );
+      assert.ok(first.statusView.nowMs - Date.now() < 11 * 60_000);
+      offset = 20 * 60_000;
+      // Foregrounding samples the clock again; the layouts stay the same.
+      await runtime.call('setActive', { active: true });
+      const second = await runtime.catalog(
+        (c) => c.statusView && c.statusView.nowMs - Date.now() > 19 * 60_000,
+      );
+      assert.deepEqual(second.statusView.team, first.statusView.team);
+    } finally {
+      await runtime.call('setActive', { active: false });
+      runtime.dispose();
+    }
+  },
+);

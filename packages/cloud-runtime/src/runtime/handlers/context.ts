@@ -27,7 +27,7 @@ export type RuntimeState = {
   readonly catalogs: Map<string, Catalog>;
   readonly unhealthy: Set<string>;
   /** Live `${workspace}:wf:workspace` replica, written by Status view commands. */
-  workspaceReplica: MetaReplica | undefined;
+  workspaceReplica: (MetaReplica & { missing?: boolean }) | undefined;
   /** Last read `pinSection` rows; `loaded` is false until the first read. */
   pinSections: { sections: PinSection[]; loaded: boolean };
 };
@@ -52,6 +52,13 @@ export type RuntimeContext = {
   syncClock?: () => Promise<boolean>;
   /** The host is active; time-based Status view republishing runs only then. */
   setForeground?: (active: boolean) => void;
+  /** Drops a replica holding a commit its append never landed, and re-bootstraps it. */
+  discardReplica: (
+    replica: import('../status-view.ts').StatusViewDirtyReplica,
+    flock: Flock,
+  ) => void;
+  /** Restarts the live workspace settings read, keeping the current replica. */
+  refreshWorkspace: () => void;
   watch: (mode: string) => void;
   startPresence: () => void;
   stopPresence: () => void;

@@ -732,6 +732,15 @@ function traceCode(value: unknown) {
     .replace(/[^a-z0-9_]/g, '_')
     .slice(0, 48);
 }
+/**
+ * Sends that never move the dispatch pointer (a guide, an edit and resend)
+ * still count as sending a message: the runtime clears Later / Settled then.
+ * Dispatches report through `markDispatch` instead.
+ */
+let sendObserver: (sessionId: string) => void = () => {};
+export function setSessionSendObserver(observer: typeof sendObserver) {
+  sendObserver = observer;
+}
 let traceSink: (event: SessionTrace) => void = () => {};
 export function setSessionTraceSink(sink: typeof traceSink) {
   traceSink = sink;
@@ -1879,6 +1888,7 @@ export async function sendTurn(
         });
         writeStarted = true;
         await waitForAcceptedInputSave(owner, state.id, id);
+        if (guide) sendObserver(state.id);
         return guide
           ? { id, state: 'uploaded', awaitingGuide: true }
           : { id, state: 'uploaded' };
@@ -1954,6 +1964,8 @@ export async function sendTurn(
           throw error;
         } finally {
           clearTimeout(timer);
+          // Release the combined signal's hold on the session signal.
+          waitEnded.abort();
         }
       }
       return await writeQueue();
@@ -1986,6 +1998,7 @@ export async function sendTurn(
     if (!result.ok) throw new Error(result.result.code);
     uploaded = true;
     if (guide) {
+      sendObserver(state.id);
       // History is durable; receipt tracking belongs to this message, not the
       // session-wide write lock. A later guide can be persisted while RPC waits.
       void steerTurn(state, args.machineId, {
@@ -2537,6 +2550,7 @@ export async function editSession(
     if (result?.success === true) {
       if (args.backgroundTaskId)
         state.backgroundWork = { id: args.backgroundTaskId, turnId: args.id };
+      sendObserver(state.id);
       return { state: 'accepted', id: args.id };
     }
     if (result?.success === false)

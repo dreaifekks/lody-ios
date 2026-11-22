@@ -7,6 +7,10 @@ import test from 'node:test';
 import { build } from 'esbuild';
 import { Flock } from '@loro-dev/flock-wasm/base64';
 import { runtimeCalls } from '../../../../packages/cloud-runtime/src/contract/methods.ts';
+import v8 from 'node:v8';
+import vm from 'node:vm';
+
+v8.setFlagsFromString('--expose-gc');
 
 test('persistent runtime applies live increments to the existing replica and advances the cursor', async () => {
   const previousBroadcastChannel = globalThis.BroadcastChannel;
@@ -1140,6 +1144,21 @@ test('the AbortSignal.any fallback follows the standard', async () => {
   assert.equal(combined.reason, reason);
   assert.equal(abortSignalAny([]).aborted, false);
 
+  // As the standard's dependent signals: a long-lived input (a session or
+  // watcher signal) holds a combined signal weakly, so request signals combined
+  // with it do not accumulate.
+  const gc = vm.runInNewContext('gc');
+  const longLived = new AbortController();
+  const weak = (() => new WeakRef(abortSignalAny([longLived.signal])))();
+  await new Promise((resolve) => setImmediate(resolve));
+  gc();
+  assert.equal(weak.deref(), undefined);
+  const held = abortSignalAny([longLived.signal]);
+  await new Promise((resolve) => setImmediate(resolve));
+  gc();
+  longLived.abort('stop');
+  assert.equal(held.reason, 'stop', 'a held combined signal still aborts');
+
   // A platform that has it keeps its own.
   const native = function any() {};
   const target = { any: native };
@@ -1190,4 +1209,55 @@ test('the URL.canParse fallback follows the standard and serves Effect URL schem
     'https://example.invalid/a',
   );
   assert.throws(() => decode('not a url'));
+});
+
+test('share uploads release their hold on the caller signal once every task settles', async (t) => {
+  const { abortSignalAny } =
+    await import('../../../../packages/cloud-runtime/src/runtime/abort-signal-any.ts');
+  const { mapShareConcurrent } =
+    await import('../../../../packages/cloud-runtime/src/runtime/sharing/session-share-concurrency.ts');
+  // The WebKit 16.4 path: the fallback, whose listeners are observable.
+  const nativeAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+  t.after(() => Object.defineProperty(AbortSignal, 'any', nativeAny));
+  Object.defineProperty(AbortSignal, 'any', {
+    value: abortSignalAny,
+    configurable: true,
+    writable: true,
+  });
+  const editor = new AbortController();
+  const attached = new Set();
+  const add = editor.signal.addEventListener.bind(editor.signal);
+  const remove = editor.signal.removeEventListener.bind(editor.signal);
+  editor.signal.addEventListener = (type, listener, options) => {
+    attached.add(listener);
+    add(type, listener, options);
+  };
+  editor.signal.removeEventListener = (type, listener, options) => {
+    attached.delete(listener);
+    remove(type, listener, options);
+  };
+  const seen = [];
+  const results = await mapShareConcurrent(
+    [1, 2, 3],
+    async (item, _index, signal) => {
+      seen.push(signal.aborted);
+      return item * 2;
+    },
+    editor.signal,
+  );
+  assert.deepEqual(results, [2, 4, 6]);
+  assert.deepEqual(seen, [false, false, false]);
+  assert.equal(attached.size, 0);
+  await assert.rejects(
+    mapShareConcurrent(
+      [1],
+      async () => {
+        throw new Error('upload_failed');
+      },
+      editor.signal,
+    ),
+    /upload_failed/,
+  );
+  assert.equal(attached.size, 0);
+  assert.equal(editor.signal.aborted, false);
 });

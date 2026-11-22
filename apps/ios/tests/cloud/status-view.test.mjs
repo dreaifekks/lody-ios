@@ -9,6 +9,7 @@ import {
   catalogStatusView,
   pinSectionRows,
   planCommand,
+  conversationOf,
   sessionPermissions,
   snoozePresets,
   statusViewState,
@@ -143,9 +144,10 @@ test('pin sections keep valid rows only, in key then id order', () => {
   );
 });
 
-test('management needs a readable or owned machine; preferences admit the author', () => {
+test('management needs an owned machine, or a readable one outside a local project; preferences admit the author', () => {
   const meta = { machineOwners: { mine: 'u1', theirs: 'u2' } };
   const readable = new Map([
+    ['mine', { projects: [] }],
     ['theirs', { projects: [{ id: 'theirs:local:p1' }] }],
   ]);
   const check = (session) => sessionPermissions(session, meta, readable, 'u1');
@@ -154,14 +156,48 @@ test('management needs a readable or owned machine; preferences admit the author
     { canManage: true, canPrefer: true },
   );
   assert.deepEqual(
-    check({ machineId: 'theirs', projectId: 'theirs:local:p1', userId: 'u2' }),
+    check({ machineId: 'theirs', projectId: 'github:a/b', userId: 'u2' }),
     { canManage: true, canPrefer: true },
   );
-  // A local project the machine does not list for this user is not manageable.
+  // A teammate's local project, even one their machine stream lists, may be
+  // private: whether it is shared is server state the runtime cannot read.
   assert.deepEqual(
-    check({ machineId: 'theirs', projectId: 'theirs:local:p9', userId: 'u1' }),
+    check({ machineId: 'theirs', projectId: 'theirs:local:p1', userId: 'u2' }),
+    { canManage: false, canPrefer: false },
+  );
+  assert.deepEqual(
+    check({ machineId: 'theirs', projectId: 'theirs:local:p1', userId: 'u1' }),
     { canManage: false, canPrefer: true },
   );
+  // A Project group with a local member is a local-project conversation too.
+  const group = {
+    machineId: 'theirs',
+    projectId: 'group:g1',
+    userId: 'u2',
+    projectRun: {
+      id: 'g1',
+      name: 'G',
+      members: [
+        { id: 'a', path: 'a', kind: 'github', depth: 0, submodule: false },
+        { id: 'b', path: 'b', kind: 'local', depth: 0, submodule: false },
+      ],
+    },
+  };
+  assert.deepEqual(check(group), { canManage: false, canPrefer: false });
+  assert.deepEqual(
+    check({
+      ...group,
+      projectRun: {
+        ...group.projectRun,
+        members: [group.projectRun.members[0]],
+      },
+    }),
+    { canManage: true, canPrefer: true },
+  );
+  assert.deepEqual(check({ ...group, machineId: 'mine' }), {
+    canManage: true,
+    canPrefer: true,
+  });
   assert.deepEqual(
     check({ machineId: 'unknown', projectId: 'github:a/b', userId: 'u2' }),
     { canManage: false, canPrefer: false },
@@ -170,7 +206,7 @@ test('management needs a readable or owned machine; preferences admit the author
     sessionPermissions(
       { machineId: 'mine', projectId: 'mine:unassigned', userId: '' },
       meta,
-      readable,
+      new Map(),
       '',
     ),
     { canManage: false, canPrefer: false },
@@ -236,7 +272,7 @@ const sources = (sessions, extra = {}) => ({
 });
 const ids = (rows) => rows.map((row) => row.id);
 
-test('Tabs fold into their conversation and lend it their running and waiting state', () => {
+test('Tabs fold into their conversation and lend it their activity, running and waiting state', () => {
   const state = statusViewState(
     sources([
       session('owner', { settledAt: NOW - 1000 }),
@@ -275,43 +311,81 @@ test('Tabs fold into their conversation and lend it their running and waiting st
     'another machine does not count',
   );
   assert.equal(byId.asks.isWaitingPermission, true);
+  // As desktop's getEffectiveLatestMessageAt: every non-archived Tab or side
+  // chat, on any machine, keeps its conversation's activity fresh; unread stays
+  // the conversation's own.
+  assert.equal(byId.quiet.activityAt, NOW - 60_000);
+  assert.equal(byId.quiet.lastMessageAt, NOW - 8 * 86_400_000);
+  assert.equal(byId['other-machine-owner'].activityAt, NOW - 60_000);
   const layout = buildStatusViewLayout(state);
-  // Waiting ignores its snooze; an explicit settle holds until a newer message,
-  // and quiet rows settle after seven days.
-  assert.deepEqual(ids(layout.focus).sort(), ['asks']);
-  assert.deepEqual(ids(layout.settled).sort(), [
+  // Waiting ignores its snooze; an explicit settle holds until a newer message;
+  // a conversation quiet for seven days stays in Focus while a Tab is active.
+  assert.deepEqual(ids(layout.focus).sort(), [
+    'asks',
     'other-machine-owner',
-    'owner',
     'quiet',
   ]);
+  assert.deepEqual(ids(layout.settled), ['owner']);
 });
 
-test('rows nest under their opener, through a Tab, and My tasks keeps whole families', () => {
+test('rows nest under their opener, through a Tab; My tasks lists only own conversations and counts hidden pinned rows', () => {
   const view = catalogStatusView(
-    sources([
-      session('root', { userId: 'u2' }),
-      session('tab', { parentSessionId: 'root', userId: 'u2' }),
-      session('child', { openedBySessionId: 'tab', userId: 'u1' }),
-      session('theirs', { userId: 'u2' }),
-      session('theirs-pinned', {
-        userId: 'u2',
-        pinned: true,
-        pinSectionId: 's1',
-      }),
-      session('gone', { archived: true, userId: 'u1' }),
-    ]),
+    sources(
+      [
+        session('root', { userId: 'u2' }),
+        session('tab', { parentSessionId: 'root', userId: 'u2' }),
+        session('child', { openedBySessionId: 'tab', userId: 'u1' }),
+        session('theirs', { userId: 'u2' }),
+        session('theirs-pinned', {
+          userId: 'u2',
+          pinned: true,
+          pinSectionId: 's1',
+        }),
+        // Carried into the Pinned area by its pinned opener.
+        session('carried', {
+          userId: 'u2',
+          openedBySessionId: 'theirs-pinned',
+        }),
+        session('gone', { archived: true, userId: 'u1' }),
+      ],
+      { sections: [{ id: 's1', name: 'One', orderKey: '80' }] },
+    ),
   );
   assert.deepEqual(ids(view.team.focus).sort(), ['root', 'theirs']);
   const root = view.team.focus.find((row) => row.id === 'root');
   assert.deepEqual(ids(root.children), ['child']);
-  assert.deepEqual(ids(view.mine.focus), ['root']);
-  assert.deepEqual(ids(view.mine.focus[0].children), ['child']);
-  // The scope hid one pinned row; its section is unknown, so the default counts it.
+  // As desktop's isSessionInMyScope: the user's own conversation, alone; its
+  // teammate opener is not listed, so it renders top-level.
+  assert.deepEqual(ids(view.mine.focus), ['child']);
+  assert.deepEqual(view.mine.focus[0].children, []);
+  // The scope hid the pinned row and the row it carries, under its section.
   assert.deepEqual(
     view.mine.pinned.map((s) => [s.sectionId, s.hiddenCount]),
-    [[null, 1]],
+    [
+      [null, 0],
+      ['s1', 2],
+    ],
+  );
+  assert.deepEqual(
+    view.team.pinned.map((s) => [s.sectionId, s.hiddenCount]),
+    [
+      [null, 0],
+      ['s1', 0],
+    ],
   );
   assert.equal(CatalogStatusView.parse(view).sectionsLoaded, true);
+});
+
+test('section management waits for the section rows', () => {
+  const loading = catalogStatusView(
+    sources([session('s1')], { sectionsLoaded: false }),
+  );
+  assert.equal(loading.team.canManageSections, false);
+  assert.equal(loading.mine.canManageSections, false);
+  assert.equal(
+    catalogStatusView(sources([session('s1')])).team.canManageSections,
+    true,
+  );
 });
 
 test('read-only members get no status, pin or section actions', () => {
@@ -360,6 +434,45 @@ test('send clears Later and Settled; new conversations take the top of Focus', (
     () => 0,
   );
   assert.ok(order.patch.orderKey < '80', order.patch.orderKey);
+});
+
+test('a send in a Tab or side chat clears Later and Settled on its conversation', () => {
+  const sessions = [
+    session('root', { snoozedUntil: NOW + 3_600_000, settledAt: NOW - 5000 }),
+    session('tab', { parentSessionId: 'root' }),
+    session('side', {
+      parentSessionId: 'tab',
+      childSessionPlacement: 'side-panel',
+    }),
+  ];
+  assert.equal(conversationOf(sessions, 'side'), 'root');
+  assert.equal(conversationOf(sessions, 'tab'), 'root');
+  assert.equal(conversationOf(sessions, 'root'), 'root');
+  assert.equal(conversationOf(sessions, 'unknown'), 'unknown');
+  const cyclic = [
+    session('a', { parentSessionId: 'b' }),
+    session('b', { parentSessionId: 'a' }),
+  ];
+  assert.ok(['a', 'b'].includes(conversationOf(cyclic, 'a')));
+  // The Tab itself is not a Status row: planning for it writes nothing.
+  assert.deepEqual(
+    planCommand(sources(sessions), { type: 'touchOnSend', sessionId: 'tab' }),
+    [],
+  );
+  assert.deepEqual(
+    planCommand(sources(sessions), {
+      type: 'touchOnSend',
+      sessionId: conversationOf(sessions, 'side'),
+    }),
+    [
+      {
+        type: 'session',
+        sessionId: 'root',
+        access: 'manage',
+        patch: { snoozedUntil: null, settledAt: null },
+      },
+    ],
+  );
 });
 
 test('snooze presets resolve against the given clock', () => {

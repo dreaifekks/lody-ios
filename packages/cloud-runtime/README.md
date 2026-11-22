@@ -233,33 +233,48 @@ sections and the Focus / Later / Settled rows in the given order and never sort
 or classify them. Layout and rows arrive in one catalog event and restore with
 the catalog cache.
 
-`src/runtime/status-view.ts` builds the planner input the way the native lists
-group today: Tabs and side chats never list and lend their running / waiting
-state to their conversation (side chats and other machines excluded); rows nest
-under `openedBySessionId`, then `openedByRootSessionId`, resolved through Tabs;
-My tasks keeps whole families that contain the user's conversations and counts
-the pinned rows it hid. Working and waiting come from durable status
-(`status`, `awaitingUserSince`), not live presence. `canManage` ports the web
-`isSessionEditableToUser`: the machine's `ownerUserId` is the user, or its
-machine stream was readable (and, for a local project, lists that project).
-`canPrefer` also admits the session's author. Read grants on another member's
-machine are not discoverable here and are refused. `start({ workspaceReadOnly })`
-removes every status, pin and section action.
+`src/runtime/status-view.ts` builds the planner input as the desktop sidebar
+does. Tabs and side chats never list. A conversation's activity is the latest
+`lastMessageAt` (or creation time) of itself and its non-archived Tabs and side
+chats, on any machine, while its unread state stays its own. Same-machine Tabs,
+but not side chats, lend it their running / waiting state. Rows nest under
+`openedBySessionId`, then `openedByRootSessionId`, resolved through Tabs. My
+tasks lists each conversation the user owns (`session.userId`, desktop
+`isSessionInMyScope`), not whole families, and counts every Pinned-area row it
+hid (pinned roots and the rows they carry) under the pinned root's section.
+Working and waiting come from durable status (`status`, `awaitingUserSince`),
+not live presence. `canManage` ports the web `isSessionEditableToUser` with what
+the runtime knows: the machine's `ownerUserId` is the user, or its machine stream
+was readable and the conversation is not a local-project one (a Project group
+with a local member included). Whether a teammate's local project is shared is
+server access state the runtime cannot read, and a machine Flock lists private
+projects too, so those rows offer no status actions on native even when desktop
+does. `canPrefer` also admits the session's author. Read grants on another
+member's machine are not discoverable here and are refused.
+`start({ workspaceReadOnly })` removes every status, pin and section action, and
+section management waits until the section rows are known.
 
 The workspace Flock is read live beside `:meta` and `:mf:<id>`; its failures are
-diagnostics, never `syncError`, and keep the last sections. Time is the server
-clock: the `/api/time` round-trip midpoint (Lody `time-sync.ts`), recalibrated
-on start and foreground, the device clock until a sample succeeds. The runtime
-republishes at the layouts' `nextChangeAt` while the host is active and on
-every foreground.
+diagnostics, never `syncError`, and keep the last sections. A workspace without
+that stream has no sections; the first section write creates the stream, as Agent
+Role saves do, and the read restarts at once. Time is the server clock: the
+`/api/time` round-trip midpoint (Lody `time-sync.ts`), recalibrated on start and
+foreground, the device clock until a sample succeeds. The runtime republishes at
+the layouts' `nextChangeAt` while the host is active, on every foreground, and
+whenever a calibration changes the offset, since hosts learn it from `nowMs`.
 
 `statusViewCommand({ workspaceId, command, scope? })` plans against the current
 replicas (`scope` names the list a `move` happened in, default `team`) and
 writes session fields to the meta Flock and sections to the workspace Flock,
-one append each; it returns `{ writes }`, 0 when the planner refused.
-`snoozePresets()` resolves the four presets on the server clock. Sending a turn
-clears Later / Settled in the dispatch append (`touchOnSend`), and a new
-top-level conversation gets the top Focus `orderKey` (`newSessionOrder`).
+one append each; it returns `{ writes }`, 0 when the planner refused. A write
+commits to the live replica before its append, so a failed append (this or a
+dispatch pointer) discards that replica and bootstraps it again: the unsent
+commit is neither shown nor replayed. `snoozePresets()` resolves the four presets
+on the server clock. Every send clears Later / Settled on the conversation it
+belongs to (a Tab or side chat resolves to its conversation, `touchOnSend`): a
+dispatch in its pointer append, Loro or Roost, and a guide or an accepted edit
+and resend in an append of its own. A new top-level conversation gets the top
+Focus `orderKey` (`newSessionOrder`).
 `contract/fixtures/catalog-status-view.json` is a decoded catalog with both.
 
 ## Catalog recovery

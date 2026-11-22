@@ -1,13 +1,13 @@
 {
   "repository": "https://github.com/LodyAI/Lody",
   "branch": "main",
-  "commit": "6f27d1ba544252cdb7ae14f3bca3d8e2a1d99a75",
+  "commit": "7895c4102d22ed9fd28b43451ae79a65e4781b8b",
   "license": "AGPL-3.0-only (fractional index: MIT, see its header)",
   "files": [
     {
       "path": "pinned-sections.ts",
       "upstream": "packages/shared/src/pinned-sections.ts",
-      "sha256": "7f27f8f3349e7629d39e32609f3d1b41938009c78f8b32bb0e1987662da242da",
+      "sha256": "bb16421317f3f79ede294ce4f378b5cbd836a12ff328636f48411010bf4d898f",
       "adapt": [
         [
           "from './vendor/loro-fractional-index';",
@@ -59,7 +59,7 @@
     {
       "path": "status-view/layout.ts",
       "upstream": "packages/shared/src/status-view/layout.ts",
-      "sha256": "fc3c9343e11fedef8d3c736f1742ff65b1891840f118df651fc19a7e23bd32cc",
+      "sha256": "c9a4692b2961a83ffe5afb037b6da089c47494f3b00f496f295ff72477d586ff",
       "adapt": [
         [
           "from '../pinned-sections';",
@@ -78,7 +78,7 @@
     {
       "path": "status-view/command.ts",
       "upstream": "packages/shared/src/status-view/command.ts",
-      "sha256": "fe57f2d052bd70a0ca6a02c363266f375d5eb521af42b5c28b9aefe52370667d",
+      "sha256": "75aecaa1c735994fb3e5a5919066ad1c834606aa0dd213cf9d7011e4640caeea",
       "adapt": [
         [
           "from '../pinned-sections';",
@@ -101,13 +101,13 @@
     {
       "path": "status-view/vectors/layout.json",
       "upstream": "packages/shared/src/status-view/vectors/layout.json",
-      "sha256": "3cff970373a17625fb741510914699873d98c237dcc60d0d2fd782b0c2bcec7f",
+      "sha256": "579dd1c05f2c7f9e6f7123e0f32b10ccc2c9fd42a294cdf528b25365212be449",
       "adapt": []
     },
     {
       "path": "status-view/vectors/commands.json",
       "upstream": "packages/shared/src/status-view/vectors/commands.json",
-      "sha256": "e2d2c2f6470bef8fc6717124d1ebe0167ee97d218a03925e9ae488b3e45c78e3",
+      "sha256": "9da18d567e9d3d5ade8c265d9e74acba0a2e5af6bc4cd802bcf17d8a86aacc3f",
       "adapt": []
     }
   ]
