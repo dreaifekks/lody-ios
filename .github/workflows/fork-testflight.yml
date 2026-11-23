@@ -27,4 +27,9 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       notes: ${{ inputs.notes }}
+      # The fork owner's Mac mini, a self-hosted runner (mirroring Lody's
+      # lan-build.yml): hosted xcode-27 runners kept failing to acquire
+      # capacity. This workflow runs only on pushed tf-* tags or manual
+      # dispatch, never on pull requests.
+      runs_on: '["self-hosted","macOS","ARM64","lody-mini"]'
     secrets: inherit

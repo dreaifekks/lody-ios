@@ -7,6 +7,10 @@ on:
         required: false
         type: string
         default: ''
+      runs_on:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       notes:
@@ -33,7 +37,7 @@ env:
 jobs:
   submit:
     name: Archive and upload
-    runs-on: xcode-27
+    runs-on: ${{ inputs.runs_on != '' && fromJSON(inputs.runs_on) || 'xcode-27' }}
     timeout-minutes: 120
     outputs:
       build_number: ${{ steps.build.outputs.build_number }}
@@ -148,10 +152,22 @@ jobs:
           : "${DIST_CERT_PASSWORD:?IOS_DIST_CERT_PASSWORD is required}"
           keychain_path="$RUNNER_TEMP/ci.keychain-db"
           keychain_password="$(uuidgen)"
+          saved_keychains=()
+          while IFS= read -r kc; do
+            kc="$(printf '%s' "$kc" | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')"
+            if [ -n "$kc" ] && [ -f "$kc" ] && [ "$kc" != "$keychain_path" ]; then
+              saved_keychains+=("$kc")
+            fi
+          done <<< "$(security list-keychains -d user || true)"
+          if [ "${#saved_keychains[@]}" -eq 0 ]; then
+            saved_keychains=("login.keychain-db")
+          fi
+          printf '%s\n' "${saved_keychains[@]}" > "$RUNNER_TEMP/saved-keychains.txt"
+          rm -f "$keychain_path"
           security create-keychain -p "$keychain_password" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$keychain_password" "$keychain_path"
-          security list-keychains -d user -s "$keychain_path" login.keychain-db
+          security list-keychains -d user -s "$keychain_path" "${saved_keychains[@]}"
           printf '%s' "$DIST_CERT_P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
           security import "$RUNNER_TEMP/dist.p12" \
             -k "$keychain_path" \
@@ -202,12 +218,28 @@ jobs:
         working-directory: ${{ env.IOS_DIR }}
         run: |
           set -o pipefail
+          lock_dir="/tmp/lody-ios-mac-heavy.lock"
+          acquired_lock=0
+          cleanup_lock() {
+            if [ "$acquired_lock" -eq 1 ]; then
+              rmdir "$lock_dir" 2>/dev/null || true
+            fi
+          }
+          trap cleanup_lock EXIT
+          if [ "${RUNNER_ENVIRONMENT:-}" = "self-hosted" ]; then
+            while ! mkdir "$lock_dir" 2>/dev/null; do
+              echo "Waiting for $lock_dir..."
+              sleep 5
+            done
+            acquired_lock=1
+          fi
           command -v xcbeautify >/dev/null || brew install xcbeautify
           xcodebuild \
             -project Lody.xcodeproj \
             -scheme Lody \
             -configuration Release \
             -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             -archivePath "$RUNNER_TEMP/Lody.xcarchive" \
             archive \
@@ -302,9 +334,20 @@ jobs:
       - name: Clean up signing assets
         if: always()
         run: |
+          if [ -f "$RUNNER_TEMP/saved-keychains.txt" ]; then
+            restored_keychains=()
+            while IFS= read -r kc; do
+              [ -n "$kc" ] && [ -f "$kc" ] && restored_keychains+=("$kc")
+            done < "$RUNNER_TEMP/saved-keychains.txt"
+            if [ "${#restored_keychains[@]}" -gt 0 ]; then
+              security list-keychains -d user -s "${restored_keychains[@]}" || true
+            fi
+            rm -f "$RUNNER_TEMP/saved-keychains.txt"
+          fi
           security delete-keychain "$RUNNER_TEMP/ci.keychain-db" || true
           rm -f "$RUNNER_TEMP/dist.p12" "$RUNNER_TEMP"/AuthKey_*.p8
           rm -f "$RUNNER_TEMP"/*.mobileprovision
+          rm -rf "$RUNNER_TEMP/DerivedData" "$RUNNER_TEMP/Lody.xcarchive" "$RUNNER_TEMP/export" "$RUNNER_TEMP/ipa-verification"
           if [ -n "${IOS_PROFILE_MAP:-}" ]; then
             jq -r '.[]' <<< "$IOS_PROFILE_MAP" | while IFS= read -r uuid; do
               rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
