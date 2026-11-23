@@ -25,6 +25,15 @@ for section in ('focus', 'later', 'settled'):
     ui.element(f'label:{section}')
 assert not any(item.get('AXUniqueId') in {'later-a', 'later-child', 'settled-a'} for item in ui.state())
 ui.capture('collapsed')
+# An empty pin section's label (with its menu) and a collapsed tier's label (without) are spaced alike.
+pitch = lambda a, b: ui.element(b)['frame']['y'] - ui.element(a)['frame']['y']
+assert abs(pitch('label:pinned:review', 'label:focus') - pitch('label:later', 'label:settled')) < 1, 'Group labels are spaced differently'
+# The label menu keeps its 44 pt target beyond the compact label.
+menu = ui.element('label-menu:pinned:review')['frame']
+ui.axe('tap', '-x', str(menu['x'] + menu['width'] / 2), '-y', str(menu['y'] + 2))
+new_section = catalog.text('home.pins.newSection')
+ui.axe('tap', *center(ui.wait(lambda items: next((i for i in items if i.get('AXLabel') == new_section and i.get('type') == 'Button'), None), 'The label menu did not open')))
+ui.axe('tap', '--label', catalog.text('common.cancel'))
 ui.axe('tap', *center(ui.element('label:later')))
 child_return = ui.element('later-child')['AXValue']
 ui.axe('tap', *center(ui.element('label:later')))

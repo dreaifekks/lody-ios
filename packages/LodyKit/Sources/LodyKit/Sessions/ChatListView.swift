@@ -186,7 +186,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let cell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
       self?.configure(cell, item)
     }
-    let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+    let header = UICollectionView.SupplementaryRegistration<ChatSectionHeaderCell>(
       elementKind: UICollectionView.elementKindSectionHeader
     ) { [weak self] view, _, path in
       let id = self?.dataSource.sectionIdentifier(for: path.section)
@@ -195,13 +195,12 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       let count = id.flatMap { self?.titleCounts[$0] } ?? ""
       let menu = id.flatMap { self?.titleMenus[$0] } ?? []
       guard let folds = self?.groupFolds else { return }
+      let hasMenu = !title.isEmpty && folds.enabled && !menu.isEmpty
+      view.setMenu(hasMenu ? menu : [], groupId: id ?? "") { [weak self] action in
+        if let id { self?.forwarded?("sectionAction", ["id": id, "actionId": action]) }
+      }
       view.contentConfiguration = UIHostingConfiguration {
-        SectionTitle(
-          text: title, repository: repository, count: count, menu: menu, folds: folds, groupId: id ?? "",
-          onMenu: { [weak self] action in
-            if let id { self?.forwarded?("sectionAction", ["id": id, "actionId": action]) }
-          }
-        ) { [weak self] in
+        SectionTitle(text: title, repository: repository, count: count, hasMenu: hasMenu, folds: folds, groupId: id ?? "") { [weak self] in
           if let id { self?.toggleGroup(id) }
         }
       }
@@ -1316,11 +1315,10 @@ private struct SectionTitle: View {
   var repository = ""
   /// Shown beside the label while the group is collapsed.
   var count = ""
-  /// The label's ⋯ menu (pin section management).
-  var menu: [LodyListAction] = []
+  /// Reserves room for the header cell's ⋯ menu (pin section management).
+  var hasMenu = false
   @ObservedObject var folds: ChatGroupFolds
   let groupId: String
-  var onMenu: (String) -> Void = { _ in }
   let onToggle: () -> Void
 
   var body: some View {
@@ -1341,7 +1339,8 @@ private struct SectionTitle: View {
             .filter { !$0.isEmpty }.joined(separator: ", ")
         )
         .accessibilityIdentifier("label:" + groupId)
-        if !menu.isEmpty { sectionMenu }
+        // The header cell draws the menu over this space; its 44 pt target overhangs the label.
+        if hasMenu { Color.clear.frame(width: LodySize.touchTarget + LodySpacing.xs, height: 0) }
       }
     } else {
       label(chevron: nil)
@@ -1349,25 +1348,6 @@ private struct SectionTitle: View {
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("label:" + groupId)
     }
-  }
-
-  private var sectionMenu: some View {
-    Menu {
-      ForEach(menu, id: \.id) { action in
-        Button(role: action.destructive ? .destructive : nil) { onMenu(action.id) } label: {
-          Label(action.title, systemImage: action.symbol)
-        }
-      }
-    } label: {
-      Image(systemName: "ellipsis")
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(LodyColor.iconSecondary)
-        .frame(width: LodySize.touchTarget, height: LodySize.touchTarget)
-        .contentShape(Rectangle())
-    }
-    .accessibilityLabel(String(localized: "home.pins.menu", bundle: .lody))
-    .accessibilityIdentifier("label-menu:" + groupId)
-    .padding(.trailing, LodySpacing.xs)
   }
 
   /// `chevron` is the collapsed state when the group can fold: pointing down while open, right when collapsed.

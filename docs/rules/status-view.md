@@ -20,7 +20,7 @@ Read before changing the Home Pinned area, the Status grouping (Focus / Later / 
 
 - Later opens a bottom sheet with the presets and a custom date and time; past times are refused there and again before sending. A preset picked from the menu is resolved again first. Settle and Later confirm with an Undo notice that restores each changed conversation's own previous tier, the opened sub-conversations included one by one (`StatusViewPlanning.undo`). When the conversation has active opened sub-conversations, Settle, Later and Move to Focus first ask, as desktop, whether they follow; drags never ask.
 
-- Pin section labels carry a ⋯ menu: New Section… on every section; Rename, Move Up, Move Down and Delete on user sections (the default section stays first). Sections reorder only through Move Up / Move Down; deleting asks first and its conversations return to the default section.
+- Pin section labels carry a ⋯ menu (a UIKit button on the header cell whose 44 pt target overhangs the label, so labels with and without it keep the same height and spacing): New Section… on every section; Rename, Move Up, Move Down and Delete on user sections (the default section stays first). Sections reorder only through Move Up / Move Down; deleting asks first and its conversations return to the default section.
 
 - The conversation page's More menu carries the row's Later / Settle / Move to Focus, read from whichever scope's layout lists it; on a Tab it acts on the Tab's conversation. Seeing the page sends read receipts (`StatusViewRead`): the page's conversation up to its latest message, and its root conversation up to a woken snooze unless the root's own messages are still unread on a Tab page.
 
