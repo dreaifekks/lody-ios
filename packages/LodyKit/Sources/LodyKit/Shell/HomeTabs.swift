@@ -32,18 +32,17 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     didSet {
       guard canCreate != oldValue else { return }
       floatingCreate?.isEnabled = canCreate
-      if #available(iOS 18.4, *) { tab(forIdentifier: createTabIdentifier)?.isEnabled = canCreate }
+      if #available(iOS 27.0, *) { tab(forIdentifier: Self.createID)?.isEnabled = canCreate }
     }
   }
   private static let createID = "home-new-session"
-  private var createTabIdentifier = HomeTabsController.createID
-  /// Before iOS 26 the create action floats above the tab bar's trailing edge instead of taking a tab.
+  /// On systems without prominent tabs the create action floats above the tab bar's trailing edge instead of taking a tab.
   private lazy var floatingCreate: UIButton? = Self.makeFloatingCreate()
   private static let floatingSize: CGFloat = 56
   private static let floatingMargin: CGFloat = 16
 
   private static func makeFloatingCreate() -> UIButton? {
-    if #available(iOS 26.0, *) { return nil }
+    if #available(iOS 27.0, *) { return nil }
     var configuration = UIButton.Configuration.lodyProminent()
     configuration.image = LodyIcon.compose.uiImage?.withRenderingMode(.alwaysTemplate)
     configuration.cornerStyle = .capsule
@@ -108,7 +107,8 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     // Lists keep their last rows clear of the floating create action.
     if floatingCreate != nil {
       for (destination, controller) in navigations {
-        controller.additionalSafeAreaInsets.bottom = destination == .settings ? 0 : Self.floatingSize + Self.floatingMargin
+        if #unavailable(iOS 26.0), destination == .settings { continue }
+        controller.additionalSafeAreaInsets.bottom = Self.floatingSize + Self.floatingMargin
       }
     }
   }
@@ -121,28 +121,17 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
       tab.accessibilityIdentifier = tab.identifier
       return tab
     }
-    if #available(iOS 26.0, *), floatingCreate == nil {
-      let create: UITab
-      if #available(iOS 27.0, *) {
-        create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
-          identifier: Self.createID) { _ in UIViewController() }
-      } else {
-        let search = UISearchTab { _ in UIViewController() }
-        search.automaticallyActivatesSearch = true
-        search.title = String(localized: "tabs.newSession", bundle: .lody)
-        search.image = LodyIcon.compose.uiImage
-        create = search
-      }
+    if #available(iOS 27.0, *) {
+      let create = UITab(title: String(localized: "tabs.newSession", bundle: .lody), image: LodyIcon.compose.uiImage,
+        identifier: Self.createID) { _ in UIViewController() }
       create.accessibilityIdentifier = Self.createID
-      createTabIdentifier = create.identifier
       built.append(create)
     }
     tabs = built
-    // Apply disabled state only after assigning `tabs`: installing an iOS 26 UISearchTab
-    // with `isEnabled = false` leaves its minimized button stuck disabled when re-enabled.
-    if #available(iOS 18.4, *), !canCreate { tab(forIdentifier: createTabIdentifier)?.isEnabled = false }
-    // iOS 27 supports a separate prominent action without misrepresenting it as Search.
-    if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
+    if #available(iOS 27.0, *) {
+      tab(forIdentifier: Self.createID)?.isEnabled = canCreate
+      prominentTabIdentifier = Self.createID
+    }
   }
 
   func show(_ destination: HomeTab) {
@@ -158,14 +147,14 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   /// The create action keeps the compose glyph; on Schedules it adds a schedule, elsewhere it starts a chat.
   private func updateCreate(_ destination: HomeTab) {
     let title = String(localized: String.LocalizationValue(destination == .schedules ? "schedules.new" : "tabs.newSession"), bundle: .lody)
-    if #available(iOS 18.0, *) { tab(forIdentifier: createTabIdentifier)?.title = title }
+    if #available(iOS 27.0, *) { tab(forIdentifier: Self.createID)?.title = title }
     floatingCreate?.accessibilityLabel = title
-    floatingCreate?.isHidden = destination == .settings
+    if #unavailable(iOS 26.0) { floatingCreate?.isHidden = destination == .settings }
   }
 
   @available(iOS 18.0, *)
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-    if tab.identifier == createTabIdentifier { if canCreate { onCreate() }; return false }
+    if tab.identifier == Self.createID { if canCreate { onCreate() }; return false }
     return true
   }
 
@@ -176,7 +165,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   }
 
   // The create action never exists as a classic tab bar item (the floating
-  // button covers it below iOS 26), so every classic selection is a real tab.
+  // button covers it below iOS 27), so every classic selection is a real tab.
   func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
     guard let index = viewControllers?.firstIndex(of: viewController),
           index < HomeTab.allCases.count else { return }
