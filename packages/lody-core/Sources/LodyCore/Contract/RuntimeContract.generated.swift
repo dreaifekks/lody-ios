@@ -3043,6 +3043,11 @@ extension RuntimeContract {
     }
   }
 
+  public enum DiffScope: String, Codable, Sendable, Equatable, CaseIterable {
+    case branch = "branch"
+    case uncommitted = "uncommitted"
+  }
+
   public enum DiffSideKind: String, Codable, Sendable, Equatable, CaseIterable {
     case text = "text"
     case missing = "missing"
@@ -3570,19 +3575,23 @@ extension RuntimeContract {
   public struct FileDiffParams: Codable, Sendable, Equatable {
     public var sessionId: String
     public var path: String
-    public init(sessionId: String, path: String) {
+    public var scope: DiffScope?
+    public init(sessionId: String, path: String, scope: DiffScope? = nil) {
       self.sessionId = sessionId
       self.path = path
+      self.scope = scope
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
       self.path = try c.decode(String.self, forKey: Key("path"))
+      self.scope = try c.decodeIfPresent(DiffScope.self, forKey: Key("scope"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.sessionId, forKey: Key("sessionId"))
       try c.encode(self.path, forKey: Key("path"))
+      try c.encodeIfPresent(self.scope, forKey: Key("scope"))
     }
   }
 
@@ -9336,16 +9345,20 @@ extension RuntimeContract {
 
   public struct WorkspaceChangesParams: Codable, Sendable, Equatable {
     public var sessionId: String
-    public init(sessionId: String) {
+    public var scope: DiffScope?
+    public init(sessionId: String, scope: DiffScope? = nil) {
       self.sessionId = sessionId
+      self.scope = scope
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.scope = try c.decodeIfPresent(DiffScope.self, forKey: Key("scope"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encodeIfPresent(self.scope, forKey: Key("scope"))
     }
   }
 

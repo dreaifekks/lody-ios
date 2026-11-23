@@ -995,6 +995,77 @@ test('workspace changes use the session worktree and owner key, retaining deferr
   assert.equal(calls.length, 1);
 });
 
+test('uncommitted scope reaches the machine and keeps each file’s line changes', async () => {
+  const text = {
+    kind: 'text',
+    text: { encoding: 'plain', text: 'one\ntwo', rawBytes: 7 },
+  };
+  const calls = machine((method, params) => {
+    if (method === 'code-collab/open-all-changes-diff') {
+      assert.deepEqual(params, { sessionId: 's1', scope: 'uncommitted' });
+      return {
+        result: {
+          status: 'ok',
+          base: 'HEAD',
+          truncated: false,
+          entries: [
+            {
+              status: 'ok',
+              path: 'a.ts',
+              oldSnapshot: text,
+              newSnapshot: text,
+              add: 4,
+              del: 2,
+            },
+            { status: 'deferred', path: 'large.ts', add: 200, del: 10 },
+            { status: 'unavailable', path: 'gone.ts', reason: 'not_changed' },
+          ],
+        },
+      };
+    }
+    assert.equal(method, 'code-collab/open-current-diff');
+    assert.deepEqual(params, {
+      sessionId: 's1',
+      path: 'a.ts',
+      scope: 'uncommitted',
+    });
+    return {
+      result: {
+        status: 'ok',
+        path: 'a.ts',
+        oldSnapshot: text,
+        newSnapshot: text,
+        add: 4,
+        del: 2,
+      },
+    };
+  });
+  const changes = await runtime.workspaceChanges(ctx(), {
+    sessionId: 's1',
+    scope: 'uncommitted',
+  });
+  assert.equal(changes.status, 'ok');
+  assert.equal(changes.base, 'HEAD');
+  assert.deepEqual(
+    changes.files.map((file) => [file.path, file.add, file.del, file.kind]),
+    [
+      ['a.ts', 4, 2, 'modified'],
+      ['large.ts', 200, 10, undefined],
+    ],
+  );
+  const diff = await runtime.fileDiff(ctx(), {
+    sessionId: 's1',
+    path: 'a.ts',
+    scope: 'uncommitted',
+  });
+  assert.equal(diff.status, 'ok');
+  assert.equal(diff.add, 4);
+  assert.equal(diff.del, 2);
+  assert.deepEqual(diff.old, { kind: 'text', text: 'one\ntwo' });
+  assert.deepEqual(diff.new, { kind: 'text', text: 'one\ntwo' });
+  assert.equal(calls.length, 2);
+});
+
 test('workspace changes distinguish unavailable, rejected and successfully empty reads', async () => {
   machine(() => ({
     result: { status: 'unavailable', reason: 'transient_io' },
