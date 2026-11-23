@@ -71,7 +71,7 @@ final class ChatFileCardCell: UICollectionViewCell {
     let type = (file.mimeType ?? "").lowercased()
     let ext = (file.fileName as NSString).pathExtension.lowercased()
     if type.hasPrefix("image/") { return "photo" }
-    if type.hasPrefix("video/") { return "film" }
+    if type.hasPrefix("video/") || ["mp4", "mov", "m4v", "webm", "mkv", "avi", "ogv"].contains(ext) { return "film" }
     if type.hasPrefix("audio/") { return "waveform" }
     if type == "application/pdf" || ext == "pdf" { return "doc.richtext" }
     if type.contains("zip") || ["zip", "gz", "tgz", "tar", "7z"].contains(ext) { return "doc.zipper" }

@@ -308,6 +308,28 @@ private final class SessionPreviewFixture {
       object["entries"] = entries
       session = SessionController.json(object)
     }
+    if bar == "video", let data = session?.data(using: .utf8),
+       var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       var entries = object["entries"] as? [[String: Any]] {
+      entries[0]["items"] = [["itemId": "text", "type": "text", "text": "Play the recorded walkthrough video."]]
+      entries[1]["items"] = [
+        ["itemId": "reply", "type": "text", "text": "Here is the walkthrough clip."],
+        [
+          "itemId": "video",
+          "type": "file",
+          "file": [
+            "id": "video",
+            "fileName": "walkthrough.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 65_536,
+            "storageSessionId": "ui-verify-attachments",
+            "transport": "r2",
+          ],
+        ],
+      ]
+      object["entries"] = entries
+      session = SessionController.json(object)
+    }
     if bar.hasPrefix("cards-") {
       session = Self.cardsEnvelope(scenario: bar, revision: revision, outcomes: cardOutcomes)
     }

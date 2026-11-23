@@ -161,6 +161,10 @@ extension LodyChatView {
       ChatMarkdownAttachmentSheet.present(file: attachment, localURL: local, workspace: imageWorkspace, session: imageSession, from: controller)
       return
     }
+    if SessionVideoPreviewController.handles(attachment) {
+      SessionVideoPreviewController.present(file: attachment, localURL: local, workspace: imageWorkspace, session: imageSession, from: controller)
+      return
+    }
     if let url = local {
       controller.present(ChatAttachmentPreview([ChatAttachment(id: attachment.id, name: attachment.fileName, url: url, isImage: false)], index: 0), animated: true)
       return
