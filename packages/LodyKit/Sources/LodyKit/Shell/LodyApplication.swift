@@ -7,7 +7,7 @@ import UIKit
 public final class LodyApplication {
   public static let shared = LodyApplication()
   private let accent = LodyAccentLifecycle()
-  private let activities = ConversationActivities()
+  private var activities: ConversationActivities { ConversationActivities.shared }
   private let push = PushLifecycle()
 
   public func launch(_ application: UIApplication, options: [UIApplication.LaunchOptionsKey: Any]?) {
@@ -16,7 +16,10 @@ public final class LodyApplication {
   }
   public func active() { accent.applicationDidBecomeActive(.shared); push.applicationDidBecomeActive(.shared); shares.wake() }
   public func pushToken(_ data: Data) { PushNotifications.shared.deviceToken(data) }
-  public func pushRegistrationFailed() { DiagnosticsStore.shared.record("notification", "apns_registration_failed") }
+  public func pushRegistrationFailed() {
+    DiagnosticsStore.shared.record("notification", "apns_registration_failed")
+    PushNotifications.shared.registrationFailed()
+  }
   public func background() { push.applicationDidEnterBackground(.shared) }
   public func geometryChanged(in scene: UIWindowScene) { HomeController.current?.geometryChanged(in: scene) }
 

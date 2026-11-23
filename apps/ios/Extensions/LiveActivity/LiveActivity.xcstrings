@@ -17,6 +17,22 @@
         }
       }
     },
+    "liveActivity.stale": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outdated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态已过期"
+          }
+        }
+      }
+    },
     "liveActivity.status.failed": {
       "localizations": {
         "en": {

@@ -79,15 +79,6 @@ targets:
           - Info.plist
           - Lody.entitlements
           - '**/*.md'
-      - path: ../../packages/LodyKit/Sources/LodyKit
-        group: Shared Extension Sources
-        createIntermediateGroups: false
-        includes:
-          - Notifications/LodyConversationLiveActivityAttributes.swift
-          - Auth/AuthKeychain.swift
-          - Auth/LanInvite.swift
-          - Auth/LanHub.swift
-          - Cloud/BackendEnvironment.swift
       - Extensions/LiveActivity/LodyLiveActivityPermissionResponseIntent.swift
       - Extensions/LiveActivity/LiveActivity.xcstrings
       - Extensions/LiveActivity/LodyLiveActivityLocalization.swift
@@ -171,6 +162,7 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: 'YES'
         SKIP_INSTALL: 'YES'
         SWIFT_VERSION: '5.0'
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) LODY_LIVE_ACTIVITY_EXTENSION'
         TARGETED_DEVICE_FAMILY: '1,2'
     dependencies:
       - package: OneSignal

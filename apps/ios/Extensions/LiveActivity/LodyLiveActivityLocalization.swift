@@ -1,4 +1,7 @@
 import Foundation
+#if !LODY_LIVE_ACTIVITY_EXTENSION
+import LodyKit
+#endif
 
 private final class LodyLiveActivityLocalizationBundleToken {}
 

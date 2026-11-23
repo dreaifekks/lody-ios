@@ -95,6 +95,8 @@ struct SessionItem: Equatable, Sendable {
   var projectRun: SessionProjectRun?
   /// A local creation the catalog has not read back yet (Outbox); the runtime layout cannot list it.
   var pending = false
+  /// Last heartbeat timestamp (epoch ms) recorded while the session was actively running.
+  var lastRunningSeen: Double? = nil
 
   var activityAt: Double { lastMessageAt ?? SessionItem.parse(createdAt) }
 
@@ -125,7 +127,7 @@ extension SessionItem {
 extension SessionItem: Decodable {
   private enum CodingKeys: String, CodingKey {
     case id, title, status, isTabClosed, archived, pinned, projectId, createdAt, openedBySessionId, openedByRootSessionId
-    case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
+    case childSessionPlacement, parentSessionId, lastMessageAt, lastReadAt, lastRunningSeen, awaitingUserSince, branchName, baseBranch, lastModel, diff, machineId
     case lastHandledUserMsgId, lastFailedUserMsgId
     case cliType, agentType, resume, pullRequests, iosSimulatorPreviewRequestId, androidEmulatorPreviewRequestId, userId, agentConfigId
     case workspaceDirty, workspaceUnpushed, projectRun
@@ -162,6 +164,7 @@ extension SessionItem: Decodable {
     childSessionPlacement = present(value(.childSessionPlacement))
     lastMessageAt = value(.lastMessageAt)
     lastReadAt = value(.lastReadAt)
+    lastRunningSeen = value(.lastRunningSeen)
     awaitingUserSince = value(.awaitingUserSince)
     lastHandledUserMsgId = present(value(.lastHandledUserMsgId))
     lastFailedUserMsgId = present(value(.lastFailedUserMsgId))

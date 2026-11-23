@@ -3,6 +3,7 @@ import Security
 
 public enum AuthKeychain: Sendable {
   public static let lanHub = "lan-hub"
+  public static let lanPushDeviceToken = "lan-push-device-token"
   public static let cloudSession = "better-auth-session"
 
   private static func query(_ account: String) -> [String: Any] { [

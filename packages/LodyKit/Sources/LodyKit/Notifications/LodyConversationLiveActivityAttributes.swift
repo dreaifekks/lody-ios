@@ -167,6 +167,40 @@ public struct LodyConversationLiveActivityAttributes: OneSignalLiveActivityAttri
 
     public var isLAN: Bool { workspaceId.hasPrefix("lw_") }
 
+    /// Deep-link route opened when the user taps the Dynamic Island or Lock Screen card.
+    public func routeURL(for state: ContentState, preferredSessionId: String? = nil) -> URL {
+        let fallback = URL(string: "lody:///activity")!
+        let targetId = preferredSessionId ?? state.items.first?.id
+        guard let targetId,
+              let session = Self.encodedPathSegment(targetId) else {
+            return fallback
+        }
+        let rawSlug = workspaceSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedSlug: String
+        if !rawSlug.isEmpty {
+            resolvedSlug = rawSlug
+        } else if isLAN {
+            resolvedSlug = "lan"
+        } else {
+            resolvedSlug = workspaceId
+        }
+        guard let workspace = Self.encodedPathSegment(resolvedSlug),
+              let url = URL(string: "lody://\(workspace)/sessions/\(session)") else {
+            return fallback
+        }
+        return url
+    }
+
+    private static let routeSegmentAllowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+
+    private static func encodedPathSegment(_ raw: String) -> String? {
+        guard !raw.isEmpty, raw != ".", raw != "..",
+              !raw.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 || $0 == "/" || $0 == "\\" }) else {
+            return nil
+        }
+        return raw.addingPercentEncoding(withAllowedCharacters: routeSegmentAllowed)
+    }
+
     public init(
         activityId: String,
         workspaceId: String,

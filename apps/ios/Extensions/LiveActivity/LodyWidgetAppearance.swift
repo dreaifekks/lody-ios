@@ -57,6 +57,8 @@ struct LodyAgentLogo: View {
                     .foregroundStyle(.white)
             case "minimax":
                 AgentAssetImage(name: "AgentMinimax")
+            case "antigravity-acp", "antigravity":
+                AgentAssetImage(name: "AgentAntigravity")
             default:
                 Text(text)
                     .font(.system(size: 10, weight: .black, design: .rounded))
@@ -92,6 +94,8 @@ private func agentLogoBackground(_ kind: String) -> Color {
         return Color(red: 1.0, green: 0.42, blue: 0.0)
     case "minimax":
         return Color(red: 0.20, green: 0.22, blue: 0.88)
+    case "antigravity-acp", "antigravity":
+        return Color(red: 0.19, green: 0.36, blue: 0.78)
     default:
         return Color.white.opacity(0.12)
     }

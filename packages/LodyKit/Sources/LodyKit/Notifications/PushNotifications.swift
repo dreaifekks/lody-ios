@@ -114,12 +114,18 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
       PushPermissionLaunchRequest.perform {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { accepted, _ in
           Task { @MainActor in
-            if accepted, self.lanMode { UIApplication.shared.registerForRemoteNotifications() }
+            guard self.lanMode else { return }
+            if accepted { UIApplication.shared.registerForRemoteNotifications() }
+            LanPush.shared.sync()
           }
         }
       }
     }
-    return LanPush.shared.start()
+    let started = LanPush.shared.start()
+    if started {
+      ConversationActivities.shared.reconcileLanTokens()
+    }
+    return started
   }
 
   func stopLan() {
@@ -130,6 +136,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     visibleRoute = ""
     lanMode = false
     LanPush.shared.stop()
+    ConversationActivities.shared.reconcileLanTokens()
     UNUserNotificationCenter.current().delegate = self
     permissionCatalog = nil
     clearDelivered()
@@ -239,6 +246,12 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
     refresh()
   }
 
+  func registrationFailed() {
+    if lanMode {
+      LanPush.shared.didFailToRegister()
+    }
+  }
+
   func status(_ completion: @escaping @MainActor ([String: any Sendable]) -> Void) {
     Task { @MainActor in
       let settings = await UNUserNotificationCenter.current().notificationSettings()
@@ -271,6 +284,7 @@ final class PushNotifications: NSObject, OSNotificationClickListener, OSNotifica
       guard epoch == self.identityEpoch, self.lanMode == wasLAN, self.userId == requestedUser else { completion(false); return }
       if self.lanMode {
         if accepted { UIApplication.shared.registerForRemoteNotifications() }
+        LanPush.shared.sync()
       } else {
         self.refresh()
       }
@@ -418,8 +432,10 @@ final class PushLifecycle {
 
   func applicationDidBecomeActive(_ application: UIApplication) {
     DiagnosticsStore.shared.record("app", "foreground", fields: ["appState": String(application.applicationState.rawValue)])
+    LanPush.shared.endBackgroundWake()
     if PushNotifications.shared.lanMode {
       _ = LanPush.shared.start()
+      ConversationActivities.shared.recoverLanTokens()
       LanPush.shared.sync()
     }
     PushNotifications.shared.status { _ in }

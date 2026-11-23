@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 import catalog
-from driver import UI
+from driver import BUNDLE_ID, UI
 ui = UI(sys.argv[1], sys.argv[2])
 
 def text(value):
@@ -59,6 +59,6 @@ ui.axe('touch', '-x', str(screen['width'] / 2), '-y', '33', '--down', '--up', '-
 text('Review the release notes')
 ui.screenshot('live-activity-expanded')
 ui.axe('button', 'home')
-subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, 'ai.lody.mobile'], check=True, timeout=30)
+subprocess.run(['xcrun', 'simctl', 'launch', ui.udid, BUNDLE_ID], check=True, timeout=30)
 touch(ui.element('activity-demo'))
 text('Sample activity ended')

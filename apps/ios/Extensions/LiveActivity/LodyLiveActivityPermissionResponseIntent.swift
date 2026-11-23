@@ -1,6 +1,9 @@
 @preconcurrency import ActivityKit
 import AppIntents
 import Foundation
+#if !LODY_LIVE_ACTIVITY_EXTENSION
+import LodyKit
+#endif
 
 @available(iOS 17.0, iOSApplicationExtension 17.0, *)
 struct LodyLiveActivityPermissionResponseIntent: LiveActivityIntent {
@@ -178,10 +181,12 @@ struct LodyLiveActivityPermissionResponseIntent: LiveActivityIntent {
             ) else {
                 continue
             }
+            let staleInterval: TimeInterval = activity.attributes.isLAN ? 30 * 60 : 5 * 60
+            let nextStale = max(activity.content.staleDate ?? .distantPast, Date(timeIntervalSinceNow: staleInterval))
             await activity.update(
                 ActivityContent(
                     state: nextState,
-                    staleDate: Date(timeIntervalSinceNow: 5 * 60),
+                    staleDate: nextStale,
                     relevanceScore: 100
                 )
             )
@@ -190,7 +195,7 @@ struct LodyLiveActivityPermissionResponseIntent: LiveActivityIntent {
 
     private func matchingActivities() -> [Activity<LodyConversationLiveActivityAttributes>] {
         return Activity<LodyConversationLiveActivityAttributes>.activities.filter {
-            $0.attributes.activityId == activityId
+            $0.attributes.activityId == activityId && ($0.activityState == .active || $0.activityState == .stale)
         }
     }
 
@@ -240,10 +245,12 @@ struct LodyLiveActivityPermissionFeedbackIntent: LiveActivityIntent {
             ) else {
                 continue
             }
+            let staleInterval: TimeInterval = activity.attributes.isLAN ? 30 * 60 : 5 * 60
+            let nextStale = max(activity.content.staleDate ?? .distantPast, Date(timeIntervalSinceNow: staleInterval))
             await activity.update(
                 ActivityContent(
                     state: nextState,
-                    staleDate: Date(timeIntervalSinceNow: 5 * 60),
+                    staleDate: nextStale,
                     relevanceScore: 100
                 )
             )
@@ -253,7 +260,7 @@ struct LodyLiveActivityPermissionFeedbackIntent: LiveActivityIntent {
 
     private func matchingActivities() -> [Activity<LodyConversationLiveActivityAttributes>] {
         return Activity<LodyConversationLiveActivityAttributes>.activities.filter {
-            $0.attributes.activityId == activityId
+            $0.attributes.activityId == activityId && ($0.activityState == .active || $0.activityState == .stale)
         }
     }
 }

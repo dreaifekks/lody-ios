@@ -18,41 +18,63 @@ struct LodyLiveActivityWidget: Widget {
                 .activityBackgroundTint(LodyWidgetAppearance.background)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
-            let permissionItem = context.state.items.first { $0.status == .permission }
+            let isStale = context.isStale
+            let leadStatus = context.state.items.first?.status ?? .unread
+            let permissionItem = isStale ? nil : context.state.items.first { $0.status == .permission }
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     LodyActivityBrand(compact: true)
                         .padding(.leading, 10)
                 }
-                DynamicIslandExpandedRegion(.bottom) {
-                    if let permissionItem {
-                        LodyPermissionIslandCard(
-                            item: permissionItem,
-                            activityId: context.attributes.activityId,
-                            workspaceId: context.attributes.workspaceId
-                        )
-                        .padding(.horizontal, 14)
-                        .padding(.top, 2)
-                    } else {
-                        LodyConversationRows(items: Array(context.state.items.prefix(3)))
-                            .padding(.horizontal, 14)
-                            .padding(.top, 4)
+                DynamicIslandExpandedRegion(.trailing) {
+                    if isStale {
+                        LodyStaleBadge()
+                            .padding(.trailing, 10)
                     }
                 }
+                DynamicIslandExpandedRegion(.bottom) {
+                    Group {
+                        if let permissionItem {
+                            LodyPermissionIslandCard(
+                                item: permissionItem,
+                                activityId: context.attributes.activityId,
+                                workspaceId: context.attributes.workspaceId
+                            )
+                            .padding(.horizontal, 14)
+                            .padding(.top, 2)
+                        } else {
+                            LodyConversationRows(
+                                items: Array(context.state.items.prefix(3)),
+                                isStale: isStale
+                            )
+                            .padding(.horizontal, 14)
+                            .padding(.top, 4)
+                        }
+                    }
+                    .opacity(isStale ? 0.72 : 1.0)
+                }
             } compactLeading: {
-                LodyCompactIslandMark(status: context.state.items.first?.status ?? .unread)
+                LodyCompactIslandMark(status: leadStatus, isStale: isStale)
             } compactTrailing: {
-                Text("\(context.state.totalCount)")
-                    .font(.caption.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
+                if isStale {
+                    Image(systemName: "wifi.slash")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                } else {
+                    Text("\(context.state.totalCount)")
+                        .font(.caption.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                }
             } minimal: {
                 LodyMinimalIslandMark(
-                    status: context.state.items.first?.status ?? .unread,
-                    totalCount: context.state.totalCount
+                    status: leadStatus,
+                    totalCount: context.state.totalCount,
+                    isStale: isStale
                 )
             }
-            .keylineTint(statusColor(context.state.items.first?.status ?? .unread))
+            .keylineTint(isStale ? Color.white.opacity(0.35) : statusColor(leadStatus))
+            .widgetURL(context.attributes.routeURL(for: context.state, preferredSessionId: permissionItem?.id))
         }
         .addLodySupplementalActivityFamilies()
     }
@@ -117,7 +139,13 @@ private struct LodyLanCompactActivityView: View {
         VStack(alignment: .leading, spacing: 5) {
             if let focus {
                 HStack(spacing: 5) {
-                    LodyStatusDot(status: focus.status, size: 6)
+                    if context.isStale {
+                        Image(systemName: "wifi.slash")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.65))
+                    } else {
+                        LodyStatusDot(status: focus.status, size: 6)
+                    }
                     Text(focus.title)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .lineLimit(1)
@@ -129,7 +157,12 @@ private struct LodyLanCompactActivityView: View {
                             .lineLimit(1)
                     }
                 }
-                if focus.status == .permission, focus.permissionRequestId != nil {
+                if context.isStale {
+                    Text(lodyLiveActivityLocalized("liveActivity.stale"))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                } else if focus.status == .permission, focus.permissionRequestId != nil {
                     if let command = focus.permissionCommand, !command.isEmpty {
                         Text(command)
                             .font(.system(size: 10, design: .monospaced))
@@ -171,25 +204,57 @@ private struct LodyLanCompactActivityView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .foregroundStyle(.white)
+        .opacity(context.isStale ? 0.75 : 1.0)
+        .widgetURL(context.attributes.routeURL(for: context.state))
     }
 }
 
 private struct LodyLockScreenActivityView: View {
     let context: ActivityViewContext<LodyConversationLiveActivityAttributes>
 
+    private var lanPermissionItem: LodyConversationLiveActivityAttributes.ConversationItem? {
+        guard context.attributes.isLAN, !context.isStale else { return nil }
+        return context.state.items.first { $0.status == .permission && $0.permissionRequestId != nil }
+    }
+
+    private func listedItems(excluding permissionItem: LodyConversationLiveActivityAttributes.ConversationItem?) -> [LodyConversationLiveActivityAttributes.ConversationItem] {
+        if let permissionItem {
+            return Array(context.state.items.filter { $0.id != permissionItem.id }.prefix(3))
+        }
+        return Array(context.state.items.prefix(4))
+    }
+
     var body: some View {
+        let permissionItem = lanPermissionItem
+        let rows = listedItems(excluding: permissionItem)
+        let shownCount = rows.count + (permissionItem == nil ? 0 : 1)
+
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center, spacing: 8) {
                 LodyActivityBrand(compact: false)
+                Spacer(minLength: 6)
+                if context.isStale {
+                    LodyStaleBadge()
+                }
             }
 
-            LodyConversationRows(items: Array(context.state.items.prefix(4)))
+            if let permissionItem {
+                LodyPermissionIslandCard(
+                    item: permissionItem,
+                    activityId: context.attributes.activityId,
+                    workspaceId: context.attributes.workspaceId
+                )
+            }
 
-            if context.state.totalCount > context.state.items.prefix(4).count {
+            if !rows.isEmpty {
+                LodyConversationRows(items: rows, isStale: context.isStale)
+            }
+
+            if context.state.totalCount > shownCount {
                 Text(
                     String(
                         format: lodyLiveActivityLocalized("liveActivity.more"),
-                        context.state.totalCount - context.state.items.prefix(4).count
+                        context.state.totalCount - shownCount
                     )
                 )
                     .font(.caption2.weight(.medium))
@@ -198,6 +263,8 @@ private struct LodyLockScreenActivityView: View {
         }
         .padding(16)
         .foregroundStyle(.white)
+        .opacity(context.isStale ? 0.72 : 1.0)
+        .widgetURL(context.attributes.routeURL(for: context.state, preferredSessionId: permissionItem?.id))
     }
 }
 
@@ -268,6 +335,7 @@ private struct LodyWatchSmallActivityView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .foregroundStyle(.white)
+        .widgetURL(context.attributes.routeURL(for: context.state))
     }
 }
 
@@ -649,16 +717,33 @@ private struct LodyActivityBrand: View {
     }
 }
 
+private struct LodyStaleBadge: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 10, weight: .semibold))
+            Text(lodyLiveActivityLocalized("liveActivity.stale"))
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white.opacity(0.68))
+    }
+}
+
 private struct LodyCompactIslandMark: View {
     let status: LodyConversationActivityStatus
+    var isStale: Bool = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             LodyLogoMark(size: 17)
+                .opacity(isStale ? 0.65 : 1.0)
 
-            LodyStatusDot(status: status, size: 5)
-                .background(Circle().fill(.black))
-                .offset(x: -1, y: -1)
+            if !isStale {
+                LodyStatusDot(status: status, size: 5)
+                    .background(Circle().fill(.black))
+                    .offset(x: -1, y: -1)
+            }
         }
         .frame(width: 22, height: 20)
     }
@@ -667,37 +752,46 @@ private struct LodyCompactIslandMark: View {
 private struct LodyMinimalIslandMark: View {
     let status: LodyConversationActivityStatus
     let totalCount: Int
+    var isStale: Bool = false
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            LodyLogoMark(size: 16)
-                .padding(2)
-                .background(Circle().fill(.white.opacity(0.10)))
-                .overlay(Circle().stroke(statusColor(status), lineWidth: 1.2))
+        if isStale {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.65))
                 .frame(width: 22, height: 22)
+        } else {
+            ZStack(alignment: .bottomTrailing) {
+                LodyLogoMark(size: 16)
+                    .padding(2)
+                    .background(Circle().fill(.white.opacity(0.10)))
+                    .overlay(Circle().stroke(statusColor(status), lineWidth: 1.2))
+                    .frame(width: 22, height: 22)
 
-            Text(minimalCountLabel(totalCount))
-                .font(.system(size: 6.5, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.black)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .padding(.horizontal, 2)
-                .frame(minWidth: 10, minHeight: 9)
-                .background(Capsule().fill(statusColor(status)))
-                .offset(x: -1, y: -1)
+                Text(minimalCountLabel(totalCount))
+                    .font(.system(size: 6.5, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .padding(.horizontal, 2)
+                    .frame(minWidth: 10, minHeight: 9)
+                    .background(Capsule().fill(statusColor(status)))
+                    .offset(x: -1, y: -1)
+            }
+            .frame(width: 28, height: 28)
         }
-        .frame(width: 28, height: 28)
     }
 }
 
 private struct LodyConversationRows: View {
     let items: [LodyConversationLiveActivityAttributes.ConversationItem]
+    var isStale: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             ForEach(items, id: \.id) { item in
-                LodyConversationRow(item: item)
+                LodyConversationRow(item: item, isStale: isStale)
             }
         }
     }
@@ -705,12 +799,27 @@ private struct LodyConversationRows: View {
 
 private struct LodyConversationRow: View {
     let item: LodyConversationLiveActivityAttributes.ConversationItem
+    var isStale: Bool = false
 
-    private var runningDetail: String? {
-        guard item.status == .running else { return nil }
-        if let activity = item.activity?.trimmingCharacters(in: .whitespacesAndNewlines), !activity.isEmpty { return activity }
-        if let thought = item.thought?.trimmingCharacters(in: .whitespacesAndNewlines), !thought.isEmpty { return thought }
-        return nil
+    private var secondaryDetail: String? {
+        let machine = item.machineName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let runningText: String?
+        if item.status == .running {
+            if let activity = item.activity?.trimmingCharacters(in: .whitespacesAndNewlines), !activity.isEmpty {
+                runningText = activity
+            } else if let thought = item.thought?.trimmingCharacters(in: .whitespacesAndNewlines), !thought.isEmpty {
+                runningText = thought
+            } else {
+                runningText = nil
+            }
+        } else {
+            runningText = nil
+        }
+        let parts = [machine, runningText].compactMap { value -> String? in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     var body: some View {
@@ -733,20 +842,58 @@ private struct LodyConversationRow: View {
 
                 Spacer(minLength: 6)
 
-                Text(item.updatedAtLabel)
-                    .font(.caption2.monospacedDigit().weight(.medium))
-                    .foregroundStyle(.white.opacity(0.56))
-                    .frame(minWidth: 58, alignment: .trailing)
-                    .lineLimit(1)
-                    .layoutPriority(2)
+                LodyConversationTrailingTime(item: item, isStale: isStale)
             }
-            if let detail = runningDetail {
+            if let detail = secondaryDetail {
                 Text(detail)
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.64))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .padding(.leading, 69)
+            }
+        }
+    }
+}
+
+private struct LodyConversationTrailingTime: View {
+    let item: LodyConversationLiveActivityAttributes.ConversationItem
+    let isStale: Bool
+
+    private var isActiveStatus: Bool {
+        item.status == .running || item.status == .permission || item.status == .question
+    }
+
+    var body: some View {
+        if !item.updatedAtLabel.isEmpty {
+            Text(item.updatedAtLabel)
+                .font(.caption2.monospacedDigit().weight(.medium))
+                .foregroundStyle(.white.opacity(0.56))
+                .frame(minWidth: 58, alignment: .trailing)
+                .lineLimit(1)
+                .layoutPriority(2)
+        } else if let startedAt = item.startedAt, startedAt > 0 {
+            let startDate = Date(timeIntervalSince1970: startedAt / 1000)
+            if let completedAt = item.completedAt, completedAt >= startedAt {
+                let endDate = Date(timeIntervalSince1970: completedAt / 1000)
+                Text(timerInterval: startDate...max(endDate, startDate), pauseTime: endDate, countsDown: false)
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .foregroundStyle(.white.opacity(0.56))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 48, alignment: .trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(2)
+            } else if !isStale, isActiveStatus {
+                // Bound the timer text width so an open-ended interval never pushes the title off screen.
+                Text(timerInterval: startDate...Date.distantFuture, countsDown: false)
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .foregroundStyle(.white.opacity(0.56))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 48, alignment: .trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(2)
             }
         }
     }
