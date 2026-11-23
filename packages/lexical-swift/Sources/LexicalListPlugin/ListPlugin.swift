@@ -43,7 +43,7 @@ open class ListPlugin: Plugin {
         })
 
       try editor.registerCustomDrawing(customAttribute: .listItem, layer: .text, granularity: .contiguousParagraphs) {
-        attributeKey, attributeValue, textStorage, characterRange, expandedCharRange, glyphRange, rect, firstLineFragment in
+        [weak editor] attributeKey, attributeValue, textStorage, characterRange, expandedCharRange, glyphRange, rect, firstLineFragment in
 
         guard let attributeValue = attributeValue as? ListItemAttribute, let textStorage = textStorage as? TextStorage else {
           return
@@ -58,7 +58,21 @@ open class ListPlugin: Plugin {
 
         let isFirstLine = (glyphRange.location == 0)
 
-        var attributes = textStorage.attributes(at: characterRange.location, effectiveRange: nil)
+        var attributes: [NSAttributedString.Key: Any]
+        if characterRange.location < textStorage.length {
+          attributes = textStorage.attributes(at: characterRange.location, effectiveRange: nil)
+        } else if let theme = editor?.getTheme() {
+          attributes = (theme.root ?? [:]).merging(theme.listItem ?? [:]) { _, rhs in rhs }
+        } else {
+          attributes = [:]
+        }
+
+        if attributes[.font] == nil {
+          attributes[.font] = editor?.getTheme().root?[.font] ?? UIFont.preferredFont(forTextStyle: .body)
+        }
+        if attributes[.foregroundColor] == nil {
+          attributes[.foregroundColor] = editor?.getTheme().root?[.foregroundColor] ?? UIColor.label
+        }
 
         var spacingBefore = 0.0
         if let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle, let mutableParagraphStyle = paragraphStyle.mutableCopy() as? NSMutableParagraphStyle {
@@ -71,6 +85,7 @@ open class ListPlugin: Plugin {
         }
         attributes.removeValue(forKey: .underlineStyle)
         attributes.removeValue(forKey: .strikethroughStyle)
+        attributes.removeValue(forKey: .backgroundColor)
         let bulletDrawRect = firstLineFragment.inset(by: UIEdgeInsets(top: spacingBefore, left: attributeValue.characterIndentationPixels, bottom: 0, right: 0))
 
         attributeValue.listItemCharacter.draw(in: bulletDrawRect, withAttributes: attributes)

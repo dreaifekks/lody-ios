@@ -218,6 +218,7 @@ final class ChatComposerInput: TextView {
 
   static func makeEditorView() -> LexicalView {
     let theme = Theme()
+    theme.indentSize = 22.0
     theme.root = [.font: UIFont.dynamic(of: 17), .foregroundColor: UIColor.label]
     theme.code = [
       .paddingHead: 8.0, .paddingTail: -8.0,
