@@ -1365,6 +1365,20 @@ for _ in 0..<5 { chipInput.deleteBackward() }
 precondition(chipInput.text == "", "Deleting into a chip must remove the whole token")
 print("Rich composer: reference chips insert, send, restore and delete as one token")
 
+for (trigger, token, label) in [("@", "@role:review", "审核员"), ("$", "$find-skills", "$find-skills")] {
+  let (_, input) = makeRichComposer()
+  let prefix = "😀 米 "
+  let suffix = "后文"
+  typeInto(input, prefix)
+  input.textStorage.replaceCharacters(in: input.selectedRange, with: trigger + suffix)
+  let range = NSRange(location: (prefix as NSString).length, length: 1)
+  input.insertReference(token, label: label, replacing: range)
+  precondition(input.text == prefix + label + " " + suffix, "The chip must replace only its trigger: \(input.text!)")
+  typeInto(input, "你")
+  precondition(input.text == prefix + label + " 你" + suffix, "Typing must continue after the chip")
+  precondition(input.markdown == prefix + token + " 你" + suffix)
+}
+
 let (retryComposer, retryInput) = makeRichComposer()
 var retrySent: [String] = []
 retryComposer.onSend = { retrySent.append($0["text"] as! String) }

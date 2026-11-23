@@ -404,10 +404,10 @@ final class ChatComposerInput: TextView {
   /// as chips), then a space. Returns the inserted chips' node keys.
   @discardableResult
   func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) -> [NodeKey] {
-    selectedRange = range
     var keys: [NodeKey] = []
     try? editor.update {
       guard let selection = try getSelection() as? RangeSelection else { return }
+      try selection.applyNativeSelection(NativeSelection(range: range, affinity: .forward))
       let nodes = try makeNodes(segments) + [createTextNode(text: " ")]
       _ = try selection.insertNodes(nodes: nodes, selectStart: false)
       keys = nodes.compactMap { ($0 as? ChatReferenceNode)?.key }
