@@ -47,6 +47,23 @@ let quoteBlocks = ChatUserMentions.decorate(NSAttributedString(string: quoted),
 precondition(quoteBlocks.string == "Intro\n\nfirst passage\nfirst comment\n\nsecond passage\n\nthird passage\nlast comment",
   "A comment sits directly under its quote; separate blocks keep the blank line between them")
 print("Message quotes: comments attach to their quote, blocks stay separated passed")
+func quoteViewerLayout(_ snapshot: String) -> (block: CGRect, text: CGRect, sheet: CGRect) {
+  let viewer = ChatQuoteViewerController(snapshot: snapshot)
+  viewer.view.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+  viewer.view.layoutIfNeeded()
+  func find(_ view: UIView) -> UITextView? {
+    if let text = view as? UITextView, text.accessibilityIdentifier == "quote-snapshot" { return text }
+    return view.subviews.lazy.compactMap(find).first
+  }
+  let text = find(viewer.view)!
+  return (text.superview!.convert(text.superview!.bounds, to: viewer.view), text.convert(text.bounds, to: viewer.view), viewer.view.bounds)
+}
+let shortQuote = quoteViewerLayout("A short quoted passage")
+precondition(shortQuote.block.height == shortQuote.text.height && shortQuote.block.height < 100,
+  "The viewer's quote bar spans only the quoted text, not the sheet")
+let longQuote = quoteViewerLayout(Array(repeating: "A long quoted line", count: 200).joined(separator: "\n"))
+precondition(longQuote.block.height > longQuote.sheet.height, "A long quote keeps its full height and scrolls inside the viewer")
+print("Quote viewer: the bar fits the quoted text and long quotes scroll passed")
 
 struct LodyListRow {
   var parent = false
