@@ -359,7 +359,13 @@ enum ChatContextViewProbe {
           let color = text.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? UIColor
           checks[key + "-bodySize"] = font != nil && font?.pointSize == bodyFont?.pointSize
           checks[key + "-monospaced"] = font?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) == true
-          checks[key + "-color"] = color == (token == "linkedcode" ? .systemBlue : .secondaryLabel)
+          let expectedColor: UIColor
+          if token == "linkedcode" {
+            expectedColor = store.theme(secondary: secondary).colors.highlight
+          } else {
+            expectedColor = secondary ? .secondaryLabel : .lodyInlineCode
+          }
+          checks[key + "-color"] = color == expectedColor
         }
       }
     }

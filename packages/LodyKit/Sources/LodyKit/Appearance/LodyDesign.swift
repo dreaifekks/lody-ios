@@ -58,6 +58,7 @@ enum LodyDesign {
 extension UIColor {
   static let lodyGround = UIColor.lodyBackground
   static let lodyInk = LodyDesign.dynamic(light: 0x18181B, dark: 0xF2F2F4, lightHigh: 0x000000, darkHigh: 0xFFFFFF)
+  static let lodyInlineCode = LodyDesign.dynamic(light: 0x3F3F46, dark: 0xD8D8DF, lightHigh: 0x000000, darkHigh: 0xFFFFFF)
   static let lodySecondary = LodyDesign.dynamic(light: 0x6E6E76, dark: 0x9C9CA5, lightHigh: 0x4E4E55, darkHigh: 0xBDBDC5)
   static let lodyTertiary = LodyDesign.dynamic(light: 0xA1A1A8, dark: 0x6A6A73, lightHigh: 0x66666D, darkHigh: 0xA4A4AC)
   static let lodyLine = LodyDesign.wash(light: 0.06, dark: 0.08)

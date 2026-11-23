@@ -1,3 +1,4 @@
+import LodyDesignSystem
 import MarkdownView
 import UIKit
 
@@ -24,7 +25,7 @@ enum ChatMarkdownTheme {
       return UIColor(red: 0.0952, green: 0.4216, blue: 0.5848, alpha: 1)
     }
     theme.colors.emphasis = .lodyAccent
-    theme.colors.codeBackground = .lodyInset
+    theme.colors.codeBackground = LodyUIColor.codeInlineBg
     theme.colors.codeBlockBackground = .lodyInset
     theme.colors.codeBlockBarBackground = .clear
     theme.colors.selectionBackground = nil
