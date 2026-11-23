@@ -30,6 +30,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   var onDebug: () -> Void = {}
   var canCreate = false {
     didSet {
+      guard canCreate != oldValue else { return }
       floatingCreate?.isEnabled = canCreate
       if #available(iOS 18.4, *) { tab(forIdentifier: createTabIdentifier)?.isEnabled = canCreate }
     }
@@ -133,11 +134,13 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
         create = search
       }
       create.accessibilityIdentifier = Self.createID
-      create.isEnabled = canCreate
       createTabIdentifier = create.identifier
       built.append(create)
     }
     tabs = built
+    // Apply disabled state only after assigning `tabs`: installing an iOS 26 UISearchTab
+    // with `isEnabled = false` leaves its minimized button stuck disabled when re-enabled.
+    if #available(iOS 18.4, *), !canCreate { tab(forIdentifier: createTabIdentifier)?.isEnabled = false }
     // iOS 27 supports a separate prominent action without misrepresenting it as Search.
     if #available(iOS 27.0, *) { prominentTabIdentifier = Self.createID }
   }
