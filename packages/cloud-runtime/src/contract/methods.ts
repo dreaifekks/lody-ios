@@ -132,6 +132,8 @@ import {
   RespondPermissionParams,
   DecideProposalParams,
   DecideProposalResult,
+  InspectProposalParams,
+  InspectProposalResult,
   RespondPermissionResult,
   SendTurnParams,
   SendTurnResult,
@@ -408,6 +410,11 @@ export const runtimeCalls = {
     params: DecideProposalParams,
     result: DecideProposalResult,
     timeoutMs: 75_000,
+  },
+  inspectProposal: {
+    params: InspectProposalParams,
+    result: InspectProposalResult,
+    timeoutMs: 45_000,
   },
   probeSchema: {
     params: ProbeSchemaParams,

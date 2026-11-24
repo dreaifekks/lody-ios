@@ -501,7 +501,7 @@ extension LodyChatView {
       return ChatMessageAttachmentsCell.height(count: row.attachments.count, width: width,
         expanded: expandedAttachments.contains(row.entryID), author: !row.author.isEmpty)
     }
-    if row.kind == "chat_failed" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
+    if row.kind == "chat_failed" || row.kind == "agent_warning" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "proposal" { return ChatProposalCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "file", row.file != nil { return ChatFileCardCell.height(traits: traitCollection) }
     if row.kind == "tasksHeader" { return row.detail.isEmpty ? ChatFileCell.headerHeight : 56 }

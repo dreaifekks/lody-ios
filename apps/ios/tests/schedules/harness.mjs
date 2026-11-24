@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
  * appended parts). Loro is shared with the caller so documents can be read
  * back without crossing WASM instances.
  */
-export async function loadSchedules() {
+export async function loadSchedules({ proposals = false } = {}) {
   const require = createRequire(import.meta.url);
   const bundle = await build({
     stdin: {
@@ -16,7 +16,8 @@ export async function loadSchedules() {
         export * from './src/runtime/schedules.ts';
         export { draftInput, ruleOf, scheduleMachine, triggerOf } from './src/runtime/handlers/schedules.ts';
         export * from './src/protocol/schedules.ts';
-        export { proposalRule } from './src/protocol/proposals.ts';
+        export * from './src/protocol/proposals.ts';
+        ${proposals ? "export { registerProposals, scheduleEditProposalActivityId } from './src/runtime/handlers/proposals.ts';" : ''}
       `,
       resolveDir: new URL(
         '../../../../packages/cloud-runtime/',
@@ -32,6 +33,12 @@ export async function loadSchedules() {
       {
         name: 'stream',
         setup(b) {
+          // The open conversation's notices, from `globalThis.__notices` (key `entry/item`).
+          b.onResolve({ filter: /^\.\.\/session$/ }, (args) =>
+            args.importer.endsWith('handlers/proposals.ts')
+              ? { path: 'session', namespace: 'test' }
+              : undefined,
+          );
           b.onResolve({ filter: /^loro-crdt(\/base64)?$/ }, () => ({
             path: pathToFileURL(require.resolve('loro-crdt/base64')).href,
             external: true,
@@ -40,7 +47,25 @@ export async function loadSchedules() {
             path: 'mock',
             namespace: 'test',
           }));
-          b.onLoad({ filter: /.*/, namespace: 'test' }, () => ({
+          b.onLoad({ filter: /^session$/, namespace: 'test' }, () => ({
+            contents: `
+              const key = (args) => args.entryId + '/' + args.itemId;
+              export async function noticeAt(args) {
+                return globalThis.__notices.get(key(args));
+              }
+              export async function writeNoticeMeta(args) {
+                const notice = globalThis.__notices.get(key(args));
+                if (!notice || notice.name !== args.name) throw new Error('proposal_unavailable');
+                if (globalThis.__failNoticeWrite) {
+                  globalThis.__failNoticeWrite = false;
+                  throw new Error('upload_failed');
+                }
+                notice.meta = { ...notice.meta, ...args.patch };
+              }
+              export async function readyHistory() { return []; }
+            `,
+          }));
+          b.onLoad({ filter: /^mock$/, namespace: 'test' }, () => ({
             contents: `export class StreamsClient {
               constructor({ url }) {
                 this.id = decodeURIComponent(url.split('/ds/lody/')[1]);

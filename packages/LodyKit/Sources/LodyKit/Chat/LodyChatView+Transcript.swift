@@ -1,3 +1,4 @@
+import LodyCore
 import UIKit
 
 extension LodyChatView {
@@ -13,6 +14,23 @@ extension LodyChatView {
     let key = entryId + "/" + itemId
     guard proposalStates[key] != state else { return }
     proposalStates[key] = state
+    applyRows()
+  }
+
+  /// An edit proposal's live schedule; `nil` forgets it so the next projection reads it again.
+  func setProposalInspection(entryId: String, itemId: String, _ value: RuntimeContract.InspectProposalResult?) {
+    let key = entryId + "/" + itemId
+    if value == nil { proposalInspectRequested.remove(key) }
+    guard proposalInspections[key] != value else { return }
+    proposalInspections[key] = value
+    applyRows()
+  }
+
+  /// Native has no schedule subscription: edit proposals read their schedule again whenever the
+  /// conversation returns to the screen. The last answer stays shown until the new one lands.
+  func rereadProposals() {
+    guard !proposalInspectRequested.isEmpty else { return }
+    proposalInspectRequested.removeAll()
     applyRows()
   }
 
@@ -275,12 +293,18 @@ extension LodyChatView {
     }
     for index in projected.indices where projected[index].kind == "proposal" {
       let row = projected[index]
-      projected[index].proposalState = proposalStates[row.entryID + "/" + row.itemID]
+      let key = row.entryID + "/" + row.itemID
+      projected[index].proposalState = proposalStates[key]
+      projected[index].proposalInspection = proposalInspections[key]
+      if row.proposal?.isEdit == true, row.proposal?.decided == false, proposalInspectRequested.insert(key).inserted {
+        onProposalInspect(row)
+      }
       let requester = row.proposal?.requesterUserId
       projected[index].proposalDecidable = !proposalUserID.isEmpty
         && (row.proposal?.isRole != true || requester == proposalUserID)
     }
     for index in projected.indices where projected[index].kind == "chat_failed" {
+      projected[index].errorSignIn = agentSignInAvailable && projected[index].errorMeta?.reason == "acp_auth_required"
       if let state = errorRetryState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
         projected[index].errorRetry = state
       }

@@ -55,7 +55,7 @@ struct ChatStream {
       var start: ID?
       for item in entry.items {
         if item.hidesFromTranscript { continue }
-        if item.type == "system_notice" && (item.name == nil || item.name == "agent_warning") { continue }
+        if item.type == "system_notice" && item.name == nil { continue }
         if item.isProcess {
           if start == nil { start = ID(entry: entry.id, item: item.itemId) }
         } else if let id = start {

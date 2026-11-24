@@ -83,6 +83,17 @@ final class SessionDecision {
     }
   }
 
+  /// Web `supportsAuthenticationWhenRequired` and `machineSupportsAcpProtocolAuthentication`:
+  /// managed builtins sign in through Lody's own flow; ACP-authenticated agents need protocol 2.
+  static func canAuthenticate(_ session: SessionItem, capabilities: [String: Int]?) -> Bool {
+    guard let config = session.agentConfigId, !config.isEmpty else { return false }
+    let acp = session.cliType == "registry" || session.cliType == "custom"
+      || (session.cliType == "builtin" && ["devin", "sorbet"].contains(session.agentType))
+    let managed = session.cliType == "builtin" && ["antigravity", "kimi", "devin", "grok", "claude", "codex"].contains(session.agentType)
+    guard acp || managed else { return false }
+    return !acp || (capabilities?["acpProtocolAuthentication"] ?? 0) >= 2
+  }
+
   static let capacityContinuation =
     "Continue working from where you left off. The previous turn stopped because the selected model was at capacity."
   static let errorContinuation =

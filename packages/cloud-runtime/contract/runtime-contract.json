@@ -116,6 +116,11 @@
       "result": "HelloResult",
       "timeoutMs": 10000
     },
+    "inspectProposal": {
+      "params": "InspectProposalParams",
+      "result": "InspectProposalResult",
+      "timeoutMs": 45000
+    },
     "iosSimulatorControl": {
       "params": "IosSimulatorControlParams",
       "result": "IosSimulatorControlResult",
@@ -1680,7 +1685,7 @@
       "properties": {
         "outcome": {
           "type": "string",
-          "enum": ["saved", "created", "dismissed"]
+          "enum": ["saved", "created", "applied", "dismissed"]
         },
         "scheduleId": { "type": "string" }
       },
@@ -2070,6 +2075,38 @@
         "methods": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["protocol", "methods"]
+    },
+    "InspectProposalParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId", "entryId", "itemId"]
+    },
+    "InspectProposalResult": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "unavailable",
+            "stale",
+            "not_owner",
+            "machine_unsupported",
+            "target_unavailable"
+          ]
+        },
+        "isOwner": { "type": "boolean" },
+        "currentTitle": { "type": "string" },
+        "currentRule": { "$ref": "ScheduleRule" },
+        "timeZone": { "type": "string" },
+        "promptDiff": { "type": "array", "items": { "$ref": "PromptDiffLine" } }
+      },
+      "required": ["state", "isOwner", "timeZone"]
     },
     "IosSimulatorControlParams": {
       "type": "object",
@@ -2604,6 +2641,14 @@
         "groups": { "type": "array", "items": { "$ref": "ProjectGroupItem" } }
       },
       "required": ["groups"]
+    },
+    "PromptDiffLine": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["same", "add", "del", "gap"] },
+        "text": { "type": "string" }
+      },
+      "required": ["kind", "text"]
     },
     "PromptShortcut": {
       "type": "object",

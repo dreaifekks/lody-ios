@@ -139,8 +139,20 @@ Agent Role and schedule proposals (`lody_agent_role_create` / `_update`,
 `proposal` projection: the proposed fields (Before/After for an update, the rule in
 `ScheduleFormat` words), then Dismiss and Save / Create through `decideProposal`.
 Only the requesting member decides a Role proposal; a decided proposal is a receipt,
-and a created schedule opens Schedules. Failures stay on the card for an explicit
-retry. See the [decision](../../../.agents/notes/implemented/feature/2026-11-11-mobile-proposal-cards.md). Files the Agent shares (`lody_upload_files`) use `ChatFileCardCell` and open
+and Open on a created or updated schedule opens that schedule's editor (over the
+Schedules list, once the live list names it). A schedule edit proposal
+(`schedule_edit_proposal`) reads its live schedule through `inspectProposal` and shows
+current and proposed values with the prompt's line diff; Apply is enabled only while
+the schedule is the revision the Agent read and the viewer owns it, and Open sits
+beside it. An edit card reads its schedule again whenever the conversation returns to
+the screen (native has no schedule subscription). Failures stay on the card for an explicit
+retry. Web's other system rows render too: agent warnings use `ChatErrorCell` in
+neutral ink with Details, an `acp_auth_required` failure offers Sign in (the same
+machine flow as Settings › Agents, for the session's computer and Agent config, when
+web's `supportsAuthenticationWhenRequired` gate passes and the computer is online), a
+fork origin opens its source conversation, resumed
+history is a quiet line, and a worktree script opens its commands and output; unknown
+notices are hidden. See the [decision](../../../.agents/notes/implemented/feature/2026-11-11-mobile-proposal-cards.md). Files the Agent shares (`lody_upload_files`) use `ChatFileCardCell` and open
 like attachments.
 The related-conversations icon above the composer opens a live native tree, with
 each conversation and its contained Tabs sharing one horizontally scrolling row.

@@ -48,6 +48,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var mentionSequence = 0
   var editable = ""
   var editCheck = ""
+  /// Whether the last rendered feed was live; edit proposals that could not be read retry on going live.
+  var proposalsLive = false
+  /// Debug fixtures without a live computer still show the sign-in action.
+  var fixtureSignIn = false
   var quotaEntry = "pending"
   var rendered: [String: String] = [:]
   var infoBar: SessionInfoBar?
@@ -173,7 +177,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
           if viewsChanged { self?.loadTabViews() }
           self?.render()
           self?.openCreatedTab()
-          if activated { self?.markViewed() }
+          if activated {
+            self?.markViewed()
+            self?.chat.rereadProposals()
+          }
         }
       }
     }
@@ -189,6 +196,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     let slug = source.state.workspace?.slug ?? ""
     PushNotifications.shared.visibleRoute = slug.isEmpty ? "" : "/\(slug)/sessions/\(sessionId)"
     markViewed()
+    // Returning from the schedule editor (Open) or another page may have changed an edit proposal's schedule.
+    chat.rereadProposals()
   }
 
   override func viewDidAppear(_ animated: Bool) {
@@ -251,8 +260,11 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     prepareSimulator(state, session)
     startFeed(state)
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
-    if chat.proposalUserID != state.userId {
+    let signIn = fixtureSignIn || state.presence.status(of: session.machineId) == "online" && !session.archived
+      && SessionDecision.canAuthenticate(session, capabilities: state.catalog.machineCapabilities[session.machineId])
+    if chat.proposalUserID != state.userId || chat.agentSignInAvailable != signIn {
       chat.proposalUserID = state.userId
+      chat.agentSignInAvailable = signIn
       chat.applyRows()
     }
     chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"

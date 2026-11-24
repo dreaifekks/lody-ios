@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","inspectProposal","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -2857,6 +2857,7 @@ extension RuntimeContract {
   public enum DecideProposalResultOutcome: String, Codable, Sendable, Equatable, CaseIterable {
     case saved = "saved"
     case created = "created"
+    case applied = "applied"
     case dismissed = "dismissed"
   }
 
@@ -3812,6 +3813,77 @@ extension RuntimeContract {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.`protocol`, forKey: Key("protocol"))
       try c.encode(self.methods, forKey: Key("methods"))
+    }
+  }
+
+  public struct InspectProposalParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var entryId: String
+    public var itemId: String
+    public init(workspaceId: String, sessionId: String, entryId: String, itemId: String) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.entryId = entryId
+      self.itemId = itemId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.entryId = try c.decode(String.self, forKey: Key("entryId"))
+      self.itemId = try c.decode(String.self, forKey: Key("itemId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.entryId, forKey: Key("entryId"))
+      try c.encode(self.itemId, forKey: Key("itemId"))
+    }
+  }
+
+  public enum InspectProposalResultState: String, Codable, Sendable, Equatable, CaseIterable {
+    case ready = "ready"
+    case unavailable = "unavailable"
+    case stale = "stale"
+    case notOwner = "not_owner"
+    case machineUnsupported = "machine_unsupported"
+    case targetUnavailable = "target_unavailable"
+  }
+
+  public struct InspectProposalResult: Codable, Sendable, Equatable {
+    public var state: InspectProposalResultState
+    public var isOwner: Bool
+    public var currentTitle: String?
+    public var currentRule: ScheduleRule?
+    public var timeZone: String
+    public var promptDiff: [PromptDiffLine]?
+    public init(state: InspectProposalResultState, isOwner: Bool, currentTitle: String? = nil, currentRule: ScheduleRule? = nil, timeZone: String, promptDiff: [PromptDiffLine]? = nil) {
+      self.state = state
+      self.isOwner = isOwner
+      self.currentTitle = currentTitle
+      self.currentRule = currentRule
+      self.timeZone = timeZone
+      self.promptDiff = promptDiff
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.state = try c.decode(InspectProposalResultState.self, forKey: Key("state"))
+      self.isOwner = try c.decode(Bool.self, forKey: Key("isOwner"))
+      self.currentTitle = try c.decodeIfPresent(String.self, forKey: Key("currentTitle"))
+      self.currentRule = try c.decodeIfPresent(ScheduleRule.self, forKey: Key("currentRule"))
+      self.timeZone = try c.decode(String.self, forKey: Key("timeZone"))
+      self.promptDiff = try c.decodeIfPresent([PromptDiffLine].self, forKey: Key("promptDiff"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.state, forKey: Key("state"))
+      try c.encode(self.isOwner, forKey: Key("isOwner"))
+      try c.encodeIfPresent(self.currentTitle, forKey: Key("currentTitle"))
+      try c.encodeIfPresent(self.currentRule, forKey: Key("currentRule"))
+      try c.encode(self.timeZone, forKey: Key("timeZone"))
+      try c.encodeIfPresent(self.promptDiff, forKey: Key("promptDiff"))
     }
   }
 
@@ -5109,6 +5181,32 @@ extension RuntimeContract {
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.groups, forKey: Key("groups"))
+    }
+  }
+
+  public enum PromptDiffLineKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case same = "same"
+    case add = "add"
+    case del = "del"
+    case gap = "gap"
+  }
+
+  public struct PromptDiffLine: Codable, Sendable, Equatable {
+    public var kind: PromptDiffLineKind
+    public var text: String
+    public init(kind: PromptDiffLineKind, text: String) {
+      self.kind = kind
+      self.text = text
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.kind = try c.decode(PromptDiffLineKind.self, forKey: Key("kind"))
+      self.text = try c.decode(String.self, forKey: Key("text"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.kind, forKey: Key("kind"))
+      try c.encode(self.text, forKey: Key("text"))
     }
   }
 
@@ -9593,6 +9691,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum InspectProposal: RuntimeCall {
+      public typealias Params = RuntimeContract.InspectProposalParams
+      public typealias Result = RuntimeContract.InspectProposalResult
+      public static let method = "inspectProposal"
+      public static let timeout: Double = 45
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .inspectProposal(let result) = value { return result }
+        return nil
+      }
+    }
     public enum IosSimulatorControl: RuntimeCall {
       public typealias Params = RuntimeContract.IosSimulatorControlParams
       public typealias Result = RuntimeContract.IosSimulatorControlResult
@@ -9996,6 +10104,7 @@ extension RuntimeContract {
     case forgetPendingInput(RuntimeContract.Empty)
     case forkSession(RuntimeContract.ForkSessionResult)
     case hello(RuntimeContract.HelloResult)
+    case inspectProposal(RuntimeContract.InspectProposalResult)
     case iosSimulatorControl(RuntimeContract.IosSimulatorControlResult)
     case itemDetail(RuntimeContract.ItemDetail)
     case listDir(RuntimeContract.DirectoryListing)
@@ -10119,6 +10228,7 @@ extension RuntimeContract {
         case "forgetPendingInput": message = .result(id: id, .forgetPendingInput(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "forkSession": message = .result(id: id, .forkSession(try c.decode(RuntimeContract.ForkSessionResult.self, forKey: Key("payload"))))
         case "hello": message = .result(id: id, .hello(try c.decode(RuntimeContract.HelloResult.self, forKey: Key("payload"))))
+        case "inspectProposal": message = .result(id: id, .inspectProposal(try c.decode(RuntimeContract.InspectProposalResult.self, forKey: Key("payload"))))
         case "iosSimulatorControl": message = .result(id: id, .iosSimulatorControl(try c.decode(RuntimeContract.IosSimulatorControlResult.self, forKey: Key("payload"))))
         case "itemDetail": message = .result(id: id, .itemDetail(try c.decode(RuntimeContract.ItemDetail.self, forKey: Key("payload"))))
         case "listDir": message = .result(id: id, .listDir(try c.decode(RuntimeContract.DirectoryListing.self, forKey: Key("payload"))))

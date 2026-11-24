@@ -1,3 +1,4 @@
+import LodyCore
 import ChatKit
 import Litext
 import UIKit
@@ -73,8 +74,18 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   /// Accept (`true`) or dismiss an Agent's proposal row; the owner reports back through `setProposalState`.
   var onProposalDecision: (_ row: ChatRow, _ accept: Bool) -> Void = { _, _ in }
   var onProposalOpenSchedule: (String) -> Void = { _ in }
+  /// Web's sign-in beside an `acp_auth_required` failure; set when the session's agent can authenticate.
+  var agentSignInAvailable = false
+  var onAgentSignIn: () -> Void = {}
+  /// Read an undecided edit proposal's live schedule; the owner answers through `setProposalInspection`.
+  var onProposalInspect: (_ row: ChatRow) -> Void = { _ in }
   /// Decisions in flight or failed, by `entryId/itemId`.
   var proposalStates: [String: ChatProposalState] = [:]
+  /// Edit proposals' live schedules, by `entryId/itemId`; a key is requested once until cleared.
+  var proposalInspections: [String: RuntimeContract.InspectProposalResult] = [:]
+  var proposalInspectRequested: Set<String> = []
+  /// Edit proposals whose shown failure is a failed read, cleared by the next successful one.
+  var proposalInspectFailures: Set<String> = []
   /// The signed-in user: a Role proposal is decided only by the member who asked for it.
   var proposalUserID = ""
   var planDecisionState: ChatPlanDecisionState?
@@ -380,11 +391,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     collection.register(ChatMarkdownCell.self, forCellWithReuseIdentifier: "markdown")
     dataSource = UICollectionViewDiffableDataSource<String, String>(collectionView: collection) { [weak self] collection, index, id in
       guard let self, let row = self.rows[id] else { return nil }
-      if row.kind == "chat_failed" {
+      if row.kind == "chat_failed" || row.kind == "agent_warning" {
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "error", for: index) as! ChatErrorCell
         cell.configure(row)
         cell.onDetail = { [weak self] in self?.onActivityPress(["entryId": row.entryID, "itemId": row.itemID]) }
         cell.onRetry = { [weak self] in self?.onErrorRetry(["entryId": row.entryID, "itemId": row.itemID, "id": UUID().uuidString.lowercased()]) }
+        cell.onSignIn = { [weak self] in self?.onAgentSignIn() }
         return cell
       }
       if row.kind == "proposal" {
