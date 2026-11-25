@@ -19,6 +19,7 @@ export const SessionEvent = z
     sessionId: z.string().min(1),
     session: z.string(),
     synced: z.boolean(),
+    historyStart: z.number().int().nonnegative().optional(),
     backgroundWork: SessionBackgroundWork.optional(),
   })
   .meta({ id: 'SessionEvent' });

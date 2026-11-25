@@ -2,6 +2,8 @@
 
 Read before changing login, the data runtime, the offscreen WebView and watchdog, the host↔runtime contract, Streams grants or local persistence. These rules bind every caller of the area, not only files in its directory.
 
+- A same-session reopen carries the start of the last readable transcript window under the active account, workspace and session. The runtime rebuilds the window from current history through the existing pagination rules. The native transcript stays readable while the replacement window loads.
+
 - Login is native, with each provider following [its native protocol](../native-auth.md#public-protocol) (GitHub/Discord through a one-use PKCE backend handoff). Never restore device-code polling or a Web login screen. `AuthSession` alone installs Keychain credentials, after account validation and cancellation checks after every suspension. Credential HTTP requests refuse all redirects and cookies; persist only the raw JSON `token`, never the signed `set-auth-token` cookie header, because Streams authorization looks up the raw session token. Never substitute desktop credentials for app authorization. Keep the sign-in page in step with web `/login` ([details](../native-auth.md#sign-in-page)).
 
 - `data-runtime` in LodyKit owns the POC's catalog replicas, Streams reads, cursors and retry. Native sessions observe projected catalog events; do not add a second live replica. The old offline decoder is retained only as a comparison path.

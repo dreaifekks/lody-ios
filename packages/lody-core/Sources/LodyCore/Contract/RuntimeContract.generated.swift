@@ -4947,16 +4947,20 @@ extension RuntimeContract {
 
   public struct OpenSessionParams: Codable, Sendable, Equatable {
     public var sessionId: String
-    public init(sessionId: String) {
+    public var historyStart: Int?
+    public init(sessionId: String, historyStart: Int? = nil) {
       self.sessionId = sessionId
+      self.historyStart = historyStart
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.historyStart = try c.decodeIfPresent(Int.self, forKey: Key("historyStart"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encodeIfPresent(self.historyStart, forKey: Key("historyStart"))
     }
   }
 
@@ -6576,22 +6580,26 @@ extension RuntimeContract {
     public var ids: [String]
     public var current: String?
     public var reserved: [String]
-    public init(ids: [String], current: String?, reserved: [String]) {
+    public var historyStart: Int?
+    public init(ids: [String], current: String?, reserved: [String], historyStart: Int? = nil) {
       self.ids = ids
       self.current = current
       self.reserved = reserved
+      self.historyStart = historyStart
     }
     public init(from decoder: any Decoder) throws {
       let c = try decoder.container(keyedBy: Key.self)
       self.ids = try c.decode([String].self, forKey: Key("ids"))
       self.current = try c.decode(String?.self, forKey: Key("current"))
       self.reserved = try c.decode([String].self, forKey: Key("reserved"))
+      self.historyStart = try c.decodeIfPresent(Int.self, forKey: Key("historyStart"))
     }
     public func encode(to encoder: any Encoder) throws {
       var c = encoder.container(keyedBy: Key.self)
       try c.encode(self.ids, forKey: Key("ids"))
       try c.encode(self.current, forKey: Key("current"))
       try c.encode(self.reserved, forKey: Key("reserved"))
+      try c.encodeIfPresent(self.historyStart, forKey: Key("historyStart"))
     }
   }
 
@@ -7384,11 +7392,13 @@ extension RuntimeContract {
     public var sessionId: String
     public var session: String
     public var synced: Bool
+    public var historyStart: Int?
     public var backgroundWork: SessionBackgroundWork?
-    public init(sessionId: String, session: String, synced: Bool, backgroundWork: SessionBackgroundWork? = nil) {
+    public init(sessionId: String, session: String, synced: Bool, historyStart: Int? = nil, backgroundWork: SessionBackgroundWork? = nil) {
       self.sessionId = sessionId
       self.session = session
       self.synced = synced
+      self.historyStart = historyStart
       self.backgroundWork = backgroundWork
     }
     public init(from decoder: any Decoder) throws {
@@ -7396,6 +7406,7 @@ extension RuntimeContract {
       self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
       self.session = try c.decode(String.self, forKey: Key("session"))
       self.synced = try c.decode(Bool.self, forKey: Key("synced"))
+      self.historyStart = try c.decodeIfPresent(Int.self, forKey: Key("historyStart"))
       self.backgroundWork = try c.decodeIfPresent(SessionBackgroundWork.self, forKey: Key("backgroundWork"))
     }
     public func encode(to encoder: any Encoder) throws {
@@ -7403,6 +7414,7 @@ extension RuntimeContract {
       try c.encode(self.sessionId, forKey: Key("sessionId"))
       try c.encode(self.session, forKey: Key("session"))
       try c.encode(self.synced, forKey: Key("synced"))
+      try c.encodeIfPresent(self.historyStart, forKey: Key("historyStart"))
       try c.encodeIfPresent(self.backgroundWork, forKey: Key("backgroundWork"))
     }
   }

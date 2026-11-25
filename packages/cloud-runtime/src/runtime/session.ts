@@ -112,6 +112,7 @@ type SessionState = {
    * whole history, unset until the first ready projection fixes it.
    */
   historyAnchor?: string | null;
+  resumeHistoryStart?: number;
   /** The last projection dropped window turns to fit the host envelope budget. */
   historyClipped?: boolean;
   client: StreamsClient;
@@ -697,12 +698,20 @@ function loroWindowStart(state: SessionState, history: LoroList) {
   if (state.historyAnchor !== undefined)
     for (let i = history.length - 1; i >= 0; i--)
       if (entryField(history.get(i), 'id') === state.historyAnchor) return i;
-  const start = pageStart(history, history.length, HISTORY_PAGE_TURNS);
+  const latest = pageStart(history, history.length, HISTORY_PAGE_TURNS);
+  const start =
+    state.ready &&
+    state.resumeHistoryStart !== undefined &&
+    state.resumeHistoryStart < latest
+      ? pageStart(history, state.resumeHistoryStart + 1, 1)
+      : latest;
   const anchor = entryField(history.get(start), 'id');
   // An empty or still-bootstrapping replica must not fix the window at 0.
-  if (state.ready && history.length)
+  if (state.ready && history.length) {
     state.historyAnchor =
       start === 0 ? null : typeof anchor === 'string' ? anchor : undefined;
+    state.resumeHistoryStart = undefined;
+  }
   return start;
 }
 
@@ -953,6 +962,11 @@ function flush(state: SessionState) {
     type: active === state ? 'session' : 'sessionCache',
     sessionId: state.id,
     synced: state.status === 'live',
+    ...(active === state &&
+    snapshot.entries.length &&
+    (state.status === 'live' || snapshot.controlReady)
+      ? { historyStart: loro ? start : state.roostWindow?.start }
+      : {}),
     backgroundWork: backgroundProgress(state),
     session,
   });
@@ -1184,6 +1198,7 @@ export async function openSession(
   ) => Promise<void>,
   activate = true,
   resolveTarget?: ResolveSessionTarget,
+  resumeHistoryStart?: number,
 ) {
   if ([...sessions.values()].some((state) => state.workspace !== workspace))
     stopSessions();
@@ -1199,6 +1214,8 @@ export async function openSession(
   if (existing && existing.status !== 'offline') {
     existing.emit = emit;
     if (activate) {
+      if (!existing.ready && !existing.historyReadable)
+        existing.resumeHistoryStart ??= resumeHistoryStart;
       active = existing;
       sessions.delete(id);
       sessions.set(id, existing);
@@ -1214,6 +1231,7 @@ export async function openSession(
     workspace,
     scopeIsCurrent: resolveTarget?.isCurrent,
     doc: new LoroDoc(),
+    resumeHistoryStart,
     client: undefined as unknown as StreamsClient,
     controller,
     ready: false,
@@ -1412,7 +1430,19 @@ export async function openSession(
           () => reader.latest(),
           retryHistory,
         );
-        if (sessions.get(id) !== state) return;
+        // Replay the reader's window through the same checked cursors as an
+        // explicit page read. A failed optional page leaves the usable tail intact.
+        const historyStart = state.resumeHistoryStart;
+        if (historyStart !== undefined) {
+          try {
+            while (window.cursor && window.start > historyStart)
+              window = await reader.older(window);
+          } catch {
+            controller.signal.throwIfAborted();
+          }
+        }
+        state.resumeHistoryStart = undefined;
+        if (sessions.get(id) !== state || !targetIsCurrent(state)) return;
         installHistory(state, window);
         state.historyReadable = true;
         let metadataRevision = 0;

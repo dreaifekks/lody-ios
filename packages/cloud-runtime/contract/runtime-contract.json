@@ -2540,7 +2540,14 @@
     },
     "OpenSessionParams": {
       "type": "object",
-      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "historyStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
       "required": ["sessionId"]
     },
     "PinSection": {
@@ -3315,6 +3322,11 @@
         "reserved": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "historyStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": ["ids", "current", "reserved"]
@@ -3691,6 +3703,11 @@
         "sessionId": { "type": "string", "minLength": 1 },
         "session": { "type": "string" },
         "synced": { "type": "boolean" },
+        "historyStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "backgroundWork": { "$ref": "SessionBackgroundWork" }
       },
       "required": ["sessionId", "session", "synced"]

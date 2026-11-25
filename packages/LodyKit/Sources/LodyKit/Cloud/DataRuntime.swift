@@ -9,6 +9,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   static weak var current: DataRuntime?
   var webView: WKWebView?
   var sessionId: String?
+  private var sessionHistoryStart: Int?
   private(set) var sessionSnapshot: (generation: Int, json: String)?
   private var retainedSessions: [String] = []
   private var sessionWatchers = SessionSubscriptions()
@@ -96,7 +97,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     guard WorkspaceModePins.shared.mode(workspace) == .plaintext else { stop(); return }
     disposeView()
     if self.workspace != workspace || self.userId != userId {
-      sessionId = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
+      sessionId = nil; sessionHistoryStart = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
     }
     self.userId = userId; cacheErrorShown = false
     self.workspace = workspace; self.owner = owner; health = RuntimeHealth()
@@ -106,7 +107,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   }
   func stop(owner: String? = nil) {
     if let owner, self.owner != owner { return }
-    workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
+    workspace = nil; sessionId = nil; sessionHistoryStart = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
   }
   func status() -> [String: any Sendable] {
     var value: [String: any Sendable] = ["owner": owner, "generation": generation, "state": phase, "reason": reason, "acknowledgements": acknowledgements, "lastStartReason": lastStartReason]
@@ -217,7 +218,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     default: break
     }
   }
-  private func receiveSession(_ id: String, session: String?, synced: Bool?, work: (id: String, state: String)?, active: Bool) {
+  private func receiveSession(_ id: String, session: String?, synced: Bool?, work: (id: String, state: String)?, active: Bool, historyStart: Int? = nil) {
     if let work { SessionBackgroundTasks.shared.update(id: work.id, state: work.state, owner: owner) }
     guard let session else { return }
     let fits = session.utf8.count <= 12 * 1024 * 1024
@@ -236,6 +237,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       }
     }
     guard active, id == sessionId else { return }
+    if fits, synced == true || historyStart != nil { sessionHistoryStart = historyStart }
     if !fits, overflowReported != id {
       overflowReported = id
       DiagnosticsStore.shared.record("session-sync", "session_overflow", fields: [
@@ -255,9 +257,9 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     openSession(id)
   }
   func openSession(_ id: String) {
-    if sessionId != id { sessionSnapshot = nil; overflowReported = nil }
+    if sessionId != id { sessionHistoryStart = nil; sessionSnapshot = nil; overflowReported = nil }
     sessionId = id
-    dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id))
+    dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id, historyStart: sessionHistoryStart))
   }
   func loadOlderSession(_ id: String) {
     dispatch(RuntimeContract.Calls.LoadOlderSession.self, .init(sessionId: id))
@@ -275,6 +277,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     ContentStore.shared.clear(session: id)
     guard sessionId == id else { return }
     sessionId = nil
+    sessionHistoryStart = nil
     sessionSnapshot = nil
     dispatch(RuntimeContract.Calls.CloseSession.self, .init())
     emitStatus()
@@ -330,7 +333,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       self.health.startupCompleted()
       let current = self.sessionId.flatMap { $0.isEmpty ? nil : $0 }
       self.dispatch(RuntimeContract.Calls.RestoreSessions.self, .init(
-        ids: self.retainedSessions, current: current, reserved: self.reservedSessions))
+        ids: self.retainedSessions, current: current, reserved: self.reservedSessions,
+        historyStart: self.sessionHistoryStart))
     }
   }
   private func handle(_ event: RuntimeContract.Event) {
@@ -365,7 +369,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       reservedSessions = value.reserved
     case .session(let value):
       receiveSession(value.sessionId, session: value.session, synced: value.synced,
-        work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: true)
+        work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: true, historyStart: value.historyStart)
     case .sessionCache(let value):
       receiveSession(value.sessionId, session: value.session, synced: value.synced,
         work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: false)

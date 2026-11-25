@@ -308,7 +308,7 @@ export async function openTestSession({
         ...value,
       };
     }, targetResolver);
-  const reopen = () =>
+  const reopen = (historyStart) =>
     runtime.openSession(
       's1',
       'w1',
@@ -317,6 +317,7 @@ export async function openTestSession({
       markDispatch,
       true,
       resolver,
+      historyStart,
     );
   await reopen();
   await ready.promise;

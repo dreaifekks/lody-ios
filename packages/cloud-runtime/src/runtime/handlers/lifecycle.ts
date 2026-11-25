@@ -194,7 +194,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
     traceStalledReads();
     return {};
   });
-  channel.handle('openSession', async ({ sessionId }) => {
+  channel.handle('openSession', async ({ sessionId, historyStart }) => {
     const result = openSession(
       sessionId,
       state.workspace,
@@ -203,6 +203,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       markDispatch,
       true,
       resolveTarget(sessionId),
+      historyStart,
     );
     ctx.publishSubscriptions();
     await result;
@@ -222,41 +223,45 @@ export function registerLifecycle(ctx: RuntimeContext) {
     ctx.publishSubscriptions();
     return {};
   });
-  channel.handle('restoreSessions', ({ ids, current, reserved }) => {
-    const { workspace } = state;
-    for (const id of ids) {
-      if (id === current || reserved.includes(id)) continue;
-      void openSession(
-        id,
-        workspace,
-        getGrant,
-        emitSession,
-        markDispatch,
-        false,
-        resolveTarget(id),
-      );
-    }
-    for (const id of reserved)
-      void ensureSession(
-        id,
-        workspace,
-        getGrant,
-        emitSession,
-        markDispatch,
-        resolveTarget(id),
-      ).catch(() => {});
-    if (current)
-      void openSession(
-        current,
-        workspace,
-        getGrant,
-        emitSession,
-        markDispatch,
-        true,
-        resolveTarget(current),
-      );
-    else closeSession();
-    ctx.publishSubscriptions();
-    return {};
-  });
+  channel.handle(
+    'restoreSessions',
+    ({ ids, current, reserved, historyStart }) => {
+      const { workspace } = state;
+      for (const id of ids) {
+        if (id === current || reserved.includes(id)) continue;
+        void openSession(
+          id,
+          workspace,
+          getGrant,
+          emitSession,
+          markDispatch,
+          false,
+          resolveTarget(id),
+        );
+      }
+      for (const id of reserved)
+        void ensureSession(
+          id,
+          workspace,
+          getGrant,
+          emitSession,
+          markDispatch,
+          resolveTarget(id),
+        ).catch(() => {});
+      if (current)
+        void openSession(
+          current,
+          workspace,
+          getGrant,
+          emitSession,
+          markDispatch,
+          true,
+          resolveTarget(current),
+          historyStart,
+        );
+      else closeSession();
+      ctx.publishSubscriptions();
+      return {};
+    },
+  );
 }
