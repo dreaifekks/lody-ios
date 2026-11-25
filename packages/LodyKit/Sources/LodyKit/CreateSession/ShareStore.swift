@@ -6,6 +6,7 @@ struct ShareCatalog: Codable, Equatable {
   var workspaceId: String
   var projects: [CreateProject]
   var machineNames: [String: String]?
+  var machineOs: [String: String]?
 }
 
 struct ShareAttachment: Codable, Equatable {
@@ -71,7 +72,7 @@ enum ShareStore {
   static func writeCatalog(_ json: String) throws {
     guard let catalog = CreateJSON.decode(ShareCatalog.self, json) else { throw CocoaError(.coderReadCorrupt) }
     if let previous = self.catalog(), previous.userId != catalog.userId || previous.workspaceId != catalog.workspaceId {
-      for path in ["options", "branches", "prefs.json"] {
+      for path in ["options", "branches", "prefs.json", "roles.json", "groups.json"] {
         if let stale = url(path) { try? FileManager.default.removeItem(at: stale) }
       }
     }
@@ -81,6 +82,20 @@ enum ShareStore {
   static func writeOptions(_ options: CreationOptions, target: String) throws {
     try write(Data(CreateJSON.encode(options).utf8), to: optionsPath(target))
   }
+
+  static func writeRoles(_ roles: [RuntimeContract.AgentRoleItem], userId: String, workspaceId: String) throws {
+    guard let catalog = catalog(), catalog.userId == userId, catalog.workspaceId == workspaceId else { return }
+    try write(Data(CreateJSON.encode(roles).utf8), to: "roles.json")
+  }
+
+  static func roles() -> [RuntimeContract.AgentRoleItem]? { read([RuntimeContract.AgentRoleItem].self, "roles.json") }
+
+  static func writeProjectGroups(_ groups: [RuntimeContract.ProjectGroupItem], userId: String, workspaceId: String) throws {
+    guard let catalog = catalog(), catalog.userId == userId, catalog.workspaceId == workspaceId else { return }
+    try write(Data(CreateJSON.encode(groups).utf8), to: "groups.json")
+  }
+
+  static func projectGroups() -> [RuntimeContract.ProjectGroupItem]? { read([RuntimeContract.ProjectGroupItem].self, "groups.json") }
 
   private static func branchesPath(_ repo: String) -> String {
     "branches/" + (repo.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "invalid") + ".json"
@@ -102,7 +117,7 @@ enum ShareStore {
   static func options(_ target: String) -> CreationOptions? { read(CreationOptions.self, optionsPath(target)) }
 
   static func clearCatalog() {
-    for path in ["catalog.json", "options", "branches", "prefs.json"] {
+    for path in ["catalog.json", "options", "branches", "prefs.json", "roles.json", "groups.json"] {
       if let file = url(path) { try? FileManager.default.removeItem(at: file) }
     }
   }

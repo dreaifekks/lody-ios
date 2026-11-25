@@ -118,10 +118,14 @@ struct ShareCheckAccount {
 @MainActor enum CreateSessionService {
   static var live: CreateSessionService.Type { Self.self }
   static var response: CreationOptions?
+  static func prefsKey(userId: String, workspaceId: String) -> String { "create:\(userId):\(workspaceId)" }
+  static func readPrefs(_ key: String) async -> CreatePrefs? { nil }
   static func options(_ workspace: String, _ project: String?) async throws -> CreationOptions {
     guard let response else { fatalError("Unexpected network") }
     return response
   }
+  static func roles(_ workspace: String) async throws -> [RuntimeContract.AgentRoleItem] { [] }
+  static func projectGroups(_ workspace: String) async throws -> [RuntimeContract.ProjectGroupItem] { [] }
 }
 @MainActor enum OutboxSession {
   static var shared: OutboxSession.Type { Self.self }

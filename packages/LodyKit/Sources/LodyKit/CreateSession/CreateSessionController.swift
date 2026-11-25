@@ -92,6 +92,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       self.changed(prefs: false)
     }
     composer.onRunConfig = { [weak self] in self?.presentRunConfig() }
+    composer.cardStyle = true
     addChild(context)
     context.view.backgroundColor = .clear
     context.view.translatesAutoresizingMaskIntoConstraints = false

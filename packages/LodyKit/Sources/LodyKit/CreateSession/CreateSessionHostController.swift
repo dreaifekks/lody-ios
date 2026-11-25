@@ -172,11 +172,19 @@ class CreateSessionHostController: UIViewController, LodyPageOwnedHeader {
     }
     controller.loadRoles = { [weak self] in
       guard let self else { throw CancellationError() }
-      return try await service.roles(workspaceId)
+      let roles = try await service.roles(workspaceId)
+      if service.persistShare, service.workspaceMode(workspaceId) == .plaintext {
+        try? ShareStore.writeRoles(roles, userId: params.userId, workspaceId: workspaceId)
+      }
+      return roles
     }
     controller.loadProjectGroups = { [weak self] in
       guard let self else { throw CancellationError() }
-      return try await service.projectGroups(workspaceId)
+      let groups = try await service.projectGroups(workspaceId)
+      if service.persistShare, service.workspaceMode(workspaceId) == .plaintext {
+        try? ShareStore.writeProjectGroups(groups, userId: params.userId, workspaceId: workspaceId)
+      }
+      return groups
     }
     controller.loadRepositories = { [weak self] in
       guard let self else { throw CancellationError() }
