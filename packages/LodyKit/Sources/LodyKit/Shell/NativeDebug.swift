@@ -124,7 +124,13 @@ enum NativeDebug {
     if scenario == "item-detail-preview" { fields["scenario"] = "paging" }
     if scenario == "project-preview-empty" || scenario == "project-preview-offline" { fields["projectId"] = "preview-empty" }
     if scenario == "project-preview-offline" { fields["offline"] = true }
-    if ["create-parity", "create-recovery", "create-scope", "model-memory", "project-picker-preview"].contains(scenario) {
+    if scenario == "preferences-preview" || scenario == "queued-message-behavior-preview" {
+      var sharing = true
+      content = PreferencesController { enabled in
+        if let enabled { sharing = enabled }
+        return sharing
+      }
+    } else if ["create-parity", "create-recovery", "create-scope", "model-memory", "project-picker-preview"].contains(scenario) {
       content = CreateSessionPreviewController(scenario: scenario == "project-picker-preview" ? "create-parity" : scenario)
     } else {
       guard let page = LodyNativePages.make(id, params: SessionController.json(fields)) else {

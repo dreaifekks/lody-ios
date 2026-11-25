@@ -27718,6 +27718,40 @@
         }
       }
     },
+    "settings.preferences.usageSharing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share app usage data to help improve Lody"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享应用使用数据，帮助改进 Lody"
+          }
+        }
+      }
+    },
+    "settings.preferences.sharingRetry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not confirm the setting. Tap to retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能确认设置，轻点重试。"
+          }
+        }
+      }
+    },
     "settings.preferences.defaultIcon": {
       "extractionState": "manual",
       "localizations": {

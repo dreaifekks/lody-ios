@@ -5,6 +5,14 @@ from driver import UI
 import catalog
 
 ui = UI(sys.argv[1], sys.argv[2])
+def usage_enabled():
+    return str(ui.element('usage-sharing:toggle').get('AXValue')).lower() in ('1', 'true', 'on')
+ui.wait(lambda _: usage_enabled(), 'Default usage sharing did not load')
+ui.axe('tap', '--id', 'usage-sharing:toggle')
+ui.wait(lambda _: not usage_enabled(), 'Usage sharing did not turn off')
+ui.capture('usage-sharing-disabled')
+ui.axe('tap', '--id', 'usage-sharing:toggle')
+ui.wait(lambda _: usage_enabled(), 'Usage sharing did not turn on')
 ui.axe('tap', '--id', 'app-icon', '--post-delay', '.6')
 first, second = ui.element('app-icon-default'), ui.element('app-icon-Aqua')
 a, b = first['frame'], second['frame']

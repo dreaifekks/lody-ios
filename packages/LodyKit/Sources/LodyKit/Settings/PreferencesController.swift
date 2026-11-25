@@ -5,7 +5,15 @@ final class PreferencesController: UIViewController {
   private let list = LodyGroupedList(frame: .zero)
   private var observers: [NSObjectProtocol] = []
 
-  init() {
+  private var sharing: Bool?
+  private var savingSharing = false
+  private var sharingFailed = false
+
+  typealias UsagePreference = @MainActor (Bool?) async throws -> Bool
+  private let usagePreference: UsagePreference
+
+  init(usagePreference: @escaping UsagePreference = PreferencesController.accountSharing) {
+    self.usagePreference = usagePreference
     super.init(nibName: nil, bundle: nil)
     title = text("preferences.title")
   }
@@ -31,7 +39,39 @@ final class PreferencesController: UIViewController {
 
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
+    if !savingSharing { Task { await refreshSharing() } }
     render()
+  }
+
+  private func refreshSharing(_ enabled: Bool? = nil) async {
+    guard !savingSharing else { return }
+    savingSharing = true
+    sharingFailed = false
+    render()
+    defer { savingSharing = false; render() }
+    do {
+      sharing = try await usagePreference(enabled)
+    } catch {
+      sharing = nil
+      sharingFailed = true
+    }
+  }
+
+  static func accountSharing(_ enabled: Bool?) async throws -> Bool {
+    if let enabled {
+      _ = try await GitHubCloud.call("mutation", path: "analytics:setUsageSharing", args: ["enabled": enabled])
+      return enabled
+    }
+    guard let value = try await GitHubCloud.call("query", path: "analytics:getUsageSharing", args: [:]) as? Bool else { throw GitHubCloud.failure() }
+    return value
+  }
+
+  private func sharingRow() -> LodyListRow {
+    var row = LodyListRow.item("usage-sharing", text("preferences.usageSharing"), image: "chart.bar")
+    row.toggle = sharing
+    row.action = sharing != nil && !savingSharing
+    if sharingFailed { row.subtitle = text("preferences.sharingRetry"); row.action = true }
+    return row
   }
 
   private func appIconRow() -> LodyListRow {
@@ -60,6 +100,7 @@ final class PreferencesController: UIViewController {
           accessibilityValue: language
         ),
         .item("notifications", text("notifications.title"), image: "bell", disclosure: true, navigates: true),
+        sharingRow(),
       ]),
       .group("chat", header: text("preferences.chat"), [
         queued,
@@ -74,6 +115,10 @@ final class PreferencesController: UIViewController {
   private func event(_ name: String, _ body: [String: Any]) {
     guard let id = body["id"] as? String else { return }
     switch (name, id, body["actionId"] as? String) {
+    case ("rowToggle", "usage-sharing", _):
+      if let value = body["value"] as? Bool { Task { await refreshSharing(value) } }
+    case ("rowPress", "usage-sharing", _):
+      if sharingFailed { Task { await refreshSharing() } }
     case ("rowAction", "queued-message-behavior", let value?) where ["queue", "guide"].contains(value):
       LodyPreferences.saveQueuedMessageBehavior(value)
     case ("rowPress", "app-icon", _):
