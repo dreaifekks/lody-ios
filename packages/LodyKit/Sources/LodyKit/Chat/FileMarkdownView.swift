@@ -152,11 +152,46 @@ enum ChatTableViewport {
     return name.contains("TableView") && !(view is UITableView)
   }
 
+  static func isCode(_ view: UIView) -> Bool {
+    NSStringFromClass(type(of: view)).hasSuffix("CodeView")
+  }
+
   static func tables(in view: UIView) -> [UIView] {
     var found: [UIView] = []
     if isTable(view) { found.append(view) }
     for subview in view.subviews { found += tables(in: subview) }
     return found
+  }
+
+  static func codeLabels(in root: UIView) -> [TextLabelView] {
+    var found: [TextLabelView] = []
+    func walk(_ view: UIView, insideCode: Bool) {
+      if insideCode, let label = view as? TextLabelView, label.isSelectable {
+        found.append(label)
+        return
+      }
+      let next = insideCode || isCode(view)
+      for subview in view.subviews { walk(subview, insideCode: next) }
+    }
+    walk(root, insideCode: false)
+    return found
+  }
+
+  static func selectionGroups(in root: UIView) -> [TextSelectionGroup] {
+    var groups: [TextSelectionGroup] = []
+    var seen = Set<ObjectIdentifier>()
+    func firstGroup(in view: UIView) -> TextSelectionGroup? {
+      if let label = view as? TextLabelView, let group = label.selectionGroup { return group }
+      for subview in view.subviews {
+        if let group = firstGroup(in: subview) { return group }
+      }
+      return nil
+    }
+    for table in tables(in: root) {
+      guard let group = firstGroup(in: table) else { continue }
+      if seen.insert(ObjectIdentifier(group)).inserted { groups.append(group) }
+    }
+    return groups
   }
 
   static func scroll(in table: UIView) -> UIScrollView? {

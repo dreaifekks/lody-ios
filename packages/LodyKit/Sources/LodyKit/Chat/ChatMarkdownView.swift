@@ -38,6 +38,8 @@ final class ChatMarkdownView: UIView {
   }
 
   var selectionLabels: [TextLabelView] { blocks.map(\.label) }
+  var codeSelectionLabels: [TextLabelView] { ChatTableViewport.codeLabels(in: self) }
+  var tableSelectionGroups: [TextSelectionGroup] { ChatTableViewport.selectionGroups(in: self) }
 
   func clearSelection() {
     func clear(_ view: UIView) {
