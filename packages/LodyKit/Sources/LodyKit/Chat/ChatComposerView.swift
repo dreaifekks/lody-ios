@@ -819,8 +819,25 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private var composerOptions = ChatComposerOptions()
   private var composerExpanded = false
   var allowsFullScreen = false { didSet { updateComposer() } }
+  /// Container whose bounds bound full-screen expansion, grabber drag, and dimming.
+  /// Nil defaults to `superview` (when the composer sits directly inside the page view).
+  weak var fullScreenContainer: UIView?
   /// Host chrome below the safe area (a page-owned header) that full screen must stay under.
   var fullScreenTopInset: CGFloat = 0 { didSet { if fullScreen { updateComposer() } } }
+  /// Vertical room reserved above the composer while auto-growing inline (such as the new-chat
+  /// context rows). When set, typing grows the input until the reserved content reaches the header
+  /// instead of stopping at `maximumCollapsedHeight`; dragging the grabber still covers that room.
+  var inlineTopReservedHeight: CGFloat? {
+    didSet {
+      guard oldValue != inlineTopReservedHeight else { return }
+      updateComposer()
+    }
+  }
+  /// Inline height (before full-screen drag/expansion) so hosts can anchor content above the
+  /// composer at its inline top while full-screen expansion glides over it.
+  private(set) var inlineTotalHeight: CGFloat = 64
+  var isFullScreenActive: Bool { fullScreen || dragProgress != nil }
+  var onBeginEditing: (() -> Void)?
   private var fullScreen = false
   private var fittedRoom: CGFloat?
   private var fittingRoom = false
@@ -1591,21 +1608,35 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     return nil
   }
-  /// The highest edge the composer may reach, in its superview: under the safe area and the page's header.
-  private func pageTop() -> CGFloat? {
-    guard let superview, let host = owningController()?.view else { return nil }
-    // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
-    return max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
+  private var roomContainer: UIView? { fullScreenContainer ?? superview }
+
+  /// Direct subview of `container` holding the composer (`self` in `LodyChatView`, `host` in `CreateSessionController`).
+  private func containerAnchor(in container: UIView) -> UIView? {
+    var current: UIView? = self
+    while let view = current {
+      if view.superview === container { return view }
+      current = view.superview
+    }
+    return nil
+  }
+
+  /// The highest edge the composer may reach, in `container`: under the safe area and the page's header.
+  private func pageTop(in container: UIView) -> CGFloat? {
+    guard let host = owningController()?.view else { return nil }
+    // Touches outside `container` never reach the composer, so the controller's safe area alone is not enough.
+    return max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: container).y, container.safeAreaInsets.top) + fullScreenTopInset + 8
   }
   private var layoutRoot: UIView { owningController()?.view ?? superview ?? self }
-  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
-    guard let top = pageTop() else { return ChatMessageContent.maximumCollapsedHeight }
-    return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
+  private func fullScreenInputHeight(chrome: CGFloat, minimum: CGFloat) -> CGFloat {
+    guard let room = pageRoom else { return max(ChatMessageContent.maximumCollapsedHeight, minimum) }
+    return max(minimum, room - chrome)
   }
-  /// Room above the keyboard in hosts that let the composer grow up to their header (the conversation).
+  /// Room above the keyboard in hosts that let the composer grow up to their header.
   private var pageRoom: CGFloat? {
-    guard allowsFullScreen, let top = pageTop() else { return nil }
-    return frame.maxY - top
+    guard allowsFullScreen, let container = roomContainer, let anchor = containerAnchor(in: container),
+          let top = pageTop(in: container), anchor.frame.maxY > 0
+    else { return nil }
+    return anchor.frame.maxY - top
   }
   /// The keyboard or the header moved: fit the docked panel and the input to the new room.
   func fitPageRoom() {
@@ -1615,19 +1646,22 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     fittingRoom = false
   }
+  private func attachFullScreenDim(in container: UIView, behind anchor: UIView) {
+    fullScreenDim.frame = container.bounds
+    if fullScreenDim.superview !== container {
+      fullScreenDim.alpha = 0
+      container.addSubview(fullScreenDim)
+    }
+    container.bringSubviewToFront(anchor)
+  }
   @objc private func toggleFullScreen() {
     setFullScreen(!fullScreen)
   }
   private func setFullScreen(_ value: Bool, animated: Bool = true) {
-    guard fullScreen != value, let superview else { return }
+    guard fullScreen != value, let container = roomContainer, let anchor = containerAnchor(in: container) else { return }
     layoutRoot.layoutIfNeeded()
     fullScreen = value
-    if value {
-      fullScreenDim.frame = superview.bounds
-      fullScreenDim.alpha = 0
-      superview.addSubview(fullScreenDim)
-      superview.bringSubviewToFront(self)
-    }
+    if value { attachFullScreenDim(in: container, behind: anchor) }
     updateComposer()
     let changes = {
       self.fullScreenDim.alpha = value ? 1 : 0
@@ -1651,16 +1685,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     return progress > 0.5 ? .fullScreen : .sheet
   }
   private func dragGrabber(_ pan: UIPanGestureRecognizer) {
-    guard let superview, allowsFullScreen, input.isFirstResponder else { return }
-    let translation = pan.translation(in: superview).y
+    guard let container = roomContainer, let anchor = containerAnchor(in: container),
+          allowsFullScreen, input.isFirstResponder
+    else { return }
+    let translation = pan.translation(in: container).y
     switch pan.state {
     case .began:
       dragStart = fullScreen ? 1 : 0
-      if fullScreenDim.superview == nil {
-        fullScreenDim.frame = superview.bounds
-        fullScreenDim.alpha = 0
-        superview.addSubview(fullScreenDim)
-        superview.bringSubviewToFront(self)
+      if fullScreenDim.superview !== container {
+        attachFullScreenDim(in: container, behind: anchor)
       }
       dragProgress = dragStart
     case .changed:
@@ -1670,7 +1703,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       updateComposer()
       layoutRoot.layoutIfNeeded()
     default:
-      let velocity = pan.velocity(in: superview).y
+      let velocity = pan.velocity(in: container).y
       let progress = dragProgress ?? dragStart
       dragProgress = nil
       let release = Self.grabberRelease(fromFullScreen: dragStart == 1, progress: progress, translation: translation, velocity: velocity)
@@ -1894,11 +1927,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       if input.isFirstResponder { lines = showsAttachmentRow ? 2 : 3 }
       minimumHeight = topInset + verticalInset + lines * input.font!.lineHeight
     }
-    var inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
     // Below the page header: the docked panel gives up rows first (its lists scroll), then the
     // input stops growing and scrolls, down to one line.
     var dock = mentionPanel.panelHeight
     fittedRoom = pageRoom
+    var inlineCap = ChatMessageContent.maximumCollapsedHeight
+    if let reserved = inlineTopReservedHeight, let room = fittedRoom {
+      inlineCap = max(minimumHeight, room - reserved - others - dock)
+    }
+    var inlineHeight = expanded ? min(inlineCap, max(minimumHeight, height)) : 48
     if let room = fittedRoom, expanded {
       if dock > 0 { dock = min(dock, max(ChatMentionPanel.minimumDockHeight, room - others - inlineHeight)) }
       inlineHeight = min(inlineHeight, max(topInset + verticalInset + input.font!.lineHeight, room - others - dock))
@@ -1913,17 +1950,24 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // A conversation's card can also stay open across a focus change when a draft keeps it open.
     let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
     cardFocused = input.isFirstResponder
+    let fullHeight = fullScreenInputHeight(chrome: chrome, minimum: inlineHeight)
+    dragDistance = max(1, fullHeight - inlineHeight)
     if fullProgress > 0 {
-      let fullHeight = fullScreenInputHeight(chrome: chrome)
-      dragDistance = max(1, fullHeight - inlineHeight)
       inputHeight.constant = inlineHeight + (fullHeight - inlineHeight) * fullProgress
     } else {
-      dragDistance = max(1, fullScreenInputHeight(chrome: chrome) - inlineHeight)
       inputHeight.constant = inlineHeight
     }
+    let wasScrollEnabled = input.isScrollEnabled
     input.isScrollEnabled = expanded && (fullProgress > 0 || height > inputHeight.constant + 0.5)
+    if !wasScrollEnabled && input.isScrollEnabled && input.isFirstResponder {
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.input.isFirstResponder, self.input.isScrollEnabled else { return }
+        self.input.scrollRangeToVisible(self.input.selectedRange)
+      }
+    }
     if !expanded { input.contentOffset = .zero }
     updateComposerOptions()
+    inlineTotalHeight = chrome + inlineHeight
     onHeightChange?(chrome + inputHeight.constant)
     setNeedsLayout()
     // The card is always "expanded", so its focus change grows the input here: ride along with
@@ -2250,7 +2294,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     scheduleDraftSave()
   }
-  func textViewDidBeginEditing(_ textView: UITextView) { updateComposer() }
+  func textViewDidBeginEditing(_ textView: UITextView) {
+    onBeginEditing?()
+    updateComposer()
+  }
   func textViewDidEndEditing(_ textView: UITextView) {
     setFullScreen(false)
     updateComposer()

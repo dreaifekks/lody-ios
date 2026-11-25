@@ -1549,3 +1549,133 @@ labelInput.restoreDraft(savedReferences)
 precondition(labelInput.markdown == "@Same title @session:first @session:second ")
 precondition(!labelInput.text.contains("session:"))
 print("Mention labels: identical titles retain distinct tokens across draft restoration")
+
+// Hosted card composer (CreateSessionController pattern): composer lives inside a shrink-wrapped
+// host view whose height tracks composer.onHeightChange, while fullScreenContainer points to the
+// controller's root view and inlineTopReservedHeight reserves room for the context rows above it.
+do {
+  let page = UIViewController()
+  let nav = UINavigationController(rootViewController: page)
+  let pageWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+  pageWindow.rootViewController = nav
+  pageWindow.makeKeyAndVisible()
+  page.loadViewIfNeeded()
+  nav.view.layoutIfNeeded()
+
+  let contextView = UIView()
+  contextView.translatesAutoresizingMaskIntoConstraints = false
+  page.view.addSubview(contextView)
+
+  let composerHost = UIView()
+  composerHost.translatesAutoresizingMaskIntoConstraints = false
+  page.view.addSubview(composerHost)
+
+  let hostedComposer = ChatComposerView(frame: .zero)
+  hostedComposer.translatesAutoresizingMaskIntoConstraints = false
+  composerHost.addSubview(hostedComposer)
+  NSLayoutConstraint.activate([
+    hostedComposer.topAnchor.constraint(equalTo: composerHost.topAnchor),
+    hostedComposer.leadingAnchor.constraint(equalTo: composerHost.leadingAnchor),
+    hostedComposer.trailingAnchor.constraint(equalTo: composerHost.trailingAnchor),
+  ])
+
+  let hostHeight = composerHost.heightAnchor.constraint(equalToConstant: 64)
+  let contextBottom = contextView.bottomAnchor.constraint(equalTo: composerHost.bottomAnchor, constant: -64)
+  // Simulate a software keyboard occupying the bottom 330 pt of the screen.
+  let keyboardTopOffset: CGFloat = -330
+  NSLayoutConstraint.activate([
+    composerHost.leadingAnchor.constraint(equalTo: page.view.leadingAnchor),
+    composerHost.trailingAnchor.constraint(equalTo: page.view.trailingAnchor),
+    composerHost.bottomAnchor.constraint(equalTo: page.view.bottomAnchor, constant: keyboardTopOffset),
+    hostHeight,
+    contextView.topAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.topAnchor),
+    contextView.leadingAnchor.constraint(equalTo: page.view.leadingAnchor),
+    contextView.trailingAnchor.constraint(equalTo: page.view.trailingAnchor),
+    contextBottom,
+  ])
+
+  hostedComposer.onHeightChange = { height in
+    let inline = hostedComposer.inlineTotalHeight > 0 ? min(height, hostedComposer.inlineTotalHeight) : height
+    hostHeight.constant = height
+    contextBottom.constant = -inline
+    page.view.setNeedsLayout()
+  }
+  let reservedContext: CGFloat = 150
+  hostedComposer.cardStyle = true
+  hostedComposer.fullScreenContainer = page.view
+  hostedComposer.allowsFullScreen = true
+  hostedComposer.inlineTopReservedHeight = reservedContext
+  hostedComposer.setComposerState(ready)
+  page.view.layoutIfNeeded()
+  hostedComposer.fitPageRoom()
+  page.view.layoutIfNeeded()
+
+  let hostedInput = descendants(hostedComposer).compactMap { $0 as? UITextView }.first!
+  let hostedGrabber = descendants(hostedComposer).first { $0.accessibilityIdentifier == "session-grabber" }!
+  precondition(hostedInput.becomeFirstResponder(), "Hosted creation composer must accept focus")
+  RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+  page.view.layoutIfNeeded()
+  hostedComposer.fitPageRoom()
+  page.view.layoutIfNeeded()
+  // Repeated layout passes must not shrink the focused default height.
+  let defaultInputHeight = hostedInput.bounds.height
+  hostedComposer.fitPageRoom()
+  page.view.layoutIfNeeded()
+  precondition(defaultInputHeight > 60 && abs(hostedInput.bounds.height - defaultInputHeight) < 1,
+    "Hosted focused input must keep its multi-line default height across layout passes; got \(defaultInputHeight) -> \(hostedInput.bounds.height)")
+  precondition(!hostedInput.isScrollEnabled, "Empty default input should not scroll")
+
+  // Typing many lines grows past maximumCollapsedHeight (140) until the reserved context hits the header,
+  // then stops growing and enables internal scrolling while keeping the context visible.
+  hostedInput.text = (1...24).map { "Line \($0) of the prompt" }.joined(separator: "\n")
+  hostedComposer.textViewDidChange(hostedInput)
+  RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+  page.view.layoutIfNeeded()
+  hostedComposer.fitPageRoom()
+  page.view.layoutIfNeeded()
+
+  let safeTop = page.view.safeAreaInsets.top
+  let inlineMaxInputHeight = hostedInput.bounds.height
+  let inlineHostTop = composerHost.frame.minY
+  let inlineContextBottom = contextView.frame.maxY
+  precondition(inlineMaxInputHeight > ChatMessageContent.maximumCollapsedHeight,
+    "Creation input must auto-grow past 140 pt when room remains above context; got \(inlineMaxInputHeight)")
+  precondition(hostedInput.isScrollEnabled, "Overflowing creation input must scroll internally once context reaches the header")
+  precondition(abs(inlineHostTop - (safeTop + 8 + reservedContext)) < 2,
+    "Auto-grow must stop when reserved context reaches the header; hostTop=\(inlineHostTop), expected=\(safeTop + 8 + reservedContext)")
+  precondition(abs(inlineContextBottom - inlineHostTop) < 1,
+    "Context bottom must sit directly above the inline composer; contextBottom=\(inlineContextBottom), hostTop=\(inlineHostTop)")
+
+  // Expanding via grabber directly covers the context rows up to just below the header,
+  // keeping contextView anchored behind the dimming scrim in page.view.
+  _ = hostedGrabber.accessibilityActivate()
+  RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+  page.view.layoutIfNeeded()
+  let fullHostTop = composerHost.frame.minY
+  let fullInputHeight = hostedInput.bounds.height
+  precondition(hostedComposer.isFullScreenActive, "Grabber must activate full screen")
+  precondition(abs(fullHostTop - (safeTop + 8)) < 2,
+    "Full-screen drag/toggle must reach just below the header; got \(fullHostTop), expected \(safeTop + 8)")
+  precondition(fullInputHeight > inlineMaxInputHeight + reservedContext - 4,
+    "Full-screen input must reclaim the reserved context height; inline=\(inlineMaxInputHeight), full=\(fullInputHeight)")
+  precondition(abs(contextView.frame.maxY - inlineContextBottom) < 1,
+    "Context rows must stay in place to be covered rather than pushed offscreen; was \(inlineContextBottom), now \(contextView.frame.maxY)")
+  precondition(page.view.subviews.last === composerHost,
+    "Composer host must sit above the dimming scrim and context view")
+  precondition(page.view.subviews.count == 3,
+    "Full-screen dimming scrim must be inserted in the page container view; got \(page.view.subviews.count) subviews")
+
+  // Collapsing returns smoothly to the inline height and removes the dimming scrim.
+  _ = hostedGrabber.accessibilityActivate()
+  RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+  page.view.layoutIfNeeded()
+  precondition(!hostedComposer.isFullScreenActive, "Second grabber activation must collapse full screen")
+  precondition(abs(composerHost.frame.minY - inlineHostTop) < 2,
+    "Collapsing must restore inline host top; got \(composerHost.frame.minY), expected \(inlineHostTop)")
+  precondition(page.view.subviews.count == 2,
+    "Collapsing must remove the dimming scrim from the page container view")
+
+  hostedInput.resignFirstResponder()
+  pageWindow.isHidden = true
+  print("Hosted creation composer: auto-grows to context ceiling, scrolls internally, and grabber covers context to header")
+}

@@ -36,7 +36,7 @@ CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
 STATUS_CASES = ('home-status', 'home-status-drag')
-CASES = PHONE_CASES + PAD_CASES + list(STATUS_CASES) + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room']
+CASES = PHONE_CASES + PAD_CASES + list(STATUS_CASES) + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'create-composer-resize']
 HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general', *STATUS_CASES}
 PREVIEW = {
     'toast': 'session-preview-live',
@@ -118,6 +118,7 @@ PREVIEW = {
     'queued-message-behavior': 'queued-message-behavior-preview',
     'model-memory': 'model-memory',
     'create-parity': 'create-parity',
+    'create-composer-resize': 'create-parity',
     'smooth-scroll': 'scroll-preview',
     'duration': 'permission-preview',
     'process-counts': 'chat-preview',
@@ -231,6 +232,7 @@ READY = {
     'queued-message-behavior': 'queued-message-behavior',
     'model-memory': 'create-session-input',
     'create-parity': 'create-session-input',
+    'create-composer-resize': 'create-session-input',
     'send': 'send-status',
     'send-handoff': 'create-session-input',
     'send-handoff-delayed': 'create-session-input',
@@ -541,7 +543,7 @@ try:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
-                if case in {'home-settings', 'home-workspace', 'ipad-create', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'dictation'}:
+                if case in {'home-settings', 'home-workspace', 'ipad-create', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'create-composer-resize', 'dictation'}:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case in ['session-tree', 'session-tree-pad']:
                     script = Path(__file__).with_name('session-tree.py')

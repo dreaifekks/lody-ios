@@ -40,6 +40,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   private weak var runConfigSheet: UIViewController?
   private let signedOutLabel = UILabel()
   private lazy var hostHeight = host.heightAnchor.constraint(equalToConstant: 64)
+  private lazy var contextBottom = context.view.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -64)
+  private var collapsedContextHeight: CGFloat = 0
   private var optionsTask: Task<Void, Never>?
   private var composingConstraints: [NSLayoutConstraint] = []
   private var searchingConstraints: [NSLayoutConstraint] = []
@@ -91,7 +93,20 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       self.form.current.worktree = on
       self.changed(prefs: false)
     }
+    panelState.onCollapsedHeight = { [weak self] height in
+      guard let self, abs(self.collapsedContextHeight - height) > 0.5 else { return }
+      self.collapsedContextHeight = height
+      self.updateComposerReservedHeight()
+    }
+    panelState.onOpenChange = { [weak self] _ in
+      self?.updateComposerReservedHeight()
+    }
     composer.onRunConfig = { [weak self] in self?.presentRunConfig() }
+    composer.onBeginEditing = { [weak self] in
+      guard let self else { return }
+      if self.panelState.open != nil { self.panelState.open = nil }
+      self.updateComposerReservedHeight()
+    }
     composer.cardStyle = true
     addChild(context)
     context.view.backgroundColor = .clear
@@ -111,7 +126,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     view.addSubview(host)
     let keyboard = host.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -LodySpacing.sm)
     keyboard.priority = .defaultHigh
-    composingConstraints = [keyboard, context.view.bottomAnchor.constraint(equalTo: host.topAnchor)]
+    composingConstraints = [keyboard, contextBottom]
     let searchBottom = context.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -LodySpacing.sm)
     searchBottom.priority = .defaultHigh
     searchingConstraints = [
@@ -127,7 +142,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       host.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -16),
       hostHeight,
       // The context fills the space above the composer, bottom-aligned within thumb reach, and
-      // rides up with it; expanded lists grow upward and scroll when they run out of room.
+      // rides up with inline typing; dragging the grabber lets the composer glide directly over it.
       context.view.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
       context.view.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
       context.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -136,6 +151,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       signedOutLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -LodyLayout.screenPaddingX * 2),
     ])
     NSLayoutConstraint.activate(composingConstraints)
+    composer.fullScreenContainer = view
     composer.allowsFullScreen = true
     composer.setInputIdentifier("create-session-input")
     composer.setComposerState(CreateJSON.encode(["placeholder": String(localized: "create.composer.placeholder", bundle: .lody)]))
@@ -169,6 +185,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   @objc private func dismissKeyboard() { view.endEditing(true) }
 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    guard !composer.isFullScreenActive else { return false }
     guard let target = touch.view, !target.isDescendant(of: host) else { return false }
     // Search fields in expanded pickers must still be able to take focus.
     var ancestor: UIView? = target
@@ -181,9 +198,24 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
 
+  private func updateComposerReservedHeight() {
+    guard isViewLoaded else { return }
+    if panelState.open != nil {
+      composer.inlineTopReservedHeight = nil
+    } else if collapsedContextHeight > 0 {
+      composer.inlineTopReservedHeight = collapsedContextHeight
+    } else {
+      composer.inlineTopReservedHeight = nil
+    }
+  }
+
   func setComposerHeight(_ height: CGFloat) {
-    guard hostHeight.constant != height else { return }
+    let inline = composer.inlineTotalHeight > 0 ? min(height, composer.inlineTotalHeight) : height
+    let hostChanged = hostHeight.constant != height
+    let contextChanged = contextBottom.constant != -inline
+    guard hostChanged || contextChanged else { return }
     hostHeight.constant = height
+    contextBottom.constant = -inline
     viewIfLoaded?.setNeedsLayout()
   }
 

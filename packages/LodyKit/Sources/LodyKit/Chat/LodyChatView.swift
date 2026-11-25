@@ -1058,7 +1058,10 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     incoming.onComposerOptionChange = old.onComposerOptionChange
     incoming.onDraftChange = old.onDraftChange
     incoming.allowsFullScreen = old.allowsFullScreen
+    incoming.fullScreenContainer = old.fullScreenContainer
     incoming.fullScreenTopInset = old.fullScreenTopInset
+    incoming.inlineTopReservedHeight = old.inlineTopReservedHeight
+    incoming.onBeginEditing = old.onBeginEditing
     // The conversation's run config, not the creation page's, answers the chip from here on.
     incoming.onRunConfig = old.onRunConfig
     incoming.quotesSupported = old.quotesSupported

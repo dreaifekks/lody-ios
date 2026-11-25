@@ -341,43 +341,66 @@ final class CreatePanelState: ObservableObject {
   /// Recently used configurations atop the run-config sheet; empty hides the group.
   @Published var recents: [CreateOption] = []
   /// The one expanded list on the page, and separately in the sheet.
-  @Published var open: String?
+  @Published var open: String? {
+    didSet { if oldValue != open { onOpenChange?(open != nil) } }
+  }
   @Published var openInSheet: String?
   var onPick: (String, String) -> Void = { _, _ in }
   var onWorktree: (Bool) -> Void = { _ in }
   var onRetry: () -> Void = {}
+  var onCollapsedHeight: ((CGFloat) -> Void)?
+  var onOpenChange: ((Bool) -> Void)?
 }
 
 // MARK: - Page panel
 
 struct CreateContextPanel: View {
   @ObservedObject var state: CreatePanelState
+  @State private var cardHeights: [String: CGFloat] = [:]
+  @State private var branchRowHeight: CGFloat = 0
+  @State private var noteHeight: CGFloat = 0
+
+  private var collapsedHeight: CGFloat {
+    var heights: [CGFloat] = []
+    for card in state.panel.cards {
+      if let height = cardHeights[card.id], height > 0 { heights.append(height) }
+    }
+    if (state.panel.worktree != nil || state.panel.branch != nil), branchRowHeight > 0 {
+      heights.append(branchRowHeight)
+    }
+    if !state.panel.note.isEmpty, noteHeight > 0 {
+      heights.append(noteHeight)
+    }
+    guard !heights.isEmpty else { return 0 }
+    return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * LodySpacing.sm + LodySpacing.md
+  }
 
   var body: some View {
     GeometryReader { geometry in
       ScrollView {
-        VStack(alignment: .leading, spacing: LodySpacing.sm) {
+        VStack(spacing: 0) {
           Spacer(minLength: 0)
-          ForEach(state.panel.cards) { picker in
-            VStack(spacing: 0) {
-              PickerFace(picker: picker, prominent: true) { toggle(picker.id) }
-              list(picker)
-            }
-          }
-          if state.panel.worktree != nil || state.panel.branch != nil { branchLine }
-          if !state.panel.note.isEmpty {
-            if state.panel.noteRetry {
-              Button { state.onRetry() } label: {
-                note.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+          VStack(alignment: .leading, spacing: LodySpacing.sm) {
+            ForEach(state.panel.cards) { picker in
+              VStack(spacing: 0) {
+                PickerFace(picker: picker, prominent: true) { toggle(picker.id) }
+                  .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if abs((cardHeights[picker.id] ?? 0) - height) > 0.5 { cardHeights[picker.id] = height }
+                  }
+                list(picker)
               }
-              .buttonStyle(.plain)
-            } else {
-              note
+            }
+            if state.panel.worktree != nil || state.panel.branch != nil { branchLine }
+            if !state.panel.note.isEmpty {
+              noteRow
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                  if abs(noteHeight - height) > 0.5 { noteHeight = height }
+                }
             }
           }
+          .padding(.horizontal, LodyLayout.screenPaddingX)
+          .padding(.bottom, LodySpacing.md)
         }
-        .padding(.horizontal, LodyLayout.screenPaddingX)
-        .padding(.bottom, LodySpacing.md)
         .frame(minHeight: geometry.size.height, alignment: .bottom)
         .background {
           Color.clear.contentShape(Rectangle()).onTapGesture { state.open = nil }
@@ -385,6 +408,20 @@ struct CreateContextPanel: View {
       }
       .scrollBounceBehavior(.basedOnSize)
       .lodyScrollAnchor(.bottom)
+    }
+    .onChange(of: collapsedHeight) { height in state.onCollapsedHeight?(height) }
+    .onAppear { if collapsedHeight > 0 { state.onCollapsedHeight?(collapsedHeight) } }
+  }
+
+  @ViewBuilder
+  private var noteRow: some View {
+    if state.panel.noteRetry {
+      Button { state.onRetry() } label: {
+        note.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+    } else {
+      note
     }
   }
 
@@ -420,6 +457,9 @@ struct CreateContextPanel: View {
           PickerFace(picker: branch, prominent: false) { toggle(branch.id) }
         }
         Spacer(minLength: 0)
+      }
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+        if abs(branchRowHeight - height) > 0.5 { branchRowHeight = height }
       }
       if let branch = state.panel.branch { list(branch) }
     }
