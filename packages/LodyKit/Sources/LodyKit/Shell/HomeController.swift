@@ -199,6 +199,22 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
     layoutColumns()
     if !folded, !panelOpen { split.show(.secondary) }
   }
+  /// Opens a local draft Tab (Web draftTabs): no remote write until the first message is sent.
+  func openDraftTab(_ draft: SessionItem, choice: ModelChoice? = nil) {
+    if listInPopover {
+      dismissBookList { [weak self] in self?.openDraftTab(draft, choice: choice) }
+      return
+    }
+    leaveSchedulesDetail()
+    closePanel()
+    let next = SessionController(sessionId: draft.id, choice: choice, source: source, draftTab: draft)
+    session = next
+    secondary.setViewControllers([page(next, title: "")], animated: false)
+    updateBookSidebar()
+    markListSelection()
+    layoutColumns()
+    if !folded, !panelOpen { split.show(.secondary) }
+  }
   /// Only a list shown beside its conversation (iPad and unfolded iPhone Duo split) marks the open row.
   /// Compact Home pushes the conversation over the list, so returning must not leave a highlighted row.
   private func markListSelection() {

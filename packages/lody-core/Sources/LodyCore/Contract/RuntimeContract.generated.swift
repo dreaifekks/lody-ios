@@ -2499,10 +2499,11 @@ extension RuntimeContract {
     public var archived: Bool
     public var pinned: Bool
     public var projectId: String
+    public var parentSessionId: String?
     public var createdAt: String
     public var cliType: String?
     public var agentType: String?
-    public init(id: String, machineId: String, title: String, status: String, archived: Bool, pinned: Bool, projectId: String, createdAt: String, cliType: String? = nil, agentType: String? = nil) {
+    public init(id: String, machineId: String, title: String, status: String, archived: Bool, pinned: Bool, projectId: String, parentSessionId: String? = nil, createdAt: String, cliType: String? = nil, agentType: String? = nil) {
       self.id = id
       self.machineId = machineId
       self.title = title
@@ -2510,6 +2511,7 @@ extension RuntimeContract {
       self.archived = archived
       self.pinned = pinned
       self.projectId = projectId
+      self.parentSessionId = parentSessionId
       self.createdAt = createdAt
       self.cliType = cliType
       self.agentType = agentType
@@ -2523,6 +2525,7 @@ extension RuntimeContract {
       self.archived = try c.decode(Bool.self, forKey: Key("archived"))
       self.pinned = try c.decode(Bool.self, forKey: Key("pinned"))
       self.projectId = try c.decode(String.self, forKey: Key("projectId"))
+      self.parentSessionId = try c.decodeIfPresent(String.self, forKey: Key("parentSessionId"))
       self.createdAt = try c.decode(String.self, forKey: Key("createdAt"))
       self.cliType = try c.decodeIfPresent(String.self, forKey: Key("cliType"))
       self.agentType = try c.decodeIfPresent(String.self, forKey: Key("agentType"))
@@ -2536,6 +2539,7 @@ extension RuntimeContract {
       try c.encode(self.archived, forKey: Key("archived"))
       try c.encode(self.pinned, forKey: Key("pinned"))
       try c.encode(self.projectId, forKey: Key("projectId"))
+      try c.encodeIfPresent(self.parentSessionId, forKey: Key("parentSessionId"))
       try c.encode(self.createdAt, forKey: Key("createdAt"))
       try c.encodeIfPresent(self.cliType, forKey: Key("cliType"))
       try c.encodeIfPresent(self.agentType, forKey: Key("agentType"))
@@ -2555,8 +2559,9 @@ extension RuntimeContract {
     public var agentRoleId: String?
     public var agentRoleRevision: Int?
     public var projectGroupId: String?
+    public var parentSessionId: String?
     public var billingEntitlement: BillingEntitlement?
-    public init(workspaceId: String, projectId: String? = nil, sessionId: String, machineId: String, agentConfigId: String, userId: String, preferRoost: Bool? = nil, title: String, branch: String? = nil, agentRoleId: String? = nil, agentRoleRevision: Int? = nil, projectGroupId: String? = nil, billingEntitlement: BillingEntitlement?) {
+    public init(workspaceId: String, projectId: String? = nil, sessionId: String, machineId: String, agentConfigId: String, userId: String, preferRoost: Bool? = nil, title: String, branch: String? = nil, agentRoleId: String? = nil, agentRoleRevision: Int? = nil, projectGroupId: String? = nil, parentSessionId: String? = nil, billingEntitlement: BillingEntitlement?) {
       self.workspaceId = workspaceId
       self.projectId = projectId
       self.sessionId = sessionId
@@ -2569,6 +2574,7 @@ extension RuntimeContract {
       self.agentRoleId = agentRoleId
       self.agentRoleRevision = agentRoleRevision
       self.projectGroupId = projectGroupId
+      self.parentSessionId = parentSessionId
       self.billingEntitlement = billingEntitlement
     }
     public init(from decoder: any Decoder) throws {
@@ -2585,6 +2591,7 @@ extension RuntimeContract {
       self.agentRoleId = try c.decodeIfPresent(String.self, forKey: Key("agentRoleId"))
       self.agentRoleRevision = try c.decodeIfPresent(Int.self, forKey: Key("agentRoleRevision"))
       self.projectGroupId = try c.decodeIfPresent(String.self, forKey: Key("projectGroupId"))
+      self.parentSessionId = try c.decodeIfPresent(String.self, forKey: Key("parentSessionId"))
       self.billingEntitlement = try c.decode(BillingEntitlement?.self, forKey: Key("billingEntitlement"))
     }
     public func encode(to encoder: any Encoder) throws {
@@ -2601,6 +2608,7 @@ extension RuntimeContract {
       try c.encodeIfPresent(self.agentRoleId, forKey: Key("agentRoleId"))
       try c.encodeIfPresent(self.agentRoleRevision, forKey: Key("agentRoleRevision"))
       try c.encodeIfPresent(self.projectGroupId, forKey: Key("projectGroupId"))
+      try c.encodeIfPresent(self.parentSessionId, forKey: Key("parentSessionId"))
       try c.encode(self.billingEntitlement, forKey: Key("billingEntitlement"))
     }
   }

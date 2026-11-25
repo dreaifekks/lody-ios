@@ -85,6 +85,8 @@ final class SessionComposerModel {
   private var agentKind: (cliType: String, agentType: String) = ("", "")
   private var machineId = ""
   private var agentConfigId: String?
+  /// Resolved agent config id (from session metadata, or matched from options for legacy sessions).
+  private(set) var matchedAgentConfigId: String?
   /// Agent configs online on the conversation's computer, from the creation options.
   private var online: Set<String> = []
   /// Readable Roles; nil until listed, and then no Role is claimed either way.
@@ -143,6 +145,7 @@ final class SessionComposerModel {
     agentKind = (session.cliType, session.agentType)
     machineId = session.machineId
     agentConfigId = session.agentConfigId
+    matchedAgentConfigId = session.agentConfigId
     capabilityKey = key
     capabilityTask?.cancel()
     optionsRead = nil
@@ -188,8 +191,10 @@ final class SessionComposerModel {
         in: options.capabilities, machineId: session.machineId, configId: session.agentConfigId,
         cliType: session.cliType, agentType: session.agentType)
       let agents = options.agents.filter { $0.machineId == session.machineId }
-      let agentName = agents.first { $0.id == session.agentConfigId }?.name
-        ?? agents.first { session.agentConfigId == nil && $0.cliType == session.cliType && $0.agentType == session.agentType }?.name
+      let matched = agents.first { $0.id == session.agentConfigId }
+        ?? agents.first { session.agentConfigId == nil && $0.cliType == session.cliType && $0.agentType == session.agentType }
+      let agentName = matched?.name
+      if let id = matched?.id { self.matchedAgentConfigId = id }
       self.online = Set(agents.map(\.id))
       self.capability = capability ?? (retry ? self.capability : nil)
       self.agentName = agentName ?? (retry ? self.agentName : nil)

@@ -67,9 +67,14 @@ extension SessionController {
   }
 
   func wireSendEvents() {
+    composerModel.changed = { [weak self] in self?.renderComposer() }
     chat.onSend = { [weak self] body in
       guard let self, !SessionActions.isDeleting(self.source.state.workspaceId, self.sessionId), !self.planDecision.pending
       else { return }
+      if self.isDraftTab {
+        self.submitDraftTab(body)
+        return
+      }
       self.sender?.submit(body, choice: self.composerModel.sendChoice, role: self.composerModel.sendRole)
     }
     chat.onRetrySend = { [weak self] body in
@@ -189,8 +194,70 @@ extension SessionController {
   }
 
   func renderComposer() {
-    guard isViewLoaded, let session = source.state.catalog.session(sessionId) else { return }
+    guard isViewLoaded, let session = activeSession else { return }
     renderComposer(session, feed?.state ?? SessionFeedState())
+  }
+
+  /// Creates the shared-directory Tab and sends its first turn through the shared Outbox pipeline
+  /// (same createSession + sendTurn flow as CreateSessionHostController).
+  func submitDraftTab(_ body: [String: Any]) {
+    let state = source.state
+    guard let draft = draftTab,
+          state.workspace?.resolvedMode == .plaintext,
+          !state.userId.isEmpty, !state.workspaceId.isEmpty,
+          let agentConfigId = draft.agentConfigId ?? composerModel.matchedAgentConfigId,
+          let store = environment.store(state.userId, state.workspaceId),
+          let parentSessionId = draft.parentSessionId, !parentSessionId.isEmpty,
+          var send = SessionSender.object(body) else {
+      draftRestoreToken += 1
+      chat.restoreDraft(token: draftRestoreToken)
+      LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: .error)
+      return
+    }
+    let message = body["text"] as? String ?? ""
+    let shown = (body["displayText"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let title = CreateDraftRecord.title(shown ?? message, fallback: String(localized: "session.tabs.defaultTitle", bundle: .lody))
+    let createdAt = CreateDraftRecord.now()
+    var sessionValue: [String: OutboxValue] = [
+      "id": .string(sessionId),
+      "projectId": .string(draft.projectId),
+      "machineId": .string(draft.machineId),
+      "cliType": .string(draft.cliType),
+      "agentType": .string(draft.agentType),
+      "agentConfigId": .string(agentConfigId),
+      "parentSessionId": .string(parentSessionId),
+      "title": .string(title),
+      "status": .string("idle"),
+      "archived": .bool(false),
+      "pinned": .bool(false),
+      "createdAt": .string(createdAt),
+    ]
+    if let branch = draft.branchName, !branch.isEmpty { sessionValue["branchName"] = .string(branch) }
+    var creationFields: [String: Any] = [
+      "workspaceId": state.workspaceId,
+      "sessionId": sessionId,
+      "parentSessionId": parentSessionId,
+      "machineId": draft.machineId,
+      "agentConfigId": agentConfigId,
+      "userId": state.userId,
+      "title": title,
+    ]
+    if let role = composerModel.activeRole?.role {
+      creationFields["agentRoleId"] = role.id
+      creationFields["agentRoleRevision"] = role.revision
+    }
+    send["choice"] = .object(composerModel.sendChoice)
+    send["agentRoleId"] = composerModel.sendRole
+    send["creation"] = .string(Self.json(creationFields))
+    send["phase"] = .string("waiting")
+    let record = OutboxRecord(session: sessionValue, send: send)
+    draftTabSubmitted = true
+    let put = store.put(record)
+    render()
+    Task { @MainActor in
+      guard case .failure = await put.result else { return }
+      store.put(record.with(phase: "failed", reason: String(localized: "send.error.draftSaveShort", bundle: .lody)))
+    }
   }
 
   func renderComposer(_ session: SessionItem, _ feed: SessionFeedState) {
@@ -222,9 +289,13 @@ extension SessionController {
       session: session, transcript: feed.transcript, live: feed.controlReady, overflow: feed.overflow, steerable: steerable
     )
     let deleting = SessionActions.isDeleting(state.workspaceId, sessionId)
+    let draft = isDraftTab
+    let draftReady = draft && state.workspace?.resolvedMode == .plaintext
+      && !state.userId.isEmpty && !state.workspaceId.isEmpty
+      && (session.agentConfigId ?? composerModel.matchedAgentConfigId) != nil
     var composer: [String: Any] = [
       "editable": !session.archived && !deleting && !locked,
-      "canSend": sender?.canSend == true && !deleting && !locked && !planDecision.pending && !errorRetry.pending,
+      "canSend": (draft ? draftReady : sender?.canSend == true) && !deleting && !locked && !planDecision.pending && !errorRetry.pending,
       "sending": sender?.sending == true,
       "running": control.running || sender?.awaitingReply == true,
       "canStop": control.canStop, "stopping": control.stopping, "controlling": control.controlling,
@@ -234,11 +305,11 @@ extension SessionController {
       "quotaNotice": locked ? "" : quotaNotice(feed.billableTurnCount, live: live),
       "quotaLocked": locked,
       "reconnect": feed.overflow,
-      "connection": connection(feed),
+      "connection": draft ? "" : connection(feed),
       "placeholder": placeholder(session, locked: locked),
     ]
     let busy = control.running || sender?.awaitingReply == true || sender?.sending == true || OutboxDispatcher.busy.contains(session.status)
-    composer["actionBar"] = actionBarState(session, busy: busy)
+    composer["actionBar"] = draft ? [:] : actionBarState(session, busy: busy)
     composer["usage"] = sessionUsage(session, feed: feed)
     adjustComposer(&composer)
     apply("composer", Self.json(composer), chat.setComposerState)

@@ -57,6 +57,8 @@ export const CreateSessionParams = z
      * group fresh and writes its `projectRun` snapshot. `projectId` is then omitted.
      */
     projectGroupId: z.string().uuid().optional(),
+    /** Root conversation of a shared-directory Tab; the runtime copies its directory context from meta. */
+    parentSessionId: z.string().min(1).optional(),
     billingEntitlement: BillingEntitlement.nullable(),
   })
   .meta({ id: 'CreateSessionParams' });
@@ -70,6 +72,7 @@ export const CreatedSession = z
     archived: z.boolean(),
     pinned: z.boolean(),
     projectId: z.string(),
+    parentSessionId: z.string().optional(),
     createdAt: z.string(),
     cliType: z.string().optional(),
     agentType: z.string().optional(),
