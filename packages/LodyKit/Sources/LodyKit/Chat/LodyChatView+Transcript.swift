@@ -50,11 +50,12 @@ extension LodyChatView {
 
   func setProcessEntryID(_ id: String) {
     guard processEntryID != id else { return }
+    if !id.isEmpty, shareSelection != nil { endShareSelection() }
     processEntryID = id
     deferredRows.removeAll()
     backgroundColor = processBackground
-    composer.isHidden = !id.isEmpty || composerRetired
-    edgeFade.isHidden = !id.isEmpty
+    composer.isHidden = !id.isEmpty || composerRetired || shareSelection != nil
+    edgeFade.isHidden = !id.isEmpty || shareSelection != nil
     setNeedsLayout()
     applyRows()
   }
@@ -349,7 +350,7 @@ extension LodyChatView {
       for row in rows.values where row.kind == "delivery" && !activeIDs.contains(row.id) {
         guard let index = projected.lastIndex(where: { $0.entryID == row.entryID }) else { continue }
         if deliveryExits[row.id] == nil {
-          let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
+          let width = transcriptItemWidth
           let height = rowHeight(row, width: width)
           deliveryExits[row.id] = height
           rowHeights[row.id] = (height, 0, width)
@@ -450,7 +451,7 @@ extension LodyChatView {
     store.nonAnimatedRows = Set(projected.filter { catchingUpEntries.contains($0.entryID) }.map(\.id))
     prepareRowHeights(projected, previous: previous, animate: !folding && delivered == nil)
     for (id, height) in deliveryExits where rowHeights[id] == nil {
-      rowHeights[id] = (height, 0, ChatReadingColumn.itemWidth(in: collection.bounds.width))
+      rowHeights[id] = (height, 0, transcriptItemWidth)
     }
     rows = Dictionary(projected.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     let settlingDelivery = hasPositionedContent && window != nil && !insertingHistory && catchingUpEntries.isEmpty
@@ -512,6 +513,8 @@ extension LodyChatView {
         self.updateDeferredStreams()
         self.refreshFind()
         self.updateHistoryHeader()
+        self.syncShareSelectionToolbar()
+        self.refreshVisibleShareSelections()
         self.prefetchHistoryIfNeeded()
         self.deliverPendingContent()
         if let tail = projected.last(where: { $0.streaming }) {
@@ -599,7 +602,7 @@ extension LodyChatView {
     historyStartID = entryIDs[start]
     hasEarlierHistory = start > 0 || remoteHasEarlierHistory
     hasPagedHistory = hasEarlierHistory || (retainedStart != nil && hasPagedHistory)
-    let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
+    let width = transcriptItemWidth
     if width != historyWidth {
       preparedHistory.removeAll()
       historyWidth = width
@@ -659,7 +662,7 @@ extension LodyChatView {
     let work = DispatchWorkItem { [weak self] in
       guard let self, self.window != nil else { return }
       self.historyPreparation = nil
-      guard ChatReadingColumn.itemWidth(in: self.collection.bounds.width) == width else {
+      guard self.transcriptItemWidth == width else {
         self.applyRows()
         return
       }

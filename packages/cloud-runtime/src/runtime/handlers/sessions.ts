@@ -6,6 +6,7 @@ import type { Value } from '@loro-dev/flock-wasm/base64';
 import { tabOwner } from '../directory-tab';
 import { projectRows } from '../../protocol/catalog.ts';
 import { buildConversationMarkdown } from '../../protocol/conversation-markdown.ts';
+import { buildConversationShareMessages } from '../../protocol/conversation-share-image.ts';
 import { resolveSessionWorkspacePath } from '../../protocol/session-workspace-path.ts';
 import {
   archiveSession,
@@ -467,6 +468,43 @@ export function registerSessions(
       terminalTrimmed:
         stats.terminalOutputOmitted || stats.terminalOutputTruncated,
       toolResultsTruncated: stats.toolResultsTruncated,
+    };
+  });
+  channel.handle('conversationShareMessages', async (args) => {
+    const { flock } = metaWrite(args);
+    const meta = metaOf(flock, `session-${args.sessionId}`);
+    if (!meta) throw new Error('session_not_found');
+    const history = await readyHistory(args.sessionId);
+    const messages = buildConversationShareMessages(history);
+    if (!messages.length) return { state: 'empty' as const };
+    const cliType = text(meta.cliType) || undefined;
+    const agentType = text(meta.agentType) || undefined;
+    const machineId = text(meta.machineId);
+    const agentConfigId = text(meta.agentConfigId);
+    let agentName: string | undefined;
+    if (cliType === 'custom' && agentConfigId) {
+      const fromMachine = machineId
+        ? state.machineReplicas
+            .get(machineId)
+            ?.get(['agentConfig', agentConfigId])
+        : undefined;
+      const fromMeta = metaOf(flock, `agent-${agentConfigId}`);
+      const candidate =
+        fromMachine &&
+        typeof fromMachine === 'object' &&
+        !Array.isArray(fromMachine)
+          ? (fromMachine as Record<string, unknown>)
+          : fromMeta;
+      agentName = text(candidate?.name) || undefined;
+    }
+    return {
+      state: 'ready' as const,
+      ...(text(meta.title) ? { title: text(meta.title) } : {}),
+      ...(text(meta.createdAt) ? { createdAt: text(meta.createdAt) } : {}),
+      ...(cliType ? { cliType } : {}),
+      ...(agentType ? { agentType } : {}),
+      ...(agentName ? { agentName } : {}),
+      messages,
     };
   });
   channel.handle('respondPermission', respondPermission);

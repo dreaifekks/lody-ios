@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","inspectProposal","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","conversationShareMessages","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","inspectProposal","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -2488,6 +2488,179 @@ extension RuntimeContract {
         try c.encode("ready", forKey: Key("state"))
         try value.encode(to: encoder)
       }
+    }
+  }
+
+  public enum ConversationShareMessageRole: String, Codable, Sendable, Equatable, CaseIterable {
+    case user = "user"
+    case assistant = "assistant"
+  }
+
+  public struct ConversationShareMessage: Codable, Sendable, Equatable {
+    public var id: String
+    public var role: ConversationShareMessageRole
+    public var text: String
+    public var references: [ConversationShareReference]?
+    public var estimatedTokens: Double
+    public var modelName: String?
+    public var userTurnId: String?
+    public init(id: String, role: ConversationShareMessageRole, text: String, references: [ConversationShareReference]? = nil, estimatedTokens: Double, modelName: String? = nil, userTurnId: String? = nil) {
+      self.id = id
+      self.role = role
+      self.text = text
+      self.references = references
+      self.estimatedTokens = estimatedTokens
+      self.modelName = modelName
+      self.userTurnId = userTurnId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.id = try c.decode(String.self, forKey: Key("id"))
+      self.role = try c.decode(ConversationShareMessageRole.self, forKey: Key("role"))
+      self.text = try c.decode(String.self, forKey: Key("text"))
+      self.references = try c.decodeIfPresent([ConversationShareReference].self, forKey: Key("references"))
+      self.estimatedTokens = try c.decode(Double.self, forKey: Key("estimatedTokens"))
+      self.modelName = try c.decodeIfPresent(String.self, forKey: Key("modelName"))
+      self.userTurnId = try c.decodeIfPresent(String.self, forKey: Key("userTurnId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.id, forKey: Key("id"))
+      try c.encode(self.role, forKey: Key("role"))
+      try c.encode(self.text, forKey: Key("text"))
+      try c.encodeIfPresent(self.references, forKey: Key("references"))
+      try c.encode(self.estimatedTokens, forKey: Key("estimatedTokens"))
+      try c.encodeIfPresent(self.modelName, forKey: Key("modelName"))
+      try c.encodeIfPresent(self.userTurnId, forKey: Key("userTurnId"))
+    }
+  }
+
+  public struct ConversationShareMessagesParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public init(workspaceId: String, sessionId: String) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+    }
+  }
+
+  public struct ConversationShareMessagesResultEmpty: Codable, Sendable, Equatable {
+    public init() {
+    }
+    public init(from decoder: any Decoder) throws {
+      _ = try decoder.container(keyedBy: Key.self)
+    }
+    public func encode(to encoder: any Encoder) throws {
+      _ = encoder.container(keyedBy: Key.self)
+    }
+  }
+
+  public struct ConversationShareMessagesResultReady: Codable, Sendable, Equatable {
+    public var title: String?
+    public var createdAt: String?
+    public var cliType: String?
+    public var agentType: String?
+    public var agentName: String?
+    public var messages: [ConversationShareMessage]
+    public init(title: String? = nil, createdAt: String? = nil, cliType: String? = nil, agentType: String? = nil, agentName: String? = nil, messages: [ConversationShareMessage]) {
+      self.title = title
+      self.createdAt = createdAt
+      self.cliType = cliType
+      self.agentType = agentType
+      self.agentName = agentName
+      self.messages = messages
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.title = try c.decodeIfPresent(String.self, forKey: Key("title"))
+      self.createdAt = try c.decodeIfPresent(String.self, forKey: Key("createdAt"))
+      self.cliType = try c.decodeIfPresent(String.self, forKey: Key("cliType"))
+      self.agentType = try c.decodeIfPresent(String.self, forKey: Key("agentType"))
+      self.agentName = try c.decodeIfPresent(String.self, forKey: Key("agentName"))
+      self.messages = try c.decode([ConversationShareMessage].self, forKey: Key("messages"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encodeIfPresent(self.title, forKey: Key("title"))
+      try c.encodeIfPresent(self.createdAt, forKey: Key("createdAt"))
+      try c.encodeIfPresent(self.cliType, forKey: Key("cliType"))
+      try c.encodeIfPresent(self.agentType, forKey: Key("agentType"))
+      try c.encodeIfPresent(self.agentName, forKey: Key("agentName"))
+      try c.encode(self.messages, forKey: Key("messages"))
+    }
+  }
+
+  public enum ConversationShareMessagesResult: Codable, Sendable, Equatable {
+    case empty(ConversationShareMessagesResultEmpty)
+    case ready(ConversationShareMessagesResultReady)
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      let tag = try c.decode(String.self, forKey: Key("state"))
+      switch tag {
+      case "empty": self = .empty(try ConversationShareMessagesResultEmpty(from: decoder))
+      case "ready": self = .ready(try ConversationShareMessagesResultReady(from: decoder))
+      default: throw DecodingError.dataCorruptedError(forKey: Key("state"), in: c, debugDescription: "Unknown state \(tag)")
+      }
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      switch self {
+      case .empty(let value):
+        try c.encode("empty", forKey: Key("state"))
+        try value.encode(to: encoder)
+      case .ready(let value):
+        try c.encode("ready", forKey: Key("state"))
+        try value.encode(to: encoder)
+      }
+    }
+  }
+
+  public struct ConversationShareReference: Codable, Sendable, Equatable {
+    public var start: Int
+    public var end: Int
+    public var kind: String
+    public var label: String
+    public var target: String?
+    public var mark: String?
+    public var quote: String?
+    public init(start: Int, end: Int, kind: String, label: String, target: String? = nil, mark: String? = nil, quote: String? = nil) {
+      self.start = start
+      self.end = end
+      self.kind = kind
+      self.label = label
+      self.target = target
+      self.mark = mark
+      self.quote = quote
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.start = try c.decode(Int.self, forKey: Key("start"))
+      self.end = try c.decode(Int.self, forKey: Key("end"))
+      self.kind = try c.decode(String.self, forKey: Key("kind"))
+      self.label = try c.decode(String.self, forKey: Key("label"))
+      self.target = try c.decodeIfPresent(String.self, forKey: Key("target"))
+      self.mark = try c.decodeIfPresent(String.self, forKey: Key("mark"))
+      self.quote = try c.decodeIfPresent(String.self, forKey: Key("quote"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.start, forKey: Key("start"))
+      try c.encode(self.end, forKey: Key("end"))
+      try c.encode(self.kind, forKey: Key("kind"))
+      try c.encode(self.label, forKey: Key("label"))
+      try c.encodeIfPresent(self.target, forKey: Key("target"))
+      try c.encodeIfPresent(self.mark, forKey: Key("mark"))
+      try c.encodeIfPresent(self.quote, forKey: Key("quote"))
     }
   }
 
@@ -9601,6 +9774,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum ConversationShareMessages: RuntimeCall {
+      public typealias Params = RuntimeContract.ConversationShareMessagesParams
+      public typealias Result = RuntimeContract.ConversationShareMessagesResult
+      public static let method = "conversationShareMessages"
+      public static let timeout: Double = 15
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .conversationShareMessages(let result) = value { return result }
+        return nil
+      }
+    }
     public enum CreateSession: RuntimeCall {
       public typealias Params = RuntimeContract.CreateSessionParams
       public typealias Result = RuntimeContract.CreateSessionResult
@@ -10113,6 +10296,7 @@ extension RuntimeContract {
     case closeSession(RuntimeContract.Empty)
     case controlTurn(RuntimeContract.ControlTurnResult)
     case conversationMarkdown(RuntimeContract.ConversationMarkdownResult)
+    case conversationShareMessages(RuntimeContract.ConversationShareMessagesResult)
     case createSession(RuntimeContract.CreateSessionResult)
     case createTab(RuntimeContract.CreateSessionResult)
     case creationOptions(RuntimeContract.CreationOptions)
@@ -10237,6 +10421,7 @@ extension RuntimeContract {
         case "closeSession": message = .result(id: id, .closeSession(try c.decode(RuntimeContract.Empty.self, forKey: Key("payload"))))
         case "controlTurn": message = .result(id: id, .controlTurn(try c.decode(RuntimeContract.ControlTurnResult.self, forKey: Key("payload"))))
         case "conversationMarkdown": message = .result(id: id, .conversationMarkdown(try c.decode(RuntimeContract.ConversationMarkdownResult.self, forKey: Key("payload"))))
+        case "conversationShareMessages": message = .result(id: id, .conversationShareMessages(try c.decode(RuntimeContract.ConversationShareMessagesResult.self, forKey: Key("payload"))))
         case "createSession": message = .result(id: id, .createSession(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "createTab": message = .result(id: id, .createTab(try c.decode(RuntimeContract.CreateSessionResult.self, forKey: Key("payload"))))
         case "creationOptions": message = .result(id: id, .creationOptions(try c.decode(RuntimeContract.CreationOptions.self, forKey: Key("payload"))))

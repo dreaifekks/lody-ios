@@ -79,6 +79,7 @@ final class ChatMessageContent: UIView {
 /// Draws a rounded chip behind each line's run of a reference in a user bubble, matching
 /// `ChatReferenceNode.registerChipDrawing` in the composer.
 final class ChatReferenceChipsView: UIView {
+  var quoteBarColor: UIColor = .lodyTertiary
   private var runs: [(rect: CGRect, fill: UIColor)] = []
 
   override init(frame: CGRect) {
@@ -106,7 +107,7 @@ final class ChatReferenceChipsView: UIView {
       let lines = label.rectangles(for: range).filter { $0.height > 0 && $0.minY < visible }
       guard let top = lines.map(\.minY).min(), let bottom = lines.map(\.maxY).max() else { return }
       let bar = CGRect(x: label.frame.minX, y: label.frame.minY + top + 2, width: 3, height: max(0, min(bottom, visible) - top - 4))
-      next.append((bar, UIColor.lodyTertiary))
+      next.append((bar, quoteBarColor))
     }
     guard next.count != runs.count || zip(next, runs).contains(where: { $0.rect != $1.rect || $0.fill != $1.fill }) else { return }
     runs = next

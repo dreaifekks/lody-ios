@@ -61,6 +61,11 @@
       "result": "ConversationMarkdownResult",
       "timeoutMs": 15000
     },
+    "conversationShareMessages": {
+      "params": "ConversationShareMessagesParams",
+      "result": "ConversationShareMessagesResult",
+      "timeoutMs": 15000
+    },
     "createSession": {
       "params": "CreateSessionParams",
       "result": "CreateSessionResult",
@@ -1508,6 +1513,76 @@
           ]
         }
       ]
+    },
+    "ConversationShareMessage": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "text": { "type": "string" },
+        "references": {
+          "type": "array",
+          "items": { "$ref": "ConversationShareReference" }
+        },
+        "estimatedTokens": { "type": "number", "minimum": 0 },
+        "modelName": { "type": "string" },
+        "userTurnId": { "type": "string" }
+      },
+      "required": ["id", "role", "text", "estimatedTokens"]
+    },
+    "ConversationShareMessagesParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId"]
+    },
+    "ConversationShareMessagesResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "empty" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "ready" },
+            "title": { "type": "string" },
+            "createdAt": { "type": "string" },
+            "cliType": { "type": "string" },
+            "agentType": { "type": "string" },
+            "agentName": { "type": "string" },
+            "messages": {
+              "type": "array",
+              "items": { "$ref": "ConversationShareMessage" }
+            }
+          },
+          "required": ["state", "messages"]
+        }
+      ]
+    },
+    "ConversationShareReference": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "kind": { "type": "string" },
+        "label": { "type": "string" },
+        "target": { "type": "string" },
+        "mark": { "type": "string" },
+        "quote": { "type": "string" }
+      },
+      "required": ["start", "end", "kind", "label"]
     },
     "CreatedSession": {
       "type": "object",

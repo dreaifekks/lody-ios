@@ -157,6 +157,52 @@ export const ConversationMarkdownResult = z
   ])
   .meta({ id: 'ConversationMarkdownResult' });
 
+export const ConversationShareReference = z
+  .object({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive(),
+    kind: z.string(),
+    label: z.string(),
+    target: z.string().optional(),
+    mark: z.string().optional(),
+    quote: z.string().optional(),
+  })
+  .meta({ id: 'ConversationShareReference' });
+
+export const ConversationShareMessage = z
+  .object({
+    id: z.string().min(1),
+    role: z.enum(['user', 'assistant']),
+    text: z.string(),
+    references: z.array(ConversationShareReference).optional(),
+    estimatedTokens: z.number().nonnegative(),
+    modelName: z.string().optional(),
+    userTurnId: z.string().optional(),
+  })
+  .meta({ id: 'ConversationShareMessage' });
+
+export const ConversationShareMessagesParams = z
+  .object({
+    workspaceId,
+    sessionId,
+  })
+  .meta({ id: 'ConversationShareMessagesParams' });
+
+export const ConversationShareMessagesResult = z
+  .discriminatedUnion('state', [
+    z.object({ state: z.literal('empty') }),
+    z.object({
+      state: z.literal('ready'),
+      title: z.string().optional(),
+      createdAt: z.string().optional(),
+      cliType: z.string().optional(),
+      agentType: z.string().optional(),
+      agentName: z.string().optional(),
+      messages: z.array(ConversationShareMessage),
+    }),
+  ])
+  .meta({ id: 'ConversationShareMessagesResult' });
+
 export const CheckTurnQuotaParams = z
   .object({ sessionId, billingEntitlement: BillingEntitlement.nullable() })
   .meta({ id: 'CheckTurnQuotaParams' });

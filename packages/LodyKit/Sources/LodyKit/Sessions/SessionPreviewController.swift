@@ -12,6 +12,7 @@ final class SessionPreviewController: SessionController {
     self.scenario = scenario
     let fixture = SessionPreviewFixture(offline: scenario == "offline", tools: LodyUIVerify.has("--ui-verify-process-tools"), bar: scenario)
     self.fixture = fixture
+    _ = try? WorkspaceModePins.shared.observe("preview-workspace", mode: .plaintext)
     super.init(
       sessionId: SessionPreviewFixture.sessionId, findQuery: scenario == "find" ? "needle" : "",
       source: SessionSource(
@@ -50,6 +51,18 @@ final class SessionPreviewController: SessionController {
     markdown: { _ in
       .ready(.init(markdown: "# Native session preview\n\nLive reply with a needle\n", estimatedTokens: 12, overBudget: false,
                    toolCallsCollapsed: false, thinkingTruncated: false, terminalTrimmed: false, toolResultsTruncated: 0))
+    },
+    shareMessages: { _ in
+      .ready(.init(
+        title: "Native session preview",
+        createdAt: "2026-10-29T10:00:00Z",
+        cliType: "builtin",
+        agentType: "claude",
+        messages: [
+          .init(id: "preview-user", role: .user, text: "Show the native session page", estimatedTokens: 18),
+          .init(id: "preview-answer", role: .assistant, text: "Live reply with a needle", estimatedTokens: 64, modelName: "Native fixture model", userTurnId: "preview-user"),
+        ]
+      ))
     }
   )
 

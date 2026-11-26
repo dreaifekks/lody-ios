@@ -129,6 +129,8 @@ import {
   SessionWorkspacePathResult,
   ConversationMarkdownParams,
   ConversationMarkdownResult,
+  ConversationShareMessagesParams,
+  ConversationShareMessagesResult,
   RespondPermissionParams,
   DecideProposalParams,
   DecideProposalResult,
@@ -364,6 +366,11 @@ export const runtimeCalls = {
   conversationMarkdown: {
     params: ConversationMarkdownParams,
     result: ConversationMarkdownResult,
+    timeoutMs: 15_000,
+  },
+  conversationShareMessages: {
+    params: ConversationShareMessagesParams,
+    result: ConversationShareMessagesResult,
     timeoutMs: 15_000,
   },
   checkTurnQuota: {

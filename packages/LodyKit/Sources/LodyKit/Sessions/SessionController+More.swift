@@ -6,6 +6,7 @@ import UIKit
 struct SessionCopyService {
   var workspacePath: (_ workspaceId: String, _ sessionId: String) async throws -> String?
   var markdown: (_ params: RuntimeContract.ConversationMarkdownParams) async throws -> RuntimeContract.ConversationMarkdownResult
+  var shareMessages: @MainActor (_ params: RuntimeContract.ConversationShareMessagesParams) async throws -> RuntimeContract.ConversationShareMessagesResult = { _ in .empty(.init()) }
 
   static var live: SessionCopyService {
     SessionCopyService(
@@ -16,6 +17,9 @@ struct SessionCopyService {
       },
       markdown: { params in
         try await scoped(params.workspaceId).perform(RuntimeContract.Calls.ConversationMarkdown.self, params)
+      },
+      shareMessages: { params in
+        try await scoped(params.workspaceId).perform(RuntimeContract.Calls.ConversationShareMessages.self, params)
       }
     )
   }
@@ -199,6 +203,101 @@ extension SessionController {
     }
     if trimmed.isEmpty { return text("session.copy.markdownCopied") }
     return String(format: text("session.copy.markdownTrimmed"), ListFormatter.localizedString(byJoining: trimmed))
+  }
+
+  func beginShareAsImage() {
+    guard !isDraftTab, !shareImageLoading else { return }
+    let state = source.state
+    let accountId = state.userId
+    let workspaceId = state.workspaceId
+    let currentSessionId = sessionId
+    let visit = navigationVisit
+    do {
+      try WorkspaceModePins.shared.requirePlaintext(workspaceId)
+    } catch {
+      LodyToastOverlay.shared.show(message: text("chat.shareImage.loadFailed"), kind: .error)
+      return
+    }
+    shareImageLoading = true
+    Task { [weak self] in
+      guard let self else { return }
+      defer { self.shareImageLoading = false }
+      do {
+        let result = try await self.copyService.shareMessages(
+          .init(workspaceId: workspaceId, sessionId: currentSessionId)
+        )
+        guard self.source.state.userId == accountId,
+              self.source.state.workspaceId == workspaceId,
+              self.sessionId == currentSessionId,
+              self.navigationVisit == visit,
+              WorkspaceModePins.shared.mode(workspaceId) == .plaintext else {
+          return
+        }
+        switch result {
+        case .empty:
+          LodyToastOverlay.shared.show(message: self.text("chat.shareImage.empty"), kind: .neutral)
+        case .ready(let ready):
+          let selection = ChatShareSelectionSession(
+            userId: accountId,
+            workspaceId: workspaceId,
+            sessionId: currentSessionId,
+            payload: ready
+          )
+          if !self.chat.beginShareSelection(selection) {
+            LodyToastOverlay.shared.show(message: self.text("chat.shareImage.empty"), kind: .neutral)
+          }
+        }
+      } catch {
+        guard self.source.state.userId == accountId,
+              self.source.state.workspaceId == workspaceId,
+              self.sessionId == currentSessionId,
+              self.navigationVisit == visit else {
+          return
+        }
+        LodyToastOverlay.shared.show(message: self.text("chat.shareImage.loadFailed"), kind: .error)
+      }
+    }
+  }
+
+  func presentShareImagePreview(
+    selection: ChatShareSelectionSession,
+    orderedMessages: [RuntimeContract.ConversationShareMessage]
+  ) {
+    guard !orderedMessages.isEmpty else { return }
+    let state = source.state
+    guard state.userId == selection.userId,
+          state.workspaceId == selection.workspaceId,
+          sessionId == selection.sessionId,
+          WorkspaceModePins.shared.mode(selection.workspaceId) == .plaintext else {
+      chat.endShareSelection()
+      return
+    }
+    let styleSource = view.window?.traitCollection ?? traitCollection
+    let initialTheme: ChatShareTheme = styleSource.userInterfaceStyle == .dark ? .dark : .light
+    let sheet = ChatShareImageController(
+      payload: selection.payload,
+      selectedMessages: orderedMessages,
+      repository: chat.mentionRepository,
+      initialTheme: initialTheme,
+      isScopeValid: { [weak self] in
+        guard let self else { return false }
+        let current = self.source.state
+        return current.userId == selection.userId
+          && current.workspaceId == selection.workspaceId
+          && self.sessionId == selection.sessionId
+          && WorkspaceModePins.shared.mode(selection.workspaceId) == .plaintext
+      },
+      onCompleteShare: { [weak self] in
+        self?.chat.endShareSelection()
+      }
+    )
+    shareImageSheet = sheet
+    LodyShell.shared.presentNative(
+      sheet,
+      title: text("chat.shareImage.title"),
+      detents: [1],
+      grabber: true
+    )
   }
 
   private static func copy(_ value: String, toast key: String) {

@@ -141,6 +141,11 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   var composerRetired = false
   let edgeFade = LodyEdgeFade()
   let overlay = ChatOverlay()
+  var shareSelection: ChatShareSelectionSession?
+  let shareSelectionToolbar = ChatSelectionToolbar()
+  var onPreviewShareImage: ((ChatShareSelectionSession, [RuntimeContract.ConversationShareMessage]) -> Void)?
+  var overlayBottomToComposer: NSLayoutConstraint!
+  var overlayBottomToSelectionToolbar: NSLayoutConstraint!
   var localAttachments: [String: [ChatMessageAttachment]] = [:]
   var expandedPlans = Set<String>()
   /// Plans already opened in full for a pending approval, so a reader's fold sticks.
@@ -361,7 +366,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     collection.accessibilityIdentifier = "chat-transcript"
     collection.alwaysBounceVertical = true
     collection.keyboardDismissMode = .interactive
-    let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+    let tap = UITapGestureRecognizer(target: self, action: #selector(handleCollectionTap(_:)))
     tap.cancelsTouchesInView = false
     tap.delegate = self
     collection.addGestureRecognizer(tap)
@@ -392,6 +397,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     collection.register(ChatMarkdownCell.self, forCellWithReuseIdentifier: "markdown")
     dataSource = UICollectionViewDiffableDataSource<String, String>(collectionView: collection) { [weak self] collection, index, id in
       guard let self, let row = self.rows[id] else { return nil }
+      let builtCell: UICollectionViewCell = {
       if row.kind == "chat_failed" || row.kind == "agent_warning" {
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "error", for: index) as! ChatErrorCell
         cell.configure(row)
@@ -493,7 +499,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       }
       if row.kind == "proposed_plan" {
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "proposed-plan", for: index) as! ChatPlanCell
-        let width = max(1, ChatReadingColumn.itemWidth(in: collection.bounds.width) - 32)
+        let width = max(1, self.transcriptItemWidth - 32)
         let markdown = self.store.view(id: id, text: row.text, secondary: false, streaming: row.streaming, width: width)
         markdown.onLink = { [weak self] in self?.openMessageLink($0) }
         cell.configure(row, markdown: markdown, expanded: self.expandedPlans.contains(id))
@@ -506,7 +512,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
         let cell = collection.dequeueReusableCell(withReuseIdentifier: "markdown", for: index) as! ChatMarkdownCell
         let secondary = row.kind == "thought"
         cell.onLink = { [weak self] in self?.openMessageLink($0) }
-        let width = ChatCell.textWidth(row, width: ChatReadingColumn.itemWidth(in: collection.bounds.width))
+        let width = ChatCell.textWidth(row, width: self.transcriptItemWidth)
         cell.configure(
           row,
           markdown: self.store.view(id: id, text: row.text, secondary: secondary, streaming: row.streaming, width: width),
@@ -527,6 +533,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       cell.expanded = self.expandedMessages.contains(row.entryID)
       cell.configure(row, text: self.text(for: row))
       return cell
+      }()
+      self.applyShareSelection(to: builtCell, row: row)
+      return builtCell
     }
     LodyScrollEdges.chat(collection)
     dataSource.supplementaryViewProvider = { [weak self] collection, kind, index in
@@ -567,6 +576,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     addSubview(collection)
     addSubview(edgeFade)
     addSubview(composer)
+    shareSelectionToolbar.isHidden = true
+    shareSelectionToolbar.translatesAutoresizingMaskIntoConstraints = false
+    shareSelectionToolbar.onCancel = { [weak self] in self?.endShareSelection() }
+    shareSelectionToolbar.onToggleSelectAll = { [weak self] in self?.toggleShareSelectAll() }
+    shareSelectionToolbar.onPreview = { [weak self] in self?.previewSelectedShareMessages() }
+    addSubview(shareSelectionToolbar)
     overlay.onReconnect = { [weak self] in self?.onReconnect([:]) }
     overlay.onScrollToBottom = { [weak self] in
       guard let self else { return }
@@ -586,10 +601,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     composer.allowsFullScreen = true
     let composerWidth = composer.widthAnchor.constraint(equalTo: safeAreaLayoutGuide.widthAnchor)
     composerWidth.priority = .defaultHigh
+    overlayBottomToComposer = overlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8)
+    overlayBottomToSelectionToolbar = overlay.bottomAnchor.constraint(equalTo: shareSelectionToolbar.topAnchor, constant: -8)
     NSLayoutConstraint.activate([
       overlay.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: 16),
       overlay.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -16),
-      overlay.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
+      overlayBottomToComposer,
       overlay.heightAnchor.constraint(equalToConstant: ChatOverlay.controlSize),
       collection.topAnchor.constraint(equalTo: topAnchor),
       collection.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
@@ -602,6 +619,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
       composer.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
       composer.widthAnchor.constraint(lessThanOrEqualToConstant: ChatReadingColumn.maximumWidth),
       composerWidth,
+      shareSelectionToolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
+      shareSelectionToolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
+      shareSelectionToolbar.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
     composerBottom = composer.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor)
     composerBottom.isActive = true
@@ -853,7 +873,20 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
   }
 
-  @objc private func dismissKeyboard() { endEditing(true) }
+  @objc private func handleCollectionTap(_ tap: UITapGestureRecognizer) {
+    if shareSelection != nil {
+      let point = tap.location(in: collection)
+      let inset = ChatReadingColumn.horizontalInset(in: collection.bounds.width)
+      let probeX = max(point.x, inset + ChatShareSelectionMetrics.leadingGutter + 8)
+      if let indexPath = collection.indexPathForItem(at: CGPoint(x: probeX, y: point.y)),
+         let id = dataSource.itemIdentifier(for: indexPath),
+         let row = rows[id] {
+        toggleShareEntry(row.entryID)
+      }
+      return
+    }
+    endEditing(true)
+  }
   /// A user bubble's links: its sent quotes open in full, other links as in any message.
   func openUserMessageLink(_ href: String) {
     guard let quote = ChatQuoteLink.snapshot(href) else { openMessageLink(href); return }
@@ -873,7 +906,12 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
   }
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    if gestureRecognizer === selectionTap { return true }
+    if gestureRecognizer === selectionTap { return shareSelection == nil }
+    if shareSelection != nil {
+      let location = touch.location(in: collection)
+      let inset = ChatReadingColumn.horizontalInset(in: collection.bounds.width)
+      return location.x < inset + ChatShareSelectionMetrics.leadingGutter
+    }
     // Row actions own their tap. Dismissing the keyboard first moves the row
     // before UICollectionView can deliver selection (notably Retry).
     if let index = collection.indexPathForItem(at: touch.location(in: collection)),
@@ -993,9 +1031,9 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   }
 
   func retireComposer(_ retired: Bool) {
-    composer.isUserInteractionEnabled = !retired && processEntryID.isEmpty
+    composer.isUserInteractionEnabled = !retired && processEntryID.isEmpty && shareSelection == nil
     if retired { endEditing(true) }
-    if processEntryID.isEmpty { composer.isHidden = false }
+    if processEntryID.isEmpty && shareSelection == nil { composer.isHidden = false }
     let distance = max(composer.bounds.height + 16, 88)
     composerBottom.constant = retired ? distance : 0
     let changes = {
@@ -1004,7 +1042,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     }
     let finish: (Bool) -> Void = { finished in
       guard finished, self.composerRetired == retired else { return }
-      self.composer.isHidden = retired || !self.processEntryID.isEmpty
+      self.composer.isHidden = retired || !self.processEntryID.isEmpty || self.shareSelection != nil
     }
     let duration = UIAccessibility.isReduceMotionEnabled ? 0.2 : 0.45
     UIView.animate(
@@ -1020,7 +1058,7 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
     // Window-hosted glass must not sample the destination before adoption.
     collection.alpha = hidden ? 0 : 1
     overlay.alpha = hidden ? 0 : 1
-    composer.isHidden = hidden || composerRetired || !processEntryID.isEmpty
+    composer.isHidden = hidden || composerRetired || !processEntryID.isEmpty || shareSelection != nil
   }
 
   func adoptComposerIfNeeded() {
@@ -1108,12 +1146,152 @@ final class LodyChatView: LodyAppearanceView, UICollectionViewDelegateFlowLayout
   func setComposerOptions(_ json: String) { composer.setComposerOptions(json) }
   var tabClosed = false
   func setTabClosed(_ closed: Bool) {
+    if closed, shareSelection != nil { endShareSelection() }
     if tabClosed != closed { empty.isHidden = !closed }
     tabClosed = closed
-    composer.isHidden = closed || composerRetired || !processEntryID.isEmpty
-    composer.isUserInteractionEnabled = !closed && !composerRetired
+    composer.isHidden = closed || composerRetired || !processEntryID.isEmpty || shareSelection != nil
+    composer.isUserInteractionEnabled = !closed && !composerRetired && shareSelection == nil
     if closed { endEditing(true) }
   }
 
   func setEmptyText(_ text: String) { empty.text = text }
+}
+
+extension LodyChatView {
+  var loadedShareEntryIDs: Set<String> {
+    Set(transcript.entries.filter { !$0.isQueued }.map(\.id))
+  }
+
+  var transcriptItemWidth: CGFloat {
+    let base = ChatReadingColumn.itemWidth(in: collection.bounds.width)
+    let gutter: CGFloat = shareSelection == nil ? 0 : ChatShareSelectionMetrics.leadingGutter
+    return max(1, base - gutter)
+  }
+
+  @discardableResult
+  func beginShareSelection(_ session: ChatShareSelectionSession) -> Bool {
+    guard !tabClosed, processEntryID.isEmpty else { return false }
+    let selectable = session.selectableEntryIDs(loadedEntryIDs: loadedShareEntryIDs)
+    guard !selectable.isEmpty else { return false }
+    let groups = Array(markdownSelections.values) + tableSelections.values.compactMap(\.group)
+    for group in groups where group.hasSelection {
+      group.clearSelection()
+    }
+    endEditing(true)
+    pauseTracking()
+    shareSelection = session
+    syncBottomChromeVisibility()
+    syncShareSelectionToolbar()
+    preparedHistory.removeAll()
+    measurements.removeAll()
+    rowHeights.removeAll()
+    refreshShareSelectionCellsAndLayout()
+    return true
+  }
+
+  func endShareSelection() {
+    guard shareSelection != nil else { return }
+    shareSelection = nil
+    syncBottomChromeVisibility()
+    preparedHistory.removeAll()
+    measurements.removeAll()
+    rowHeights.removeAll()
+    refreshShareSelectionCellsAndLayout()
+  }
+
+  func toggleShareEntry(_ entryID: String) {
+    guard var current = shareSelection else { return }
+    guard current.toggleEntry(entryID, loadedEntryIDs: loadedShareEntryIDs) else { return }
+    shareSelection = current
+    UISelectionFeedbackGenerator().selectionChanged()
+    syncShareSelectionToolbar()
+    refreshVisibleShareSelections()
+  }
+
+  func toggleShareSelectAll() {
+    guard var current = shareSelection else { return }
+    current.toggleSelectAll(loadedEntryIDs: loadedShareEntryIDs)
+    shareSelection = current
+    UISelectionFeedbackGenerator().selectionChanged()
+    syncShareSelectionToolbar()
+    refreshVisibleShareSelections()
+  }
+
+  func previewSelectedShareMessages() {
+    guard let current = shareSelection else { return }
+    let ordered = current.orderedSelectedMessages(loadedEntryIDs: loadedShareEntryIDs)
+    guard !ordered.isEmpty else { return }
+    onPreviewShareImage?(current, ordered)
+  }
+
+  func syncBottomChromeVisibility() {
+    let selecting = shareSelection != nil
+    shareSelectionToolbar.isHidden = !selecting
+    composer.isHidden = selecting || !processEntryID.isEmpty || composerRetired || tabClosed
+    composer.isUserInteractionEnabled = !selecting && processEntryID.isEmpty && !composerRetired && !tabClosed
+    edgeFade.isHidden = selecting || !processEntryID.isEmpty
+    overlayBottomToComposer.isActive = !selecting
+    overlayBottomToSelectionToolbar.isActive = selecting
+    setNeedsLayout()
+    layoutIfNeeded()
+    _ = updateBottomInset()
+  }
+
+  func syncShareSelectionToolbar() {
+    guard let current = shareSelection else { return }
+    let loaded = loadedShareEntryIDs
+    let selectable = current.selectableEntryIDs(loadedEntryIDs: loaded)
+    shareSelectionToolbar.update(
+      selectedCount: current.selectedCount(loadedEntryIDs: loaded),
+      allSelected: current.areAllLoadedSelected(loadedEntryIDs: loaded),
+      hasSelectable: !selectable.isEmpty
+    )
+  }
+
+  func shareCellSelectionState(for row: ChatRow) -> ChatShareCellSelectionState {
+    guard let current = shareSelection else { return .inactive }
+    let selectable = current.selectableEntryIDs(loadedEntryIDs: loadedShareEntryIDs)
+    guard selectable.contains(row.entryID) else { return .dimmed }
+    let items = dataSource.snapshot().itemIdentifiers
+    let entryItems = items.filter { rows[$0]?.entryID == row.entryID }
+    let isFirst = entryItems.first == row.id
+    let isLast = entryItems.last == row.id
+    let isSelected = current.selectedEntryIDs.contains(row.entryID)
+    return .selectable(selected: isSelected, isFirstRow: isFirst, isLastRow: isLast)
+  }
+
+  func applyShareSelection(to cell: UICollectionViewCell, row: ChatRow) {
+    ChatSelectionCellDecoration.apply(to: cell, state: shareCellSelectionState(for: row))
+  }
+
+  func refreshVisibleShareSelections() {
+    for indexPath in collection.indexPathsForVisibleItems {
+      guard let id = dataSource.itemIdentifier(for: indexPath),
+            let row = rows[id],
+            let cell = collection.cellForItem(at: indexPath) else { continue }
+      applyShareSelection(to: cell, row: row)
+    }
+  }
+
+  private func refreshShareSelectionCellsAndLayout() {
+    guard dataSource != nil else { return }
+    let offset = collection.contentOffset
+    if !applying {
+      var snapshot = dataSource.snapshot()
+      let ids = snapshot.itemIdentifiers
+      if !ids.isEmpty {
+        applying = true
+        snapshot.reconfigureItems(ids)
+        dataSource.apply(snapshot, animatingDifferences: false)
+        applying = false
+      }
+    } else {
+      needsApply = true
+    }
+    collection.collectionViewLayout.invalidateLayout()
+    collection.layoutIfNeeded()
+    _ = updateBottomInset()
+    refreshVisibleShareSelections()
+    collection.contentOffset.y = min(bottomOffset, max(-collection.adjustedContentInset.top, offset.y))
+  }
 }

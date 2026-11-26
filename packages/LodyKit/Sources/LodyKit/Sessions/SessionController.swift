@@ -88,11 +88,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
   private var browsingVisible = false
-  private var navigationVisit = UUID()
+  var navigationVisit = UUID()
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
   var copyService = SessionCopyService.live
+  var shareImageLoading = false
+  weak var shareImageSheet: ChatShareImageController?
   var pendingOwner: (sessionId: String, userId: String)?
   /// Read receipts already sent from this page, by session, so each render does not resend them.
   private var sentReadReceipts: [String: Double] = [:]
@@ -177,7 +179,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       if let action = body["action"] as? String { self?.contextAction(action) }
     }
     wireMentionEvents()
-    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyPreferencesDidChange, .lodyWorkspaceRoleDidChange]).map { name in
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyPreferencesDidChange, .lodyWorkspaceRoleDidChange, .lodyWorkspaceEncryptionObserved]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
         let activated = note.name == UIApplication.didBecomeActiveNotification
         let viewsChanged = note.name == .lodySessionViewsDidChange
@@ -253,6 +255,17 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       }
     }
     if state.catalog.session(sessionId) != nil { draftTab = nil }
+    if let activeSelection = chat.shareSelection {
+      let validScope = state.userId == activeSelection.userId
+        && state.workspaceId == activeSelection.workspaceId
+        && sessionId == activeSelection.sessionId
+        && WorkspaceModePins.shared.mode(activeSelection.workspaceId) == .plaintext
+        && activeSession?.isTabClosed != true
+      if !validScope {
+        chat.endShareSelection()
+        shareImageSheet?.navigationController?.presentingViewController?.dismiss(animated: false)
+      }
+    }
     guard let session = activeSession else {
       permissionPage?.update(nil, ready: true)
       if listed, !state.loading { LodyShell.shared.close(from: self) }
@@ -519,6 +532,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       })
     }
     children += sessionMenuItems(session, canManage: canManage)
+    if WorkspaceModePins.shared.mode(state.workspaceId) == .plaintext {
+      let shareImage = UIAction(title: String(localized: "session.action.shareImage", bundle: .lody), image: UIImage(systemName: "photo")) { [weak self] _ in
+        self?.beginShareAsImage()
+      }
+      shareImage.accessibilityIdentifier = "session.more.shareImage"
+      children.append(shareImage)
+    }
     children.append(UIAction(title: String(localized: "session.action.share", bundle: .lody), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
       self?.perform("share")
     })
@@ -656,6 +676,9 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     chat.onTitleMenu = { [weak self] body in self?.titleMenuSelected(body["id"] as? String ?? "") }
     chat.onTitlePress = { [weak self] _ in self?.presentMachine() }
+    chat.onPreviewShareImage = { [weak self] selection, messages in
+      self?.presentShareImagePreview(selection: selection, orderedMessages: messages)
+    }
   }
 
   private func presentMachine() {

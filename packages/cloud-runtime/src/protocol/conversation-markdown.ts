@@ -135,7 +135,9 @@ export function collectConversationMessages(
   return messages;
 }
 
-function estimateStoredMessageTokens(items: readonly MessageContent[]): number {
+export function estimateStoredMessageTokens(
+  items: readonly MessageContent[],
+): number {
   let tokens = 0;
   const count = (text: string | null | undefined) => {
     tokens += estimateTokenCount(text ?? '');

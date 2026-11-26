@@ -311,6 +311,10 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
     setNeedsLayout()
   }
   override func accessibilityActivate() -> Bool {
+    if !contentView.isUserInteractionEnabled {
+      onActivate?()
+      return true
+    }
     if expandable { onToggle?(); return true }
     guard row?.actionable == true else { return super.accessibilityActivate() }
     onActivate?()
