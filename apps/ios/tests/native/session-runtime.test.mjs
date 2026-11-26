@@ -244,7 +244,15 @@ test(
       items: [{ type: 'text', text: 'Synthetic reply' }],
     });
     const fixture = await openTestSession({
-      target: { backend: 'roost', machineId: 'm1' },
+      target: {
+        backend: 'roost',
+        machineId: 'm1',
+        cloud: { metadata: () => undefined, observe: () => () => {} },
+        getHistoryProof: async (intent) =>
+          intent.cloudHistory ? { state: 'pending' } : 'synthetic-read-proof',
+      },
+      readyWhen: (snapshot) =>
+        snapshot.status === 'live' && snapshot.historySync?.phase === 'pending',
       readSession({ signal }) {
         if (++polls === 1) return controlRead.promise;
         if (polls === 2) return controlRetry.promise;
@@ -304,6 +312,11 @@ test(
       fixture.close();
     });
     assert.equal(fixture.events.at(-1).entries[0].finished, false);
+    assert.deepEqual(fixture.events.at(-1).historySync, {
+      source: 'machine',
+      phase: 'pending',
+      newerVersionPending: false,
+    });
     controlUnavailable = true;
     controlRead.resolve({ ok: false, result: { code: 'network_error' } });
     await controlFailed.promise;
@@ -2124,7 +2137,7 @@ for (const invalidPatch of [false, true]) {
 test(
   'Roost reads the latest page first and uses the complete directory for send state',
   { timeout: 5000 },
-  async () => {
+  async (t) => {
     const requests = [];
     let handedOff;
     const handoff = new Promise((resolve) => {
@@ -2138,6 +2151,11 @@ test(
     const directoryGate = new Promise((resolve) => {
       allowDirectory = resolve;
     });
+    const refreshRequested = Promise.withResolvers();
+    const refreshGate = Promise.withResolvers();
+    const visibleUpdate = Promise.withResolvers();
+    let revision = 1;
+    let firstDirectory = true;
     const turns = Array.from({ length: 80 }, (_, index) => ({
       id: `turn-${index}`,
       role: index < 40 ? 'user' : 'assistant',
@@ -2150,8 +2168,21 @@ test(
       target: {
         backend: 'roost',
         machineId: 'm1',
+        incremental: false,
         acceptsInput: true,
         dispatchesInput: true,
+      },
+      onEvent(event) {
+        if (!event.session || revision === 1) return;
+        const snapshot = JSON.parse(event.session);
+        if (
+          snapshot.entries.some(
+            (entry) =>
+              entry.id === 'turn-79' &&
+              entry.items?.[0]?.text === 'New assistant output',
+          )
+        )
+          visibleUpdate.resolve(snapshot);
       },
       async onRpc(request, runtime) {
         const params = await runtime.openPayload(request.params);
@@ -2166,8 +2197,14 @@ test(
           };
         } else if (params.query.kind === 'count') result = turns.length;
         else if (params.query.kind === 'readDirectory') {
-          directoryRequested();
-          await directoryGate;
+          if (firstDirectory) {
+            firstDirectory = false;
+            directoryRequested();
+            await directoryGate;
+          } else {
+            refreshRequested.resolve();
+            await refreshGate.promise;
+          }
           result = turns
             .slice(params.query.from, params.query.to)
             .map((turn, offset) => ({
@@ -2185,7 +2222,7 @@ test(
         } else {
           pageTurns = turns.slice(40);
           result = {
-            checkpoint: 'c1',
+            checkpoint: `c${revision}`,
             startPosition: 40,
             totalCount: 80,
             rows: pageTurns.map((turn, index) => ({
@@ -2204,7 +2241,7 @@ test(
               : 'session/history-read_response',
             sessionId: 's1',
             success: true,
-            historyRevision: 1,
+            historyRevision: revision,
             historyCount: turns.length,
             ...(params.operation ? { operation: params.operation } : {}),
             result,
@@ -2213,50 +2250,58 @@ test(
         };
       },
     });
-    try {
-      assert.equal(fixture.events.at(-1).entries.length, 40);
-      assert.equal(fixture.events.at(-1).billableTurnCount, undefined);
-      await directoryReady;
-      const args = {
-        sessionId: 's1',
-        machineId: 'm1',
-        userId: 'u1',
-        cliType: 'builtin',
-        agentType: 'codex',
-        text: 'Continue',
-      };
-      assert.equal(
-        (await fixture.runtime.sendTurn(args)).reason,
-        'session_not_ready',
-      );
-      const updated = fixture.nextEmit(
-        (event) => event.billableTurnCount !== undefined,
-      );
+    t.after(() => {
       allowDirectory();
-      const event = await updated;
-      assert.equal(event.billableTurnCount, 40);
-      assert.equal(event.composer.modelId, 'earlier-model');
-      assert.equal((await fixture.runtime.sendTurn(args)).state, 'uploaded');
-      await handoff;
-      const write = requests.find(
-        (request) => request.params.operation === 'accept_input_and_dispatch',
-      );
-      assert.equal(
-        write.params.payload.entry.inputConfig.modelId,
-        'earlier-model',
-      );
-      assert.equal(
-        requests.some(
-          (request) =>
-            request.params.query?.kind === 'readOlderPage' ||
-            request.params.query?.kind === 'readAll',
-        ),
-        false,
-      );
-    } finally {
-      allowDirectory();
+      refreshGate.resolve();
       fixture.close();
-    }
+    });
+    assert.equal(fixture.events.at(-1).entries.length, 40);
+    assert.equal(fixture.events.at(-1).billableTurnCount, undefined);
+    await directoryReady;
+    const args = {
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text: 'Continue',
+    };
+    assert.equal(
+      (await fixture.runtime.sendTurn(args)).reason,
+      'session_not_ready',
+    );
+    revision++;
+    turns[79].items.push({ type: 'text', text: 'New assistant output' });
+    fixture.server.getMap('session').set('historyHint', revision);
+    fixture.server.commit();
+    await fixture.pushUpdate();
+    assert.equal((await visibleUpdate.promise).sendReady, false);
+    const updated = fixture.nextEmit(
+      (event) => event.billableTurnCount !== undefined,
+    );
+    allowDirectory();
+    const event = await updated;
+    assert.equal(event.sendReady, true);
+    assert.equal(event.billableTurnCount, 40);
+    assert.equal(event.composer.modelId, 'earlier-model');
+    await refreshRequested.promise;
+    assert.equal((await fixture.runtime.sendTurn(args)).state, 'uploaded');
+    await handoff;
+    const write = requests.find(
+      (request) => request.params.operation === 'accept_input_and_dispatch',
+    );
+    assert.equal(
+      write.params.payload.entry.inputConfig.modelId,
+      'earlier-model',
+    );
+    assert.equal(
+      requests.some(
+        (request) =>
+          request.params.query?.kind === 'readOlderPage' ||
+          request.params.query?.kind === 'readAll',
+      ),
+      false,
+    );
   },
 );
 

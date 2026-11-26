@@ -25,6 +25,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   var attachmentAttempts: [String: UUID] = [:]
   var grantTask: URLSessionDataTask?
   var prefetchedGrant: (value: RuntimeContract.Grant, requestedAt: ContinuousClock.Instant)?
+  /// The Streams gateway origin of the latest workspace grant; Roost history grants must name it.
+  var streamsOrigin: (workspace: String, origin: String)?
   var grantWaiters: [String] = []
   var channel: RuntimeChannel?
   var contractReady = false

@@ -5,6 +5,28 @@ struct SessionBrowserPreview: Equatable, Sendable {
   var active: Bool
 }
 
+struct RoostHistorySync: Equatable, Sendable {
+  enum Source: String, Sendable { case machine, streams }
+  enum Phase: String, Sendable {
+    case idle, checking, pending, syncing, ready, retrying, refused
+    case ownerRequired = "owner-required"
+  }
+
+  let source: Source
+  let phase: Phase
+  let httpStatus: Int?
+  let newerVersionPending: Bool
+
+  init?(_ object: [String: Any]) {
+    guard let source = Source(rawValue: object["source"] as? String ?? ""),
+      let phase = Phase(rawValue: object["phase"] as? String ?? "") else { return nil }
+    self.source = source
+    self.phase = phase
+    httpStatus = (object["httpStatus"] as? Int).flatMap { (100...599).contains($0) ? $0 : nil }
+    newerVersionPending = object["newerVersionPending"] as? Bool == true
+  }
+}
+
 struct SessionEnvelope: Sendable {
   var version: Int?
   var revision: Int?
@@ -16,6 +38,7 @@ struct SessionEnvelope: Sendable {
   var billableTurnCount: Int?
   var historyHasMore = false
   var historyLoading = false
+  var historySync: RoostHistorySync?
   var composerJSON: String?
   var usageJSON: String?
   var preview: SessionBrowserPreview?
@@ -38,6 +61,7 @@ struct SessionEnvelope: Sendable {
     envelope.billableTurnCount = (object["billableTurnCount"] as? NSNumber)?.intValue
     envelope.historyHasMore = object["historyHasMore"] as? Bool == true
     envelope.historyLoading = object["historyLoading"] as? Bool == true
+    envelope.historySync = (object["historySync"] as? [String: Any]).flatMap(RoostHistorySync.init)
     if let composer = object["composer"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: composer) {
       envelope.composerJSON = String(decoding: data, as: UTF8.self)
     }

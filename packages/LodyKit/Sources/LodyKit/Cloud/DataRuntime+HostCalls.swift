@@ -69,9 +69,10 @@ extension DataRuntime {
       channel.fail(id: id, method: Call.method, code: "share_request_failed"); return
     }
     let user = userId
+    let gateway = streamsOrigin?.workspace == workspace ? streamsOrigin?.origin : nil
     shareTasks[id] = Task { [weak self] in
       var value: RuntimeContract.JSONValue?
-      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user) {
+      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user, gatewayOrigin: gateway) {
         value = try? RuntimeJSON.decode(RuntimeContract.JSONValue.self, from: result)
       }
       guard !Task.isCancelled, let self, self.channel === channel else { return }
@@ -103,6 +104,9 @@ extension DataRuntime {
              let url = URL(string: address), url.scheme == "https", url.user == nil, url.password == nil,
              let expiry = value["expiresIn"] as? Double, expiry > 0 {
             grant = .init(token: token, gatewayBaseUrl: address, expiresIn: expiry, shardHostSuffix: value["shardHostSuffix"] as? String)
+            if url.port == nil, let host = url.host, !host.isEmpty {
+              self.streamsOrigin = (workspace, "https://\(host.lowercased())")
+            }
           }
           if self.grantWaiters.isEmpty, let grant {
             self.prefetchedGrant = (grant, requestedAt)

@@ -6,16 +6,22 @@ final class ChatOverlay: UIView {
     case idle
     case connecting
     case paused
+    case history(label: String, reconnect: Bool)
   }
 
   static let controlSize: CGFloat = 44
   static let visualSize: CGFloat = 30
   static let tasksProcessStartID = "__tasks__"
 
-  static func slot(connection: String) -> Slot {
-    if connection == "paused" { return .paused }
-    if connection == "connecting" { return .connecting }
-    return .idle
+  static func slot(connection: String, historySyncLabel: String? = nil) -> Slot {
+    let connectionSlot: Slot = switch connection {
+    case "paused": .paused
+    case "connecting": .connecting
+    default: .idle
+    }
+    guard let historySyncLabel else { return connectionSlot }
+    let label = connectionSlot == .idle ? historySyncLabel : historySyncLabel + "\n" + connectionSlot.title
+    return .history(label: label, reconnect: connectionSlot.isActionable)
   }
 
   var slot = Slot.idle {
@@ -82,10 +88,7 @@ final class ChatOverlay: UIView {
     statusSurface.setContentHuggingPriority(.required, for: .horizontal)
     statusButton.addAction(UIAction { [weak self] _ in
       guard let self else { return }
-      switch self.slot {
-      case .paused: self.onReconnect?()
-      default: break
-      }
+      if self.slot.isActionable { self.onReconnect?() }
     }, for: .touchUpInside)
     var scrollConfiguration = UIButton.Configuration.plain()
     scrollConfiguration.contentInsets = .zero
@@ -136,7 +139,8 @@ final class ChatOverlay: UIView {
       if target.contains(button.convert(point, from: self)) { return button }
     }
     let hit = super.hitTest(point, with: event)
-    return hit === self ? nil : hit
+    if hit === self || (!slot.isActionable && hit?.isDescendant(of: statusSurface) == true) { return nil }
+    return hit
   }
 
   private func apply(animated: Bool? = nil) {
@@ -146,6 +150,7 @@ final class ChatOverlay: UIView {
     var configuration = statusButton.configuration ?? .plain()
     if showStatus {
       configuration.title = slot.title
+      configuration.titleLineBreakMode = slot.title.contains("\n") ? .byWordWrapping : .byTruncatingTail
       statusButton.configuration = configuration
       statusButton.accessibilityLabel = slot.title
     }
@@ -165,6 +170,7 @@ private extension ChatOverlay.Slot {
   var isActionable: Bool {
     switch self {
     case .paused: true
+    case .history(_, let reconnect): reconnect
     default: false
     }
   }
@@ -174,6 +180,7 @@ private extension ChatOverlay.Slot {
     case .paused: String(localized: "native.chat.connection.paused", bundle: .lody)
     case .connecting: String(localized: "native.chat.connection.connecting", bundle: .lody)
     case .idle: ""
+    case .history(let label, _): label
     }
   }
 }

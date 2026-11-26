@@ -63,6 +63,8 @@ export type RuntimeContext = {
     replica: import('../status-view.ts').StatusViewDirtyReplica,
     flock: Flock,
   ) => void;
+  /** Observes the current meta replica, following it across reconnects. */
+  observeMeta: (wake: () => void) => () => void;
   /** Restarts the live workspace settings read, keeping the current replica. */
   refreshWorkspace: () => void;
   watch: (mode: string) => void;

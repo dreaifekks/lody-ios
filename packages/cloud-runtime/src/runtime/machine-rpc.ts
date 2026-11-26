@@ -1,4 +1,5 @@
 import { clientFor } from './session';
+import type { StreamError } from '@loro-dev/streams-client';
 
 type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
 
@@ -6,6 +7,18 @@ export type RpcReply = {
   result?: unknown;
   error?: { code?: string; message?: string; data?: unknown };
 };
+
+export class MachineRpcTransportError extends Error {
+  constructor(readonly code: 'timeout' | 'network_error') {
+    super(code);
+  }
+}
+
+function rpcStreamError({ code }: StreamError): Error {
+  return code === 'timeout' || code === 'network_error'
+    ? new MachineRpcTransportError(code)
+    : new Error(code);
+}
 
 async function prepareReply(
   workspaceId: string,
@@ -21,7 +34,7 @@ async function prepareReply(
     contentType: 'application/json',
     ttlSeconds: Math.max(300, Math.ceil(timeoutMs / 1000) + 60),
   });
-  if (!created.ok) throw new Error(created.result.code);
+  if (!created.ok) throw rpcStreamError(created.result);
   signal.throwIfAborted();
   return { replyTo, response };
 }
@@ -77,7 +90,7 @@ async function appendRequest(args: {
       }),
     },
   });
-  if (!sent.ok) throw new Error(sent.result.code);
+  if (!sent.ok) throw rpcStreamError(sent.result);
 }
 
 function decodeReplies(bytes: Uint8Array): (RpcReply & { id?: string })[] {
@@ -118,7 +131,7 @@ export async function machineRpc(
   let offset = '-1';
   while (!signal.aborted) {
     const read = await response.readOnce({ offset, live: 'long-poll', signal });
-    if (!read.ok) throw new Error(read.result.code);
+    if (!read.ok) throw rpcStreamError(read.result);
     offset = read.result.nextOffset;
     if (!read.result.payload) continue;
     for (const reply of decodeReplies(read.result.payload.body)) {

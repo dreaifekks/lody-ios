@@ -18,7 +18,6 @@ import type { HistoryTokenIntent } from '../../contract/sharing.ts';
 import { sessionActionMeta } from '../fork-session';
 
 import {
-  machineSupportsSessionHistoryProtocol,
   machineSupportsSessionHistoryIncremental,
   machineSupportsSessionHistorySubscription,
   machineSupportsSessionHistoryPatches,
@@ -70,10 +69,13 @@ export function registerLifecycle(ctx: RuntimeContext) {
             protocolCapabilities?: Record<string, unknown>;
           }
         | undefined;
-      if (!machineSupportsSessionHistoryProtocol(capabilityCarrier))
-        throw new Error('roost_history_unsupported');
       return {
         backend: 'roost' as const,
+        cloud: {
+          metadata: () =>
+            isCurrent() ? getDocMeta(`session-${id}`)?.meta : undefined,
+          observe: (wake: () => void) => ctx.observeMeta(wake),
+        },
         accountId: user,
         machineId: meta.machineId as string,
         incremental:

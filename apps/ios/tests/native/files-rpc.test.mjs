@@ -245,6 +245,210 @@ test('Roost history never retries a write after a transport failure', async () =
   assert.equal(calls.length, 1);
 });
 
+test('mobile Roost opens published history without a metadata hint or an owner reply', async (t) => {
+  globalThis.indexedDB = new IDBFactory();
+  globalThis.IDBKeyRange = IDBKeyRange;
+  const controller = new AbortController();
+  machine(async () => new Promise(() => {}));
+  const binding = { generation: 'root', ownerPublicKey: 'A'.repeat(43) };
+  const streamUrl = `https://example.invalid/ds/lody-rh/${encodeURIComponent(
+    `w:rh:m:s1:${binding.ownerPublicKey}:root`,
+  )}`;
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+    assert.equal(url.origin + url.pathname, streamUrl);
+    const headers = { 'content-type': 'application/octet-stream' };
+    if ((init?.method ?? input.method) === 'HEAD')
+      return new Response(null, {
+        headers: { ...headers, 'stream-next-offset': '0' },
+      });
+    if (url.searchParams.get('direction') === 'backward')
+      return new Response(Uint8Array.of(1), {
+        headers: {
+          'content-type': 'application/vnd.loro-streams.frames',
+          'stream-prev-offset': '0'.repeat(20),
+          'stream-end-offset': '0'.repeat(20),
+          'stream-at-start': 'true',
+          'stream-at-retained-start': 'true',
+        },
+      });
+    if (url.searchParams.has('live')) {
+      const signal = init?.signal ?? input.signal;
+      signal.throwIfAborted();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    }
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...headers,
+        'stream-next-offset': '0',
+        'stream-up-to-date': 'true',
+      },
+    });
+  });
+  let status;
+  const reader = runtime.createUpstreamRoostHistory({
+    ...ctx(),
+    sessionId: 's1',
+    signal: controller.signal,
+    cloud: { metadata: () => undefined, observe: () => () => {} },
+    onHistorySync: (next) => (status = next),
+    getHistoryProof: async (intent) => {
+      assert.deepEqual(intent, {
+        workspaceId: 'w',
+        machineId: 'm',
+        sessionId: 's1',
+        cloudHistory: true,
+      });
+      return {
+        state: 'published',
+        newerVersionPending: false,
+        binding,
+        streamUrl,
+        token: 'synthetic-read-grant',
+        expiresIn: 60,
+      };
+    },
+  });
+  try {
+    assert.deepEqual((await reader.latest()).turns, []);
+    assert.equal(status.source, 'streams');
+  } finally {
+    controller.abort();
+  }
+});
+
+test('mobile Roost fences a pending grant on close and never follows a refusal to the machine', async (t) => {
+  for (const closing of [false, true]) {
+    await t.test(closing ? 'session closes' : 'Streams refuses', async () => {
+      globalThis.indexedDB = new IDBFactory();
+      globalThis.IDBKeyRange = IDBKeyRange;
+      const controller = new AbortController();
+      const reader = runtime.createUpstreamRoostHistory({
+        ...ctx(),
+        sessionId: 's1',
+        signal: controller.signal,
+        cloud: { metadata: () => undefined, observe: () => () => {} },
+        getHistoryProof: async (intent) => {
+          assert.equal(intent.cloudHistory, true);
+          if (closing) controller.abort();
+          return { status: 403 };
+        },
+      });
+      try {
+        await assert.rejects(
+          reader.latest(),
+          closing ? { name: 'AbortError' } : { status: 403 },
+        );
+      } finally {
+        controller.abort();
+      }
+    });
+  }
+});
+
+test('mobile Roost uses an admitted owner during a published Streams grant outage on older WebViews', async (t) => {
+  const nativeResolvers = Object.getOwnPropertyDescriptor(
+    Promise,
+    'withResolvers',
+  );
+  delete Promise.withResolvers;
+  t.after(() => {
+    if (nativeResolvers)
+      Object.defineProperty(Promise, 'withResolvers', nativeResolvers);
+  });
+  for (const { allowed, grant } of [
+    { allowed: true, grant: { status: 503 } },
+    { allowed: true, grant: { failure: 'transport' } },
+    { allowed: false, grant: { status: 503 } },
+  ]) {
+    const mode = 'status' in grant ? `HTTP ${grant.status}` : 'host transport';
+    await t.test(
+      `${mode}, owner ${allowed ? 'admits' : 'refuses'}`,
+      async () => {
+        globalThis.indexedDB = new IDBFactory();
+        globalThis.IDBKeyRange = IDBKeyRange;
+        const controller = new AbortController();
+        const turn = {
+          id: 'owner-turn',
+          role: 'user',
+          timestamp: '2026-01-01',
+        };
+        const scope = { workspaceId: 'w', machineId: 'm', sessionId: 's1' };
+        machine(async (_method, params) => {
+          assert.equal(params.readProof, 'synthetic-owner-proof');
+          if (!allowed)
+            return { error: { code: 'session_history_read_denied' } };
+          return {
+            result: {
+              type: 'session/history-read_response',
+              sessionId: scope.sessionId,
+              success: true,
+              historyRevision: 1,
+              historyCount: 1,
+              result:
+                params.query.kind === 'count'
+                  ? 1
+                  : {
+                      startPosition: 0,
+                      totalCount: 1,
+                      rows: [{ position: 0, state: 'ready', turnId: turn.id }],
+                      hasMoreOlder: false,
+                      cursor: null,
+                    },
+              pageTurns: [turn],
+            },
+          };
+        });
+        let status;
+        const reader = runtime.createUpstreamRoostHistory({
+          ...ctx(),
+          sessionId: scope.sessionId,
+          signal: controller.signal,
+          cloud: {
+            metadata: () => ({
+              roostCloudGeneration: 'root',
+              roostCloudAuthor: 'A'.repeat(43),
+            }),
+            observe: () => () => {},
+          },
+          getHistoryProof: async (intent) => {
+            if (intent.cloudHistory) {
+              assert.deepEqual(intent, { ...scope, cloudHistory: true });
+              return grant;
+            }
+            assert.deepEqual(intent, scope);
+            return 'synthetic-owner-proof';
+          },
+          onHistorySync: (next) => (status = next),
+        });
+        try {
+          if (allowed) {
+            assert.deepEqual((await reader.latest()).turns, [turn]);
+            assert.deepEqual(status, {
+              source: 'machine',
+              phase: 'retrying',
+              ...(grant.status && { httpStatus: grant.status }),
+            });
+          } else {
+            await assert.rejects(
+              reader.latest(),
+              /session_history_read_denied/,
+            );
+            assert.equal(status.source, 'streams');
+          }
+        } finally {
+          controller.abort();
+        }
+      },
+    );
+  }
+});
+
 test('Roost history rejects an encrypted response for another owner', async () => {
   let pending;
   globalThis.__projectClient = class {
@@ -317,7 +521,7 @@ test('sharing a Roost session reads an authoritative owner snapshot', async () =
       success: true,
       historyRevision: 1,
       historyCount: history.length,
-      result: history,
+      result: params.query.kind === 'count' ? history.length : history,
     },
   }));
   const handlers = new Map();
@@ -335,8 +539,10 @@ test('sharing a Roost session reads an authoritative owner snapshot', async () =
     },
     channel: { handle: (name, fn) => handlers.set(name, fn), emit() {} },
     getGrant: ctx().getGrant,
+    observeMeta: () => () => {},
     broker: (operation, { intent }) => {
       assert.equal(operation, 'historyToken');
+      if (intent.cloudHistory) return { state: 'pending' };
       return ctx().getHistoryProof(intent);
     },
   });
@@ -345,8 +551,8 @@ test('sharing a Roost session reads an authoritative owner snapshot', async () =
     sessionId: 's1',
   });
   assert.deepEqual(result.history, history);
-  assert.equal(calls[0].method, 'session/history-read');
-  assert.equal(calls[0].params.query.kind, 'readAll');
+  assert.equal(calls.at(-1).method, 'session/history-read');
+  assert.equal(calls.at(-1).params.query.kind, 'readAll');
 });
 
 test('upstream Roost reader rejects page bodies that do not match the directory', async () => {

@@ -1,4 +1,5 @@
 export * from './packages/shared/src/message-schemas';
+export * from './packages/shared/src/roost-cloud-history';
 export { HistoryEntryWriteSchema, parseHistoryWrite } from './packages/shared/src/history-write-schema';
 export { getServerNow } from './packages/shared/src/time-sync';
 export { isLoroRepoDocDeleted } from './packages/shared/src/repo-doc-meta';

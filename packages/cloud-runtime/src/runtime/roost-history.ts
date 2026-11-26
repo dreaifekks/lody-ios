@@ -1,6 +1,7 @@
 import {
   isEnvelope,
   machineRpc,
+  MachineRpcTransportError,
   openPayload,
   sealPayload,
   subscribeMachineHistory,
@@ -12,6 +13,7 @@ import {
   SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS,
   sessionHistoryWriteIntentDigest,
   type HistoryPublication,
+  type HistoryReadTransportFailure,
   type HistorySubscriptionOpen,
 } from './upstream-roost.js';
 
@@ -24,7 +26,9 @@ const READ_PROOF_REUSE_MS = 30_000;
 const readProofDenied = (error: unknown) =>
   error instanceof Error && error.message === 'session_history_read_denied';
 
-type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
+type Grant = (() => Promise<{ token: string; gatewayBaseUrl: string }>) & {
+  invalidate?: () => void;
+};
 type OwnerResponse = {
   type: string;
   sessionId: string;
@@ -37,6 +41,7 @@ type OwnerResponse = {
   error?: string;
   retryReason?: 'superseded';
   historyChange?: unknown;
+  rpcFailure?: HistoryReadTransportFailure;
 };
 
 type Turn = {
@@ -136,36 +141,57 @@ export function createRoostHistoryTransport(options: {
     });
     signal.throwIfAborted();
     checkScope();
-    const requestSignal = AbortSignal.any([
-      signal,
-      AbortSignal.timeout(HISTORY_RPC_TIMEOUT_MS),
-    ]);
-    const reply = await machineRpc(
-      workspaceId,
-      machineId,
-      method,
-      params,
-      getGrant,
-      requestSignal,
-      undefined,
-      HISTORY_RPC_TIMEOUT_MS,
-      edit?.requestId,
-    ).catch((error) => {
-      if (method === 'session/history-read') requestSignal.throwIfAborted();
-      throw error;
-    });
-    const result = (await decode(
-      reply,
-      method === 'session/history-read' ? requestSignal : signal,
-    )) as OwnerResponse;
-    const expected =
-      method === 'session/history-write'
-        ? 'session/history-write_response'
-        : 'session/history-read_response';
+    const read = method === 'session/history-read';
+    const expected = read
+      ? 'session/history-read_response'
+      : 'session/history-write_response';
+    const deadline = AbortSignal.timeout(HISTORY_RPC_TIMEOUT_MS);
+    const requestSignal = AbortSignal.any([signal, deadline]);
+    const requestId = edit?.requestId ?? crypto.randomUUID();
+    let result: OwnerResponse;
+    try {
+      const reply = await machineRpc(
+        workspaceId,
+        machineId,
+        method,
+        params,
+        getGrant,
+        requestSignal,
+        undefined,
+        HISTORY_RPC_TIMEOUT_MS,
+        requestId,
+      );
+      result = (await decode(
+        reply,
+        read ? requestSignal : signal,
+      )) as OwnerResponse;
+    } catch (error) {
+      if (!read) throw error;
+      signal.throwIfAborted();
+      checkScope();
+      const transportCode =
+        error instanceof MachineRpcTransportError ? error.code : undefined;
+      if (!deadline.aborted && !transportCode) throw error;
+      const code =
+        deadline.aborted || transportCode === 'timeout'
+          ? 'response_timeout'
+          : 'request_failed';
+      return {
+        type: expected,
+        sessionId,
+        success: false,
+        error:
+          code === 'response_timeout'
+            ? 'The history RPC request timed out.'
+            : 'The history RPC transport failed.',
+        rpcFailure: { source: 'transport', code, requestId, machineId },
+      };
+    }
     if (
       result.type !== expected ||
       result.sessionId !== sessionId ||
       typeof result.success !== 'boolean' ||
+      'rpcFailure' in result ||
       (edit && result.operation !== payload.operation) ||
       (payload.operation === 'respond_permission' &&
         result.success &&

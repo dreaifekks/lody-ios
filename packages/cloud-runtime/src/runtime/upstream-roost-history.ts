@@ -1,6 +1,12 @@
 import {
   createRemoteRoostSessionDataFactory,
+  createRoostHistoryReplica,
+  parseRoostCloudHistoryReadResult,
   readSessionHistoryMetadata,
+  roostCloudHistoryBinding,
+  RoostCloudHistoryRequestError,
+  RoostCloudHistoryTransportError,
+  type RoostHistorySyncState,
 } from './upstream-roost.js';
 import { createRoostHistoryTransport, type RoostWindow } from './roost-history';
 
@@ -14,6 +20,11 @@ export function roostStorageAccount(accountId: string): string {
   return suffix ? JSON.stringify([suffix, accountId]) : accountId;
 }
 
+export type MobileRoostCloudHistory = {
+  metadata: () => Record<string, unknown> | undefined;
+  observe: (wake: () => void) => () => void;
+};
+
 type RoostSessionOptions = Parameters<typeof createRoostHistoryTransport>[0] & {
   accountId?: string | null;
   patches?: boolean;
@@ -21,6 +32,9 @@ type RoostSessionOptions = Parameters<typeof createRoostHistoryTransport>[0] & {
   incremental?: boolean;
   live?: boolean;
   onSubscription?: (state: { checkpoint: string } | { reason: string }) => void;
+  cloud?: MobileRoostCloudHistory;
+  onCloudRoute?: (active: boolean) => void;
+  onHistorySync?: (state: RoostHistorySyncState) => void;
 };
 
 export function createMobileRoostSessionData(
@@ -28,12 +42,58 @@ export function createMobileRoostSessionData(
   subscribeWake?: (wake: () => void) => () => void,
 ) {
   const transport = createRoostHistoryTransport(options);
+  const cloud = options.cloud;
+  let cloudActive = false;
   return createRemoteRoostSessionDataFactory({
     ...options,
     accountId: options.accountId
       ? roostStorageAccount(options.accountId)
       : options.accountId,
     active: () => !options.signal.aborted && (options.isCurrent?.() ?? true),
+    ...(cloud && {
+      onCloudHistoryRoute: (active: boolean) => {
+        cloudActive = active;
+        options.onCloudRoute?.(active);
+      },
+      cloudHistory: (sessionId: string) => {
+        return createRoostHistoryReplica({
+          accountId: options.accountId
+            ? roostStorageAccount(options.accountId)
+            : options.accountId,
+          workspaceId: options.workspaceId,
+          machineId: options.machineId,
+          sessionId,
+          replicaNamespace: 'mobile',
+          getBinding: () => roostCloudHistoryBinding(cloud.metadata()),
+          observeBinding: cloud.observe,
+          requestGrant: async (signal) => {
+            const scope = AbortSignal.any([signal, options.signal]);
+            scope.throwIfAborted();
+            if (options.isCurrent && !options.isCurrent())
+              throw new Error('workspace_changed');
+            const grant = await options.getHistoryProof({
+              workspaceId: options.workspaceId,
+              sessionId,
+              machineId: options.machineId,
+              cloudHistory: true,
+            });
+            scope.throwIfAborted();
+            if (options.isCurrent && !options.isCurrent())
+              throw new Error('workspace_changed');
+            if (grant && typeof grant === 'object') {
+              if ('failure' in grant && grant.failure === 'transport')
+                throw new RoostCloudHistoryTransportError();
+              if ('status' in grant && typeof grant.status === 'number')
+                throw new RoostCloudHistoryRequestError(grant.status);
+            }
+            return parseRoostCloudHistoryReadResult(grant);
+          },
+          onSyncState: (sync) => {
+            if (cloudActive) options.onSubscription?.(sync);
+          },
+        });
+      },
+    }),
     subscribeWake,
     subscribeHistory: async (_machineId, _sessionId, open, publish, signal) => {
       let published = false;
@@ -43,14 +103,15 @@ export function createMobileRoostSessionData(
           (publication) => {
             published = true;
             publish(publication);
-            options.onSubscription?.({ checkpoint: publication.checkpoint });
+            if (!cloudActive)
+              options.onSubscription?.({ checkpoint: publication.checkpoint });
           },
           signal,
         );
         if (!published && !signal.aborted)
           throw new Error('history_subscription_unavailable');
       } catch (error) {
-        if (!signal.aborted && !options.signal.aborted)
+        if (!cloudActive && !signal.aborted && !options.signal.aborted)
           options.onSubscription?.({
             reason:
               error instanceof Error && error.message
@@ -70,12 +131,24 @@ export function createMobileRoostSessionData(
 /** Observe the upstream history in the native transcript's window format. */
 export function createUpstreamRoostHistory(options: RoostSessionOptions) {
   let wake: (() => void) | undefined;
-  const data = createMobileRoostSessionData(options, (next) => {
-    wake = next;
-    return () => {
-      wake = undefined;
-    };
-  });
+  let cloudActive = false;
+  let sourceVersion = 0;
+  const data = createMobileRoostSessionData(
+    {
+      ...options,
+      onCloudRoute(active) {
+        if (active !== cloudActive) sourceVersion++;
+        cloudActive = active;
+        options.onCloudRoute?.(active);
+      },
+    },
+    (next) => {
+      wake = next;
+      return () => {
+        wake = undefined;
+      };
+    },
+  );
   let generation = 0;
   let consumed = 0;
   const changes: unknown[] = [];
@@ -93,6 +166,7 @@ export function createUpstreamRoostHistory(options: RoostSessionOptions) {
   const pageWindow = async (
     page: Awaited<typeof observation.initialPage>,
   ): Promise<RoostWindow> => {
+    const source = sourceVersion;
     const turns = await Promise.all(
       page.rows.map(async (row) => {
         if (row.state !== 'ready' || !row.turnId)
@@ -108,6 +182,8 @@ export function createUpstreamRoostHistory(options: RoostSessionOptions) {
       }),
     );
     options.signal.throwIfAborted();
+    if (source !== sourceVersion)
+      throw new Error('history_observation_superseded');
     return {
       checkpoint: page.checkpoint,
       count: page.totalCount,
@@ -130,6 +206,11 @@ export function createUpstreamRoostHistory(options: RoostSessionOptions) {
     wake() {
       wake?.();
     },
+    /** Re-reads the latest window even without a history change event. */
+    reload() {
+      generation++;
+      notify?.();
+    },
     metadataChanged(metadata: readonly Record<string, unknown>[] | undefined) {
       const seen = changes.splice(0);
       if (!metadata) return true;
@@ -145,6 +226,7 @@ export function createUpstreamRoostHistory(options: RoostSessionOptions) {
       });
     },
     async metadata() {
+      if (cloudActive) return readSessionHistoryMetadata(data.history);
       return readSessionHistoryMetadata({
         readDirectory: data.history.readDirectory,
       });

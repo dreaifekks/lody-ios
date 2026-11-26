@@ -22,6 +22,7 @@ import type { HistoryProofBroker, RoostWindow } from './roost-history';
 import {
   createUpstreamRoostHistory,
   roostStorageAccount,
+  type MobileRoostCloudHistory,
 } from './upstream-roost-history';
 import {
   buildPendingUserHistoryEntry,
@@ -33,6 +34,8 @@ import {
   type AcceptedInput,
   HistoryEntryWriteSchema,
   parseHistoryWrite,
+  RoostCloudHistoryRequestError,
+  type RoostHistorySyncState,
 } from './upstream-roost.js';
 import { retrySessionRead, wakeSessionReads } from './session-read';
 import { resolveTurnRole, type TurnRole } from './agent-roles';
@@ -69,6 +72,7 @@ export type SessionTarget =
   | { backend: 'loro' }
   | {
       backend: 'roost';
+      cloud?: MobileRoostCloudHistory;
       accountId?: string | null;
       machineId: string;
       incremental: boolean;
@@ -101,6 +105,7 @@ type SessionState = {
   historyReady?: boolean;
   historyReadable?: boolean;
   historySubscriptionFailure?: string;
+  historySync?: RoostHistorySyncState;
   streamReady?: boolean;
   roostReader?: Awaited<ReturnType<typeof createUpstreamRoostHistory>>;
   roostWindow?: RoostWindow;
@@ -715,6 +720,16 @@ function loroWindowStart(state: SessionState, history: LoroList) {
   return start;
 }
 
+function isRoostHistorySuperseded(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message === 'history_observation_superseded' ||
+      error.message === 'Roost history observation was superseded' ||
+      error.message === 'Roost cached page cursor needs rebasing' ||
+      error.message === 'Roost history source changed')
+  );
+}
+
 export async function loadOlderSession(sessionId: string) {
   const state = sessions.get(sessionId);
   if (!state || !targetIsCurrent(state)) throw new Error('session_not_ready');
@@ -742,6 +757,9 @@ export async function loadOlderSession(sessionId: string) {
       if (next.start === 0)
         state.roostMetadata = next.turns.map((turn) => ({ ...turn }));
     });
+  } catch (error) {
+    // The active reader will refresh the window after a source change.
+    if (!isRoostHistorySuperseded(error)) throw error;
   } finally {
     state.roostLoading = false;
     if (sessions.get(sessionId) === state) scheduleEmit(state, state.status);
@@ -926,6 +944,7 @@ function flush(state: SessionState) {
     snapshot.sendReady = sessionSendReady(state);
     snapshot.historyHasMore = !!state.roostWindow?.cursor;
     snapshot.historyLoading = state.roostLoading === true;
+    snapshot.historySync = state.historySync;
     const pending = (acceptedInputs?.getSnapshot() ?? []).filter(
       (send) =>
         send.sessionId === state.id &&
@@ -1268,6 +1287,8 @@ export async function openSession(
     retrying(error);
   };
   const retryHistory = (error: unknown) => {
+    if (error instanceof RoostCloudHistoryRequestError && !error.retryable)
+      throw error;
     state.historyReadable = false;
     state.historyReady = false;
     retrying(error);
@@ -1379,11 +1400,19 @@ export async function openSession(
       if (sessions.get(id) !== state) return;
       state.target = target;
       if (target.backend === 'roost') {
-        const liveHistory = target.live;
+        let cloudActive = false;
         let ownerCheckpoint: string | undefined;
+        let metadataController: AbortController | undefined;
+        let metadataRefreshPending = false;
+        const resetMetadata = () => {
+          metadataController?.abort();
+          metadataController = undefined;
+          metadataRefreshPending = false;
+          state.roostMetadata = undefined;
+        };
         const confirmHistory = () => {
           if (
-            !liveHistory ||
+            (!cloudActive && !target.live) ||
             (ownerCheckpoint &&
               ownerCheckpoint === state.roostWindow?.checkpoint)
           ) {
@@ -1394,6 +1423,7 @@ export async function openSession(
           event(state.ready ? 'live' : 'syncing');
         };
         const reader = createUpstreamRoostHistory({
+          cloud: target.cloud,
           accountId: target.accountId,
           workspaceId: workspace,
           machineId: target.machineId,
@@ -1406,6 +1436,24 @@ export async function openSession(
           incremental: target.incremental,
           live: target.live,
           getHistoryProof: target.getHistoryProof,
+          onCloudRoute: (active) => {
+            if (active === cloudActive) return;
+            cloudActive = active;
+            ownerCheckpoint = undefined;
+            state.historyReady = false;
+            resetMetadata();
+            updateReadiness();
+          },
+          onHistorySync: (next) => {
+            if (
+              controller.signal.aborted ||
+              sessions.get(id) !== state ||
+              !targetIsCurrent(state)
+            )
+              return;
+            state.historySync = next;
+            scheduleEmit(state, state.status, state.reason);
+          },
           onSubscription: (observation) => {
             if (
               controller.signal.aborted ||
@@ -1417,10 +1465,21 @@ export async function openSession(
               ownerCheckpoint = undefined;
               state.historySubscriptionFailure = observation.reason;
               state.historyReady = false;
+              if (observation.reason === 'roost_cloud_history_changed')
+                resetMetadata();
               retrying(new Error(observation.reason));
             } else {
               ownerCheckpoint = observation.checkpoint;
-              if (!state.historyReady) confirmHistory();
+              if (state.historyReady) return;
+              // A published replica's checkpoint includes its forward offset,
+              // which can advance without a history change event. Reload the
+              // window so readiness confirms against the caught-up checkpoint.
+              if (
+                cloudActive &&
+                ownerCheckpoint !== state.roostWindow?.checkpoint
+              )
+                state.roostReader?.reload();
+              else confirmHistory();
             }
           },
         });
@@ -1445,51 +1504,59 @@ export async function openSession(
         if (sessions.get(id) !== state || !targetIsCurrent(state)) return;
         installHistory(state, window);
         state.historyReadable = true;
-        let metadataRevision = 0;
-        let metadataController: AbortController | undefined;
         const refreshMetadata = () => {
-          const revision = ++metadataRevision;
-          metadataController?.abort();
           if (state.roostWindow?.start === 0) {
+            resetMetadata();
             state.roostMetadata = state.roostWindow.turns.map((turn) => ({
               ...turn,
             }));
             return;
           }
-          state.roostMetadata = undefined;
-          metadataController = new AbortController();
-          const signal = AbortSignal.any([
-            controller.signal,
-            metadataController.signal,
-          ]);
+          // Keep the current source's coherent result while it catches up.
+          // New history requests one follow-up without cancelling the current read.
+          if (metadataController) {
+            metadataRefreshPending = true;
+            return;
+          }
+          const request = new AbortController();
+          metadataController = request;
+          const signal = AbortSignal.any([controller.signal, request.signal]);
           void retrySessionRead(
             signal,
             () => reader.metadata(),
             () => {},
           )
             .then((metadata) => {
-              if (sessions.get(id) !== state || revision !== metadataRevision)
+              if (
+                sessions.get(id) !== state ||
+                signal.aborted ||
+                !targetIsCurrent(state) ||
+                state.roostWindow?.start === 0
+              )
                 return;
               state.roostMetadata = metadata;
               scheduleEmit(state, state.status);
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => {
+              if (metadataController !== request) return;
+              metadataController = undefined;
+              if (!metadataRefreshPending || signal.aborted) return;
+              metadataRefreshPending = false;
+              refreshMetadata();
+            });
         };
         refreshMetadata();
         reader.metadataChanged(state.roostMetadata);
         confirmHistory();
         void (async () => {
-          const isSuperseded = (error: unknown) =>
-            error instanceof Error &&
-            (error.message === 'history_observation_superseded' ||
-              error.message === 'Roost history observation was superseded' ||
-              error.message === 'Roost cached page cursor needs rebasing');
           const retryNonSuperseded = async <T>(work: () => Promise<T>) => {
             for (let attempt = 0; ; attempt++) {
               try {
                 return await work();
               } catch (error) {
-                if (!isSuperseded(error) || attempt >= 3) throw error;
+                if (!isRoostHistorySuperseded(error) || attempt >= 3)
+                  throw error;
                 controller.signal.throwIfAborted();
               }
             }

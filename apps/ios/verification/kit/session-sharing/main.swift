@@ -72,6 +72,27 @@ final class ShareProtocol: URLProtocol {
       fatalError("Rejected mutation reported success")
     } catch { precondition(error.localizedDescription == "share_unavailable") }
     precondition(ShareProtocol.calls.withLock { $0.count } == before + 2, "Never replay a mutation")
+    // A Roost history read grant may name only a published stream of this workspace on its gateway.
+    let key = String(repeating: "A", count: 43)
+    func grant(_ url: String, owner: String = key) -> [String: Any] {
+      ["state": "published", "binding": ["generation": "root", "ownerPublicKey": owner], "streamUrl": url, "token": "t", "expiresIn": 60]
+    }
+    let gateway = "https://streams.lody.ai"
+    let published = "\(gateway)/ds/lody-rh/workspace%3Arh%3Am%3As%3A\(key)%3Aroot"
+    precondition(SessionSharing.validCloudHistoryGrant(grant(published), workspace: "workspace", gatewayOrigin: gateway))
+    for waiting in ["pending", "owner-required"] {
+      precondition(SessionSharing.validCloudHistoryGrant(["state": waiting], workspace: "workspace", gatewayOrigin: gateway))
+      precondition(!SessionSharing.validCloudHistoryGrant(["state": waiting, "token": "t"], workspace: "workspace", gatewayOrigin: gateway))
+    }
+    for rejected in [
+      grant(published.replacingOccurrences(of: gateway, with: "https://evil.example")),
+      grant(published.replacingOccurrences(of: "/lody-rh/", with: "/lody/")),
+      grant(published.replacingOccurrences(of: "/workspace%3A", with: "/other%3A")),
+      grant(published + "?x=1"),
+      grant(published, owner: String(repeating: "B", count: 43)),
+    ] {
+      precondition(!SessionSharing.validCloudHistoryGrant(rejected, workspace: "workspace", gatewayOrigin: gateway))
+    }
     print("Sharing native boundary passed: scoped operations, native-only credentials, null state, rejected mutation and no replay")
   }
 }

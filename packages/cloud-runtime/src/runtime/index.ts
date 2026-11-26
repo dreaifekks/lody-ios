@@ -371,7 +371,36 @@ function scheduleStatusRefresh(at: number | null) {
     publish();
   }, delay);
 }
+/**
+ * Metadata observers follow the current meta replica. A reconnect replaces
+ * that replica, so callers never subscribe to a Flock captured earlier.
+ */
+const metaObservers = new Set<() => void>();
+let metaObserved: { flock: Flock; unsubscribe: () => void } | undefined;
+function notifyMetaObservers() {
+  for (const wake of [...metaObservers]) wake();
+}
+function followMetaReplica(notify: boolean) {
+  const flock = metaObservers.size ? state.metaReplica?.flock : undefined;
+  if (metaObserved?.flock === flock) return;
+  metaObserved?.unsubscribe();
+  metaObserved = flock && {
+    flock,
+    unsubscribe: flock.subscribe(notifyMetaObservers),
+  };
+  if (flock && notify) notifyMetaObservers();
+}
+function observeMeta(wake: () => void) {
+  metaObservers.add(wake);
+  followMetaReplica(false);
+  return () => {
+    metaObservers.delete(wake);
+    followMetaReplica(false);
+  };
+}
 function publish() {
+  // Every installed or caught-up catalog publishes; follow a replaced replica.
+  followMetaReplica(true);
   if (publishTimer !== undefined) return;
   // Read the current scope at flush time; never retain an old catalog payload.
   publishTimer = setTimeout(() => {
@@ -826,6 +855,7 @@ const ctx: RuntimeContext = {
   markDispatch,
   statusSources,
   discardReplica,
+  observeMeta,
   refreshWorkspace() {
     watchers.get(WORKSPACE_STREAM)?.abort();
     watchers.delete(WORKSPACE_STREAM);

@@ -8468,12 +8468,14 @@ extension RuntimeContract {
     public var workspaceId: String
     public var machineId: String
     public var sessionId: String
+    public var cloudHistory: Bool?
     public var requestId: String?
     public var intentDigest: String?
-    public init(workspaceId: String, machineId: String, sessionId: String, requestId: String? = nil, intentDigest: String? = nil) {
+    public init(workspaceId: String, machineId: String, sessionId: String, cloudHistory: Bool? = nil, requestId: String? = nil, intentDigest: String? = nil) {
       self.workspaceId = workspaceId
       self.machineId = machineId
       self.sessionId = sessionId
+      self.cloudHistory = cloudHistory
       self.requestId = requestId
       self.intentDigest = intentDigest
     }
@@ -8482,6 +8484,7 @@ extension RuntimeContract {
       self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
       self.machineId = try c.decode(String.self, forKey: Key("machineId"))
       self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.cloudHistory = try c.decodeIfPresent(Bool.self, forKey: Key("cloudHistory"))
       self.requestId = try c.decodeIfPresent(String.self, forKey: Key("requestId"))
       self.intentDigest = try c.decodeIfPresent(String.self, forKey: Key("intentDigest"))
     }
@@ -8490,6 +8493,7 @@ extension RuntimeContract {
       try c.encode(self.workspaceId, forKey: Key("workspaceId"))
       try c.encode(self.machineId, forKey: Key("machineId"))
       try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encodeIfPresent(self.cloudHistory, forKey: Key("cloudHistory"))
       try c.encodeIfPresent(self.requestId, forKey: Key("requestId"))
       try c.encodeIfPresent(self.intentDigest, forKey: Key("intentDigest"))
     }

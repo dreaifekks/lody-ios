@@ -308,6 +308,7 @@ extension SessionController {
       "connection": draft ? "" : connection(feed),
       "placeholder": placeholder(session, locked: locked),
     ]
+    if let historySync = feed.historySync { composer["historySyncLabel"] = historySync.label }
     let busy = control.running || sender?.awaitingReply == true || sender?.sending == true || OutboxDispatcher.busy.contains(session.status)
     composer["actionBar"] = draft ? [:] : actionBarState(session, busy: busy)
     composer["usage"] = sessionUsage(session, feed: feed)
@@ -443,5 +444,42 @@ extension SessionController {
     )
     alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default))
     present(alert, animated: true)
+  }
+}
+
+private extension RoostHistorySync {
+  var label: String {
+    let source = switch self.source {
+    case .machine: String(localized: "native.chat.historySync.machine", bundle: .lody)
+    case .streams: String(localized: "native.chat.historySync.streams", bundle: .lody)
+    }
+    let detail: String? = switch phase {
+    case .idle, .ready: nil
+    case .checking: String(localized: "native.chat.historySync.checking", bundle: .lody)
+    case .pending: String(localized: "native.chat.historySync.pending", bundle: .lody)
+    case .ownerRequired:
+      String(localized: "native.chat.historySync.ownerRequired", bundle: .lody)
+    case .syncing: String(localized: "native.chat.historySync.syncing", bundle: .lody)
+    case .retrying where httpStatus == 403:
+      String(localized: "native.chat.historySync.unconfirmed", bundle: .lody)
+    case .retrying:
+      if let httpStatus {
+        String(format: String(localized: "native.chat.historySync.retryingHttp", bundle: .lody), httpStatus)
+      } else {
+        String(localized: "native.chat.historySync.retrying", bundle: .lody)
+      }
+    case .refused where httpStatus == 401 || httpStatus == 403:
+      String(localized: "native.chat.historySync.denied", bundle: .lody)
+    case .refused:
+      if let httpStatus {
+        String(format: String(localized: "native.chat.historySync.refused", bundle: .lody), httpStatus)
+      } else {
+        String(localized: "native.chat.historySync.unavailable", bundle: .lody)
+      }
+    }
+    let previous = newerVersionPending && self.source == .streams
+      ? String(localized: "native.chat.historySync.previous", bundle: .lody)
+      : nil
+    return [source, previous, detail].compactMap { $0 }.joined(separator: "\n")
   }
 }

@@ -37,35 +37,45 @@ unsupported machines create Loro sessions. The resulting backend is written in
 session metadata and never changed by this preference. New Tabs use the same
 selection policy.
 
-The session's metadata selects its history backend. For Roost, the runtime waits
-for the owner and its `sessionHistory` v4 capability, and negotiates incremental
-reads, subscriptions and patches separately. An existing nonempty Loro history can open
-without metadata after control-stream catchup; an explicitly Roost session or a
-retired Roost cursor never takes that fallback. The pinned upstream Roost bridge
-and history cache read and observe history, capture sharing snapshots, and submit
-permission responses through the encrypted owner RPC. The control document
+The session's metadata selects its history backend. A remote plaintext Roost
+session requests an exact-session Streams grant, including before its metadata
+contains publication fields. Pending publication, a request for machine
+authorization, temporary transport failure, or local replica quota exhaustion
+can use the owning machine after a fresh session read admits access. A Streams
+access refusal ends the read route. Streams prepares its first readable
+window independently during machine admission and while the machine serves
+history. A source switch releases waiting reads to the new source and expires
+former replies and cursors. The sync status shows the selected source and the
+current Streams outcome, including when a previous publication is still readable.
+Sharing from Streams applies the captured tail and reads a complete history.
+Permission responses and history writes use owner RPC. The control document
 carries the shared queue and human-input receipts.
 
-The owner publishes committed checkpoints over the reply stream for
-`session/history-subscribe`. The native runtime consumes that stream using
-Streams long-poll. The upstream reader applies inline deltas at their
-exact cached base and requests missing intervals from its last applied checkpoint.
-A renewed lease resumes from that same durable checkpoint. The runtime obtains
-scoped read and intent-bound write proofs through the native `historyToken`
-broker. Reads of the same session reuse a proof for up to 30 seconds and renew a
-reused proof once if the owner denies it. The owner checks current access on every
-read. Subscription leases and writes request their own proofs. The account
+The native `historyToken` broker obtains an exact-session Streams lease for the
+published history and intent-bound owner RPC proofs for writes. The runtime
+long-polls the history stream from its last locally applied position. The account
 credential stays native.
 
-Both the control stream and owner history must be ready before the runtime
+Both the control stream and published history must be ready before the runtime
 reports a Roost session as live. A failed read clears that reader's readiness
-while the other reader continues. After a history subscription failure, live
-readiness requires a fresh owner checkpoint that the transcript has loaded.
+while the other reader continues. The host obtains a short-lived exact-session
+Streams grant. The runtime opens the latest published window, backs scroll with
+older windows, and resumes from its durable applied offset. After a history
+subscription failure, live readiness requires a fresh checkpoint that the
+transcript has loaded.
+The replica checkpoint includes its forward offset. A caught-up checkpoint that
+differs from the installed window reloads the window. An idle tail long poll
+starts again. An access refusal clears readiness and stops retries for that
+binding. Binding observers follow the current meta replica across reconnects
+(`RuntimeContext.observeMeta`).
 With the control stream caught up and a readable history window installed, Stop
 and Steer can target the known turn and permission requests can be answered
 while the subscription reconnects. Sending
 also requires the session's history metadata. These commands keep their existing
 owner checks. The host displays the sync status independently of command readiness.
+New history on the same source queues a metadata refresh after the in-flight
+read finishes. The runtime can use the last complete metadata from that source
+while the refresh runs. Changing the source clears that metadata.
 
 The iOS runtime package holds the authoring source in `vendor/upstream-roost`.
 The iOS asset build verifies the generated `src/runtime/upstream-roost.js` against
@@ -89,13 +99,11 @@ input while its session is syncing; an owner may already
 have accepted it. Archiving or deleting a Roost session cancels its pending inputs through the shared
 coordinator before changing metadata. Signing out does not erase pending input data.
 
-The transcript opens with the latest owner page and requests older pages as the
-reader scrolls. The full history directory is read in the background for send
-configuration and turn counts. The upstream bridge applies negotiated patches,
-repairs bodies at the owner checkpoint, and resumes observation from its local
-cache. Both mobile runtime WebViews allow persistent browser storage for the
-upstream cache and pending-input database. Sharing takes an authoritative owner
-snapshot rather than exporting the loaded transcript window.
+The transcript opens with the latest published page and requests older pages as
+the reader scrolls. The full history directory is read in the background for
+send configuration and turn counts. Both mobile runtime WebViews allow
+persistent storage for the replica and pending inputs. Sharing captures the
+full published snapshot.
 
 ## Host contract
 

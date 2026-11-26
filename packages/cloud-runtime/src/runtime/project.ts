@@ -23,6 +23,7 @@ import {
 } from '../protocol/permissionQuestions.ts';
 import type { QuestionMeta } from '../models/session.ts';
 import { billableTurnCount } from './billing';
+import type { RoostHistorySyncState } from './upstream-roost.js';
 import { previewSummary } from './preview';
 
 export type SystemNoticeMeta = {
@@ -166,6 +167,7 @@ export type Envelope = {
   usage?: SessionUsage;
   historyHasMore?: boolean;
   historyLoading?: boolean;
+  historySync?: RoostHistorySyncState;
   /** Locally persisted owner inputs whose delivery is still being reconciled. */
   pendingRoostInputs?: readonly Record<string, unknown>[];
   awaitingUserSince?: number;
