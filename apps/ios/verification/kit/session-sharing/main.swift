@@ -15,8 +15,13 @@ final class ShareProtocol: URLProtocol {
     let host = request.url!.host!
     Self.calls.withLock { $0.append(host) }
     var body: [String: Any]
+    var status = 200
     let token = request.value(forHTTPHeaderField: "Authorization")
-    if host == "backend.lody.ai" {
+    if host == "backend.lody.ai" && request.url!.path == "/api/session-history/roost-read-grant" {
+      precondition(token == "Bearer synthetic-app-credential")
+      status = 404
+      body = ["error": "No matching routes found"]
+    } else if host == "backend.lody.ai" {
       precondition(token == "Bearer synthetic-app-credential")
       body = ["token": "synthetic-jwt"]
     } else {
@@ -38,7 +43,7 @@ final class ShareProtocol: URLProtocol {
       body = ["status": "success", "value": NSNull()]
       if path.hasSuffix("revoke") { body = ["status": "error", "errorMessage": "forbidden"] }
     }
-    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
     client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: body))
     client?.urlProtocolDidFinishLoading(self)
   }
@@ -93,6 +98,9 @@ final class ShareProtocol: URLProtocol {
     ] {
       precondition(!SessionSharing.validCloudHistoryGrant(rejected, workspace: "workspace", gatewayOrigin: gateway))
     }
+    // A backend without the cloud read-grant route keeps the owner read path.
+    let missingRoute = try await SessionSharing.run("historyToken", args: ["intent": ["workspaceId": "workspace", "machineId": "m", "sessionId": "s", "cloudHistory": true]], workspace: "workspace", userId: "user", gatewayOrigin: gateway, session: session)
+    precondition((missingRoute as? [String: Any])?["state"] as? String == "owner-required", "A missing read-grant route must fall back to the owner")
     print("Sharing native boundary passed: scoped operations, native-only credentials, null state, rejected mutation and no replay")
   }
 }

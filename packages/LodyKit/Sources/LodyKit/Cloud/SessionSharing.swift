@@ -108,6 +108,8 @@ import Security
             credential: credential, body: target, transport: transport, timeout: 10)
         } catch let error as HTTPStatus {
           try check()
+          // A backend without the cloud read-grant route keeps the owner read path.
+          if error.code == 404 { return ["state": "owner-required"] }
           return ["status": error.code]
         } catch let error as URLError {
           try check()
