@@ -1260,9 +1260,9 @@ extension ChatPendingSend {
     if !hasReply && !acknowledged && !hasDelivery {
       let delivery = status.isEmpty ? String(localized: "send.status.awaitingConnection", bundle: .lody) : status
       let recoverable = ["unknown", "uploaded"].contains(phase ?? "") && queue != true && guide != true
-      var label = delivery
-      if recoverable { label += " · " + String(localized: "send.recover.hint", bundle: .lody) }
-      else if phase == "unknown" { label += " · " + String(localized: "send.forget.hint", bundle: .lody) }
+      let label = phase == "unknown" && !recoverable
+        ? delivery + " · " + String(localized: "send.forget.hint", bundle: .lody)
+        : delivery
       result.append(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: label,
         actionable: phase == "unknown" || recoverable, attention: phase == "unknown"))
     }

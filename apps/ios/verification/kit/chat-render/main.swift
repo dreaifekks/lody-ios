@@ -758,6 +758,15 @@ deliveryCell.configure(deliveryRow, text: deliveryText)
 deliveryCell.layoutIfNeeded()
 precondition(deliveryCell.accessibilityIdentifier == deliveryRow.id)
 precondition(deliveryCell.accessibilityLabel == deliveryRow.text)
+let uploadedPending = try! JSONDecoder().decode(
+  ChatPendingSend.self,
+  from: Data(#"{"id":"uploaded-send","text":"hello","attachments":[],"status":"等待回复…","phase":"uploaded"}"#.utf8)
+)
+let uploadedDelivery = uploadedPending.rows(entries: []).last
+precondition(
+  uploadedDelivery?.kind == "delivery" && uploadedDelivery?.text == uploadedPending.status,
+  "Uploaded delivery status must not append a tap-for-options hint"
+)
 
 let firstMessage = ChatRow(id: "local-send:user", entryID: "local-send", kind: "user",
   text: "This first message takes more than one line so its delivery status needs room below the whole bubble.",
