@@ -15,9 +15,19 @@ import {
   roleSlug,
 } from '../protocol/agent-roles';
 import { encodeFrame } from '../frames';
-import { openSettings } from './settings';
+import { forgetSettings, openSettings } from './settings';
 import { creationOptions } from './create-session';
 import { clientFor } from './session';
+
+export type RoleWorkspaceOptions = {
+  /** Live, caught-up `${workspaceId}:wf:workspace` replica owned by the runtime watcher. */
+  workspaceReplica?: () =>
+    { flock: Flock; missing?: boolean; synced?: boolean } | undefined;
+  /** Called after a write lands on the server with the updated Flock and whether it created the stream. */
+  onWritten?: (flock: Flock, created: boolean) => void;
+  /** Called when a list read finds a stream the watcher still marks as missing. */
+  onStreamDiscovered?: () => void;
+};
 
 export function roleSnapshot(
   flock: Flock,
@@ -80,10 +90,15 @@ export async function roleSettings(
   grant: Parameters<typeof openSettings>[1],
   signal: AbortSignal,
   checkScope: () => void = () => {},
+  options?: RoleWorkspaceOptions,
 ) {
   if (!userId || !['list', 'save', 'delete'].includes(request.action))
     throw new Error('role_invalid');
   checkScope();
+  const synced =
+    request.action === 'list' ? options?.workspaceReplica?.() : undefined;
+  if (synced?.synced && !synced.missing)
+    return roleSnapshot(synced.flock, userId, meta, machines);
   const stream = `${request.workspaceId}:wf:workspace`;
   let replica;
   let missing = false;
@@ -91,6 +106,8 @@ export async function roleSettings(
     replica = await openSettings(stream, grant, signal, {
       cached: request.action === 'list',
     });
+    if (request.action === 'list' && synced?.missing)
+      options?.onStreamDiscovered?.();
   } catch (error) {
     if (error instanceof Error && error.message === 'forbidden')
       throw new Error('role_forbidden');
@@ -269,5 +286,7 @@ export async function roleSettings(
         : 'role_write_unknown',
     );
   checkScope();
+  forgetSettings(stream);
+  options?.onWritten?.(flock, missing);
   return snapshot();
 }

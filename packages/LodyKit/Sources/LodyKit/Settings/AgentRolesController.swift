@@ -13,9 +13,14 @@ class AgentRolesController: UIViewController {
   private var pulled = false
   private var syncedAt: Double?
   private var version = 0
+  private var scopeVersion = 0
   /// Whether the shown list is from a live read; cached rows never authorize writes.
   private var live = false
+  private var mutating = false
+  private var pendingRefresh = false
   private var observer: NSObjectProtocol?
+  private var rolesObserver: NSObjectProtocol?
+  private var foregroundObserver: NSObjectProtocol?
   private var store: SettingsSnapshotStore<AgentRoleSnapshot> {
     SettingsSnapshotStore(kind: "agent-roles", userId: workspace.userId, workspaceId: workspace.workspaceId)
   }
@@ -32,6 +37,8 @@ class AgentRolesController: UIViewController {
 
   isolated deinit {
     if let observer { NotificationCenter.default.removeObserver(observer) }
+    if let rolesObserver { NotificationCenter.default.removeObserver(rolesObserver) }
+    if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
   }
 
   override func viewDidLoad() {
@@ -42,14 +49,56 @@ class AgentRolesController: UIViewController {
     list.setRefreshEnabled(true)
     view.addSubview(list)
     observer = NotificationCenter.default.addObserver(forName: scope.change, object: nil, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated { self?.sync() }
+      MainActor.assumeIsolated { self?.handleScopeChange() }
+    }
+    rolesObserver = NotificationCenter.default.addObserver(forName: .lodyRolesChanged, object: nil, queue: .main) { [weak self] notification in
+      let eventScope = notification.userInfo?["scopeKey"] as? String
+      MainActor.assumeIsolated { self?.handleRolesChanged(scopeKey: eventScope) }
+    }
+    foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.handleForeground() }
     }
     sync(force: true)
+  }
+
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    if pendingRefresh, !loading, !mutating {
+      pendingRefresh = false
+      refresh()
+    }
   }
 
   override func didMove(toParent parent: UIViewController?) {
     super.didMove(toParent: parent)
     renderHeader()
+  }
+
+  private func handleScopeChange() {
+    let next = scope.current()
+    if next.key != workspace.key {
+      sync()
+      return
+    }
+    guard viewIfLoaded?.window != nil, !loading, !mutating else { return }
+    if !live || failed { refresh() }
+  }
+
+  private func handleRolesChanged(scopeKey: String?) {
+    guard let scopeKey, scopeKey == workspace.key else { return }
+    if mutating || loading || viewIfLoaded?.window == nil {
+      pendingRefresh = true
+      return
+    }
+    refresh()
+  }
+
+  private func handleForeground() {
+    if mutating || loading || viewIfLoaded?.window == nil {
+      pendingRefresh = true
+      return
+    }
+    refresh()
   }
 
   func sync(force: Bool = false) {
@@ -59,15 +108,20 @@ class AgentRolesController: UIViewController {
     snapshot = nil
     syncedAt = nil
     live = false
-    version += 1
-    let id = version, store = store
+    mutating = false
+    pendingRefresh = false
+    scopeVersion += 1
+    let currentScopeVersion = scopeVersion, store = store
+    // Restore the last accepted list in parallel while the live read runs immediately.
     Task { [weak self] in
-      // The last accepted list shows at once; the live read replaces it.
       let cached = await store.read()
-      guard let self, self.version == id else { return }
-      if let cached, self.snapshot == nil { self.snapshot = cached }
-      self.refresh()
+      guard let self, self.scopeVersion == currentScopeVersion else { return }
+      if let cached, self.snapshot == nil, !self.live {
+        self.snapshot = cached
+        self.render()
+      }
     }
+    refresh()
   }
 
   private func refresh() {
@@ -87,6 +141,10 @@ class AgentRolesController: UIViewController {
       self.loading = false
       self.pulled = false
       self.render()
+      if self.pendingRefresh, !self.mutating, self.viewIfLoaded?.window != nil {
+        self.pendingRefresh = false
+        self.refresh()
+      }
     }
   }
 
@@ -140,12 +198,14 @@ class AgentRolesController: UIViewController {
     if role == nil, !live { return }
     let key = workspace.key
     let editor = AgentRoleEditorController(
-      workspace: workspace, scope: scope, role: role, agents: snapshot.agents, service: service
+      workspace: workspace, scope: scope, role: role, agents: snapshot.agents, writable: live, service: service
     )
     var previous: AgentRoleSnapshot?
     editor.willChange = { [weak self] id, next in
       guard let self, self.workspace.key == key, var current = self.snapshot else { return }
       previous = current
+      self.mutating = true
+      self.pendingRefresh = false
       // Older reads must not overwrite the optimistic row.
       self.version += 1
       self.loading = false
@@ -161,16 +221,23 @@ class AgentRolesController: UIViewController {
     }
     editor.failed = { [weak self] in
       guard let self, self.workspace.key == key else { return }
+      self.mutating = false
+      self.pendingRefresh = false
       if let previous { self.snapshot = previous }
       self.render()
       self.refresh()
     }
     editor.saved = { [weak self] next in
       guard let self, self.workspace.key == key else { return }
+      self.mutating = false
       self.version += 1
       self.loading = false
       self.accept(next)
       self.render()
+      if self.pendingRefresh, self.viewIfLoaded?.window != nil {
+        self.pendingRefresh = false
+        self.refresh()
+      }
     }
     LodyShell.shared.presentNative(editor, title: AgentRoleSections.text(role == nil ? "add" : "edit"))
   }

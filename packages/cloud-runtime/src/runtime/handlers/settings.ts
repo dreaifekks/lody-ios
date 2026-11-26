@@ -76,7 +76,7 @@ export function registerSettings(ctx: RuntimeContext) {
         args.userId !== state.userId ||
         !replica ||
         state.metaReplica !== replica ||
-        state.unhealthy.size
+        state.unhealthy.has('meta')
       )
         throw new Error('workspace_changed');
     };
@@ -238,14 +238,30 @@ export function registerSettings(ctx: RuntimeContext) {
   });
   channel.handle('agentRoles', async (args) => {
     const { flock, check, scopedGrant } = replicaScope(args);
+    const machines = new Map(
+      [...state.machineReplicas].filter(([id]) => !state.unhealthy.has(id)),
+    );
     return roleSettings(
       args,
       args.userId,
       flock,
-      state.machineReplicas,
+      machines,
       scopedGrant,
       AbortSignal.timeout(35000),
       check,
+      {
+        workspaceReplica: () => state.workspaceReplica,
+        onStreamDiscovered: () => ctx.refreshWorkspace(),
+        onWritten: (written, created) => {
+          const live = state.workspaceReplica;
+          if (created || live?.missing) {
+            ctx.refreshWorkspace();
+            return;
+          }
+          if (live && live.synced && !live.missing)
+            live.flock.importFile(written.exportFile());
+        },
+      },
     );
   });
 }

@@ -344,6 +344,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       publish("live", reason: "catalog", catalog: value.catalog)
     case .agentProvidersChanged(let value):
       NotificationCenter.default.post(name: .lodyProvidersChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentRolesChanged:
+      NotificationCenter.default.post(name: .lodyRolesChanged, object: nil, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .agentProviderAuthChanged(let value):
       NotificationCenter.default.post(name: .lodyProviderAuthChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .agentProviderOperationProgress(let value):

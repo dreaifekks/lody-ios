@@ -317,6 +317,7 @@
     "agentProviderOperationProgress": "AgentProviderOperationProgress",
     "agentProviderRefreshProgress": "AgentProviderRefreshProgress",
     "agentProvidersChanged": "AgentProvidersChangedEvent",
+    "agentRolesChanged": "Empty",
     "catalog": "CatalogEvent",
     "creationOptionsChanged": "Empty",
     "diagnostic": "DiagnosticEvent",

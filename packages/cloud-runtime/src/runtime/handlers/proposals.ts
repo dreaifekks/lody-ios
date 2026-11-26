@@ -174,11 +174,23 @@ export function registerProposals(ctx: RuntimeContext) {
     check: () => void,
   ) {
     const signal = AbortSignal.timeout(35000);
+    const machines = healthyMachines();
+    const syncWorkspace = {
+      onWritten: (written: Flock, created: boolean) => {
+        const live = state.workspaceReplica;
+        if (created || live?.missing) {
+          ctx.refreshWorkspace();
+          return;
+        }
+        if (live && live.synced && !live.missing)
+          live.flock.importFile(written.exportFile());
+      },
+    };
     const list = await roleSettings(
       { workspaceId, action: 'list' },
       userId,
       meta,
-      state.machineReplicas,
+      machines,
       scopedGrant,
       signal,
       check,
@@ -209,10 +221,11 @@ export function registerProposals(ctx: RuntimeContext) {
         },
         userId,
         meta,
-        state.machineReplicas,
+        machines,
         scopedGrant,
         signal,
         check,
+        syncWorkspace,
       );
       return;
     }
@@ -235,10 +248,11 @@ export function registerProposals(ctx: RuntimeContext) {
       },
       userId,
       meta,
-      state.machineReplicas,
+      machines,
       scopedGrant,
       signal,
       check,
+      syncWorkspace,
     );
   }
 

@@ -9,7 +9,8 @@ const bundle = await build({
     contents: `export {roleSettings,roleSnapshot} from './packages/cloud-runtime/src/runtime/role-settings.ts';
 export {roleMentions,workspaceRoleMentions} from './packages/cloud-runtime/src/runtime/agent-roles.ts';
 export {expandMentions} from './packages/cloud-runtime/src/runtime/mention-expansion.ts';
-export {registerMentions} from './packages/cloud-runtime/src/runtime/handlers/mentions.ts';`,
+export {registerMentions} from './packages/cloud-runtime/src/runtime/handlers/mentions.ts';
+export {registerSettings} from './packages/cloud-runtime/src/runtime/handlers/settings.ts';`,
     resolveDir: process.cwd(),
   },
   bundle: true,
@@ -531,4 +532,111 @@ test('a Role on a healthy computer still expands while another catalog cannot sy
   unhealthy.clear();
   unhealthy.add('meta');
   await assert.rejects(expand(), /mention_expansion_failed/);
+});
+
+test('agentRoles handler ignores unhealthy machine streams, reuses synced workspaceReplica, and updates it on writes', async () => {
+  const c = catalog();
+  c.put('reviewer');
+  c.put('other-machine', { machineId: 'm2', agentConfigId: 'a2' });
+  const workspaceFlock = new Flock('ws-synced');
+  workspaceFlock.importFile(c.remote.exportFile());
+  const unhealthy = new Set(['m2']);
+  const handlers = new Map();
+  let refreshed = 0;
+  let bootstraps = 0;
+  c.bootstrap(() => {
+    bootstraps++;
+  });
+  const state = {
+    workspace: 'w',
+    userId: 'me',
+    metaReplica: { flock: c.meta },
+    workspaceReplica: { flock: workspaceFlock, synced: true, missing: false },
+    catalogs: new Map(),
+    machineReplicas: c.machines,
+    unhealthy,
+    presence: { state: 'live', onlineMachineIds: ['m1'] },
+  };
+  runtime.registerSettings({
+    state,
+    channel: {
+      handle(name, fn) {
+        handlers.set(name, fn);
+      },
+      emit() {},
+    },
+    getGrant: grant,
+    publish() {},
+    refreshWorkspace() {
+      refreshed++;
+    },
+  });
+  const agentRoles = handlers.get('agentRoles');
+  // Unhealthy machine m2 must not fail agentRoles; synced workspaceReplica avoids any bootstrap.
+  const listed = await agentRoles({
+    workspaceId: 'w',
+    userId: 'me',
+    action: 'list',
+  });
+  assert.equal(bootstraps, 0);
+  assert.deepEqual(
+    listed.agents.map((a) => a.machineId),
+    ['m1'],
+  );
+  assert.equal(
+    listed.roles.find((r) => r.id === 'other-machine').targets[0].state,
+    'machineUnavailable',
+  );
+  // Saving bootstraps fresh, updates remote, and merges into the synced workspaceReplica immediately.
+  const reviewer = listed.roles.find((r) => r.id === 'reviewer');
+  const saved = await agentRoles({
+    workspaceId: 'w',
+    userId: 'me',
+    action: 'save',
+    id: reviewer.id,
+    base: reviewer,
+    fields: {
+      name: 'Renamed Reviewer',
+      description: reviewer.description,
+      promptPrefix: reviewer.promptPrefix,
+      visibility: reviewer.visibility,
+    },
+  });
+  assert.equal(bootstraps, 1);
+  assert.equal(
+    saved.roles.find((r) => r.id === 'reviewer').name,
+    'Renamed Reviewer',
+  );
+  const reread = await agentRoles({
+    workspaceId: 'w',
+    userId: 'me',
+    action: 'list',
+  });
+  assert.equal(bootstraps, 1, 'Immediate reread uses updated workspaceReplica');
+  assert.equal(
+    reread.roles.find((r) => r.id === 'reviewer').name,
+    'Renamed Reviewer',
+  );
+  // If workspaceReplica was marked missing, a list that discovers the stream wakes the watcher.
+  state.workspaceReplica = {
+    flock: new Flock('ws-missing'),
+    missing: true,
+    synced: false,
+  };
+  const discovered = await agentRoles({
+    workspaceId: 'w',
+    userId: 'me',
+    action: 'list',
+  });
+  assert.equal(refreshed, 1);
+  assert.equal(
+    discovered.roles.find((r) => r.id === 'reviewer').name,
+    'Renamed Reviewer',
+  );
+  // Meta unhealthy must still reject agentRoles.
+  unhealthy.add('meta');
+  await assert.rejects(
+    agentRoles({ workspaceId: 'w', userId: 'me', action: 'list' }),
+    /workspace_changed/,
+  );
 });

@@ -55,12 +55,13 @@ func role(_ id: String, owner: String = "me", name: String = "Reviewer", targets
 var missing = target
 missing.state = .agentUnavailable
 let roles = AgentRoleSections.make([role("review"), role("search", owner: "other"), role("missing", targets: [missing])], userId: "me")
-let roleRows = roles[0].rows
-precondition(roleRows.map(\.id) == ["role:review", "role:search", "role:missing"])
-precondition(roleRows[0].subtitle == "Review changes\nStudio · Coder" && roleRows[0].value == "settings.roles.private")
-precondition(roleRows[1].subtitle.hasSuffix("\nsettings.roles.ownerOnly") && roleRows[1].value == "settings.roles.sharedValue")
-precondition(roleRows[2].subtitle.hasSuffix("Studio · Coder · settings.roles.agentUnavailable"))
-precondition(roles[0].footer == "settings.roles.hint")
+precondition(roles.map(\.id) == ["mine", "shared"])
+precondition(roles[0].rows.map(\.id) == ["role:review", "role:missing"])
+precondition(roles[0].rows[0].subtitle == "Review changes" && roles[0].rows[0].value == "settings.roles.private")
+precondition(roles[0].rows[1].subtitle == "settings.roles.agentUnavailable · Review changes")
+precondition(roles[1].rows.map(\.id) == ["role:search"])
+precondition(roles[1].rows[0].subtitle == "Review changes" && roles[1].rows[0].value.isEmpty)
+precondition(roles[1].footer == "settings.roles.hintShort")
 
 precondition(AgentRoleSections.editable(role("r"), userId: "me"))
 precondition(!AgentRoleSections.editable(role("r", owner: "other"), userId: "me"))
@@ -68,6 +69,8 @@ precondition(AgentRoleSections.editable(role("r", name: String(repeating: "😀"
 precondition(!AgentRoleSections.editable(role("r", name: String(repeating: "a", count: 61)), userId: "me"))
 precondition(AgentRoleSections.readOnlyHint(role("r", owner: "other"), userId: "me") == "settings.roles.readOnly")
 precondition(AgentRoleSections.readOnlyHint(role("r", name: String(repeating: "a", count: 61)), userId: "me") == "settings.roles.longReadOnly")
+precondition(AgentRoleSections.readOnlyHint(role("r"), userId: "me", live: false) == "settings.roles.cachedReadOnly")
+precondition(AgentRoleSections.readOnlyHint(role("r", owner: "other"), userId: "me", live: false) == "settings.roles.readOnly")
 precondition(AgentRoleSections.readOnlyHint(role("r"), userId: "me") == nil)
 
 func error(_ text: String) -> NSError { NSError(domain: "t", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }

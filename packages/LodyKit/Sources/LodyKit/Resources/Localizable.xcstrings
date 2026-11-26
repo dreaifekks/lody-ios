@@ -62585,6 +62585,59 @@
         }
       }
     },
+    "settings.roles.cachedReadOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前显示已保存的数据，刷新后才可编辑或删除。"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing saved data. Refresh before editing or deleting."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前顯示已儲存的資料，重新整理後才可編輯或刪除。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存済みのデータを表示しています。編集または削除する前に更新してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "저장된 데이터를 표시 중입니다. 편집하거나 삭제하기 전에 새로고침하세요."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se muestran datos guardados. Actualiza antes de editar o eliminar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Affichage des données enregistrées. Actualisez avant de modifier ou supprimer."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показаны сохранённые данные. Обновите перед редактированием или удалением."
+          }
+        }
+      }
+    },
     "settings.roles.sharedValue": {
       "extractionState": "manual",
       "localizations": {

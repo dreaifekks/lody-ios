@@ -31,8 +31,9 @@ export type RuntimeState = {
   readonly unhealthy: Set<string>;
   /** Active error-free stream catch-ups keyed by watcher mode (`meta` or `machineId`). */
   readonly catchingUp?: Map<string, Promise<void>>;
-  /** Live `${workspace}:wf:workspace` replica, written by Status view commands. */
-  workspaceReplica: (MetaReplica & { missing?: boolean }) | undefined;
+  /** Live `${workspace}:wf:workspace` replica, shared by Status view and Agent Roles. */
+  workspaceReplica:
+    (MetaReplica & { missing?: boolean; synced?: boolean }) | undefined;
   /** Last read `pinSection` rows; `loaded` is false until the first read. */
   pinSections: { sections: PinSection[]; loaded: boolean };
 };

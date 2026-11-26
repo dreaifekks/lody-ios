@@ -456,6 +456,7 @@ export const runtimeEvents = {
   agentProvidersChanged: z
     .object({ machineId: z.string() })
     .meta({ id: 'AgentProvidersChangedEvent' }),
+  agentRolesChanged: Empty,
   catalog: CatalogEvent,
   shareProgress: ShareProgressEvent,
   creationOptionsChanged: Empty,
