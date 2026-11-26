@@ -141,6 +141,7 @@ const state: RuntimeState = {
   machineReplicas: new Map(),
   catalogs: new Map(),
   unhealthy: new Set(),
+  catchingUp: new Map(),
   workspaceReplica: undefined,
   pinSections: { sections: [], loaded: false },
 };
@@ -465,9 +466,28 @@ function watch(mode: string) {
   const markUnhealthy = () => {
     if (!workspaceStream) unhealthy.add(mode);
   };
+  let finishCatchUp: (() => void) | undefined;
+  const startCatchUp = () => {
+    if (workspaceStream) return;
+    unhealthy.add(mode);
+    if (finishCatchUp || !state.catchingUp) return;
+    let pending!: Promise<void>;
+    pending = new Promise<void>((resolve) => {
+      finishCatchUp = () => {
+        finishCatchUp = undefined;
+        if (state.catchingUp?.get(mode) === pending)
+          state.catchingUp.delete(mode);
+        resolve();
+      };
+    });
+    state.catchingUp.set(mode, pending);
+  };
+  const endCatchUp = () => finishCatchUp?.();
+  watchers.get(mode)?.abort();
   const controller = new AbortController();
   watchers.set(mode, controller);
   const { signal } = controller;
+  signal.addEventListener('abort', endCatchUp, { once: true });
   const reportError = (
     reason:
       'catalog_limit' | 'stream_closed' | 'stalled_cursor' | 'network_or_auth',
@@ -510,7 +530,9 @@ function watch(mode: string) {
         });
         if (mode !== 'meta' && !workspaceStream)
           releaseBootstrap = await acquireCatalogBootstrap(signal);
-        const checkpoint = catalogImportCheckpoint(signal);
+        const checkpoint = catalogImportCheckpoint(signal, () => {
+          if (caughtUp) startCatchUp();
+        });
         channel.emit('diagnostic', { stage: 'bootstrap', stream: mode });
         const initial = preparedBootstrap
           ? { ok: true as const, result: preparedBootstrap }
@@ -539,6 +561,7 @@ function watch(mode: string) {
           }
           if (initial.result.code === 'not_found' && mode !== 'meta') {
             unhealthy.delete(mode);
+            endCatchUp();
             catalogs.set(mode, { projects: [], sessions: [], machineIds: [] });
             publish();
             releaseBootstrap();
@@ -595,6 +618,9 @@ function watch(mode: string) {
             pages = 0;
             size = 0;
           } else if (upToDate) {
+            await checkpoint();
+            const rows = flock.scan();
+            catalogs.set(mode, projectRows(rows, mode));
             caughtUp = true;
             if (mode === 'meta') {
               const first = !state.metaReplica;
@@ -602,12 +628,14 @@ function watch(mode: string) {
               // compare it to detect a reconnect, not a routine update.
               if (state.metaReplica?.flock !== flock)
                 state.metaReplica = { flock, client };
+              unhealthy.delete(mode);
+              endCatchUp();
               if (first) resumeAcceptedInputs();
-            } else machineReplicas.set(mode, flock);
-            unhealthy.delete(mode);
-            await checkpoint();
-            const rows = flock.scan();
-            catalogs.set(mode, projectRows(rows, mode));
+            } else {
+              machineReplicas.set(mode, flock);
+              unhealthy.delete(mode);
+              endCatchUp();
+            }
             if (mode !== 'meta') {
               const nextSignature = JSON.stringify(
                 providerRows(flock, mode, false, rows),
@@ -666,6 +694,7 @@ function watch(mode: string) {
             (error) => {
               livePoll = false;
               markUnhealthy();
+              endCatchUp();
               channel.emit('creationOptionsChanged', {});
               reportError('network_or_auth');
               if (!(
@@ -695,10 +724,11 @@ function watch(mode: string) {
               throw new Error('catalog_rebootstrap');
             }
           }
-          if (next.payload?.body.length || !next.upToDate) markUnhealthy();
+          if (!next.upToDate) startCatchUp();
           if (next.payload) {
             size += next.payload.body.length;
             if (size > 16 * 1024 * 1024) throw new Error('catalog_limit');
+            checkpoint.reset?.();
             await importCatalogUpdates(flock, next.payload.body, checkpoint);
           }
           if (next.nextOffset === offset && !next.upToDate)
@@ -718,6 +748,7 @@ function watch(mode: string) {
         else if (workspaceStream) state.workspaceReplica = undefined;
         else machineReplicas.delete(mode);
         markUnhealthy();
+        endCatchUp();
         channel.emit('creationOptionsChanged', {});
         const reason = error instanceof Error ? error.message : 'sync_failed';
         if (
@@ -749,6 +780,7 @@ function watch(mode: string) {
         }
       } finally {
         releaseBootstrap();
+        endCatchUp();
       }
     }
   })();

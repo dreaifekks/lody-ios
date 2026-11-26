@@ -3,6 +3,7 @@ import type {
   MentionCategory,
   MentionSource,
 } from '../../models/mentions';
+import { projectRows } from '../../protocol/catalog.ts';
 import { workspaceRoleMentions } from '../agent-roles';
 import {
   agentCommandMentions,
@@ -69,8 +70,26 @@ export function registerMentions(ctx: RuntimeContext) {
     githubPending.set(key, request);
     return request;
   }
+  async function waitCatchUp(modes: readonly string[]) {
+    const pending = modes.flatMap((mode) => {
+      const wait = state.unhealthy.has(mode)
+        ? state.catchingUp?.get(mode)
+        : undefined;
+      return wait ? [wait] : [];
+    });
+    if (!pending.length) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(pending),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 3000);
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+  }
   async function getMentions(args: MentionArgs) {
     const { catalogs, machineReplicas } = state;
+    if (args.workspaceId === state.workspace) await waitCatchUp(['meta']);
     if (
       args.workspaceId !== state.workspace ||
       !state.metaReplica ||
@@ -90,6 +109,8 @@ export function registerMentions(ctx: RuntimeContext) {
         if (!state.metaReplica || state.unhealthy.has('meta'))
           throw new Error('metadata_not_ready');
       };
+      await waitCatchUp([...machineReplicas.keys()]);
+      check();
       const result = await workspaceRoleMentions(
         sourceWorkspace,
         args.userId,
@@ -107,29 +128,43 @@ export function registerMentions(ctx: RuntimeContext) {
       check();
       return result;
     }
+    const metaSessions = () =>
+      catalogs.get('meta')?.sessions ??
+      projectRows(state.metaReplica!.flock.scan(), 'meta').sessions;
     if (args.category === 'session')
       return sessionMentions(
-        catalogs.get('meta')?.sessions ?? [],
+        metaSessions(),
         [...catalogs.values()].flatMap((value) => value.projects),
         args.sessionId,
       );
     const session = args.sessionId
-      ? catalogs
+      ? (catalogs
           .get('meta')
-          ?.sessions.find((item) => item.id === args.sessionId)
+          ?.sessions.find((item) => item.id === args.sessionId) ??
+        projectRows(state.metaReplica.flock.scan(), 'meta').sessions.find(
+          (item) => item.id === args.sessionId,
+        ))
       : undefined;
     if (args.sessionId && !session) throw new Error('session_unavailable');
     const projectId = session?.projectId ?? args.projectId;
     const project = [...catalogs.values()]
       .flatMap((value) => value.projects)
       .find((item) => item.id === projectId);
-    if (args.projectId && !project) throw new Error('project_unavailable');
+    if (args.projectId && !args.projectId.startsWith('group:') && !project)
+      throw new Error('project_unavailable');
     const machineId =
       session?.machineId ??
-      (projectId?.startsWith('github:')
+      (projectId?.startsWith('github:') || projectId?.startsWith('group:')
         ? args.machineId
         : project?.machineId) ??
       args.machineId;
+    if (machineId) await waitCatchUp([machineId]);
+    if (
+      args.workspaceId !== state.workspace ||
+      !state.metaReplica ||
+      state.unhealthy.has('meta')
+    )
+      throw new Error('metadata_not_ready');
     if (
       !machineId ||
       state.unhealthy.has(machineId) ||

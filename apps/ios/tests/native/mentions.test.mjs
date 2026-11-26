@@ -7,7 +7,7 @@ import { openTestSession } from '../helpers.mjs';
 const bundle = await build({
   stdin: {
     contents:
-      "export * from './mentions'; export * from './mention-expansion'; export * from './agent-roles';",
+      "export * from './mentions'; export * from './mention-expansion'; export * from './agent-roles'; export * from './handlers/mentions'; export * from './catalog-sync';",
     resolveDir: new URL(
       '../../../../packages/cloud-runtime/src/runtime/',
       import.meta.url,
@@ -78,10 +78,15 @@ test('send expansion matches OSS prompts; paths, GitHub references and commands 
     '$auth [Skill Path](already)',
   );
   assert.equal(
-    await mentions.expandMentions('/compact #12 @src/file.ts', () => {
-      throw new Error('Verbatim references must not load a catalog');
-    }),
-    '/compact #12 @src/file.ts',
+    await mentions.expandMentions(
+      '/compact #12 @src/file.ts costs $100 and $5.99 arg $1 `$auth` ```sh\necho $HOME @session:s2\n```',
+      () => {
+        throw new Error(
+          'Verbatim references, currency amounts and code must not load a catalog',
+        );
+      },
+    ),
+    '/compact #12 @src/file.ts costs $100 and $5.99 arg $1 `$auth` ```sh\necho $HOME @session:s2\n```',
   );
   assert.throws(
     () =>
@@ -414,4 +419,129 @@ test('retry keeps the original references and writes the same input once the cat
   } finally {
     fixture.close();
   }
+});
+
+test('new-session references wait out active stream catch-up, fall back to live meta Flock rows, and still fail fast on unhealthy streams', async () => {
+  const meta = new Flock('new-session-meta');
+  meta.set(['e', 'session-existing'], true);
+  meta.set(['m', 'session-existing'], {
+    id: 'existing',
+    title: 'Other conversation',
+    machineId: 'm1',
+    createdAt: '2026-11-26T00:00:00.000Z',
+  });
+  meta.set(['e', 'session-new'], true);
+  meta.set(['m', 'session-new'], {
+    id: 'new',
+    title: 'New chat',
+    machineId: 'm1',
+    agentConfigId: 'a1',
+    createdAt: '2026-11-26T00:01:00.000Z',
+  });
+  const machine = new Flock('new-session-machine');
+  machine.set(['agentConfig', 'a1'], {
+    id: 'a1',
+    machineId: 'm1',
+    name: 'Agent',
+  });
+  const state = {
+    workspace: 'w1',
+    userId: 'u1',
+    metaReplica: { flock: meta },
+    machineReplicas: new Map([['m1', machine]]),
+    // Intentionally omit 'new' from catalogs.get('meta') to simulate first-turn send before catalog flush.
+    catalogs: new Map(),
+    unhealthy: new Set(),
+    catchingUp: new Map(),
+    presence: { state: 'live', onlineMachineIds: ['m1'] },
+  };
+  const getMentions = mentions.registerMentions({
+    state,
+    channel: { handle() {} },
+    getGrant: async () => ({
+      token: 'fixture',
+      gatewayBaseUrl: 'https://example.invalid',
+    }),
+  });
+
+  // 1. Freshly created session resolves @session from live meta Flock even before catalogs.set('meta', ...).
+  const initialExpanded = await mentions.expandMentions(
+    'Follow @session:existing for $100',
+    (category) =>
+      getMentions({
+        workspaceId: 'w1',
+        sessionId: 'new',
+        userId: 'u1',
+        category,
+      }),
+  );
+  assert.equal(
+    initialExpanded,
+    'Follow [@Other conversation](lody://session/existing) for $100',
+  );
+
+  // 2. Active error-free meta catch-up (e.g. multi-page burst right after createSession) waits and succeeds.
+  let finishMetaCatchUp;
+  state.unhealthy.add('meta');
+  state.catchingUp.set(
+    'meta',
+    new Promise((resolve) => {
+      finishMetaCatchUp = () => {
+        state.unhealthy.delete('meta');
+        state.catchingUp.delete('meta');
+        resolve();
+      };
+    }),
+  );
+  setTimeout(finishMetaCatchUp, 10);
+  const afterCatchUp = await mentions.expandMentions(
+    'Continue @session:existing',
+    (category) =>
+      getMentions({
+        workspaceId: 'w1',
+        sessionId: 'new',
+        userId: 'u1',
+        category,
+      }),
+  );
+  assert.equal(
+    afterCatchUp,
+    'Continue [@Other conversation](lody://session/existing)',
+  );
+
+  // 3. Genuine stream failure (unhealthy without active catchingUp) rejects immediately.
+  state.unhealthy.add('meta');
+  const started = performance.now();
+  await assert.rejects(
+    mentions.expandMentions('Continue @session:existing', (category) =>
+      getMentions({
+        workspaceId: 'w1',
+        sessionId: 'new',
+        userId: 'u1',
+        category,
+      }),
+    ),
+    /mention_expansion_failed/,
+  );
+  assert.ok(
+    performance.now() - started < 500,
+    'Offline/failed metadata must reject without waiting on the catch-up deadline',
+  );
+  state.unhealthy.delete('meta');
+
+  // 4. Resetting catalogImportCheckpoint after idle I/O keeps sub-12ms live updates synchronous.
+  let yields = 0;
+  const controller = new AbortController();
+  const checkpoint = mentions.catalogImportCheckpoint(
+    controller.signal,
+    () => yields++,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  checkpoint.reset();
+  await checkpoint();
+  assert.equal(
+    yields,
+    0,
+    'Fresh slice after network idle must not yield or mark unhealthy on a fast live frame',
+  );
 });

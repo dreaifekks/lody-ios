@@ -5,11 +5,12 @@ import type {
 } from '../models/mentions';
 
 // Explicit session/Role IDs survive native text-only draft restoration and
-// renames. Quoted file references own their text, including any dollar signs.
-// A session/Role chip may follow non-ASCII text with no space (`让@role:<id>`);
-// a skill keeps its whitespace boundary so prose like `价格$5` stays prose.
+// renames. Code spans/fences and quoted file references own their text,
+// including any dollar signs. A session/Role chip may follow non-ASCII text
+// with no space (`让@role:<id>`); a skill keeps its whitespace boundary and
+// requires a letter so prose like `价格$5`, `costs $100`, or `$1` stays prose.
 const referencePattern =
-  /@"(?:\\.|[^"\\])*"|(^|\s)(\$[^\s$@]+)(?=\s|$)|(^|\s|(?<![\w$@./:-]))(@session:[^\s@]+|@role:[^\s@]+(?:@[^\s@]+)?)(?=\s|$)/g;
+  /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`+[^`\n]*`+|@"(?:\\.|[^"\\])*"|(^|\s)(\$(?=[^\s$@]*\p{L})[^\s$@]+)(?=\s|$)|(^|\s|(?<![\w$@./:-]))(@session:[^\s@]+|@role:[^\s@]+(?:@[^\s@]+)?)(?=\s|$)/gu;
 
 function categoryOf(token: string): MentionCategory {
   if (token.startsWith('$')) return 'skill';

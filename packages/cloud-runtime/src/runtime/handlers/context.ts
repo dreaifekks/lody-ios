@@ -29,6 +29,8 @@ export type RuntimeState = {
   readonly machineReplicas: Map<string, Flock>;
   readonly catalogs: Map<string, Catalog>;
   readonly unhealthy: Set<string>;
+  /** Active error-free stream catch-ups keyed by watcher mode (`meta` or `machineId`). */
+  readonly catchingUp?: Map<string, Promise<void>>;
   /** Live `${workspace}:wf:workspace` replica, written by Status view commands. */
   workspaceReplica: (MetaReplica & { missing?: boolean }) | undefined;
   /** Last read `pinSection` rows; `loaded` is false until the first read. */

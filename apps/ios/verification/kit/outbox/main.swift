@@ -435,13 +435,20 @@ func record(_ id: String, phase: String = "waiting", sendId: String? = nil, extr
     print("PASS: a guide keeps its intent and busy sessions queue when the dispatcher takes over")
 
     network = Network()
-    var replies = [#"{"state":"not_sent","reason":"session_not_ready"}"#, #"{"state":"not_sent","reason":"mention_expansion_failed"}"#]
+    var replies = [
+      #"{"state":"not_sent","reason":"session_not_ready"}"#,
+      #"{"state":"not_sent","reason":"metadata_not_ready"}"#,
+      #"{"state":"not_sent","reason":"mention_expansion_failed"}"#,
+    ]
     network.send = { _ in replies.removeFirst() }
     (dispatcher, store, _) = await harness([record("s1")], network)
     precondition(network.sent.count == 1 && phases(store) == ["waiting"] && network.alerts.isEmpty)
     dispatcher.update(store: store, inputs: .init(userId: "u1", connected: true, catalogRevision: 1))
     await settle()
-    precondition(network.sent.count == 2 && phases(store) == ["failed"] && network.alerts.count == 1)
+    precondition(network.sent.count == 2 && phases(store) == ["waiting"] && network.alerts.isEmpty)
+    dispatcher.update(store: store, inputs: .init(userId: "u1", connected: true, catalogRevision: 2))
+    await settle()
+    precondition(network.sent.count == 3 && phases(store) == ["failed"] && network.alerts.count == 1)
     precondition(store.snapshot.records[0].send["reason"] == .string("mention_expansion_failed"))
     network = Network()
     network.send = { _ in "not json" }
