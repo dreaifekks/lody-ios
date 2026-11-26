@@ -37,7 +37,6 @@ import {
   sendTurn,
 } from '../session';
 import {
-  scopedShortcutCloud,
   scopedWorkspaceGrant,
   type MetaReplica,
   type RuntimeContext,
@@ -571,7 +570,6 @@ export function registerSessions(
       sourceWorkspace,
       state.userId,
       scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
-      scopedShortcutCloud(ctx, sourceWorkspace, state.userId),
       AbortSignal.timeout(30000),
     );
     const scoped = () => {

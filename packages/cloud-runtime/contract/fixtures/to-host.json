@@ -51,25 +51,6 @@
     "v": 1,
     "gen": 3,
     "kind": "request",
-    "id": "req-shortcut",
-    "method": "shortcutCloud",
-    "payload": {
-      "workspaceId": "workspace-1",
-      "operation": "getStreamToken",
-      "args": {
-        "target": {
-          "kind": "index",
-          "ownerUserId": "user-1",
-          "visibility": "workspace"
-        },
-        "write": false
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "request",
     "id": "req-github",
     "method": "githubMentions",
     "payload": {

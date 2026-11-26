@@ -200,12 +200,6 @@ test('workspace-scoped publication, in-place body updates, owner fences and expl
       return { ok: true, result: {} };
     }
   };
-  const calls = [];
-  const cloud = async (op, args) => {
-    calls.push({ op, args });
-    if (op === 'listAccessibleDocuments') return [];
-    throw new Error(`unexpected cloud op: ${op}`);
-  };
   const req = {
     workspaceId: 'w',
     action: 'save',
@@ -215,13 +209,7 @@ test('workspace-scoped publication, in-place body updates, owner fences and expl
   };
   failIndex = true;
   await assert.rejects(
-    promptShortcuts(
-      req,
-      'owner',
-      workspaceGrant,
-      cloud,
-      AbortSignal.timeout(5000),
-    ),
+    promptShortcuts(req, 'owner', workspaceGrant, AbortSignal.timeout(5000)),
     /unknown/,
   );
   assert.ok(streams.has('w:shortcut:body'), 'body written to workspace stream');
@@ -230,22 +218,13 @@ test('workspace-scoped publication, in-place body updates, owner fences and expl
     req,
     'owner',
     workspaceGrant,
-    cloud,
     AbortSignal.timeout(5000),
   );
   assert.equal(writes, previous + 1, 'explicit retry repairs only the index');
-  assert.equal(
-    calls.filter(
-      (call) => call.op === 'stageDocument' || call.op === 'activateDocument',
-    ).length,
-    0,
-    'new saves never stage or activate via Convex',
-  );
   const access = shortcutAccess(
     'w',
     'owner',
     workspaceGrant,
-    cloud,
     AbortSignal.timeout(5000),
   );
   assert.equal((await access.list()).length, 1);
@@ -255,7 +234,6 @@ test('workspace-scoped publication, in-place body updates, owner fences and expl
       { ...req, value: { ...value, ownerUserId: 'another' } },
       'owner',
       workspaceGrant,
-      cloud,
       AbortSignal.timeout(5000),
     ),
     /invalid/,
@@ -276,7 +254,6 @@ test('workspace-scoped publication, in-place body updates, owner fences and expl
       },
       'owner',
       workspaceGrant,
-      cloud,
       AbortSignal.timeout(5000),
     ),
     /invalid/,
@@ -295,130 +272,11 @@ test('workspace-scoped publication, in-place body updates, owner fences and expl
     },
     'owner',
     workspaceGrant,
-    cloud,
     AbortSignal.timeout(5000),
   );
   assert.equal(edited.bodyDocId, 'body');
   assert.equal((await access.read(edited)).prompt, 'Updated review');
   await assert.rejects(access.read(saved, true), /changed/);
-});
-
-test('Phase 1 dual-read falls back to legacy streams only for unmigrated shortcuts and honors workspace tombstones', async () => {
-  forgetShortcuts();
-  forgetSettings();
-  const body = new LoroDoc();
-  new PromptShortcutDocument(body).save(value, []);
-  const legacyCatalog = new Flock('fixture-legacy-index');
-  new PromptShortcutCatalog(legacyCatalog).put(entry);
-  const parts = new Map([
-    ['shortcut-body:body', [body.export({ mode: 'snapshot' })]],
-    [
-      'shortcut-index:w:owner:private',
-      [new TextEncoder().encode(JSON.stringify(legacyCatalog.exportJson()))],
-    ],
-  ]);
-  let bootstraps = 0;
-  globalThis.__shortcutClient = class {
-    constructor({ url }) {
-      this.id = decodeURIComponent(url.split('/').at(-1));
-    }
-    async bootstrap() {
-      const streamParts = parts.get(this.id);
-      if (!streamParts) return { ok: false, result: { code: 'not_found' } };
-      bootstraps++;
-      return {
-        ok: true,
-        result: {
-          snapshotOffset: '-1',
-          updates: streamParts.map((bytes) => ({
-            body: encodeFrame(bytes),
-          })),
-          nextOffset: '1',
-          upToDate: true,
-        },
-      };
-    }
-    async readOnce() {
-      return { ok: true, result: { nextOffset: '1', upToDate: true } };
-    }
-  };
-  const row = {
-    shortcutId: entry.id,
-    bodyDocId: entry.bodyDocId,
-    ownerUserId: 'owner',
-    visibility: 'private',
-    revision: entry.revision,
-  };
-  let directory = [row];
-  const calls = [];
-  const cloud = async (op, args) => {
-    calls.push(op);
-    if (op === 'listAccessibleDocuments') return directory;
-    const t = args.target;
-    return {
-      token: 'fixture-only',
-      expiresIn: 600,
-      gatewayBaseUrl: 'https://example.com',
-      streamId:
-        t.kind === 'body'
-          ? `shortcut-body:${t.bodyDocId}`
-          : `shortcut-index:w:${t.ownerUserId}:${t.visibility}`,
-    };
-  };
-  const run = (request) =>
-    promptShortcuts(
-      { workspaceId: 'w', ...request },
-      'owner',
-      workspaceGrant,
-      cloud,
-      AbortSignal.timeout(5000),
-    );
-  const [listed] = await run({ action: 'list', fresh: true });
-  assert.deepEqual(listed, entry);
-  assert.equal(
-    (await run({ action: 'read', entry: listed })).prompt,
-    value.prompt,
-  );
-  assert.equal(bootstraps, 2, 'one legacy index and one legacy body bootstrap');
-  const before = calls.length;
-  assert.equal(
-    (await run({ action: 'read', entry: listed })).prompt,
-    value.prompt,
-  );
-  assert.equal(calls.length, before, 'a second open makes no cloud call');
-
-  // Tombstoning the shortcut in `{workspaceId}:shortcut-index` suppresses the legacy fallback.
-  const wsFlock = new Flock('fixture-ws-index');
-  wsFlock.set(['deletedPromptShortcut', entry.id], 'r1');
-  wsFlock.delete(['promptShortcut', entry.id]);
-  wsFlock.commit();
-  parts.set('w:shortcut-index', [
-    new TextEncoder().encode(JSON.stringify(wsFlock.exportJson())),
-  ]);
-  assert.deepEqual(await run({ action: 'list', fresh: true }), []);
-  await assert.rejects(run({ action: 'read', entry: listed }), /changed/);
-
-  // Grants are remembered per runtime scope; a fetched legacy grant must still name its stream.
-  forgetShortcuts();
-  const mismatch = shortcutAccess(
-    'w',
-    'owner',
-    workspaceGrant,
-    async () => ({
-      token: 'fixture',
-      expiresIn: 60,
-      gatewayBaseUrl: 'https://example.com',
-      streamId: 'wrong',
-    }),
-    AbortSignal.timeout(5000),
-  );
-  await assert.rejects(
-    mismatch.grant(
-      'shortcut-body:body',
-      { kind: 'body', bodyDocId: 'body' },
-      false,
-    )(),
-  );
 });
 
 test('a composer choice reads the body against the listing it showed, without re-reading the index', async () => {
@@ -459,19 +317,14 @@ test('a composer choice reads the body against the listing it showed, without re
       return { ok: true, result: { nextOffset: '1', upToDate: true } };
     }
   };
-  const cloud = async (op) => {
-    if (op === 'listAccessibleDocuments') return [];
-    throw new Error(`unexpected cloud op: ${op}`);
-  };
   const select = (id) =>
     promptShortcuts(
       { workspaceId: 'w', action: 'select', id },
       'owner',
       workspaceGrant,
-      cloud,
       AbortSignal.timeout(5000),
     );
-  const listing = await listedShortcuts('w', 'owner', workspaceGrant, cloud);
+  const listing = await listedShortcuts('w', 'owner', workspaceGrant);
   assert.deepEqual(listing.entries, [entry]);
   assert.equal((await select('review')).prompt, value.prompt);
   const before = reads.length;

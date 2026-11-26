@@ -17,29 +17,8 @@ extension DataRuntime {
         }
       }
       fetchGrant()
-    case .shortcutCloud(let params): shortcutCloud(id, params)
     case .githubMentions(let params): githubMentions(id, params)
     case .shareRequest(let params): shareRequest(id, params)
-    }
-  }
-  private func shortcutCloud(_ id: String, _ params: RuntimeContract.ShortcutCloudParams) {
-    typealias Call = RuntimeContract.HostCalls.ShortcutCloud
-    guard let channel, githubTasks[id] == nil else { return }
-    guard let workspace, let body = try? RuntimeJSON.object(params), body["workspaceId"] as? String == workspace,
-          let operation = body["operation"] as? String, let args = body["args"] as? [String: Any],
-          githubTasks.count < 8 else {
-      channel.fail(id: id, method: Call.method, code: "shortcut_unavailable"); return
-    }
-    let user = userId
-    githubTasks[id] = Task { [weak self] in
-      var value: RuntimeContract.JSONValue?
-      if let result = try? await PromptShortcutCloud.call(operation: operation, workspace: workspace, args: args) {
-        value = try? RuntimeJSON.decode(RuntimeContract.JSONValue.self, from: result)
-      }
-      guard !Task.isCancelled, let self, self.channel === channel else { return }
-      self.githubTasks.removeValue(forKey: id)
-      if let value, self.workspace == workspace, self.userId == user { channel.reply(Call.self, id: id, .init(value: value)) }
-      else { channel.fail(id: id, method: Call.method, code: "shortcut_unavailable") }
     }
   }
   private func githubMentions(_ id: String, _ params: RuntimeContract.GitHubMentionsParams) {

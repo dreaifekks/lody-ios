@@ -17,11 +17,7 @@ import {
   type PromptShortcutScope,
 } from '../../protocol/prompt-shortcuts/model.ts';
 import type { PromptShortcutIndexEntry } from '../../protocol/prompt-shortcuts/catalog.ts';
-import {
-  scopedShortcutCloud,
-  scopedWorkspaceGrant,
-  type RuntimeContext,
-} from './context.ts';
+import { scopedWorkspaceGrant, type RuntimeContext } from './context.ts';
 
 type MentionArgs = MentionSource & {
   category: MentionCategory;
@@ -210,7 +206,6 @@ export function registerMentions(ctx: RuntimeContext) {
         sourceWorkspace,
         state.userId,
         scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
-        scopedShortcutCloud(ctx, sourceWorkspace, state.userId),
       );
       const shortcuts = listing.entries
         .filter((entry) => shortcutInScope(entry, scope))

@@ -3,11 +3,7 @@ import type { StreamsClient } from '@loro-dev/streams-client';
 import type { Catalog, Project } from '../../models/catalog.ts';
 import type { MachinePresence } from '../../models/machines.ts';
 import type { PinSection } from '../../contract/status-view.ts';
-import type {
-  Grant,
-  SessionRuntimeEvent,
-  ShortcutCloudParams,
-} from '../../contract/methods.ts';
+import type { Grant, SessionRuntimeEvent } from '../../contract/methods.ts';
 import type { createChannel } from '../channel.ts';
 import type { FileContext } from '../files';
 import { sessionFileRootMounts } from '../../protocol/session-file-roots.ts';
@@ -96,32 +92,6 @@ export function scopedWorkspaceGrant(
       },
     },
   );
-}
-
-export function scopedShortcutCloud(
-  { channel, state }: RuntimeContext,
-  workspaceId: string,
-  userId: string,
-) {
-  return async (operation: string, args: Record<string, unknown>) => {
-    const check = () => {
-      if (state.workspace !== workspaceId || state.userId !== userId)
-        throw new Error('workspace_changed');
-    };
-    check();
-    let value: unknown;
-    try {
-      ({ value } = await channel.request('shortcutCloud', {
-        workspaceId,
-        operation,
-        args,
-      } as ShortcutCloudParams));
-    } catch {
-      throw new Error('shortcut_unavailable');
-    }
-    check();
-    return value;
-  };
 }
 
 export function machineFor(

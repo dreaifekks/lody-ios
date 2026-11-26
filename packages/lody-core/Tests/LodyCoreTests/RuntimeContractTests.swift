@@ -76,17 +76,13 @@ final class RuntimeContractTests: XCTestCase {
       .file(.init(editId: "original:1", fileName: "notes.md", mimeType: "text/markdown", sizeBytes: 12, fileId: "file-1",
         sha256: "abc123", textPreview: true, transport: "r2", uploadedAt: 1_700_000_000_000)),
     ]
-    XCTAssertEqual(decoded.map(\.gen), Array(repeating: 3, count: 94))
+    XCTAssertEqual(decoded.map(\.gen), Array(repeating: 3, count: 93))
     XCTAssertEqual(decoded.map(\.message), [
       .result(id: "req-hello", .hello(.init(protocol: 1, methods: ["hello", "ensureSession"]))),
       .result(id: "req-ensure", .ensureSession(.init())),
       .error(id: "req-ensure", method: "ensureSession", .init(code: "session_not_ready", retryable: false)),
       .request(id: "req-grant", .grant(.init())),
       .event(.catalog(.init(catalog: #"{"projects":[]}"#, revision: 4))),
-      .request(id: "req-shortcut", .shortcutCloud(.getStreamToken(.init(
-        workspaceId: "workspace-1",
-        args: .init(target: .index(.init(ownerUserId: "user-1", visibility: .workspace)), write: false)
-      )))),
       .request(id: "req-github", .githubMentions(.init(workspaceId: "workspace-1", repoFullName: "lody/app"))),
       .request(id: "req-share-revoke", .shareRequest(.api(.init(
         workspaceId: "workspace-1",
@@ -240,11 +236,6 @@ final class RuntimeContractTests: XCTestCase {
     channel.fail(id: "req-grant", method: "grant", code: "grant_failed", retryable: true)
     XCTAssertEqual(try json(harness.posts[3]), try json(expected[3]))
 
-    channel.reply(Contract.HostCalls.ShortcutCloud.self, id: "req-shortcut", .init(value: .object([
-      "token": .string("synthetic"), "expiresIn": .number(600),
-      "gatewayBaseUrl": .string("https://gateway.example"), "streamId": .string("stream-1"),
-    ])))
-    channel.fail(id: "req-shortcut", method: Contract.HostCalls.ShortcutCloud.method, code: "shortcut_unavailable")
     channel.reply(Contract.HostCalls.GithubMentions.self, id: "req-github", .init(
       items: [.init(path: "issue:7", name: "Fix login", kind: .issue, subtitle: "lody/app #7", insertText: "#7")],
       truncated: false, incomplete: false
@@ -312,7 +303,7 @@ final class RuntimeContractTests: XCTestCase {
     try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create))
     try await roundTrip(Contract.Calls.IosSimulatorControl.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
       userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))))
-    try await fixtureTrip(Contract.Calls.AndroidEmulatorControl.self, 30)
+    try await fixtureTrip(Contract.Calls.AndroidEmulatorControl.self, 28)
     try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"))
     try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"))
     try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"))
@@ -350,9 +341,9 @@ final class RuntimeContractTests: XCTestCase {
         "Scope": .string("Repository"), "Checks": .array([.string("Lint"), .string("Tests")]),
       ]))
     try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"))
-    try await fixtureTrip(Contract.Calls.ForgetPendingInput.self, 50)
-    for index in 51...53 { try await fixtureTrip(Contract.Calls.StatusViewCommand.self, index) }
-    try await fixtureTrip(Contract.Calls.SnoozePresets.self, 54)
+    try await fixtureTrip(Contract.Calls.ForgetPendingInput.self, 48)
+    for index in 49...51 { try await fixtureTrip(Contract.Calls.StatusViewCommand.self, index) }
+    try await fixtureTrip(Contract.Calls.SnoozePresets.self, 52)
     XCTAssertEqual(harness.posts.count, expected.count)
     for index in 4..<expected.count {
       XCTAssertEqual(try json(harness.posts[index]), try json(expected[index]))
@@ -436,7 +427,7 @@ final class RuntimeContractTests: XCTestCase {
     channel.onRequest = { id, request in requests.append("\(id):\(request.method)") }
     channel.onEvent = { events.append($0) }
     for index in 3..<replies.count { channel.receive(replies[index]) }
-    XCTAssertEqual(requests, ["req-grant:grant", "req-shortcut:shortcutCloud", "req-github:githubMentions", "req-share-revoke:shareRequest"])
+    XCTAssertEqual(requests, ["req-grant:grant", "req-github:githubMentions", "req-share-revoke:shareRequest"])
     let expected = try replies.compactMap { text -> Contract.Event? in
       guard case .event(let event) = try JSONDecoder().decode(Contract.Envelope.self, from: Data(text.utf8)).message else { return nil }
       return event
