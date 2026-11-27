@@ -44,6 +44,11 @@ for action in agentOnlyButton.actions(forTarget: agentOnlyComposer, forControlEv
   agentOnlyComposer.perform(NSSelectorFromString(action))
 }
 precondition(openedAgentConfig, "The assistant-only trigger must open run configuration")
+agentOnlyComposer.setComposerOptions(#"{"agentName":"Kimi Code","modelId":"","effort":"","models":[{"id":"m","title":"Model M"}],"efforts":[{"id":"high","title":"high"}]}"#)
+@MainActor func chipTitle() -> String { String(agentOnlyButton.configuration!.attributedTitle!.characters) }
+precondition(chipTitle() == "Kimi Code", "Available choices alone do not identify the current model or effort")
+agentOnlyComposer.setComposerOptions(#"{"agentName":"Kimi Code","modelId":"","effort":"","displayModelId":"m","displayEffort":"high","models":[{"id":"m","title":"Model M"}],"efforts":[]}"#)
+precondition(chipTitle() == "Model M  ·  High", "The composer must show the resolved model and reasoning level")
 agentOnlyComposer.setComposerOptions(#"{"modelId":"","effort":"","models":[],"efforts":[]}"#)
 precondition(agentOnlyButton.isHidden, "No assistant and no models must not show an empty trigger")
 print("Composer: assistant-only configuration remains visible and opens")

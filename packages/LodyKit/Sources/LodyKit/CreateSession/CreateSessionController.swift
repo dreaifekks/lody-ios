@@ -317,6 +317,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     let fast = CreateLogic.fastMode(capability, page.choice)
     var options: [String: Any] = [
       "modelId": page.choice.modelId ?? "", "effort": page.choice.effort ?? "",
+      "displayModelId": CreateLogic.resolvedModelId(capability, modelId: page.choice.modelId) ?? "",
+      "displayEffort": CreateLogic.resolvedEffort(capability, page.choice) ?? "",
       "models": (capability?.models ?? []).map { ["id": $0.id, "title": $0.name] },
       "efforts": CreateLogic.effortsFor(capability, modelId: page.choice.modelId).map { ["id": $0, "title": $0] },
     ]

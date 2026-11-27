@@ -2081,14 +2081,18 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // Web's run-config chip: assistant mark, model · effort, and a fast bolt, in one line.
     let font = LodyTextStyle.subhead.uiFont
     let dot = NSAttributedString(string: "  ·  ", attributes: [.foregroundColor: UIColor.tertiaryLabel])
-    var triggerTitle = composerOptions.modelTitle
-    if hasRunConfig && composerOptions.models.isEmpty {
-      triggerTitle = composerOptions.agentName.flatMap { $0.isEmpty ? nil : $0 } ?? triggerTitle
+    let modelId = composerOptions.displayModelId ?? composerOptions.modelId
+    let modelTitle: String
+    if !modelId.isEmpty && modelId.lowercased() != "default" {
+      modelTitle = composerOptions.models.first { $0.id == modelId }?.title ?? modelId
+    } else {
+      modelTitle = composerOptions.agentName.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "model.title", bundle: .lody)
     }
-    let title = NSMutableAttributedString(string: triggerTitle, attributes: [.foregroundColor: UIColor.label])
-    if !composerOptions.efforts.isEmpty || !composerOptions.effort.isEmpty {
+    let title = NSMutableAttributedString(string: modelTitle, attributes: [.foregroundColor: UIColor.label])
+    let effort = composerOptions.displayEffort ?? composerOptions.effort
+    if !effort.isEmpty && effort.lowercased() != "default" {
       title.append(dot)
-      title.append(NSAttributedString(string: composerOptions.effortTitle, attributes: [.foregroundColor: UIColor.label]))
+      title.append(NSAttributedString(string: composerOptions.effortTitle(for: effort), attributes: [.foregroundColor: UIColor.label]))
     }
     var summary = title.string
     if cardStyle, let mode = composerOptions.permissions?.first(where: { $0.id == composerOptions.permissionId }) {
@@ -2255,6 +2259,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   private func selectModel(_ id: String) {
     guard composerOptions.modelId != id else { return }
+    composerOptions.displayModelId = nil
+    composerOptions.displayEffort = nil
     composerOptions.modelId = id
     composerOptions.effort = ""
     composerOptions.efforts = []
@@ -2263,6 +2269,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   private func selectEffort(_ id: String) {
     guard composerOptions.effort != id else { return }
+    composerOptions.displayEffort = nil
     composerOptions.effort = id
     updateComposerOptions()
     onComposerOptionChange?(["modelId": composerOptions.modelId, "effort": id])

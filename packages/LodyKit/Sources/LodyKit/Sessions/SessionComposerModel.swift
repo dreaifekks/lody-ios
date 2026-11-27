@@ -372,6 +372,8 @@ final class SessionComposerModel {
       "permissions": (permission?.options ?? []).map { ["id": $0.id, "title": $0.name, "description": $0.description ?? ""] },
       "modelId": value.modelId ?? "",
       "effort": value.effort ?? "",
+      "displayModelId": CreateLogic.resolvedModelId(capability, modelId: value.modelId) ?? "",
+      "displayEffort": CreateLogic.resolvedEffort(capability, value) ?? "",
       "models": (capability?.models ?? []).map { ["id": $0.id, "title": $0.name] },
       "efforts": CreateLogic.effortsFor(capability, modelId: value.modelId).map { ["id": $0, "title": $0] },
     ]
