@@ -130,7 +130,7 @@ enum NativeDebug {
         if let enabled { sharing = enabled }
         return sharing
       }
-    } else if ["create-parity", "create-recovery", "create-scope", "model-memory", "project-picker-preview"].contains(scenario) {
+    } else if ["create-parity", "create-recovery", "create-run-config-offline", "create-scope", "model-memory", "project-picker-preview"].contains(scenario) {
       content = CreateSessionPreviewController(scenario: scenario == "project-picker-preview" ? "create-parity" : scenario)
     } else {
       guard let page = LodyNativePages.make(id, params: SessionController.json(fields)) else {

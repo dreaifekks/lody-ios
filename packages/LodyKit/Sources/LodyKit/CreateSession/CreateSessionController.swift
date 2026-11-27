@@ -26,6 +26,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   var onCancel: (() -> Void)?
   var showMessage: ((String, LodyToastKind) -> Void)?
   var restoreDraft: ((Int) -> Void)?
+  var presentSheet: ((UIViewController, Bool) -> Void)?
   private(set) var sending = false
   /// Pushed full screen: lead with a back button instead of the sheet's close button.
   var pushed = false
@@ -37,7 +38,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   /// composer chip's run-config sheet, both driven by one state object.
   private let panelState = CreatePanelState()
   private lazy var context = UIHostingController(rootView: CreateContextPanel(state: panelState))
-  private weak var runConfigSheet: UIViewController?
+  private(set) weak var runConfigSheet: CreateRunConfigSheetController?
   private let signedOutLabel = UILabel()
   private lazy var hostHeight = host.heightAnchor.constraint(equalToConstant: 64)
   private lazy var contextBottom = context.view.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -64)
@@ -227,38 +228,60 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     if !signedOut {
       let panel = CreateSessionContext.panel(form)
       if panelState.panel != panel { panelState.panel = panel }
+      if let open = panelState.open {
+        let pickers = panel.cards + (panel.branch.map { [$0] } ?? [])
+        if !pickers.contains(where: { $0.id == open && !$0.options.isEmpty }) {
+          panelState.open = nil
+        }
+      }
       let rows = CreateSessionContext.runConfig(form)
-      if panelState.runConfig != rows { panelState.runConfig = rows }
       let recents = CreateSessionContext.recents(form)
+      if panelState.runConfig != rows { panelState.runConfig = rows }
       if panelState.recents != recents { panelState.recents = recents }
+      if rows.isEmpty {
+        dismissRunConfigSheet()
+      } else if let sheet = runConfigSheet, !sheet.isDismissPending {
+        if sheet.state.runConfig != rows { sheet.state.runConfig = rows }
+        if sheet.state.recents != recents { sheet.state.recents = recents }
+        if let open = sheet.state.openInSheet,
+           !rows.contains(where: { $0.id == open && !$0.options.isEmpty }) {
+          sheet.state.openInSheet = nil
+        }
+      }
+    } else {
+      if panelState.open != nil { panelState.open = nil }
+      if !panelState.runConfig.isEmpty { panelState.runConfig = [] }
+      if !panelState.recents.isEmpty { panelState.recents = [] }
+      dismissRunConfigSheet()
     }
     renderComposer()
+  }
+
+  private func dismissRunConfigSheet(animated: Bool = UIView.areAnimationsEnabled) {
+    guard let sheet = runConfigSheet else { return }
+    runConfigSheet = nil
+    sheet.dismissCleanly(animated: animated)
   }
 
   /// Web's run-config sheet from the composer chip: Agent (when there is a choice), Model,
   /// Reasoning and Mode rows that expand in place, then the Plan and Fast switches when offered.
   private func presentRunConfig() {
-    guard !sending, runConfigSheet == nil, !panelState.runConfig.isEmpty else { return }
+    let rows = CreateSessionContext.runConfig(form)
+    guard !sending, !form.signedOut, presentedViewController == nil,
+          runConfigSheet?.isActive != true, !rows.isEmpty else { return }
     view.endEditing(true)
-    panelState.openInSheet = nil
-    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: panelState))
-    var contentHeight = CGFloat(panelState.runConfig.count + panelState.recents.count) * (LodySize.controlMd + LodySpacing.xs * 2)
-      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
-    sheet.rootView = CreateRunConfigSheet(state: panelState, onHeightChange: { [weak sheet] height in
-      guard height > 0, abs(contentHeight - height) > 1 else { return }
-      contentHeight = height
-      sheet?.sheetPresentationController?.animateChanges {
-        sheet?.sheetPresentationController?.invalidateDetents()
-      }
-    })
-    if let presentation = sheet.sheetPresentationController {
-      presentation.detents = [.custom(identifier: .init("runConfigContent")) { context in
-        min(contentHeight, context.maximumDetentValue)
-      }]
-      presentation.prefersGrabberVisible = true
-    }
+    let state = CreatePanelState()
+    state.runConfig = rows
+    state.recents = CreateSessionContext.recents(form)
+    state.onPick = { [weak self] id, option in self?.optionPicked(id, option) }
+    let sheet = CreateRunConfigSheetController(state: state)
+    sheet.view.accessibilityIdentifier = "create-run-config"
     runConfigSheet = sheet
-    present(sheet, animated: true)
+    if let presentSheet {
+      presentSheet(sheet, UIView.areAnimationsEnabled)
+    } else {
+      present(sheet, animated: UIView.areAnimationsEnabled)
+    }
   }
 
   /// A choice in the context panel or the run-config sheet.
@@ -305,7 +328,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       form.selectRecent(option)
       changed()
       // A recent entry is a terminal "run it like this" choice (web closes its menu).
-      runConfigSheet?.dismiss(animated: true)
+      dismissRunConfigSheet()
     default:
       break
     }
@@ -620,6 +643,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     form.updateChoice(form.current.choice)
     if draft != nil { form.recordRecent() }
     if let value = form.prefs { onPrefs?(value) }
+    dismissRunConfigSheet()
     sending = true
     renderComposer()
     onSubmit?(draft, payload)

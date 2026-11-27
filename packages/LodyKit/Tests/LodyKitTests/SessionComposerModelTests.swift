@@ -1,5 +1,7 @@
 import Foundation
 import LodyCore
+import LodyDesignSystem
+import UIKit
 import XCTest
 @testable import LodyKit
 
@@ -145,5 +147,156 @@ final class SessionComposerModelTests: XCTestCase {
     await settle(model) { model.optionsChanged() }
     XCTAssertEqual(rows(model), ["agent", "model"])
     XCTAssertEqual(probes.configs, ["c1"])
+  }
+
+  @MainActor
+  private final class Signal {
+    private var count = 0
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func fire() {
+      if let waiter {
+        self.waiter = nil
+        waiter.resume()
+      } else {
+        count += 1
+      }
+    }
+
+    func wait() async {
+      if count > 0 {
+        count -= 1
+        return
+      }
+      await withCheckedContinuation { continuation in
+        waiter = continuation
+      }
+    }
+  }
+
+  func testCreateRunConfigSheetDismissesCleanlyAndNeverCollapsesWhenMachineGoesOffline() async {
+    UIView.setAnimationsEnabled(false)
+    defer { UIView.setAnimationsEnabled(true) }
+
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+    let input = LodyComposerView(frame: .zero)
+    let controller = CreateSessionController(composer: input.composer, host: input)
+    controller.form = CreateSessionForm(
+      userId: "u1",
+      workspaceId: "w1",
+      projects: [CreateProject(id: "github:LodyAI/Lody", machineId: "", name: "LodyAI/Lody")],
+      machineNames: ["m1": "Mac Studio"],
+      machineOs: ["m1": "darwin"]
+    )
+    controller.form.open(projectId: "github:LodyAI/Lody", context: nil)
+    controller.form.applyBranches(CreateBranches(names: ["main"], defaultBranch: "main"))
+
+    let selectionSignal = Signal()
+    let liveGate = Signal()
+    var liveReply: CheckedContinuation<CreationOptions, Error>?
+    var nextOptions: CreationOptions?
+    var presentedSheet: CreateRunConfigSheetController?
+
+    controller.presentSheet = { viewController, _ in
+      guard let sheet = viewController as? CreateRunConfigSheetController else { return }
+      presentedSheet = sheet
+      sheet.onDismissed = {
+        if presentedSheet === sheet { presentedSheet = nil }
+      }
+    }
+    controller.onSelection = { _ in selectionSignal.fire() }
+    controller.loadCachedOptions = { [complete] in complete }
+    controller.loadOptions = {
+      if let nextOptions { return nextOptions }
+      return try await withCheckedThrowingContinuation { continuation in
+        liveReply = continuation
+        liveGate.fire()
+      }
+    }
+
+    window.rootViewController = UINavigationController(rootViewController: controller)
+    window.makeKeyAndVisible()
+    controller.loadViewIfNeeded()
+    window.layoutIfNeeded()
+
+    await selectionSignal.wait()
+    await liveGate.wait()
+
+    input.composer.onRunConfig?()
+    guard let sheet = presentedSheet else {
+      return XCTFail("Expected CreateRunConfigSheetController to be presented from cached options")
+    }
+    XCTAssertTrue(controller.runConfigSheet === sheet)
+    sheet.loadViewIfNeeded()
+    sheet.view.frame = CGRect(x: 0, y: 0, width: 393, height: 420)
+    sheet.view.layoutIfNeeded()
+    XCTAssertEqual(sheet.view.backgroundColor, LodyUIColor.bgBase)
+    XCTAssertEqual(sheet.state.runConfig.map(\.id), ["agent", "model"])
+
+    // Live options arrive with the selected computer offline while the sheet is open.
+    let offline = CreationOptions(availability: "offline", sessionId: "s-offline", agents: [], capabilities: [])
+    liveReply?.resume(returning: offline)
+    liveReply = nil
+    await selectionSignal.wait()
+
+    XCTAssertTrue(sheet.isDismissPending, "Offline options must mark the presented run-config sheet for dismissal")
+    XCTAssertEqual(
+      sheet.state.runConfig.map(\.id),
+      ["agent", "model"],
+      "The dismissing sheet keeps its last rows rather than blanking out mid-transition"
+    )
+    XCTAssertFalse(controller.form.canSend)
+    XCTAssertNotNil(controller.form.current.unavailableMessage)
+    XCTAssertNil(controller.runConfigSheet)
+    XCTAssertNil(presentedSheet, "The run-config sheet must dismiss when no rows remain")
+
+    // Tapping run-config while the selected computer remains offline must not open an empty sheet.
+    input.composer.onRunConfig?()
+    XCTAssertNil(controller.runConfigSheet)
+    XCTAssertNil(presentedSheet)
+
+    // Defense-in-depth: even if a sheet's state is emptied directly, its scroll surface stays full-width
+    // and its detent height stays above the minimum floor rather than collapsing to a narrow title pill.
+    let standaloneWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 320))
+    let standaloneState = CreatePanelState()
+    standaloneState.runConfig = [CreatePicker(id: "agent", glyph: .lody(.agent), title: "Codex")]
+    let standalone = CreateRunConfigSheetController(state: standaloneState)
+    standaloneWindow.rootViewController = standalone
+    standaloneWindow.makeKeyAndVisible()
+    standaloneWindow.layoutIfNeeded()
+    standaloneState.runConfig = []
+    standaloneState.recents = []
+    standalone.view.setNeedsLayout()
+    standaloneWindow.layoutIfNeeded()
+    let scrollViews = Self.descendantScrollViews(in: standalone.view)
+    XCTAssertFalse(scrollViews.isEmpty)
+    for scrollView in scrollViews {
+      XCTAssertEqual(scrollView.bounds.width, 393, accuracy: 1, "Empty run-config ScrollView must never shrink horizontally to title width")
+    }
+    XCTAssertGreaterThanOrEqual(standalone.contentHeight, CreateRunConfigSheetController.minimumDetentHeight)
+    standaloneWindow.isHidden = true
+
+    // When the computer comes back online, run configuration can be opened again cleanly.
+    nextOptions = complete
+    controller.load(background: true)
+    await selectionSignal.wait()
+    XCTAssertTrue(controller.form.canSend)
+    input.composer.onRunConfig?()
+    guard let reopened = presentedSheet else {
+      return XCTFail("Expected run-config sheet to reopen once the computer is online again")
+    }
+    XCTAssertTrue(controller.runConfigSheet === reopened)
+    reopened.dismissCleanly(animated: false)
+    XCTAssertNil(presentedSheet)
+    window.isHidden = true
+  }
+
+  private static func descendantScrollViews(in root: UIView) -> [UIScrollView] {
+    var result: [UIScrollView] = []
+    if let scroll = root as? UIScrollView { result.append(scroll) }
+    for child in root.subviews {
+      result.append(contentsOf: descendantScrollViews(in: child))
+    }
+    return result
   }
 }

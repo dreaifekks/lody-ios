@@ -68,8 +68,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var optionsRefresh: Task<Void, Never>?
   var connectingShown = false
   var connectingTask: Task<Void, Never>?
-  /// The open run-config sheet's rows, refreshed when the computer's options arrive.
-  weak var runConfigPanel: CreatePanelState?
+  /// The open run-config sheet, refreshed when the computer's options arrive.
+  weak var runConfigSheet: CreateRunConfigSheetController?
   private let initialChoice: ModelChoice?
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0

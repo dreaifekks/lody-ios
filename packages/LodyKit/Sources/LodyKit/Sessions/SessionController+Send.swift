@@ -315,9 +315,18 @@ extension SessionController {
     adjustComposer(&composer)
     apply("composer", Self.json(composer), chat.setComposerState)
     apply("options", composerModel.optionsJSON, chat.setComposerOptions)
-    if let panel = runConfigPanel {
+    if let sheet = runConfigSheet {
       let rows = composerModel.runConfig
-      if panel.runConfig != rows { panel.runConfig = rows }
+      if rows.isEmpty || session.archived || deleting {
+        runConfigSheet = nil
+        sheet.dismissCleanly()
+      } else if !sheet.isDismissPending {
+        if sheet.state.runConfig != rows { sheet.state.runConfig = rows }
+        if let open = sheet.state.openInSheet,
+           !rows.contains(where: { $0.id == open && !$0.options.isEmpty }) {
+          sheet.state.openInSheet = nil
+        }
+      }
     }
     apply("pending", sender?.pendingSendJSON ?? "", chat.setPendingSendJSON)
     renderDecisions(feed)
@@ -396,36 +405,21 @@ extension SessionController {
 
   /// Web's mobile run-config sheet from the composer chip, the same sheet as a new chat.
   func presentRunConfig() {
-    guard presentedViewController == nil else { return }
+    guard presentedViewController == nil, runConfigSheet?.isActive != true else { return }
     let rows = composerModel.runConfig
     guard !rows.isEmpty else { return }
     chat.endEditing(true)
     let state = CreatePanelState()
     state.runConfig = rows
-    runConfigPanel = state
     state.onPick = { [weak self, weak state] row, option in
       guard let self else { return }
       self.composerModel.pick(row, option)
       state?.runConfig = self.composerModel.runConfig
     }
-    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: state))
-    var contentHeight = CGFloat(rows.count) * (LodySize.controlMd + LodySpacing.xs * 2)
-      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
-    sheet.rootView = CreateRunConfigSheet(state: state, onHeightChange: { [weak sheet] height in
-      guard height > 0, abs(contentHeight - height) > 1 else { return }
-      contentHeight = height
-      sheet?.sheetPresentationController?.animateChanges {
-        sheet?.sheetPresentationController?.invalidateDetents()
-      }
-    })
-    if let presentation = sheet.sheetPresentationController {
-      presentation.detents = [.custom(identifier: .init("runConfigContent")) { context in
-        min(contentHeight, context.maximumDetentValue)
-      }]
-      presentation.prefersGrabberVisible = true
-    }
+    let sheet = CreateRunConfigSheetController(state: state)
     sheet.view.accessibilityIdentifier = "session-run-config"
-    present(sheet, animated: true)
+    runConfigSheet = sheet
+    present(sheet, animated: UIView.areAnimationsEnabled)
   }
 
   private func quotaNotice(_ count: Int?, live: Bool) -> String {

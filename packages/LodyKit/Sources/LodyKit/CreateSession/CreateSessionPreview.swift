@@ -31,6 +31,11 @@ struct CreateSessionFixture {
       params.projects = [Self.alpha]
       params.initialText = "Keep this draft"
       params.initialAttachmentsJSON = ##"[{"id":"device-draft","name":"notes.txt","kind":"file","uri":"file:///tmp/device-recovery-notes.txt"}]"##
+    case "create-run-config-offline":
+      params.workspaceId = "ui-home"
+      params.projects = [Self.alpha]
+      params.machineNames = ["ui": "Fixture Mac"]
+      params.machineOs = ["ui": "darwin"]
     default:
       params.workspaceId = "ui-project-picker"
       params.projects = [Self.alpha, CreateProject(id: "ui:local:beta", machineId: "ui", name: "Beta", rootPath: "/tmp/beta")]
@@ -46,11 +51,23 @@ struct CreateSessionFixture {
     service.workspaceMode = { _ in .plaintext }
     Self.write(CreateSessionService.prefsKey(userId: params.userId, workspaceId: params.workspaceId), "null")
     if scenario == "create-recovery" { Self.write("ui-device-options-error", "true") }
+    if scenario == "create-run-config-offline" {
+      Self.write("ui-device-options-error", "false")
+      Self.write("ui-create-live-gate", "hold")
+      service.cachedOptions = { _, _, projectId in
+        Self.options("ui-create-cached", project: params.projects.first { $0.id == projectId })
+      }
+    }
     service.options = { _, projectId in
       let project = params.projects.first { $0.id == projectId }
       switch scenario {
       case "model-memory": return Self.options("ui-model-memory", project: params.projects.first)
       case "create-recovery": return try await Self.recovery(project: projectId == nil ? nil : project)
+      case "create-run-config-offline":
+        while await Self.read("ui-create-live-gate") == "hold", !Task.isCancelled {
+          try await Task.sleep(for: .milliseconds(50))
+        }
+        return try await Self.recovery(project: projectId == nil ? nil : project)
       default: return Self.options("ui-create-parity", project: project)
       }
     }

@@ -1,6 +1,7 @@
 import LodyCore
 import LodyDesignSystem
 import SwiftUI
+import UIKit
 
 // The new-session page's context and run configuration, after web's mobile new-chat page
 // (`components/mobile/mobile-new-chat-sheet.tsx`, `mobile-inline-picker.tsx`,
@@ -669,13 +670,16 @@ struct CreateRunConfigSheet: View {
         .padding(.bottom, LodySpacing.lg)
         .animation(.smooth(duration: 0.3), value: state.openInSheet)
       }
+      .frame(maxWidth: .infinity)
       .onGeometryChange(for: CGFloat.self) { geometry in
         geometry.size.height
       } action: { height in
+        guard !state.runConfig.isEmpty || !state.recents.isEmpty else { return }
         onHeightChange(height)
       }
     }
-    .background(LodyColor.bgBase)
+    .frame(maxWidth: .infinity)
+    .background(LodyColor.bgBase.ignoresSafeArea())
   }
 
   /// Terminal "run it like this" rows: a pick applies the whole configuration and closes nothing
@@ -755,6 +759,115 @@ struct CreateRunConfigSheet: View {
   private func valueColor(_ row: CreatePicker) -> Color {
     if row.placeholder { return LodyColor.textTertiary }
     return row.options.isEmpty ? LodyColor.textSecondary : LodyColor.textPrimary
+  }
+}
+
+@MainActor
+final class CreateRunConfigSheetController: UIHostingController<CreateRunConfigSheet> {
+  static let minimumDetentHeight: CGFloat = LodySpacing.xl + LodySize.controlMd + LodySpacing.md
+    + (LodySize.controlMd + LodySpacing.xs * 2) + LodySpacing.lg
+
+  let state: CreatePanelState
+  var onDismissed: (() -> Void)?
+  private(set) var isDismissPending = false
+  private var didNotifyDismissed = false
+  private(set) var contentHeight: CGFloat
+
+  var isActive: Bool {
+    !isDismissPending && !isBeingDismissed && !didNotifyDismissed
+  }
+
+  init(
+    state: CreatePanelState,
+    title: String = String(localized: "create.runConfig.title", bundle: .lody),
+    detentIdentifier: String = "runConfigContent"
+  ) {
+    self.state = state
+    let rowCount = max(1, state.runConfig.count + state.recents.count)
+    let estimated = CGFloat(rowCount) * (LodySize.controlMd + LodySpacing.xs * 2)
+      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
+    contentHeight = max(estimated, Self.minimumDetentHeight)
+    super.init(rootView: CreateRunConfigSheet(state: state, title: title))
+    modalPresentationStyle = .pageSheet
+    rootView = CreateRunConfigSheet(state: state, title: title) { [weak self] height in
+      guard let self, height > 0, !self.isDismissPending, !self.isBeingDismissed else { return }
+      let clamped = max(height, Self.minimumDetentHeight)
+      guard abs(self.contentHeight - clamped) > 1 else { return }
+      self.contentHeight = clamped
+      guard self.presentingViewController != nil else { return }
+      self.sheetPresentationController?.animateChanges {
+        self.sheetPresentationController?.invalidateDetents()
+      }
+    }
+    if let presentation = sheetPresentationController {
+      presentation.detents = [.custom(identifier: .init(detentIdentifier)) { [weak self] context in
+        let desired = max(self?.contentHeight ?? Self.minimumDetentHeight, Self.minimumDetentHeight)
+        return min(desired, context.maximumDetentValue)
+      }]
+      presentation.prefersGrabberVisible = true
+    }
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    view.backgroundColor = LodyUIColor.bgBase
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if isBeingDismissed || presentingViewController == nil {
+      notifyDismissed()
+    }
+  }
+
+  private func notifyDismissed() {
+    guard !didNotifyDismissed else { return }
+    didNotifyDismissed = true
+    let callback = onDismissed
+    onDismissed = nil
+    callback?()
+  }
+
+  func dismissCleanly(animated: Bool = UIView.areAnimationsEnabled, completion: (() -> Void)? = nil) {
+    isDismissPending = true
+    state.openInSheet = nil
+    let finish = { [weak self] in
+      self?.notifyDismissed()
+      completion?()
+    }
+    if isBeingDismissed {
+      if let coordinator = transitionCoordinator,
+         coordinator.animate(alongsideTransition: nil, completion: { _ in finish() }) {
+        return
+      }
+      DispatchQueue.main.async { finish() }
+      return
+    }
+    let performDismiss = { [weak self] in
+      guard let self else {
+        finish()
+        return
+      }
+      guard !self.isBeingDismissed, let presenter = self.presentingViewController else {
+        finish()
+        return
+      }
+      presenter.dismiss(animated: animated, completion: finish)
+    }
+    if let coordinator = transitionCoordinator,
+       coordinator.animate(alongsideTransition: nil, completion: { _ in
+         DispatchQueue.main.async(execute: performDismiss)
+       }) {
+      return
+    }
+    if isBeingPresented {
+      DispatchQueue.main.async(execute: performDismiss)
+      return
+    }
+    performDismiss()
   }
 }
 
