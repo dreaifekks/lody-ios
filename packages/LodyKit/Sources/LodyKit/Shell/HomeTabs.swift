@@ -38,6 +38,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   private static let createID = "home-new-session"
   /// On systems without prominent tabs the create action floats above the tab bar's trailing edge instead of taking a tab.
   private lazy var floatingCreate: UIButton? = Self.makeFloatingCreate()
+  private var floatingBarConstraint: NSLayoutConstraint?
   private static let floatingSize: CGFloat = 56
   private static let floatingMargin: CGFloat = 16
 
@@ -72,11 +73,14 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
       }, for: .primaryActionTriggered)
       floatingCreate.translatesAutoresizingMaskIntoConstraints = false
       view.addSubview(floatingCreate)
+      let safeBottom = floatingCreate.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Self.floatingMargin)
+      safeBottom.priority = .defaultHigh
+      floatingBarConstraint = floatingCreate.bottomAnchor.constraint(equalTo: tabBar.topAnchor, constant: -Self.floatingMargin)
       NSLayoutConstraint.activate([
         floatingCreate.widthAnchor.constraint(equalToConstant: Self.floatingSize),
         floatingCreate.heightAnchor.constraint(equalToConstant: Self.floatingSize),
         floatingCreate.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -Self.floatingMargin),
-        floatingCreate.bottomAnchor.constraint(equalTo: tabBar.topAnchor, constant: -Self.floatingMargin),
+        safeBottom,
       ])
     }
   }
@@ -84,7 +88,11 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     // UIKit inserts the selected tab's view on each switch; keep the action above it.
-    if let floatingCreate { view.bringSubviewToFront(floatingCreate) }
+    if let floatingCreate {
+      // UIKit can load the compact controller before attaching its tab bar on iPad.
+      floatingBarConstraint?.isActive = tabBar.isDescendant(of: view)
+      view.bringSubviewToFront(floatingCreate)
+    }
   }
 
   func install(navigation: @escaping (HomeTab) -> UINavigationController) {
