@@ -509,7 +509,7 @@ precondition(readOnlyRow.menuActions.map(\.id) == ["share"], "Without canManage,
 let laterRow = statusSections[4].rows[0]
 precondition(swipeIds(laterRow) == [InboxSections.statusActions.settle, InboxSections.statusActions.later])
 precondition(laterRow.value == "3h" && laterRow.valueSymbol == "clock", "Later rows show their countdown")
-precondition(swipeIds(statusSections[5].rows[0]) == ["archive"], "Settled rows keep Archive")
+precondition(swipeIds(statusSections[5].rows[0]) == ["archive", InboxSections.statusActions.focus], "Settled rows offer Archive and Move to Focus")
 precondition(statusSections[0].rows[0].pinned && statusSections[0].rows[0].leadingActions.first?.title == "session.action.unpin")
 
 // The local viewed watermark clears emphasis before the read receipt syncs.

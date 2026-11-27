@@ -228,7 +228,7 @@ enum InboxSections {
     case .focus, .later:
       row.actions = [listAction(statusActions.settle, "home.status.settle", "checkmark.circle"), listAction(statusActions.later, "home.status.later", "clock")]
     case .settled:
-      row.actions = [SessionRows.archive(false)]
+      row.actions = [SessionRows.archive(false), listAction(statusActions.focus, "home.status.focus", "arrow.uturn.backward.circle")]
     case .pinned:
       break
     }

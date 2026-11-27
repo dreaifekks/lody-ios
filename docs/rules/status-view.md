@@ -16,7 +16,7 @@ Read before changing the Home Pinned area, the Status grouping (Focus / Later / 
 
 - While a drag is in flight the list defers incoming projections and applies the latest when it ends. A drop, Move to Top, Move to Section or accessibility move shows its order at once through `StatusViewHold` until the catalog shows the row there, the write fails or writes nothing, or, once the write was accepted, a layout moves the row (catalog updates that leave it where it was keep the hold); an accepted hold that never reads back yields after five seconds. Each moved row holds independently. A read-back for another local move can change its neighbours while leaving its hold in place.
 
-- Trailing swipe: Settle and Later on Focus and Later rows, Archive on Settled rows; leading swipe pins or unpins. Never full-swipe.
+- Trailing swipe: Settle and Later on Focus and Later rows, Move to Focus and Archive on Settled rows; leading swipe pins or unpins. Never full-swipe.
 
 - Later opens a bottom sheet with the presets and a custom date and time; past times are refused there and again before sending. A preset picked from the menu is resolved again first. Settle and Later confirm with an Undo notice that restores each changed conversation's own previous tier, the opened sub-conversations included one by one (`StatusViewPlanning.undo`). When the conversation has active opened sub-conversations, Settle, Later and Move to Focus first ask, as desktop, whether they follow; drags never ask.
 
