@@ -78,6 +78,9 @@ importers:
       '@loro-dev/flock-wasm':
         specifier: 0.5.0
         version: 0.5.0
+      '@loro-dev/roost':
+        specifier: 0.3.2
+        version: 0.3.2(effect@4.0.2)
       '@loro-dev/streams-client':
         specifier: 0.13.1
         version: 0.13.1(effect@4.0.2)
@@ -452,13 +455,12 @@ packages:
       typescript:
         optional: true
 
-  '@loro-dev/flock-wasm@0.4.3':
-    resolution: {integrity: sha512-Vy81NnCPLazxLzIaTQvL4C3cgYmn9I13NQALVEJHNmTQGaz4z/+4kgC/fdcESMVMCfK0kT1PrJJ0WPxZwRwD9Q==}
-    engines: {node: '>=18'}
-
   '@loro-dev/flock-wasm@0.5.0':
     resolution: {integrity: sha512-gfjAXSd/OewCCH1wVnOhmFdXD40p0ZPGHfGW/tIxBvqO+qcvtdH37QTYWi4PQdKXMHHH7jfGXX4Oitguf+0pkg==}
     engines: {node: '>=18'}
+
+  '@loro-dev/roost@0.3.2':
+    resolution: {integrity: sha512-uRFPkyiu0b/eyj/3gehTSqjY1RY5jivB0QUBa02Zu9VE2xivVBlNJ0QvilzuSwygtgHwW68G/lw3wQNklBNcog==}
 
   '@loro-dev/streams-client@0.13.1':
     resolution: {integrity: sha512-qOyKNzKpXcOI4DcXJQX7Vzrf4T175ji//qosHyfVXkLY2X0M0qOD0VfaKFwTdlwEeUw5UmgohiNn2Os4AVx4BQ==}
@@ -469,23 +471,13 @@ packages:
       effect:
         optional: true
 
-  '@loro-dev/streams-client@0.7.0':
-    resolution: {integrity: sha512-O+LphfngoJe0g0QmRV2OIQKsiytZuvHoSsQeYxiRK00UYHcpqjiZw2OmcXCU4Q5reuxI5kZJz6du24iAamBVtQ==}
+  '@loro-dev/streams-client@0.16.0':
+    resolution: {integrity: sha512-+NWjig5iZ0FamC6dtdVwHUy0cr1VZZVvj6xWR98yCKjrBNk5mL1Q/SgzJo1FKhpwpDy0LkdLVXUwshg6H8ZsAA==}
     engines: {node: '>=18'}
-
-  '@loro-dev/streams-client@0.8.0':
-    resolution: {integrity: sha512-ILqMGzgIOp8xpfi5oAVdNEm+ldbM5xjdDotkfkc/MI8dziby9yPL29qGWcjeNCwnDTAyseJadgATzWI7M0Thlw==}
-    engines: {node: '>=18'}
-
-  '@loro-dev/streams-crdt@0.16.1':
-    resolution: {integrity: sha512-SsSVv2QEuv7fPfY45miTsP5PmgzcfZ3k0jlhajpreLuC7w6ta9bP1r90yMY+cYVj8MhCod0+VP9LnrOuQZTCyw==}
     peerDependencies:
-      '@loro-dev/flock-wasm': ^0.4.0
-      loro-crdt: ^1.10.3
+      effect: 4.0.2
     peerDependenciesMeta:
-      '@loro-dev/flock-wasm':
-        optional: true
-      loro-crdt:
+      effect:
         optional: true
 
   '@loro-dev/streams-crdt@0.21.1':
@@ -504,9 +496,17 @@ packages:
     resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
     engines: {node: ^14.21.3 || >=16}
 
+  '@noble/curves@2.4.0':
+    resolution: {integrity: sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==}
+    engines: {node: '>= 20.19.0'}
+
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@peculiar/asn1-cms@2.10.0':
     resolution: {integrity: sha512-CkX0H4NCIOMHOU3rh2xXZywinYZ/EnJlaOlJiGI0e5L4XjFqHf4iH30LMbXWChVppdA9ljbanjtzQFOhDNfTWg==}
@@ -794,9 +794,6 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
-
-  loro-crdt@1.15.1:
-    resolution: {integrity: sha512-J3568cXG75MNotTJg2XVhlIEW8POjAZRFhK+3yXYBaQVB1LHn/Ksk3DIqoTOBUf+cgE4yVeqPbh7VUTX2QLV2g==}
 
   loro-crdt@1.17.0:
     resolution: {integrity: sha512-5YU7arT1jZv+mGowByjJuMT/5Viw4s/en/NLClPP9zUpyMhrUyVzOf8lbIg1bFEfb8ICMIB6Cz97/l+amk3XfA==}
@@ -1228,24 +1225,23 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.3
 
-  '@loro-dev/flock-wasm@0.4.3': {}
-
   '@loro-dev/flock-wasm@0.5.0': {}
+
+  '@loro-dev/roost@0.3.2(effect@4.0.2)':
+    dependencies:
+      '@loro-dev/streams-client': 0.16.0(effect@4.0.2)
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+    transitivePeerDependencies:
+      - effect
 
   '@loro-dev/streams-client@0.13.1(effect@4.0.2)':
     optionalDependencies:
       effect: 4.0.2
 
-  '@loro-dev/streams-client@0.7.0': {}
-
-  '@loro-dev/streams-client@0.8.0': {}
-
-  '@loro-dev/streams-crdt@0.16.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)':
-    dependencies:
-      '@loro-dev/streams-client': 0.8.0
+  '@loro-dev/streams-client@0.16.0(effect@4.0.2)':
     optionalDependencies:
-      '@loro-dev/flock-wasm': 0.4.3
-      loro-crdt: 1.15.1
+      effect: 4.0.2
 
   '@loro-dev/streams-crdt@0.21.1(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)':
     dependencies:
@@ -1259,7 +1255,13 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.8.0
 
+  '@noble/curves@2.4.0':
+    dependencies:
+      '@noble/hashes': 2.4.0
+
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.4.0': {}
 
   '@peculiar/asn1-cms@2.10.0':
     dependencies:
@@ -1612,8 +1614,6 @@ snapshots:
       '@lexical/internal': 0.49.0(typescript@6.0.3)
     optionalDependencies:
       typescript: 6.0.3
-
-  loro-crdt@1.15.1: {}
 
   loro-crdt@1.17.0: {}
 

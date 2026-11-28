@@ -8,7 +8,8 @@ extension SessionController {
       return
     }
     guard let session = state.catalog.session(sessionId) else { return }
-    let ready = feed?.state.status == "live"
+    // Roost answers follow command readiness, which survives a history subscription reconnect.
+    let ready = feed?.state.controlReady == true
     if ready, let error = feed?.state.transcript.permissionError {
       // A malformed pending request stays visible rather than masquerading as no request.
       if permissionPage == nil, view.window != nil, permissionGate.canPrompt { openPermission(nil) }

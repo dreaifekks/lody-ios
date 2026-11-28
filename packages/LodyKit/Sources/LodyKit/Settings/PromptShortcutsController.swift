@@ -177,12 +177,11 @@ class PromptShortcutsController: UIViewController {
     }
   }
 
-  /// A shortcut's body, read fresh for the composer: its index entry by id, then the body.
+  /// A shortcut's body for the composer: the runtime checks it against the listing the panel
+  /// showed and usually answers from the bodies it prefetched, without a network read.
   static func body(id: String, service: PromptShortcutService = PromptShortcutsController.cloud) async throws -> RuntimeContract.PromptShortcut {
-    guard case .list(let list) = try await service(.list), let entry = list.entries.first(where: { $0.id == id }) else {
-      throw CocoaError(.fileNoSuchFile)
-    }
-    guard case .read(let read) = try await service(.read(entry)) else { throw CocoaError(.coderInvalidValue) }
+    if let fixture = MentionFixture.shortcut(id) { return fixture }
+    guard case .read(let read) = try await service(.select(id: id)) else { throw CocoaError(.coderInvalidValue) }
     return read.shortcut
   }
 
@@ -198,6 +197,8 @@ class PromptShortcutsController: UIViewController {
         .list(.init(workspaceId: workspaceId, userId: userId, fresh: true))
       case .read(let entry):
         .read(.init(workspaceId: workspaceId, userId: userId, entry: entry))
+      case .select(let id):
+        .select(.init(workspaceId: workspaceId, userId: userId, id: id))
       case .save(let entry, let value, let bodyDocId):
         .save(.init(workspaceId: workspaceId, userId: userId, entry: entry, value: value, bodyDocId: bodyDocId))
       }

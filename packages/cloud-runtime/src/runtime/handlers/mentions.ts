@@ -3,19 +3,21 @@ import type {
   MentionCategory,
   MentionSource,
 } from '../../models/mentions';
+import { projectRows } from '../../protocol/catalog.ts';
 import { workspaceRoleMentions } from '../agent-roles';
-import { commandMentions, mentionCatalog, sessionMentions } from '../mentions';
+import {
+  agentCommandMentions,
+  mentionCatalog,
+  sessionMentions,
+} from '../mentions';
+import { sessionDoc } from '../session';
 import { listedShortcuts } from '../prompt-shortcuts';
 import {
   sameShortcutProject,
   type PromptShortcutScope,
 } from '../../protocol/prompt-shortcuts/model.ts';
 import type { PromptShortcutIndexEntry } from '../../protocol/prompt-shortcuts/catalog.ts';
-import {
-  scopedShortcutCloud,
-  scopedWorkspaceGrant,
-  type RuntimeContext,
-} from './context.ts';
+import { scopedWorkspaceGrant, type RuntimeContext } from './context.ts';
 
 type MentionArgs = MentionSource & {
   category: MentionCategory;
@@ -64,12 +66,30 @@ export function registerMentions(ctx: RuntimeContext) {
     githubPending.set(key, request);
     return request;
   }
+  async function waitCatchUp(modes: readonly string[]) {
+    const pending = modes.flatMap((mode) => {
+      const wait = state.unhealthy.has(mode)
+        ? state.catchingUp?.get(mode)
+        : undefined;
+      return wait ? [wait] : [];
+    });
+    if (!pending.length) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(pending),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 3000);
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+  }
   async function getMentions(args: MentionArgs) {
     const { catalogs, machineReplicas } = state;
+    if (args.workspaceId === state.workspace) await waitCatchUp(['meta']);
     if (
       args.workspaceId !== state.workspace ||
       !state.metaReplica ||
-      state.unhealthy.size
+      state.unhealthy.has('meta')
     )
       throw new Error('metadata_not_ready');
     if (args.category === 'role') {
@@ -82,7 +102,11 @@ export function registerMentions(ctx: RuntimeContext) {
           state.userId !== sourceUserId
         )
           throw new Error('workspace_changed');
+        if (!state.metaReplica || state.unhealthy.has('meta'))
+          throw new Error('metadata_not_ready');
       };
+      await waitCatchUp([...machineReplicas.keys()]);
+      check();
       const result = await workspaceRoleMentions(
         sourceWorkspace,
         args.userId,
@@ -98,34 +122,53 @@ export function registerMentions(ctx: RuntimeContext) {
         args.machineId ??
           catalogs.get('meta')?.sessions.find((s) => s.id === args.sessionId)
             ?.machineId,
+        state.unhealthy,
       );
       check();
       return result;
     }
+    const metaSessions = () =>
+      catalogs.get('meta')?.sessions ??
+      projectRows(state.metaReplica!.flock.scan(), 'meta').sessions;
     if (args.category === 'session')
       return sessionMentions(
-        catalogs.get('meta')?.sessions ?? [],
+        metaSessions(),
         [...catalogs.values()].flatMap((value) => value.projects),
         args.sessionId,
       );
     const session = args.sessionId
-      ? catalogs
+      ? (catalogs
           .get('meta')
-          ?.sessions.find((item) => item.id === args.sessionId)
+          ?.sessions.find((item) => item.id === args.sessionId) ??
+        projectRows(state.metaReplica.flock.scan(), 'meta').sessions.find(
+          (item) => item.id === args.sessionId,
+        ))
       : undefined;
     if (args.sessionId && !session) throw new Error('session_unavailable');
     const projectId = session?.projectId ?? args.projectId;
     const project = [...catalogs.values()]
       .flatMap((value) => value.projects)
       .find((item) => item.id === projectId);
-    if (args.projectId && !project) throw new Error('project_unavailable');
+    if (args.projectId && !args.projectId.startsWith('group:') && !project)
+      throw new Error('project_unavailable');
     const machineId =
       session?.machineId ??
-      (projectId?.startsWith('github:')
+      (projectId?.startsWith('github:') || projectId?.startsWith('group:')
         ? args.machineId
         : project?.machineId) ??
       args.machineId;
-    if (!machineId || !machineReplicas.has(machineId))
+    if (machineId) await waitCatchUp([machineId]);
+    if (
+      args.workspaceId !== state.workspace ||
+      !state.metaReplica ||
+      state.unhealthy.has('meta')
+    )
+      throw new Error('metadata_not_ready');
+    if (
+      !machineId ||
+      state.unhealthy.has(machineId) ||
+      !machineReplicas.has(machineId)
+    )
       throw new Error('machine_unavailable');
     const prefix = `${machineId}:local:`;
     const localProjectId = projectId?.startsWith(prefix)
@@ -178,7 +221,6 @@ export function registerMentions(ctx: RuntimeContext) {
               sourceWorkspace,
               state.userId,
               scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
-              scopedShortcutCloud(ctx, sourceWorkspace, state.userId),
             );
       const shortcuts = listing.entries
         .filter((entry) => shortcutInScope(entry, scope))
@@ -188,12 +230,14 @@ export function registerMentions(ctx: RuntimeContext) {
           kind: 'cmd' as const,
           subtitle: entry.name,
           insertText: `/shortcut:${entry.slug}`,
+          revision: entry.revision,
         }));
       const currentMeta = state.metaReplica;
       if (
         !currentMeta ||
         state.workspace !== sourceWorkspace ||
-        state.unhealthy.size
+        state.unhealthy.has('meta') ||
+        state.unhealthy.has(machineId)
       )
         throw new Error('metadata_not_ready');
       const commands = () => {
@@ -208,18 +252,22 @@ export function registerMentions(ctx: RuntimeContext) {
               'agentConfigId',
             ]) ?? metadata?.agentConfigId)
           : args.agentConfigId;
-        if (typeof configId !== 'string') return commandMentions([]);
-        const capability = machineReplicas
-          .get(machineId)
-          ?.get(['acpCapability', configId]) as
-          Record<string, unknown> | undefined;
-        if (
-          !capability ||
-          capability.cliType !== (args.cliType ?? session?.cliType) ||
-          capability.agentType !== (args.agentType ?? session?.agentType)
-        )
-          return commandMentions([]);
-        return commandMentions(capability.availableCommands);
+        const runtimeConfig = session
+          ? (sessionDoc(session.id)?.getMap('acpRuntimeConfig').toJSON() as
+              Record<string, unknown> | undefined)
+          : undefined;
+        const capability =
+          typeof configId === 'string'
+            ? (machineReplicas
+                .get(machineId)
+                ?.get(['acpCapability', configId]) as
+                Record<string, unknown> | undefined)
+            : undefined;
+        return agentCommandMentions(
+          runtimeConfig?.availableCommands,
+          capability,
+          { cliType, agentType },
+        );
       };
       const result = commands();
       const names = new Set(result.items.map((item) => item.insertText));

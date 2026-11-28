@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@loro-dev/flock-wasm": "0.5.0",
+    "@loro-dev/roost": "0.3.2",
     "@loro-dev/streams-client": "0.13.1",
     "@loro-dev/streams-crdt": "0.21.1",
     "acp-extension-core": "0.3.0",

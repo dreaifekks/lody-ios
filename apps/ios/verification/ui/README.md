@@ -145,7 +145,10 @@ authenticated ShareInbox drain into a live outbox.
 
 `proposal-cards` uses Debug-only synthetic transcript scenes for Role creation,
 updates, owner-only actions, saved/dismissed receipts, schedule creation/Open,
-failed and pending decisions, and agent-shared PDF/Markdown files. The runner
+schedule edit proposals (current/proposed values, prompt diff, Apply, stale,
+deleted and owner-only states), system notices (fork origin, resumed history,
+agent warning, worktree script, a hidden unknown notice), failed and pending
+decisions, and agent-shared PDF/Markdown files. The runner
 captures light/dark appearances and exercises the fixture's decision transitions
 through production card controls. It does not verify cloud persistence or file downloads.
 

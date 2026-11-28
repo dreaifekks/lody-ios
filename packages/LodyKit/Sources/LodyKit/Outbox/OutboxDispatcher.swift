@@ -198,7 +198,8 @@ final class OutboxDispatcher {
     let id = record.sessionId, phase = record.phase, context = inputs.context
     guard !inflight.contains(id) else { return }
     if confirm(record, store: store) { return }
-    if record.creation == nil, context.transcript.replied.contains(record.sendId) {
+    if record.creation == nil,
+       context.transcript.replied.contains(record.sendId) || context.transcript.settled.contains(record.sendId) {
       store.remove(id)
       return
     }
@@ -397,13 +398,14 @@ final class OutboxDispatcher {
   }
 
   private func fail(_ record: OutboxRecord, store: OutboxStore, reason: String) async {
-    let reason = reason == "mention_expansion_failed" ? text("send.error.mentions") : reason
     guard case .success = await store.put(record.with(phase: "failed", reason: reason)).result, self.store === store else { return }
-    services.alert(text("send.alert.title"), reason)
+    services.alert(text("send.alert.title"), reason == "mention_expansion_failed" ? text("send.error.mentions") : reason)
   }
 
   func quotaError(_ reason: String?, fallback: String) -> String {
     let keys = [
+      "session_not_ready": "native.runtime.sessionNotSyncedRetry",
+      "metadata_not_ready": "native.runtime.sessionNotSyncedRetry",
       "input_storage_unavailable": "send.error.draftSaveFailed",
       "shortcut_unavailable": "send.error.shortcut",
       "mcp_catalog_unavailable": "send.error.mcpCatalog",

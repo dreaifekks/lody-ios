@@ -80,12 +80,7 @@ import {
   SessionSubscriptionsEvent,
   SessionTraceEvent,
 } from './session-events.ts';
-import {
-  PromptShortcutsParams,
-  PromptShortcutsResult,
-  ShortcutCloudParams,
-  ShortcutCloudResult,
-} from './shortcuts.ts';
+import { PromptShortcutsParams, PromptShortcutsResult } from './shortcuts.ts';
 import {
   DiagnosticEvent,
   MachinePresence,
@@ -141,9 +136,13 @@ import {
   SessionWorkspacePathResult,
   ConversationMarkdownParams,
   ConversationMarkdownResult,
+  ConversationShareMessagesParams,
+  ConversationShareMessagesResult,
   RespondPermissionParams,
   DecideProposalParams,
   DecideProposalResult,
+  InspectProposalParams,
+  InspectProposalResult,
   RespondPermissionResult,
   SendTurnParams,
   SendTurnResult,
@@ -161,7 +160,6 @@ export type {
 export type { CreationOptions } from './projects.ts';
 export type { SessionRuntimeEvent, SessionTrace } from './session-events.ts';
 export type { ShareRequestParams } from './sharing.ts';
-export type { ShortcutCloudParams } from './shortcuts.ts';
 
 export type CallSpec = {
   params: z.ZodType;
@@ -401,6 +399,11 @@ export const runtimeCalls = {
     result: ConversationMarkdownResult,
     timeoutMs: 15_000,
   },
+  conversationShareMessages: {
+    params: ConversationShareMessagesParams,
+    result: ConversationShareMessagesResult,
+    timeoutMs: 15_000,
+  },
   checkTurnQuota: {
     params: CheckTurnQuotaParams,
     result: CheckTurnQuotaResult,
@@ -446,6 +449,11 @@ export const runtimeCalls = {
     result: DecideProposalResult,
     timeoutMs: 75_000,
   },
+  inspectProposal: {
+    params: InspectProposalParams,
+    result: InspectProposalResult,
+    timeoutMs: 45_000,
+  },
   probeSchema: {
     params: ProbeSchemaParams,
     result: ProbeSchemaReport,
@@ -455,11 +463,6 @@ export const runtimeCalls = {
 
 export const hostCalls = {
   grant: { params: Empty, result: Grant, timeoutMs: 30_000 },
-  shortcutCloud: {
-    params: ShortcutCloudParams,
-    result: ShortcutCloudResult,
-    timeoutMs: 20_000,
-  },
   githubMentions: {
     params: GitHubMentionsParams,
     result: GitHubMentionsResult,
@@ -479,6 +482,7 @@ export const runtimeEvents = {
   agentProvidersChanged: z
     .object({ machineId: z.string() })
     .meta({ id: 'AgentProvidersChangedEvent' }),
+  agentRolesChanged: Empty,
   catalog: CatalogEvent,
   shareProgress: ShareProgressEvent,
   creationOptionsChanged: Empty,

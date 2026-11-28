@@ -15,6 +15,7 @@ final class SessionPreviewController: SessionController {
       bar: scenario, lanSimulator: scenario.hasPrefix("lan-simulator") ? scenario : nil
     )
     self.fixture = fixture
+    _ = try? WorkspaceModePins.shared.observe("preview-workspace", mode: .plaintext)
     super.init(
       sessionId: SessionPreviewFixture.sessionId, findQuery: scenario == "find" ? "needle" : "",
       source: SessionSource(
@@ -58,6 +59,18 @@ final class SessionPreviewController: SessionController {
     markdown: { _ in
       .ready(.init(markdown: "# Native session preview\n\nLive reply with a needle\n", estimatedTokens: 12, overBudget: false,
                    toolCallsCollapsed: false, thinkingTruncated: false, terminalTrimmed: false, toolResultsTruncated: 0))
+    },
+    shareMessages: { _ in
+      .ready(.init(
+        title: "Native session preview",
+        createdAt: "2026-10-29T10:00:00Z",
+        cliType: "builtin",
+        agentType: "claude",
+        messages: [
+          .init(id: "preview-user", role: .user, text: "Show the native session page", estimatedTokens: 18),
+          .init(id: "preview-answer", role: .assistant, text: "Live reply with a needle", estimatedTokens: 64, modelName: "Native fixture model", userTurnId: "preview-user"),
+        ]
+      ))
     }
   )
 
@@ -111,11 +124,23 @@ final class SessionPreviewController: SessionController {
         self?.fixture.decideCard(itemId: row.itemID, accept: accept)
         self?.chat.setProposalState(entryId: row.entryID, itemId: row.itemID, nil)
       }
-      chat.onProposalOpenSchedule = { [weak self] _ in
+      chat.onProposalOpenSchedule = { [weak self] id in
         guard let self else { return }
-        LodyShell.shared.presentNative(
-          SchedulesController(source: source, service: ScheduleFixture.shared.service),
-          title: String(localized: "native.chat.proposal.schedules", bundle: .lody), detents: [1])
+        let page = SchedulesController(source: source, service: ScheduleFixture.shared.service)
+        page.opening = id
+        LodyShell.shared.presentNative(page, title: String(localized: "native.chat.proposal.schedules", bundle: .lody), detents: [1])
+      }
+      if scenario == "cards-notices" {
+        fixtureSignIn = true
+        chat.agentSignInAvailable = true
+        chat.onAgentSignIn = {
+          LodyShell.shared.presentNative(AgentProvidersAuthPreview.make(), title: String(localized: "native.chat.error.signIn", bundle: .lody), detents: [1])
+        }
+      }
+      chat.onProposalInspect = { [weak self] row in
+        guard let result = SessionPreviewFixture.inspection(row.itemID) else { return }
+        // The runtime answers asynchronously; never re-enter the projection that asked.
+        DispatchQueue.main.async { self?.chat.setProposalInspection(entryId: row.entryID, itemId: row.itemID, result) }
       }
       if scenario == "cards-states" {
         chat.setProposalState(entryId: "preview-answer", itemId: "error", .init(message: String(localized: "native.chat.proposal.error.failed", bundle: .lody)))
@@ -290,7 +315,8 @@ private final class SessionPreviewFixture {
   }
 
   func decideCard(itemId: String, accept: Bool) {
-    cardOutcomes[itemId] = accept ? (bar == "cards-schedules" ? "created" : "saved") : "dismissed"
+    let accepted = ["cards-schedules": "created", "cards-schedule-edit": "applied"][bar] ?? "saved"
+    cardOutcomes[itemId] = accept ? accepted : "dismissed"
     revision += 1
     emit()
   }
@@ -327,6 +353,28 @@ private final class SessionPreviewFixture {
       object["entries"] = entries
       session = SessionController.json(object)
     }
+    if bar == "video", let data = session?.data(using: .utf8),
+       var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       var entries = object["entries"] as? [[String: Any]] {
+      entries[0]["items"] = [["itemId": "text", "type": "text", "text": "Play the recorded walkthrough video."]]
+      entries[1]["items"] = [
+        ["itemId": "reply", "type": "text", "text": "Here is the walkthrough clip."],
+        [
+          "itemId": "video",
+          "type": "file",
+          "file": [
+            "id": "video",
+            "fileName": "walkthrough.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 65_536,
+            "storageSessionId": "ui-verify-attachments",
+            "transport": "r2",
+          ],
+        ],
+      ]
+      object["entries"] = entries
+      session = SessionController.json(object)
+    }
     if bar.hasPrefix("cards-") {
       session = Self.cardsEnvelope(scenario: bar, revision: revision, outcomes: cardOutcomes)
     }
@@ -349,6 +397,24 @@ private final class SessionPreviewFixture {
     changed?()
   }
 
+  /// Synthetic `inspectProposal` answers for the edit proposal scenes, by item.
+  nonisolated static func inspection(_ itemId: String) -> RuntimeContract.InspectProposalResult? {
+    let daily = RuntimeContract.ScheduleRule(kind: .daily, hour: 9, minute: 0, timeZone: "UTC")
+    let states: [String: RuntimeContract.InspectProposalResultState] = [
+      "edit-pending": .ready, "edit-stale": .stale, "edit-deleted": .unavailable, "edit-teammate": .notOwner,
+    ]
+    guard let state = states[itemId] else { return nil }
+    if state == .unavailable { return .init(state: state, isOwner: false, timeZone: "UTC") }
+    let diff: [RuntimeContract.PromptDiffLine] = [
+      .init(kind: .same, text: "Summarize open tasks."),
+      .init(kind: .del, text: "Post in the team chat."),
+      .init(kind: .add, text: "Post in the team chat with owners."),
+      .init(kind: .add, text: "Flag anything blocked for two days."),
+    ]
+    return .init(state: state, isOwner: state != .notOwner, currentTitle: "Daily review", currentRule: daily,
+      timeZone: "UTC", promptDiff: diff)
+  }
+
   /// Synthetic summaries in the same JSON shape delivered by the cloud runtime.
   /// Keep taller cards separate so each launch is a useful phone screenshot.
   nonisolated static func cardsEnvelope(scenario: String, revision: Int, outcomes: [String: String]) -> String {
@@ -369,8 +435,33 @@ private final class SessionPreviewFixture {
       if outcome == "created" { proposal["scheduleId"] = "daily-review" }
       return ["itemId": id, "type": "system_notice", "name": "schedule_proposal", "proposal": proposal]
     }
+    func edit(_ id: String, outcome: String? = nil) -> [String: Any] {
+      var proposal: [String: Any] = ["kind": "schedule_edit", "proposalId": id, "scheduleId": "daily-review",
+        "title": "Daily review", "baseActivityId": "created-1",
+        "patch": ["title": "Morning review", "prompt": "Summarize open tasks.\nPost in the team chat with owners.",
+          "rule": ["kind": "weekdays", "hour": 8, "minute": 30]]]
+      proposal["outcome"] = outcomes[id] ?? outcome
+      return ["itemId": id, "type": "system_notice", "name": "schedule_edit_proposal", "proposal": proposal]
+    }
     let items: [[String: Any]]
     switch scenario {
+    case "cards-schedule-edit":
+      items = [edit("edit-pending"), edit("edit-applied", outcome: "applied")]
+    case "cards-schedule-edit-states":
+      items = [edit("edit-stale"), edit("edit-deleted"), edit("edit-teammate")]
+    case "cards-notices":
+      items = [
+        ["itemId": "fork", "type": "system_notice", "name": "session_fork_origin",
+         "meta": ["sourceSessionId": "preview-source", "sourceTitle": "Fix the login redirect"]],
+        ["itemId": "resume", "type": "system_notice", "name": "resume_from_external_chat_history", "meta": ["truncated": true]],
+        ["itemId": "warning", "type": "system_notice", "name": "agent_warning",
+         "meta": ["source": "sessionStopTimedOut", "message": "SIGTERM sent; the process is still running."]],
+        ["itemId": "future", "type": "system_notice", "name": "future_notice", "meta": ["message": "never shown"]],
+        ["itemId": "auth", "type": "system_notice", "name": "chat_failed", "meta": ["reason": "acp_auth_required", "message": "Authentication required"]],
+        ["itemId": "setup", "type": "worktree_script", "phase": "setup", "status": "failed",
+         "steps": [["command": "pnpm install", "status": "completed", "output": "Done in 2.1s"],
+                   ["command": "pnpm build", "status": "failed", "output": "error TS2304: Cannot find name 'x'."]]],
+      ]
     case "cards-role-create":
       items = [role("create", fields: ["name": "Reviewer", "description": "Reviews proposed changes.",
         "promptPrefix": "Focus on correctness and clear feedback."])]

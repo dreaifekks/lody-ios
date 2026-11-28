@@ -47,6 +47,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var version = 0
   private var observers: [NSObjectProtocol] = []
   private var clock: Timer?
+  /// A schedule to open in its editor once the first live list names it (a proposal card's Open).
+  var opening: String?
 
   init(source: SessionSource = .live, service: ScheduleService = .live) {
     self.source = source
@@ -228,6 +230,13 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       self.loading = false
       self.refresh.endRefreshing()
       self.render()
+      if let opening = self.opening {
+        self.opening = nil
+        if let item = self.items[opening] { self.open(item) }
+        else if value != nil {
+          LodyToastOverlay.shared.show(message: String(localized: "native.chat.proposal.edit.unavailable", bundle: .lody), kind: .neutral)
+        }
+      }
     }
   }
 

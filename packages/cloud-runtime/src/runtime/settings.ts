@@ -9,7 +9,9 @@ import {
 } from './catalog-sync';
 import type { RemoteSetting, SettingsRequest } from '../models/settings.ts';
 
-type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
+type Grant = (() => Promise<{ token: string; gatewayBaseUrl: string }>) & {
+  invalidate?: (failedToken?: string) => void;
+};
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -28,7 +30,74 @@ type Cached = {
   snapshotBytes: number;
 };
 const replicas = new Map<string, Cached>();
-const SETTINGS_LIMIT = 8 * 1024 * 1024;
+const SETTINGS_LIMIT = 16 * 1024 * 1024;
+const READ_RETRY_DELAYS_MS = [250, 750];
+
+function waitRetry(ms: number, signal: AbortSignal) {
+  signal.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
+function retryableGrantError(error: unknown, signal: AbortSignal) {
+  if (signal.aborted) return false;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { retryable?: unknown }).retryable === true
+  );
+}
+
+function retryableStreamResult(
+  error: { code: string; status?: number; cause?: unknown },
+  signal: AbortSignal,
+  grant: Grant,
+  lastToken: string | undefined,
+) {
+  if (signal.aborted) return false;
+  if (error.code === 'unauthorized') {
+    grant.invalidate?.(lastToken);
+    return true;
+  }
+  if (['network_error', 'timeout', 'rate_limited'].includes(error.code))
+    return true;
+  if (error.code !== 'unknown') return false;
+  if ((error.status ?? 0) >= 500) return true;
+  return (
+    (error.cause instanceof Error || error.cause instanceof DOMException) &&
+    error.cause.name === 'AbortError'
+  );
+}
+
+async function readPageWithRetry(
+  client: Awaited<ReturnType<typeof clientFor>>,
+  offset: string,
+  cursor: string | undefined,
+  signal: AbortSignal,
+  grant: Grant,
+  getLastToken: () => string | undefined,
+) {
+  for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted();
+    const next = await client.readOnce({ offset, cursor, signal });
+    if (next.ok) return next.result;
+    if (
+      attempt >= READ_RETRY_DELAYS_MS.length ||
+      !retryableStreamResult(next.result, signal, grant, getLastToken())
+    )
+      throw new Error(next.result.code);
+    await waitRetry(READ_RETRY_DELAYS_MS[attempt], signal);
+  }
+}
 
 /** Drops cached settings reads (all streams on account/workspace switch, or one stream after write). */
 export function forgetSettings(stream?: string) {
@@ -46,6 +115,8 @@ async function catchUp(
   client: Awaited<ReturnType<typeof clientFor>>,
   cached: Cached,
   signal: AbortSignal,
+  grant: Grant,
+  getLastToken: () => string | undefined,
 ) {
   let size = 0;
   const checkpoint = catalogImportCheckpoint(signal);
@@ -57,22 +128,23 @@ async function catchUp(
   for (let page = 0; ; page++) {
     signal.throwIfAborted();
     if (page >= 100) throw new Error('catalog_limit');
-    const next = await client.readOnce({
-      offset: cached.offset,
-      cursor: cached.cursor,
+    const next = await readPageWithRetry(
+      client,
+      cached.offset,
+      cached.cursor,
       signal,
-    });
-    if (!next.ok) throw new Error(next.result.code);
-    if (next.result.payload) await apply(next.result.payload.body);
-    if (next.result.upToDate) {
-      cached.offset = next.result.nextOffset;
-      cached.cursor = next.result.cursor;
+      grant,
+      getLastToken,
+    );
+    if (next.payload) await apply(next.payload.body);
+    if (next.upToDate) {
+      cached.offset = next.nextOffset;
+      cached.cursor = next.cursor;
       return;
     }
-    if (cached.offset === next.result.nextOffset)
-      throw new Error('stalled_cursor');
-    cached.offset = next.result.nextOffset;
-    cached.cursor = next.result.cursor;
+    if (cached.offset === next.nextOffset) throw new Error('stalled_cursor');
+    cached.offset = next.nextOffset;
+    cached.cursor = next.cursor;
   }
 }
 
@@ -82,7 +154,30 @@ export async function openSettings(
   signal: AbortSignal,
   options: { cached?: boolean } = {},
 ) {
-  const client = await clientFor(stream, grant);
+  let lastToken: string | undefined;
+  const trackedGrant: Grant = Object.assign(
+    async () => {
+      const value = await grant();
+      lastToken = value.token;
+      return value;
+    },
+    { invalidate: grant.invalidate },
+  );
+  let client!: Awaited<ReturnType<typeof clientFor>>;
+  for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted();
+    try {
+      client = await clientFor(stream, trackedGrant);
+      break;
+    } catch (error) {
+      if (
+        attempt >= READ_RETRY_DELAYS_MS.length ||
+        !retryableGrantError(error, signal)
+      )
+        throw error;
+      await waitRetry(READ_RETRY_DELAYS_MS[attempt], signal);
+    }
+  }
   const cached = options.cached ? replicas.get(stream) : undefined;
   let preparedBootstrap: Awaited<ReturnType<typeof readCatalogRefresh>>;
   if (cached) {
@@ -95,7 +190,7 @@ export async function openSettings(
         signal,
       );
       if (!preparedBootstrap) {
-        await catchUp(client, cached, signal);
+        await catchUp(client, cached, signal, trackedGrant, () => lastToken);
         return { flock: copy(cached.flock), client };
       }
       replicas.delete(stream);
@@ -104,12 +199,37 @@ export async function openSettings(
       if (signal.aborted) throw error;
     }
   }
-  const initial = preparedBootstrap
-    ? { ok: true as const, result: preparedBootstrap }
-    : await client.bootstrap({ signal });
-  if (!initial.ok) throw new Error(initial.result.code);
+  let data!: NonNullable<typeof preparedBootstrap>;
+  if (preparedBootstrap) {
+    data = preparedBootstrap;
+  } else {
+    for (let attempt = 0; ; attempt++) {
+      signal.throwIfAborted();
+      let initial;
+      try {
+        initial = await client.bootstrap({ signal });
+      } catch (error) {
+        if (
+          attempt >= READ_RETRY_DELAYS_MS.length ||
+          !retryableGrantError(error, signal)
+        )
+          throw error;
+        await waitRetry(READ_RETRY_DELAYS_MS[attempt], signal);
+        continue;
+      }
+      if (initial.ok) {
+        data = initial.result;
+        break;
+      }
+      if (
+        attempt >= READ_RETRY_DELAYS_MS.length ||
+        !retryableStreamResult(initial.result, signal, trackedGrant, lastToken)
+      )
+        throw new Error(initial.result.code);
+      await waitRetry(READ_RETRY_DELAYS_MS[attempt], signal);
+    }
+  }
   const flock = new Flock(`lody-ios-settings-${crypto.randomUUID()}`);
-  const data = initial.result;
   const snapshotBytes = data.snapshot?.body.length ?? 0;
   const checkpoint = catalogImportCheckpoint(signal);
   let size = 0;
@@ -142,12 +262,18 @@ export async function openSettings(
   for (let page = 0; !upToDate; page++) {
     signal.throwIfAborted();
     if (page >= 100) throw new Error('catalog_limit');
-    const next = await client.readOnce({ offset, cursor, signal });
-    if (!next.ok) throw new Error(next.result.code);
-    if (next.result.payload) await apply(next.result.payload.body);
-    if (offset === next.result.nextOffset && !next.result.upToDate)
+    const next = await readPageWithRetry(
+      client,
+      offset,
+      cursor,
+      signal,
+      trackedGrant,
+      () => lastToken,
+    );
+    if (next.payload) await apply(next.payload.body);
+    if (offset === next.nextOffset && !next.upToDate)
       throw new Error('stalled_cursor');
-    ({ nextOffset: offset, cursor, upToDate } = next.result);
+    ({ nextOffset: offset, cursor, upToDate } = next);
   }
   if (!options.cached) return { flock, client };
   if (replicas.size >= 64) replicas.delete(replicas.keys().next().value!);

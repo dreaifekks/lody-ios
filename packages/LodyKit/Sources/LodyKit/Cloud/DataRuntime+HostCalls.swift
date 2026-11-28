@@ -6,31 +6,19 @@ extension DataRuntime {
     switch request {
     case .grant:
       grantWaiters.append(id)
+      if let prefetchedGrant {
+        self.prefetchedGrant = nil
+        var grant = prefetchedGrant.value
+        let elapsed = prefetchedGrant.requestedAt.duration(to: .now).components
+        grant.expiresIn -= Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        if grant.expiresIn > 30, let workspace, WorkspaceModePins.shared.mode(workspace) == .plaintext {
+          deliverGrant(grant)
+          return
+        }
+      }
       fetchGrant()
-    case .shortcutCloud(let params): shortcutCloud(id, params)
     case .githubMentions(let params): githubMentions(id, params)
     case .shareRequest(let params): shareRequest(id, params)
-    }
-  }
-  private func shortcutCloud(_ id: String, _ params: RuntimeContract.ShortcutCloudParams) {
-    typealias Call = RuntimeContract.HostCalls.ShortcutCloud
-    guard let channel, githubTasks[id] == nil else { return }
-    guard !isLAN else { channel.fail(id: id, method: Call.method, code: "shortcut_unavailable"); return }
-    guard let workspace, let body = try? RuntimeJSON.object(params), body["workspaceId"] as? String == workspace,
-          let operation = body["operation"] as? String, let args = body["args"] as? [String: Any],
-          githubTasks.count < 8 else {
-      channel.fail(id: id, method: Call.method, code: "shortcut_unavailable"); return
-    }
-    let user = userId
-    githubTasks[id] = Task { [weak self] in
-      var value: RuntimeContract.JSONValue?
-      if let result = try? await PromptShortcutCloud.call(operation: operation, workspace: workspace, args: args) {
-        value = try? RuntimeJSON.decode(RuntimeContract.JSONValue.self, from: result)
-      }
-      guard !Task.isCancelled, let self, self.channel === channel else { return }
-      self.githubTasks.removeValue(forKey: id)
-      if let value, self.workspace == workspace, self.userId == user { channel.reply(Call.self, id: id, .init(value: value)) }
-      else { channel.fail(id: id, method: Call.method, code: "shortcut_unavailable") }
     }
   }
   private func githubMentions(_ id: String, _ params: RuntimeContract.GitHubMentionsParams) {
@@ -55,13 +43,15 @@ extension DataRuntime {
     guard let channel, shareTasks[id] == nil else { return }
     guard let workspace, let body = try? RuntimeJSON.object(params), body["workspaceId"] as? String == workspace,
           let operation = body["operation"] as? String, let args = body["args"] as? [String: Any],
+          operation != "historyToken" || WorkspaceModePins.shared.mode(workspace) == .plaintext,
           shareTasks.count < 4 else {
       channel.fail(id: id, method: Call.method, code: "share_request_failed"); return
     }
     let user = userId
+    let gateway = streamsOrigin?.workspace == workspace ? streamsOrigin?.origin : nil
     shareTasks[id] = Task { [weak self] in
       var value: RuntimeContract.JSONValue?
-      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user) {
+      if let result = try? await SessionSharing.run(operation, args: args, workspace: workspace, userId: user, gatewayOrigin: gateway) {
         value = try? RuntimeJSON.decode(RuntimeContract.JSONValue.self, from: result)
       }
       guard !Task.isCancelled, let self, self.channel === channel else { return }
@@ -70,7 +60,7 @@ extension DataRuntime {
       else { channel.fail(id: id, method: Call.method, code: "share_request_failed") }
     }
   }
-  private func fetchGrant() {
+  func fetchGrant() {
     guard grantTask == nil else { return }
     guard let workspace, let view = webView else { deliverGrant(nil); return }
     if let lan {
@@ -85,6 +75,7 @@ extension DataRuntime {
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.httpBody = try JSONSerialization.data(withJSONObject: ["workspaceId": workspace])
+      let requestedAt = ContinuousClock.now
       grantTask = URLSession.shared.dataTask(with: request) { [weak self, weak view] data, response, error in
         DispatchQueue.main.async {
           guard let self, let view, self.webView === view else { return }
@@ -97,8 +88,13 @@ extension DataRuntime {
              let url = URL(string: address), url.scheme == "https", url.user == nil, url.password == nil,
              let expiry = value["expiresIn"] as? Double, expiry > 0 {
             grant = .init(token: token, gatewayBaseUrl: address, expiresIn: expiry, shardHostSuffix: value["shardHostSuffix"] as? String)
+            if url.port == nil, let host = url.host, !host.isEmpty {
+              self.streamsOrigin = (workspace, "https://\(host.lowercased())")
+            }
           }
-          self.deliverGrant(grant)
+          if self.grantWaiters.isEmpty, let grant {
+            self.prefetchedGrant = (grant, requestedAt)
+          } else { self.deliverGrant(grant) }
         }
       }
       grantTask?.resume()

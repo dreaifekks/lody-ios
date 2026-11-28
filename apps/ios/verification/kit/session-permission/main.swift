@@ -64,6 +64,15 @@ projection.receive(generation: 2, phase: "live", json: envelope(0, status: "sync
 precondition(projection.state == .waiting)
 projection.receive(generation: 2, phase: "live", json: envelope(1))
 precondition(projection.state == .ready(target))
+// A Roost subscription reconnect keeps answers available on the installed transcript.
+func roost(_ revision: Int, controlReady: Bool) -> String {
+  "{\"v\":1,\"revision\":\(revision),\"status\":\"syncing\",\"controlReady\":\(controlReady),\"entries\":\(pending)}"
+}
+var reconnecting = PermissionProjection()
+reconnecting.receive(generation: 1, phase: "live", json: roost(1, controlReady: true))
+precondition(reconnecting.state == .ready(target), "Command readiness must allow answers while syncing")
+reconnecting.receive(generation: 1, phase: "live", json: roost(2, controlReady: false))
+precondition(reconnecting.state == .waiting, "Answers wait while commands are unavailable")
 projection.receive(generation: 2, phase: "background", json: nil)
 precondition(projection.state == .waiting)
 projection.receive(generation: 2, phase: "live", json: envelope(2))

@@ -1,21 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { transform } from 'esbuild';
-const source = await readFile(
-  new URL(
-    '../../../../packages/cloud-runtime/src/runtime/machine-rpc.ts',
-    import.meta.url,
-  ),
-  'utf8',
-);
-const fn = source.slice(
-  source.indexOf('export async function machineRpc('),
-  source.indexOf('// Code Collab'),
-);
-const code = (await transform(fn.replace('export ', ''), { loader: 'ts' }))
-  .code;
+import { build } from 'esbuild';
+
+const bundle = await build({
+  entryPoints: [
+    new URL(
+      '../../../../packages/cloud-runtime/src/runtime/machine-rpc.ts',
+      import.meta.url,
+    ).pathname,
+  ],
+  bundle: true,
+  write: false,
+  format: 'iife',
+  globalName: 'rpc',
+  plugins: [
+    {
+      name: 'machine-rpc-client',
+      setup(builder) {
+        builder.onResolve({ filter: /^\.\/session$/ }, () => ({
+          path: 'session',
+          namespace: 'fixture',
+        }));
+        builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({
+          contents:
+            'export const clientFor = (...args) => globalThis.clientFor(...args);',
+        }));
+      },
+    },
+  ],
+});
+const load = (context) =>
+  vm.runInNewContext(bundle.outputFiles[0].text + ';rpc.machineRpc;', context);
+
 test('capability RPC waits past progress frames for the final result', async () => {
   let id,
     envelope,
@@ -59,9 +76,8 @@ test('capability RPC waits past progress frames for the final result', async () 
             },
           },
   };
-  vm.createContext(context);
-  vm.runInContext(code + ';globalThis.call=machineRpc;', context);
-  const reply = await context.call(
+  const call = load(context);
+  const reply = await call(
     'w',
     'm',
     'machine/acp-capabilities-refresh',
@@ -98,10 +114,9 @@ test('a cancelled provider request cannot append after late authorization/client
       return { create: async () => ({ ok: true }) };
     },
   };
-  vm.createContext(context);
-  vm.runInContext(code + ';globalThis.call=machineRpc;', context);
+  const call = load(context);
   const controller = new AbortController();
-  const result = context.call(
+  const result = call(
     'w',
     'm',
     'machine/acp-authenticate',

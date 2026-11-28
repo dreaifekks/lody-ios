@@ -3,17 +3,16 @@ import type { StreamsClient } from '@loro-dev/streams-client';
 import type { Catalog, Project } from '../../models/catalog.ts';
 import type { MachinePresence } from '../../models/machines.ts';
 import type { PinSection } from '../../contract/status-view.ts';
-import type {
-  Grant,
-  SessionRuntimeEvent,
-  ShortcutCloudParams,
-} from '../../contract/methods.ts';
+import type { Grant, SessionRuntimeEvent } from '../../contract/methods.ts';
 import type { createChannel } from '../channel.ts';
 import type { FileContext } from '../files';
 import { sessionFileRootMounts } from '../../protocol/session-file-roots.ts';
 
 export type RuntimeChannel = ReturnType<typeof createChannel>;
 export type MetaReplica = { flock: Flock; client: StreamsClient };
+export type GrantProvider = (() => Promise<Grant>) & {
+  invalidate?: (failedToken?: string) => void;
+};
 
 export type RuntimeState = {
   workspace: string;
@@ -27,8 +26,11 @@ export type RuntimeState = {
   readonly machineReplicas: Map<string, Flock>;
   readonly catalogs: Map<string, Catalog>;
   readonly unhealthy: Set<string>;
-  /** Live `${workspace}:wf:workspace` replica, written by Status view commands. */
-  workspaceReplica: (MetaReplica & { missing?: boolean }) | undefined;
+  /** Active error-free stream catch-ups keyed by watcher mode (`meta` or `machineId`). */
+  readonly catchingUp?: Map<string, Promise<void>>;
+  /** Live `${workspace}:wf:workspace` replica, shared by Status view and Agent Roles. */
+  workspaceReplica:
+    (MetaReplica & { missing?: boolean; synced?: boolean }) | undefined;
   /** Last read `pinSection` rows; `loaded` is false until the first read. */
   pinSections: { sections: PinSection[]; loaded: boolean };
 };
@@ -36,7 +38,7 @@ export type RuntimeState = {
 export type RuntimeContext = {
   channel: RuntimeChannel;
   state: RuntimeState;
-  getGrant: () => Promise<Grant>;
+  getGrant: GrantProvider;
   broker: (operation: string, args: object) => Promise<unknown>;
   publish: () => void;
   publishSubscriptions: () => void;
@@ -58,6 +60,8 @@ export type RuntimeContext = {
     replica: import('../status-view.ts').StatusViewDirtyReplica,
     flock: Flock,
   ) => void;
+  /** Observes the current meta replica, following it across reconnects. */
+  observeMeta: (wake: () => void) => () => void;
   /** Restarts the live workspace settings read, keeping the current replica. */
   refreshWorkspace: () => void;
   watch: (mode: string) => void;
@@ -70,43 +74,25 @@ export function scopedWorkspaceGrant(
   { state, getGrant }: RuntimeContext,
   workspaceId: string,
   userId: string,
-) {
-  return async () => {
-    const check = () => {
-      if (state.workspace !== workspaceId || state.userId !== userId)
-        throw new Error('workspace_changed');
-    };
-    check();
-    const value = await getGrant();
-    check();
-    return value;
+): GrantProvider {
+  const check = () => {
+    if (state.workspace !== workspaceId || state.userId !== userId)
+      throw new Error('workspace_changed');
   };
-}
-
-export function scopedShortcutCloud(
-  { channel, state }: RuntimeContext,
-  workspaceId: string,
-  userId: string,
-) {
-  return async (operation: string, args: Record<string, unknown>) => {
-    const check = () => {
-      if (state.workspace !== workspaceId || state.userId !== userId)
-        throw new Error('workspace_changed');
-    };
-    check();
-    let value: unknown;
-    try {
-      ({ value } = await channel.request('shortcutCloud', {
-        workspaceId,
-        operation,
-        args,
-      } as ShortcutCloudParams));
-    } catch {
-      throw new Error('shortcut_unavailable');
-    }
-    check();
-    return value;
-  };
+  return Object.assign(
+    async () => {
+      check();
+      const value = await getGrant();
+      check();
+      return value;
+    },
+    {
+      invalidate: (failedToken?: string) => {
+        if (state.workspace === workspaceId && state.userId === userId)
+          getGrant.invalidate?.(failedToken);
+      },
+    },
+  );
 }
 
 export function machineFor(

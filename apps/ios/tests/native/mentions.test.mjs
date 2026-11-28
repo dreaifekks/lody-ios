@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { Flock } from '@loro-dev/flock-wasm/base64';
 import { openTestSession } from '../helpers.mjs';
 
 const bundle = await build({
   stdin: {
     contents:
-      "export * from './mentions'; export * from './mention-expansion'; export * from './agent-roles';",
+      "export * from './mentions'; export * from './mention-expansion'; export * from './agent-roles'; export * from './handlers/mentions'; export * from './catalog-sync';",
     resolveDir: new URL(
       '../../../../packages/cloud-runtime/src/runtime/',
       import.meta.url,
@@ -93,10 +94,15 @@ test('send expansion matches OSS prompts; paths, GitHub references and commands 
     '$auth [Skill Path](already)',
   );
   assert.equal(
-    await mentions.expandMentions('/compact #12 @src/file.ts', () => {
-      throw new Error('Verbatim references must not load a catalog');
-    }),
-    '/compact #12 @src/file.ts',
+    await mentions.expandMentions(
+      '/compact #12 @src/file.ts costs $100 and $5.99 arg $1 `$auth` ```sh\necho $HOME @session:s2\n```',
+      () => {
+        throw new Error(
+          'Verbatim references, currency amounts and code must not load a catalog',
+        );
+      },
+    ),
+    '/compact #12 @src/file.ts costs $100 and $5.99 arg $1 `$auth` ```sh\necho $HOME @session:s2\n```',
   );
   assert.throws(
     () =>
@@ -324,6 +330,38 @@ test('only advertised well-formed commands are selectable', () => {
   );
 });
 
+test('a session lists its agent’s reported commands before the config’s probe preview', () => {
+  const agent = { cliType: 'custom', agentType: 'custom-a1' };
+  const preview = {
+    ...agent,
+    availableCommands: [{ name: 'probe', description: 'Probe' }],
+  };
+  const names = (actual, capability) =>
+    mentions
+      .agentCommandMentions(actual, capability, agent)
+      .items.map((item) => item.insertText);
+  // The probe of a custom command can finish before it advertises commands.
+  assert.deepEqual(
+    names([{ name: 'review' }, { name: 'init' }], {
+      ...agent,
+      availableCommands: [],
+    }),
+    ['/review', '/init'],
+  );
+  assert.deepEqual(
+    names([], preview),
+    [],
+    'a reported empty list clears the menu',
+  );
+  assert.deepEqual(names(undefined, preview), ['/probe']);
+  assert.deepEqual(
+    names(undefined, { ...preview, agentType: 'custom-other' }),
+    [],
+    'another agent’s preview is never shown',
+  );
+  assert.deepEqual(names(undefined, undefined), []);
+});
+
 test('first turn, queue and Steer persist the same expansion before delivery; failure writes nothing', async () => {
   const requests = [];
   const fixture = await openTestSession({
@@ -538,5 +576,183 @@ test('single-target and cross-machine Role targets carry stable agentRoleInstanc
   assert.throws(
     () => mentions.expandMentionText('@role:cross', catalog.items),
     /ambiguous_mention/,
+  );
+});
+
+test('retry keeps the original references and writes the same input once the catalog recovers', async () => {
+  const flock = new Flock('retry-meta');
+  flock.set(['m', 'session-s1'], { machineId: 'm1', agentConfigId: 'a1' });
+  const fixture = await openTestSession({
+    settings: () => new Flock('retry-settings').exportFile(),
+    onRpc: () => ({ result: { accepted: true } }),
+  });
+  try {
+    let recovered = false;
+    const handlers = new Map();
+    fixture.runtime.registerSessions(
+      {
+        channel: { handle: (name, fn) => handlers.set(name, fn) },
+        state: { workspace: 'w1', userId: 'u1', metaReplica: { flock } },
+        getGrant: async () => ({
+          token: 'fixture',
+          gatewayBaseUrl: 'https://example.invalid',
+        }),
+      },
+      async ({ category }) =>
+        recovered
+          ? load(category)
+          : { items: [], incomplete: true, truncated: false },
+    );
+    const send = handlers.get('sendTurn');
+    const args = {
+      id: '00000000-0000-4000-8000-000000000012',
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      text,
+    };
+    for (const attempt of [args, { ...args, literalReferences: true }]) {
+      const rejected = await send(attempt);
+      assert.equal(rejected.state, 'not_sent');
+      assert.equal(rejected.reason, 'mention_expansion_failed');
+    }
+    assert.equal(fixture.appends.length, 0);
+    recovered = true;
+    const result = await send(args);
+    assert.equal(result.state, 'accepted', result.reason);
+    const history = fixture.server.toJSON().history;
+    assert.deepEqual(
+      history.map((entry) => [entry.id, entry.inputConfig.prompt]),
+      [[args.id, expected]],
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test('new-session references wait out active stream catch-up, fall back to live meta Flock rows, and still fail fast on unhealthy streams', async () => {
+  const meta = new Flock('new-session-meta');
+  meta.set(['e', 'session-existing'], true);
+  meta.set(['m', 'session-existing'], {
+    id: 'existing',
+    title: 'Other conversation',
+    machineId: 'm1',
+    createdAt: '2026-11-26T00:00:00.000Z',
+  });
+  meta.set(['e', 'session-new'], true);
+  meta.set(['m', 'session-new'], {
+    id: 'new',
+    title: 'New chat',
+    machineId: 'm1',
+    agentConfigId: 'a1',
+    createdAt: '2026-11-26T00:01:00.000Z',
+  });
+  const machine = new Flock('new-session-machine');
+  machine.set(['agentConfig', 'a1'], {
+    id: 'a1',
+    machineId: 'm1',
+    name: 'Agent',
+  });
+  const state = {
+    workspace: 'w1',
+    userId: 'u1',
+    metaReplica: { flock: meta },
+    machineReplicas: new Map([['m1', machine]]),
+    // Intentionally omit 'new' from catalogs.get('meta') to simulate first-turn send before catalog flush.
+    catalogs: new Map(),
+    unhealthy: new Set(),
+    catchingUp: new Map(),
+    presence: { state: 'live', onlineMachineIds: ['m1'] },
+  };
+  const getMentions = mentions.registerMentions({
+    state,
+    channel: { handle() {} },
+    getGrant: async () => ({
+      token: 'fixture',
+      gatewayBaseUrl: 'https://example.invalid',
+    }),
+  });
+
+  // 1. Freshly created session resolves @session from live meta Flock even before catalogs.set('meta', ...).
+  const initialExpanded = await mentions.expandMentions(
+    'Follow @session:existing for $100',
+    (category) =>
+      getMentions({
+        workspaceId: 'w1',
+        sessionId: 'new',
+        userId: 'u1',
+        category,
+      }),
+  );
+  assert.equal(
+    initialExpanded,
+    'Follow [@Other conversation](lody://session/existing) for $100',
+  );
+
+  // 2. Active error-free meta catch-up (e.g. multi-page burst right after createSession) waits and succeeds.
+  let finishMetaCatchUp;
+  state.unhealthy.add('meta');
+  state.catchingUp.set(
+    'meta',
+    new Promise((resolve) => {
+      finishMetaCatchUp = () => {
+        state.unhealthy.delete('meta');
+        state.catchingUp.delete('meta');
+        resolve();
+      };
+    }),
+  );
+  setTimeout(finishMetaCatchUp, 10);
+  const afterCatchUp = await mentions.expandMentions(
+    'Continue @session:existing',
+    (category) =>
+      getMentions({
+        workspaceId: 'w1',
+        sessionId: 'new',
+        userId: 'u1',
+        category,
+      }),
+  );
+  assert.equal(
+    afterCatchUp,
+    'Continue [@Other conversation](lody://session/existing)',
+  );
+
+  // 3. Genuine stream failure (unhealthy without active catchingUp) rejects immediately.
+  state.unhealthy.add('meta');
+  const started = performance.now();
+  await assert.rejects(
+    mentions.expandMentions('Continue @session:existing', (category) =>
+      getMentions({
+        workspaceId: 'w1',
+        sessionId: 'new',
+        userId: 'u1',
+        category,
+      }),
+    ),
+    /mention_expansion_failed/,
+  );
+  assert.ok(
+    performance.now() - started < 500,
+    'Offline/failed metadata must reject without waiting on the catch-up deadline',
+  );
+  state.unhealthy.delete('meta');
+
+  // 4. Resetting catalogImportCheckpoint after idle I/O keeps sub-12ms live updates synchronous.
+  let yields = 0;
+  const controller = new AbortController();
+  const checkpoint = mentions.catalogImportCheckpoint(
+    controller.signal,
+    () => yields++,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  checkpoint.reset();
+  await checkpoint();
+  assert.equal(
+    yields,
+    0,
+    'Fresh slice after network idle must not yield or mark unhealthy on a fast live frame',
   );
 });

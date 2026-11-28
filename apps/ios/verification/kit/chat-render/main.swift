@@ -37,6 +37,33 @@ mentionView.setText(ChatUserMentions.decorate(NSAttributedString(string: longPat
 let mentionSize = mentionView.sizeThatFits(CGSize(width: 180, height: 1000))
 precondition(mentionSize.width <= 181 && mentionSize.height > 44, "Long file references wrap within the message width")
 print("User mentions: rich labels, file and GitHub targets, VoiceOver actions, wrapping and literal-text boundaries passed")
+let quoted = "Intro\n\nfirst passage\n\nfirst comment\n\nsecond passage\n\nthird passage\n\nlast comment"
+func quoteReference(_ passage: String) -> ChatTextReference {
+  let range = (quoted as NSString).range(of: passage)
+  return ChatTextReference(start: range.location, end: NSMaxRange(range), kind: "message_quote", target: nil, quote: passage)
+}
+let quoteBlocks = ChatUserMentions.decorate(NSAttributedString(string: quoted),
+  references: ["first passage", "second passage", "third passage"].map(quoteReference), repository: "", traits: .current)
+precondition(quoteBlocks.string == "Intro\n\nfirst passage\nfirst comment\n\nsecond passage\n\nthird passage\nlast comment",
+  "A comment sits directly under its quote; separate blocks keep the blank line between them")
+print("Message quotes: comments attach to their quote, blocks stay separated passed")
+func quoteViewerLayout(_ snapshot: String) -> (block: CGRect, text: CGRect, sheet: CGRect) {
+  let viewer = ChatQuoteViewerController(snapshot: snapshot)
+  viewer.view.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+  viewer.view.layoutIfNeeded()
+  func find(_ view: UIView) -> UITextView? {
+    if let text = view as? UITextView, text.accessibilityIdentifier == "quote-snapshot" { return text }
+    return view.subviews.lazy.compactMap(find).first
+  }
+  let text = find(viewer.view)!
+  return (text.superview!.convert(text.superview!.bounds, to: viewer.view), text.convert(text.bounds, to: viewer.view), viewer.view.bounds)
+}
+let shortQuote = quoteViewerLayout("A short quoted passage")
+precondition(shortQuote.block.height == shortQuote.text.height && shortQuote.block.height < 100,
+  "The viewer's quote bar spans only the quoted text, not the sheet")
+let longQuote = quoteViewerLayout(Array(repeating: "A long quoted line", count: 200).joined(separator: "\n"))
+precondition(longQuote.block.height > longQuote.sheet.height, "A long quote keeps its full height and scrolls inside the viewer")
+print("Quote viewer: the bar fits the quoted text and long quotes scroll passed")
 
 struct LodyListRow {
   var parent = false
@@ -731,6 +758,15 @@ deliveryCell.configure(deliveryRow, text: deliveryText)
 deliveryCell.layoutIfNeeded()
 precondition(deliveryCell.accessibilityIdentifier == deliveryRow.id)
 precondition(deliveryCell.accessibilityLabel == deliveryRow.text)
+let uploadedPending = try! JSONDecoder().decode(
+  ChatPendingSend.self,
+  from: Data(#"{"id":"uploaded-send","text":"hello","attachments":[],"status":"等待回复…","phase":"uploaded"}"#.utf8)
+)
+let uploadedDelivery = uploadedPending.rows(entries: []).last
+precondition(
+  uploadedDelivery?.kind == "delivery" && uploadedDelivery?.text == uploadedPending.status,
+  "Uploaded delivery status must not append a tap-for-options hint"
+)
 
 let firstMessage = ChatRow(id: "local-send:user", entryID: "local-send", kind: "user",
   text: "This first message takes more than one line so its delivery status needs room below the whole bubble.",

@@ -237,14 +237,14 @@ test('catalog failure or a missing connection stops sending before any history, 
   }
 });
 
-test('persisted empty and deleted selections reach the machine without adopting another default', async () => {
+test('persisted empty, absent and deleted selections reach the machine without adopting another default', async () => {
   const c = catalog();
   c.remote.set(['mcpServer', 'search'], {
     ...c.remote.get(['mcpServer', 'search']),
     enabledByDefault: true,
   });
   c.remote.delete(['mcpServer', 'docs']);
-  for (const mcpServerIds of [[], ['docs']]) {
+  for (const mcpServerIds of [undefined, [], ['docs']]) {
     let payload;
     const f = await openTestSession({
       onRpc(request) {
@@ -253,6 +253,7 @@ test('persisted empty and deleted selections reach the machine without adopting 
       },
     });
     try {
+      c.fail(mcpServerIds?.length ? undefined : 'forbidden');
       f.server.getList('history').push({
         id: 'previous',
         role: 'user',
@@ -260,7 +261,7 @@ test('persisted empty and deleted selections reach the machine without adopting 
         inputConfig: {
           cliType: turn.cliType,
           agentType: turn.agentType,
-          mcpServerIds,
+          ...(mcpServerIds === undefined ? {} : { mcpServerIds }),
           agentRoleId: 'role-fixture',
           agentRoleRevision: 1,
         },
@@ -275,7 +276,7 @@ test('persisted empty and deleted selections reach the machine without adopting 
       assert.deepEqual(payload.mcpServerIds, []);
       assert.equal(
         payload.agentRoleId,
-        mcpServerIds.length ? null : 'role-fixture',
+        mcpServerIds?.length ? null : 'role-fixture',
       );
       console.log(
         JSON.stringify({
@@ -289,9 +290,91 @@ test('persisted empty and deleted selections reach the machine without adopting 
         [],
       );
     } finally {
+      c.fail(undefined);
       f.close();
     }
   }
+});
+
+test('transient catalog errors retry with grant invalidation and fall back to a synced workspace replica unless forbidden', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const c = catalog();
+  c.remote.set(['mcpServer', 'docs'], {
+    ...c.remote.get(['mcpServer', 'docs']),
+    enabledByDefault: true,
+  });
+  const invalidated = [];
+  let attempts = 0;
+  globalThis.__mcpClient = class {
+    async bootstrap() {
+      attempts += 1;
+      if (attempts === 1)
+        return { ok: false, result: { code: 'unauthorized' } };
+      if (attempts === 2)
+        return { ok: false, result: { code: 'network_error' } };
+      return {
+        ok: true,
+        result: {
+          snapshotOffset: '1',
+          snapshot: { body: c.remote.exportFile() },
+          updates: [],
+          nextOffset: '1',
+          upToDate: true,
+        },
+      };
+    }
+  };
+  const trackedGrant = Object.assign(
+    async () => ({
+      token: `token-${invalidated.length}`,
+      gatewayBaseUrl: 'https://example.invalid',
+    }),
+    { invalidate: (token) => invalidated.push(token) },
+  );
+  const flush = async (ms) => {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(ms);
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(0);
+  };
+  const recovered = sessionMcpSelection(
+    'w1',
+    trackedGrant,
+    undefined,
+    signal(),
+  );
+  await flush(250);
+  await flush(750);
+  assert.deepEqual(await recovered, ['docs']);
+  assert.deepEqual(invalidated, ['token-0']);
+
+  globalThis.__mcpClient = class {
+    async bootstrap() {
+      return { ok: false, result: { code: 'network_error' } };
+    }
+  };
+  const fallbackSend = sessionMcpSelection(
+    'w1',
+    grant,
+    undefined,
+    signal(),
+    () => ({ flock: c.remote }),
+  );
+  await flush(250);
+  await flush(750);
+  assert.deepEqual(await fallbackSend, ['docs']);
+
+  globalThis.__mcpClient = class {
+    async bootstrap() {
+      return { ok: false, result: { code: 'forbidden' } };
+    }
+  };
+  await assert.rejects(
+    sessionMcpSelection('w1', grant, undefined, signal(), () => ({
+      flock: c.remote,
+    })),
+    /mcp_catalog_unavailable/,
+  );
 });
 
 test('replacing the session during MCP lookup cannot write a late turn', async () => {
@@ -447,10 +530,15 @@ test('loopback fixture empty MCP selection also bypasses a down directory after 
 test('an MCP preparation deadline is retryable without promoting permission or schema errors', async (t) => {
   catalog();
   let failure;
+  let controller;
+  let expired = false;
   t.mock.method(globalThis.__mcpClient.prototype, 'bootstrap', async () => {
+    controller.abort(
+      new DOMException('fixture', expired ? 'TimeoutError' : 'AbortError'),
+    );
     throw failure;
   });
-  for (const [cause, expired, retryable] of [
+  for (const [cause, timedOut, retryable] of [
     [new DOMException('deadline', 'TimeoutError'), true, true],
     [new DOMException('aborted read', 'AbortError'), true, true],
     [new Error('unknown'), true, true],
@@ -459,10 +547,8 @@ test('an MCP preparation deadline is retryable without promoting permission or s
     [new DOMException('cancelled', 'AbortError'), false, false],
   ]) {
     failure = cause;
-    const controller = new AbortController();
-    controller.abort(
-      new DOMException('fixture', expired ? 'TimeoutError' : 'AbortError'),
-    );
+    expired = timedOut;
+    controller = new AbortController();
     await assert.rejects(
       sessionMcpSelection('w1', grant, undefined, controller.signal),
       (error) => {

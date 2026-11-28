@@ -20,6 +20,7 @@ final class ShareViewController: UIViewController {
       composer.trailingAnchor.constraint(equalTo: host.trailingAnchor),
     ])
     composer.sendHandoff = false
+    composer.cardStyle = true
     composer.onHeightChange = { [weak self] in self?.form.setComposerHeight($0) }
     composer.onSend = { [weak self] in self?.form.submit($0) }
     composer.onComposerOptionChange = { [weak self] in self?.form.composerOptionChanged($0) }
@@ -30,6 +31,8 @@ final class ShareViewController: UIViewController {
     appearance.configureWithTransparentBackground()
     navigation.navigationBar.standardAppearance = appearance
     navigation.navigationBar.scrollEdgeAppearance = appearance
+    navigation.navigationBar.compactAppearance = appearance
+    navigation.view.backgroundColor = .clear
     addChild(navigation)
     navigation.view.frame = view.bounds
     navigation.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -59,13 +62,21 @@ final class ShareViewController: UIViewController {
     }
     var state = CreateSessionForm(
       userId: catalog.userId, workspaceId: catalog.workspaceId, projects: catalog.projects,
-      machineNames: catalog.machineNames ?? [:], prefs: ShareStore.prefs())
+      machineNames: catalog.machineNames ?? [:], machineOs: catalog.machineOs ?? [:], prefs: ShareStore.prefs())
     state.deferUnresolved = true
     state.open(projectId: nil, context: nil)
     form.form = state
     form.loadOptions = {
       guard let options = ShareStore.options(CreateLogic.chatTarget) else { throw CocoaError(.fileNoSuchFile) }
       return options
+    }
+    form.loadRoles = {
+      guard let roles = ShareStore.roles() else { throw CocoaError(.fileNoSuchFile) }
+      return roles
+    }
+    form.loadProjectGroups = {
+      guard let groups = ShareStore.projectGroups() else { throw CocoaError(.fileNoSuchFile) }
+      return groups
     }
     form.loadBranches = { repo, _ in
       guard let branches = ShareStore.branches(repo) else { throw CocoaError(.fileNoSuchFile) }

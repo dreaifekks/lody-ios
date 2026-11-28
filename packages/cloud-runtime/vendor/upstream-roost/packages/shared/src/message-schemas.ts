@@ -37,7 +37,6 @@ import type { ProjectRef } from './project';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema, LodyOperationCompletionSchema } from './session-orchestration';
-import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 import { normalizeMcpServerIdSelection } from './workspace-mcp';
 import {
   ACP_AUTH_FORM_FIELD_MAX_COUNT,
@@ -100,6 +99,7 @@ export const CustomAcpLaunchSpecSchema = z
 
 export const BuiltinRuntimeOverridesSchema = z
   .object({
+    antigravityPath: SharedOptionalStringSchema,
     codexPath: SharedOptionalStringSchema,
     claudeCodeExecutable: SharedOptionalStringSchema,
     kimiPath: SharedOptionalStringSchema,
@@ -110,6 +110,7 @@ export const BuiltinRuntimeOverridesSchema = z
       .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
       .max(PI_EXTENSIONS_MAX_SELECTIONS)
       .optional(),
+    antigravitySkipPermissions: z.boolean().optional(),
   })
   .strict();
 
@@ -1029,81 +1030,6 @@ export const SessionDispatchTurnResponseSchema = z
 
 export type SessionDispatchTurnResponse = z.infer<typeof SessionDispatchTurnResponseSchema>;
 
-const SessionPreparationIdSchema = z.string().trim().min(1).max(128);
-export const SessionPreparationRunConfigSchema = z
-  .object({
-    modeId: z.string().trim().min(1).optional(),
-    modelId: z.string().trim().min(1).optional(),
-    configOptionValues: AcpConfigOptionValuesSchema.transform((values) =>
-      Object.fromEntries(
-        Object.entries(values).filter(([configId]) => !isSensitiveAcpConfigOptionId(configId))
-      )
-    ).optional(),
-    memory: MemoryBindingSchema.optional(),
-    mcpServerIds: z
-      .array(SharedStringSchema)
-      .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
-      .optional(),
-  })
-  .strict();
-
-/**
- * Draft session preparation request from desktops that predate its removal.
- * Daemons decline it without doing any work; the schemas remain only so those
- * requests still parse. Draft text, launch secrets, and secret-shaped ACP
- * option values were never part of the request.
- */
-export const SessionPreparationSpecSchema = z
-  .object({
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    requestedByUserId: SharedTrimmedNonEmptyStringSchema,
-    agentConfigId: AgentConfigIdSchema,
-    cliType: AgentConfigCliTypeSchema,
-    agentType: SharedTrimmedNonEmptyStringSchema,
-    project: ProjectRefSchema.optional(),
-    runConfig: SessionPreparationRunConfigSchema.optional(),
-  })
-  .strict();
-
-export type SessionPreparationSpec = z.infer<typeof SessionPreparationSpecSchema>;
-
-export const SessionPreparationCancelSpecSchema = z
-  .object({
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    requestedByUserId: SharedTrimmedNonEmptyStringSchema,
-  })
-  .strict();
-
-export type SessionPreparationCancelSpec = z.infer<typeof SessionPreparationCancelSpecSchema>;
-
-export const SessionPrepareResponseSchema = z
-  .object({
-    type: z.literal('session/prepare_response'),
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    accepted: z.boolean(),
-    disposition: z.enum(['accepted', 'duplicate', 'replaced', 'busy', 'not-owned', 'error']),
-    error: SharedOptionalStringSchema,
-  })
-  .strict();
-
-export type SessionPrepareResponse = z.infer<typeof SessionPrepareResponseSchema>;
-
-export const SessionPrepareCancelResponseSchema = z
-  .object({
-    type: z.literal('session/prepare-cancel_response'),
-    preparationId: SessionPreparationIdSchema,
-    sessionId: SessionIdSchema,
-    cancelled: z.boolean(),
-    disposition: z.enum(['cancelled', 'not-found', 'not-owned', 'error']),
-    error: SharedOptionalStringSchema,
-  })
-  .strict();
-
-export type SessionPrepareCancelResponse = z.infer<typeof SessionPrepareCancelResponseSchema>;
-
 // Permission schemas (simplified - actual types come from @agentclientprotocol/sdk)
 const PermissionMetaSchema = z.record(SharedStringSchema, z.unknown()).nullable();
 
@@ -1511,6 +1437,7 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
     force: z.boolean().optional(),
+    readModelOptions: z.literal(true).optional(),
   })
   .strict();
 
@@ -1767,6 +1694,7 @@ export const MachineAcpBinaryProgressMessageSchema = z
       'unsupported-platform',
       'incompatible-host',
       'error',
+      'reading-model-options',
     ]),
     downloadedBytes: z.number().int().nonnegative().optional(),
     totalBytes: z.number().int().nonnegative().optional(),
@@ -1777,6 +1705,11 @@ export const MachineAcpBinaryProgressMessageSchema = z
     required: SharedOptionalStringSchema,
     command: SharedOptionalStringSchema,
     error: SharedOptionalStringSchema,
+    configId: AgentConfigIdSchema.optional(),
+    modelId: SharedOptionalStringSchema,
+    modelName: SharedOptionalStringSchema,
+    modelIndex: z.number().int().positive().optional(),
+    modelCount: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -1799,42 +1732,6 @@ export const MachineBugReportResponseSchema = z
     success: z.boolean(),
     bugReportId: SharedOptionalStringSchema,
     error: SharedOptionalStringSchema,
-  })
-  .strict();
-
-const SessionCodeCollabHostStartStatusSchema = z.enum([
-  'started',
-  'already-running',
-  'disabled',
-  'failed',
-  'stopped',
-]);
-
-/**
- * @deprecated Legacy compatibility only. Code Collab v2 uses machine RPC methods
- * under `code-collab/*`; current CLIs reject this request as unsupported.
- */
-export const SessionCodeCollabHostStartRequestSchema = z
-  .object({
-    type: z.literal('session/code-collab-host-start'),
-    machineId: MachineIdSchema,
-    workspaceId: WorkspaceIdSchema,
-    sessionId: SessionIdSchema,
-    requestedByUserId: SharedTrimmedNonEmptyStringSchema,
-  })
-  .strict();
-
-/**
- * @deprecated Legacy compatibility response for `session/code-collab-host-start`.
- */
-export const SessionCodeCollabHostStartResponseSchema = z
-  .object({
-    type: z.literal('session/code-collab-host-start_response'),
-    sessionId: SessionIdSchema,
-    success: z.boolean(),
-    status: SessionCodeCollabHostStartStatusSchema.optional(),
-    error: SharedOptionalStringSchema,
-    message: SharedOptionalStringSchema,
   })
   .strict();
 
@@ -2228,6 +2125,10 @@ export const SessionPreviewEndpointReleaseResponseSchema = z
 
 export const SESSION_HISTORY_READ_MAX_RANGE = 500;
 export const SESSION_HISTORY_READ_MAX_PAGE = 500;
+export const SESSION_HISTORY_SUBSCRIPTION_LEASE_MS = 45_000;
+export const SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS = 55_000;
+export const SESSION_HISTORY_SUBSCRIPTION_MAX_DELTA_BYTES = 16 * 1024;
+export const SESSION_HISTORY_SUBSCRIPTION_MAX_PUBLICATIONS = 64;
 
 export const SessionHistoryReadQuerySchema = z
   .discriminatedUnion('kind', [
@@ -2258,15 +2159,6 @@ export const SessionHistoryReadQuerySchema = z
       .strict(),
     z
       .object({ kind: z.literal('readReplayPrompt'), excludeTurnId: z.string().optional() })
-      .strict(),
-    z
-      .object({
-        kind: z.literal('watchChanges'),
-        checkpoint: z.string().min(1).max(1024),
-        includeBodiesFrom: z.number().int().nonnegative().optional(),
-        withPatches: z.literal(true).optional(),
-        waitMs: z.number().int().nonnegative().max(15_000),
-      })
       .strict(),
     z
       .object({
@@ -2469,6 +2361,64 @@ export const SessionHistoryReadResponseSchema = z
     }
   });
 
+export const SessionHistorySubscriptionSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('open'),
+      id: z.uuid(),
+      checkpoint: z.string().min(1).max(1024).optional(),
+      includeBodiesFrom: z.number().int().nonnegative().optional(),
+      withPatches: z.literal(true).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal('close'), id: z.uuid() }).strict(),
+]);
+
+export const SessionHistorySubscriptionRequestSchema = z
+  .object({
+    type: z.literal('session/history-subscription'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    subscription: SessionHistorySubscriptionSchema,
+  })
+  .strict();
+
+const historySubscriptionResponse = z.object({
+  type: z.literal('session/history-subscription_response'),
+  sessionId: SessionIdSchema,
+  subscriptionId: z.uuid(),
+});
+
+export const SessionHistorySubscriptionResponseSchema = z.discriminatedUnion('event', [
+  historySubscriptionResponse
+    .extend({
+      event: z.literal('publication'),
+      publication: z
+        .object({
+          checkpoint: z.string().min(1).max(1024),
+          revision: z.number().int().nonnegative(),
+          delta: z
+            .object({
+              baseCheckpoint: z.string().min(1).max(1024),
+              includeBodiesFrom: z.number().int().nonnegative(),
+              withPatches: z.literal(true).optional(),
+              response: SessionHistoryReadResponseSchema,
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  historySubscriptionResponse
+    .extend({
+      event: z.literal('closed'),
+      error: SharedOptionalStringSchema,
+    })
+    .strict(),
+]);
+
 export const SessionHistoryWriteOperationSchema = z.enum([
   'append',
   'accept_input',
@@ -2535,7 +2485,6 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   MachineAcpAuthenticateRequestSchema,
   MachineAcpBinaryStatusRequestSchema,
   MachineAcpBinaryInstallRequestSchema,
-  SessionCodeCollabHostStartRequestSchema,
   SessionImageUploadRequestSchema,
   SessionFileUploadRequestSchema,
   SessionFileSendLocalRequestSchema,
@@ -2543,6 +2492,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageResolveLocalRequestSchema,
   SessionAttachmentPrepareRequestSchema,
   SessionHistoryReadRequestSchema,
+  SessionHistorySubscriptionRequestSchema,
   SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
   SessionPreviewCreateRequestSchema,
@@ -2575,7 +2525,6 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   MachineAcpBinaryStatusResponseSchema,
   MachineAcpBinaryInstallResponseSchema,
   MachineAcpBinaryProgressMessageSchema,
-  SessionCodeCollabHostStartResponseSchema,
   SessionImageUploadResponseSchema,
   SessionFileUploadResponseSchema,
   SessionFileSendLocalResponseSchema,
@@ -2583,6 +2532,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageResolveLocalResponseSchema,
   SessionAttachmentPrepareResponseSchema,
   SessionHistoryReadResponseSchema,
+  SessionHistorySubscriptionResponseSchema,
   SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,
   SessionPreviewCreateResponseSchema,
@@ -3726,10 +3676,31 @@ const proposalTimeOfDay = {
   minute: z.number().int().min(0).max(59),
   timeZone: z.string().min(1).max(100).optional(),
 };
+/**
+ * Largest "every N minutes / hours" step, shared by the editor's Custom field,
+ * agent proposals, the CLI and the mobile runtimes. It is the 32-bit signed
+ * maximum because Android carries `every` as a Kotlin `Int`; it also keeps
+ * `every × unit` an exact JS integer whose first run, from any anchor before
+ * year 29,000, stays inside the JS Date range the planner and ledger store.
+ * A step that does not divide the clock is stored as an anchored interval.
+ */
+export const SCHEDULE_CUSTOM_STEP_MAX = 2_147_483_647;
+export const SCHEDULE_CUSTOM_MINUTES_MAX = SCHEDULE_CUSTOM_STEP_MAX;
+export const SCHEDULE_CUSTOM_HOURS_MAX = SCHEDULE_CUSTOM_STEP_MAX;
 export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('manual') }).strict(),
-  z.object({ kind: z.literal('minutes'), every: z.number().int().min(1).max(59) }).strict(),
-  z.object({ kind: z.literal('hours'), every: z.number().int().min(1).max(23) }).strict(),
+  z
+    .object({
+      kind: z.literal('minutes'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_MINUTES_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('hours'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX),
+    })
+    .strict(),
   z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
   z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
   z
@@ -4147,8 +4118,6 @@ import type {
   MachineAcpBinaryInstallRequest,
   MachineAcpBinaryInstallResponse,
   MachineAcpBinaryProgressMessage,
-  SessionCodeCollabHostStartRequest,
-  SessionCodeCollabHostStartResponse,
   LocalProjectControlRequest,
   LocalProjectControlResponse,
   LocalSessionControlRequest,
@@ -4199,8 +4168,6 @@ export type {
   MachineAcpBinaryInstallRequest as MachineAcpBinaryInstallRequestValidated,
   MachineAcpBinaryInstallResponse as MachineAcpBinaryInstallResponseValidated,
   MachineAcpBinaryProgressMessage as MachineAcpBinaryProgressMessageValidated,
-  SessionCodeCollabHostStartRequest as SessionCodeCollabHostStartRequestValidated,
-  SessionCodeCollabHostStartResponse as SessionCodeCollabHostStartResponseValidated,
 };
 
 export type ClientToServerValidated = ClientToServer;
@@ -4251,9 +4218,7 @@ function isAgentConfigCliTypeString(
  * - Current schemas are strict and reject unknown keys.
  * - Older senders may still send `project.project` as a branch alias.
  *
- * Release policy:
- * - This is temporary and must be removed for the formal release cleanup.
- * - Keep the lifecycle documented in docs/backward-compatibility.md.
+ * Remove it once no supported sender can still produce `project.project`.
  */
 function normalizeLegacyProjectRef(value: unknown): unknown {
   if (!isRecord(value)) {

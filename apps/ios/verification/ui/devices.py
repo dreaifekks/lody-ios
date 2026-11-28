@@ -132,5 +132,25 @@ if 'devices-pad' not in str(ui.output):
     capture_creation('create-no-polling')
     tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('create.title')))
 
+    presence([])
+    ui.open_case('create-run-config-offline')
+    ui.element('create-session-input')
+    ui.element('session-model')
+    ui.axe('tap', '--id', 'session-model', '--post-delay', '.6')
+    ui.element('run-config-agent')
+    ui.element('run-config-model')
+    capture_creation('create-run-config-cached')
+    seed('ui-create-live-gate', 'release')
+    label(catalog.text('create.devices.projectOffline'))
+    ui.wait(
+        lambda items: not any(
+            i.get('AXUniqueId') in ('run-config-agent', 'run-config-model', 'create-run-config')
+            for i in items
+        ),
+        'Run configuration sheet remained open over the composer when the computer went offline',
+    )
+    capture_creation('create-run-config-offline-dismissed')
+    tap_label(catalog.text('accessibility.closeSheet', title=catalog.text('create.title')))
+
 (ui.output / 'device-events.json').write_text(json.dumps(events, indent=2))
 print('PASS: device counts in the capsule (not the workspace menu), unknown/offline distinction, per-session status and one-shot creation preserves drafts and attachments. Offline service fixture; no cloud request or message sent. Visual review required.')

@@ -5,8 +5,6 @@ import { clientFor } from './session';
 import { forgetSettings, openSettings } from './settings';
 import { decodeFrames, encodeFrame } from '../frames';
 import {
-  getShortcutBodyStreamId,
-  getShortcutIndexStreamId,
   getWorkspaceShortcutBodyStreamId,
   getWorkspaceShortcutIndexStreamId,
 } from '../protocol/prompt-shortcuts/access.ts';
@@ -24,32 +22,11 @@ import {
   type PromptShortcut,
   type ShortcutRequest,
 } from '../models/prompt-shortcuts.ts';
-import { z } from 'zod';
 
-export type Cloud = (
-  operation: string,
-  args: Record<string, unknown>,
-) => Promise<unknown>;
 export type WorkspaceGrant = () => Promise<{
   token: string;
   gatewayBaseUrl: string;
 }>;
-
-const directorySchema = z
-  .array(
-    z.object({
-      shortcutId: z.string().min(1).max(200),
-      bodyDocId: z.string().min(1).max(200),
-      ownerUserId: z.string().min(1).max(200),
-      visibility: z.enum(['private', 'workspace']),
-      revision: z.string().nullable(),
-      deleted: z.boolean().optional(),
-    }),
-  )
-  .max(10000);
-
-type Row = z.infer<typeof directorySchema>[number];
-type Grant = { token: string; gatewayBaseUrl: string; expiresIn: number };
 
 function mapShortcutError(error: unknown, afterWrite = false): never {
   if (error instanceof PromptShortcutError) {
@@ -65,24 +42,16 @@ function mapShortcutError(error: unknown, afterWrite = false): never {
 }
 
 /**
- * Per-workspace/account shortcut cache.
- *
- * Primary reads and all writes use `{workspaceId}:shortcut-index` and
+ * Per-workspace/account shortcut cache using `{workspaceId}:shortcut-index` and
  * `{workspaceId}:shortcut:{bodyDocId}` under the ordinary workspace grant.
- * During Phase 1 rollout, unmigrated legacy shortcuts not yet present or tombstoned
- * in `{workspaceId}:shortcut-index` are dual-read from `shortcut-index:*` / `shortcut-body:*`.
  */
 type ShortcutScope = {
   key: string;
-  directory?: { rows: Row[]; at: number };
-  directoryPending?: Promise<Row[]>;
-  grants: Map<string, { value: Promise<Grant>; until: number }>;
   bodies: Map<string, { entry: string; value: PromptShortcut }>;
   reads: Map<string, Promise<PromptShortcut>>;
   prefetch: PromptShortcutIndexEntry[];
   prefetching: boolean;
 };
-const DIRECTORY_TTL = 30_000;
 const BODY_LIMIT = 500;
 const PREFETCH_LIMIT = 100;
 let currentScope: ShortcutScope | undefined;
@@ -92,7 +61,6 @@ function scopeFor(workspaceId: string, userId: string) {
   if (currentScope?.key !== key)
     currentScope = {
       key,
-      grants: new Map(),
       bodies: new Map(),
       reads: new Map(),
       prefetch: [],
@@ -111,7 +79,6 @@ export function shortcutAccess(
   workspaceId: string,
   userId: string,
   workspaceGrant: WorkspaceGrant,
-  cloud: Cloud | undefined,
   signal: AbortSignal,
 ) {
   const scope = scopeFor(workspaceId, userId);
@@ -162,203 +129,28 @@ export function shortcutAccess(
     return openSettings(stream, workspaceGrant, signal, { cached: false });
   };
 
-  /** Legacy Phase 1 directory rows this account may read; `fresh` skips the recent copy. */
-  const directory = async (fresh = false): Promise<Row[]> => {
-    if (!cloud) return [];
-    const cached = scope.directory;
-    if (!fresh && cached && Date.now() - cached.at < DIRECTORY_TTL)
-      return cached.rows;
-    if (!fresh && scope.directoryPending) return scope.directoryPending;
-    const pending = cloud('listAccessibleDocuments', {})
-      .then((value) => {
-        const rows = directorySchema
-          .parse(value)
-          .filter(
-            (row) =>
-              !row.deleted &&
-              (row.visibility === 'workspace' || row.ownerUserId === userId),
-          );
-        if (live()) scope.directory = { rows, at: Date.now() };
-        return rows;
-      })
-      .finally(() => {
-        if (scope.directoryPending === pending)
-          scope.directoryPending = undefined;
-      });
-    scope.directoryPending = pending;
-    const rows = await pending;
-    signal.throwIfAborted();
-    return rows;
-  };
-
-  const grant =
-    (streamId: string, target: object, write: boolean) => async () => {
-      const key = `${write}:${streamId}`;
-      const cached = scope.grants.get(key);
-      if (cached && cached.until > Date.now()) return cached.value;
-      const value = fetchGrant(streamId, target, write);
-      const slot = { value, until: Date.now() + 30000 };
-      scope.grants.set(key, slot);
-      try {
-        const resolved = await value;
-        slot.until =
-          Date.now() + Math.max(0, resolved.expiresIn * 1000 - 30000);
-        return resolved;
-      } catch (error) {
-        if (scope.grants.get(key) === slot) scope.grants.delete(key);
-        throw error;
-      }
-    };
-
-  const fetchGrant = async (
-    streamId: string,
-    target: object,
-    write: boolean,
-  ): Promise<Grant> => {
-    if (!cloud) throw new Error('shortcut_unavailable');
-    return z
-      .object({
-        token: z.string().min(1),
-        expiresIn: z.number().positive(),
-        gatewayBaseUrl: z
-          .string()
-          .url()
-          .refine((url) => url.startsWith('https://')),
-        streamId: z.literal(streamId),
-      })
-      .parse(await cloud('getStreamToken', { target, write }));
-  };
-
-  const legacyIndex = async (
-    ownerUserId: string,
-    visibility: 'private' | 'workspace',
-  ) => {
-    const stream = getShortcutIndexStreamId({
-      workspaceId,
-      ownerUserId,
-      visibility,
-    });
-    const getGrant = grant(
-      stream,
-      { kind: 'index', ownerUserId, visibility },
-      false,
-    );
-    return openSettings(stream, getGrant, signal, { cached: true });
-  };
-
-  const listed = (entry: PromptShortcutIndexEntry, rows: Row[]) =>
-    rows.some(
-      (row) =>
-        row.shortcutId === entry.id &&
-        row.bodyDocId === entry.bodyDocId &&
-        row.revision === entry.revision &&
-        row.ownerUserId === entry.ownerUserId,
-    );
-
-  const legacyDomain = async (row: Row, rows: Row[]) => {
-    const domainRows = rows.filter(
-      (item) =>
-        item.ownerUserId === row.ownerUserId &&
-        item.visibility === row.visibility,
-    );
-    const { flock } = await legacyIndex(row.ownerUserId, row.visibility);
-    return new PromptShortcutCatalog(flock)
-      .list()
-      .filter(
-        (entry) =>
-          entry.workspaceId === workspaceId &&
-          entry.ownerUserId === row.ownerUserId &&
-          listed(entry, domainRows),
-      );
-  };
-
-  const domains = (rows: Row[]) => [
-    ...new Map(
-      rows.map((row) => [`${row.ownerUserId}:${row.visibility}`, row]),
-    ).values(),
-  ];
-
   const byName = (a: PromptShortcutIndexEntry, b: PromptShortcutIndexEntry) =>
     a.name.localeCompare(b.name);
 
-  const mergeEntries = (
-    workspaceEntries: PromptShortcutIndexEntry[],
-    legacyEntries: PromptShortcutIndexEntry[],
-    deletedIds: ReadonlySet<string>,
-  ) => {
-    const seenIds = new Set<string>([
-      ...workspaceEntries.map((entry) => entry.id),
-      ...deletedIds,
-    ]);
-    const seenSlugs = new Set<string>(
-      workspaceEntries.map((entry) => entry.slug),
-    );
-    const merged = [...workspaceEntries];
-    const sortedLegacy = [...legacyEntries].sort(
-      (a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id),
-    );
-    for (const entry of sortedLegacy) {
-      if (seenIds.has(entry.id) || seenSlugs.has(entry.slug)) continue;
-      seenIds.add(entry.id);
-      seenSlugs.add(entry.slug);
-      merged.push(entry);
-    }
-    return merged.sort(byName);
-  };
-
-  const resolveSource = async (
-    entry: PromptShortcutIndexEntry,
-    fresh = false,
-  ): Promise<'workspace' | 'legacy'> => {
+  const authorized = async (entry: PromptShortcutIndexEntry, fresh = false) => {
     if (entry.workspaceId !== workspaceId) throw new Error('shortcut_changed');
     const ws = await workspaceIndex(fresh);
     if (ws.deletedIds.has(entry.id)) throw new Error('shortcut_changed');
     const wsEntry = ws.entries.find((item) => item.id === entry.id);
-    if (wsEntry) {
-      if (
-        wsEntry.bodyDocId !== entry.bodyDocId ||
-        wsEntry.revision !== entry.revision ||
-        wsEntry.ownerUserId !== entry.ownerUserId
-      ) {
-        throw new Error('shortcut_changed');
-      }
-      return 'workspace';
+    if (
+      !wsEntry ||
+      wsEntry.bodyDocId !== entry.bodyDocId ||
+      wsEntry.revision !== entry.revision ||
+      wsEntry.ownerUserId !== entry.ownerUserId
+    ) {
+      throw new Error('shortcut_changed');
     }
-    const rows = await directory(fresh);
-    if (!listed(entry, rows)) throw new Error('shortcut_changed');
-    return 'legacy';
   };
 
-  const authorized = async (entry: PromptShortcutIndexEntry, fresh = false) => {
-    await resolveSource(entry, fresh);
-  };
-
-  /** Send-time expansion: workspace index plus any unmigrated legacy rows. */
+  /** Send-time expansion: workspace index only. */
   const list = async () => {
     const ws = await workspaceIndex();
-    const knownIds = new Set<string>([
-      ...ws.entries.map((entry) => entry.id),
-      ...ws.deletedIds,
-    ]);
-    const unmigratedRows = (await directory()).filter(
-      (row) => !knownIds.has(row.shortcutId),
-    );
-    const rawLegacy = unmigratedRows.length
-      ? (
-          await Promise.all(
-            domains(unmigratedRows).map((row) =>
-              legacyDomain(row, unmigratedRows),
-            ),
-          )
-        ).flat()
-      : [];
-    if (
-      unmigratedRows.some(
-        (row) => !rawLegacy.some((entry) => listed(entry, [row])),
-      )
-    )
-      throw new Error('shortcut_index_pending');
-    return mergeEntries(ws.entries, rawLegacy, ws.deletedIds);
+    return [...ws.entries].sort(byName);
   };
 
   /** Mention discovery and Settings list: everything readable now. */
@@ -375,36 +167,7 @@ export function shortcutAccess(
         deletedIds: new Set<string>(),
       };
     });
-    const knownIds = new Set<string>([
-      ...ws.entries.map((entry) => entry.id),
-      ...ws.deletedIds,
-    ]);
-    const rows = await directory(fresh).catch(() => {
-      signal.throwIfAborted();
-      incomplete = true;
-      return [] as Row[];
-    });
-    const unmigratedRows = rows.filter((row) => !knownIds.has(row.shortcutId));
-    const rawLegacy = unmigratedRows.length
-      ? (
-          await Promise.all(
-            domains(unmigratedRows).map((row) =>
-              legacyDomain(row, unmigratedRows).catch(() => {
-                signal.throwIfAborted();
-                incomplete = true;
-                return [];
-              }),
-            ),
-          )
-        ).flat()
-      : [];
-    if (
-      unmigratedRows.some(
-        (row) => !rawLegacy.some((entry) => listed(entry, [row])),
-      )
-    )
-      incomplete = true;
-    const entries = mergeEntries(ws.entries, rawLegacy, ws.deletedIds);
+    const entries = [...ws.entries].sort(byName);
     prefetch(entries);
     return { entries, incomplete };
   };
@@ -504,21 +267,8 @@ export function shortcutAccess(
       workspaceId,
       entry.bodyDocId,
     );
-    let loaded = await readBodyDoc(wsStream, workspaceGrant, readSignal);
-    if (!loaded.exists) {
-      if (!cloud) throw new Error('shortcut_unavailable');
-      const legacyStream = getShortcutBodyStreamId(entry.bodyDocId);
-      loaded = await readBodyDoc(
-        legacyStream,
-        grant(
-          legacyStream,
-          { kind: 'body', bodyDocId: entry.bodyDocId },
-          false,
-        ),
-        readSignal,
-      );
-      if (!loaded.exists) throw new Error('shortcut_unavailable');
-    }
+    const loaded = await readBodyDoc(wsStream, workspaceGrant, readSignal);
+    if (!loaded.exists) throw new Error('shortcut_unavailable');
     const value = new PromptShortcutDocument(loaded.doc).read();
     if (
       !value ||
@@ -562,13 +312,12 @@ export function shortcutAccess(
     list,
     listAvailable,
     read,
+    body,
     authorized,
     workspaceIndex,
     openWorkspaceIndexForWrite,
     readBodyDoc,
     remember,
-    grant,
-    directory,
   };
 }
 
@@ -588,7 +337,6 @@ export async function listedShortcuts(
   workspaceId: string,
   userId: string,
   workspaceGrant: WorkspaceGrant,
-  cloud?: Cloud,
 ): Promise<ShortcutListing> {
   const key = `${workspaceId}:${userId}`;
   for (const other of listings.keys())
@@ -599,7 +347,6 @@ export async function listedShortcuts(
     workspaceId,
     userId,
     workspaceGrant,
-    cloud,
     AbortSignal.timeout(30000),
   )
     .listAvailable()
@@ -622,7 +369,6 @@ export async function promptShortcuts(
   request: ShortcutRequest,
   userId: string,
   workspaceGrant: WorkspaceGrant,
-  cloud: Cloud | undefined,
   signal: AbortSignal,
 ) {
   if (!userId) throw new Error('shortcut_unavailable');
@@ -630,7 +376,6 @@ export async function promptShortcuts(
     request.workspaceId,
     userId,
     workspaceGrant,
-    cloud,
     signal,
   );
   if (request.action === 'list')
@@ -643,6 +388,18 @@ export async function promptShortcuts(
       mapShortcutError(error);
     }
     return access.read(entry);
+  }
+  if (request.action === 'select') {
+    // As web checks its live snapshot: the listing the composer showed, not a fresh index read,
+    // so a prefetched body inserts without waiting on the network.
+    const listing =
+      listings.get(`${request.workspaceId}:${userId}`)?.value ??
+      (await listedShortcuts(request.workspaceId, userId, workspaceGrant));
+    const entry = listing.entries.find((item) => item.id === request.id);
+    if (!entry) throw new Error('shortcut_changed');
+    const value = await access.body(entry);
+    signal.throwIfAborted();
+    return value;
   }
   if (request.action !== 'save') throw new Error('invalid_shortcut');
 
@@ -720,14 +477,7 @@ export async function promptShortcuts(
       )
         throw new Error('shortcut_changed');
     } else {
-      if (
-        wsExisting ||
-        remoteHeads.length > 0 ||
-        (cloud &&
-          (await access.directory(true)).some(
-            (row) => row.shortcutId === value.id,
-          ))
-      )
+      if (wsExisting || remoteHeads.length > 0)
         throw new Error('shortcut_changed');
     }
 

@@ -5,15 +5,40 @@ struct SessionBrowserPreview: Equatable, Sendable {
   var active: Bool
 }
 
+struct RoostHistorySync: Equatable, Sendable {
+  enum Source: String, Sendable { case machine, streams }
+  enum Phase: String, Sendable {
+    case idle, checking, pending, syncing, ready, retrying, refused
+    case ownerRequired = "owner-required"
+  }
+
+  let source: Source
+  let phase: Phase
+  let httpStatus: Int?
+  let newerVersionPending: Bool
+
+  init?(_ object: [String: Any]) {
+    guard let source = Source(rawValue: object["source"] as? String ?? ""),
+      let phase = Phase(rawValue: object["phase"] as? String ?? "") else { return nil }
+    self.source = source
+    self.phase = phase
+    httpStatus = (object["httpStatus"] as? Int).flatMap { (100...599).contains($0) ? $0 : nil }
+    newerVersionPending = object["newerVersionPending"] as? Bool == true
+  }
+}
+
 struct SessionEnvelope: Sendable {
   var version: Int?
   var revision: Int?
   var status = ""
   var overflow = false
+  var sendReady: Bool?
+  var controlReady: Bool?
   var entriesJSON = "[]"
   var billableTurnCount: Int?
   var historyHasMore = false
   var historyLoading = false
+  var historySync: RoostHistorySync?
   var composerJSON: String?
   var usageJSON: String?
   var preview: SessionBrowserPreview?
@@ -25,6 +50,8 @@ struct SessionEnvelope: Sendable {
       version: (object["v"] as? NSNumber)?.intValue, revision: (object["revision"] as? NSNumber)?.intValue,
       status: object["status"] as? String ?? "", overflow: object["overflow"] as? Bool == true
     )
+    envelope.sendReady = object["sendReady"] as? Bool
+    envelope.controlReady = object["controlReady"] as? Bool
     if let preview = object["preview"] as? [String: Any], let label = preview["label"] as? String {
       envelope.preview = SessionBrowserPreview(label: label, active: preview["active"] as? Bool == true)
     }
@@ -34,6 +61,7 @@ struct SessionEnvelope: Sendable {
     envelope.billableTurnCount = (object["billableTurnCount"] as? NSNumber)?.intValue
     envelope.historyHasMore = object["historyHasMore"] as? Bool == true
     envelope.historyLoading = object["historyLoading"] as? Bool == true
+    envelope.historySync = (object["historySync"] as? [String: Any]).flatMap(RoostHistorySync.init)
     if let composer = object["composer"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: composer) {
       envelope.composerJSON = String(decoding: data, as: UTF8.self)
     }
@@ -103,6 +131,7 @@ struct SessionTranscriptFacts: Equatable, Sendable {
   var permissionError: String?
   var entryIds: Set<String> = []
   var replied: Set<String> = []
+  var settled: Set<String> = []
   var delivered: Set<String> = []
   var answered: Set<String> = []
   var unfinishedTurnId: String?
@@ -143,10 +172,18 @@ struct SessionTranscriptFacts: Equatable, Sendable {
       case "user":
         preceding = id
         conversational = true
+        if let status = entry["status"] as? String,
+           ["handled", "failed", "canceled", "delivery_unknown"].contains(status) {
+          settled.insert(id)
+        }
       case "assistant":
         conversational = true
         if let target = entry["userTurnId"] as? String ?? preceding { replied.insert(target) }
-        if entry["finished"] as? Bool != true { unfinishedTurnId = id }
+        if entry["finished"] as? Bool == true || entry["endedAt"] is NSNumber {
+          unfinishedTurnId = nil
+        } else {
+          unfinishedTurnId = id
+        }
       default:
         break
       }

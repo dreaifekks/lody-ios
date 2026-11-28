@@ -64,19 +64,31 @@ export async function readCatalogRefresh(
   }
 }
 
+export type CatalogImportCheckpoint = ((force?: boolean) => Promise<void>) & {
+  reset?: () => void;
+};
+
 // Keep one clock across all parts in a bootstrap, not a new slice per part.
 // Individual JSON/Wasm operations remain atomic; yield between frames and
 // around binary snapshot imports so queued native pings get a macrotask.
-export function catalogImportCheckpoint(signal: AbortSignal) {
+export function catalogImportCheckpoint(
+  signal: AbortSignal,
+  onYield?: () => void,
+): CatalogImportCheckpoint {
   let started = performance.now();
-  return async (force = false) => {
+  const checkpoint: CatalogImportCheckpoint = async (force = false) => {
     signal.throwIfAborted();
     if (force || performance.now() - started >= 12) {
+      onYield?.();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       signal.throwIfAborted();
       started = performance.now();
     }
   };
+  checkpoint.reset = () => {
+    started = performance.now();
+  };
+  return checkpoint;
 }
 
 export async function importCatalogUpdates(

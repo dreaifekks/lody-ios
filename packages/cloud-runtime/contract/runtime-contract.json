@@ -71,6 +71,11 @@
       "result": "ConversationMarkdownResult",
       "timeoutMs": 15000
     },
+    "conversationShareMessages": {
+      "params": "ConversationShareMessagesParams",
+      "result": "ConversationShareMessagesResult",
+      "timeoutMs": 15000
+    },
     "createSession": {
       "params": "CreateSessionParams",
       "result": "CreateSessionResult",
@@ -130,6 +135,11 @@
       "params": "HelloParams",
       "result": "HelloResult",
       "timeoutMs": 10000
+    },
+    "inspectProposal": {
+      "params": "InspectProposalParams",
+      "result": "InspectProposalResult",
+      "timeoutMs": 45000
     },
     "iosSimulatorControl": {
       "params": "IosSimulatorControlParams",
@@ -320,11 +330,6 @@
       "params": "ShareRequestParams",
       "result": "ShareRequestResult",
       "timeoutMs": 65000
-    },
-    "shortcutCloud": {
-      "params": "ShortcutCloudParams",
-      "result": "ShortcutCloudResult",
-      "timeoutMs": 20000
     }
   },
   "events": {
@@ -332,6 +337,7 @@
     "agentProviderOperationProgress": "AgentProviderOperationProgress",
     "agentProviderRefreshProgress": "AgentProviderRefreshProgress",
     "agentProvidersChanged": "AgentProvidersChangedEvent",
+    "agentRolesChanged": "Empty",
     "catalog": "CatalogEvent",
     "creationOptionsChanged": "Empty",
     "diagnostic": "DiagnosticEvent",
@@ -1568,6 +1574,76 @@
         }
       ]
     },
+    "ConversationShareMessage": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "text": { "type": "string" },
+        "references": {
+          "type": "array",
+          "items": { "$ref": "ConversationShareReference" }
+        },
+        "estimatedTokens": { "type": "number", "minimum": 0 },
+        "modelName": { "type": "string" },
+        "userTurnId": { "type": "string" }
+      },
+      "required": ["id", "role", "text", "estimatedTokens"]
+    },
+    "ConversationShareMessagesParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId"]
+    },
+    "ConversationShareMessagesResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "state": { "type": "string", "const": "empty" } },
+          "required": ["state"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": { "type": "string", "const": "ready" },
+            "title": { "type": "string" },
+            "createdAt": { "type": "string" },
+            "cliType": { "type": "string" },
+            "agentType": { "type": "string" },
+            "agentName": { "type": "string" },
+            "messages": {
+              "type": "array",
+              "items": { "$ref": "ConversationShareMessage" }
+            }
+          },
+          "required": ["state", "messages"]
+        }
+      ]
+    },
+    "ConversationShareReference": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "kind": { "type": "string" },
+        "label": { "type": "string" },
+        "target": { "type": "string" },
+        "mark": { "type": "string" },
+        "quote": { "type": "string" }
+      },
+      "required": ["start", "end", "kind", "label"]
+    },
     "CreatedSession": {
       "type": "object",
       "properties": {
@@ -1578,6 +1654,7 @@
         "archived": { "type": "boolean" },
         "pinned": { "type": "boolean" },
         "projectId": { "type": "string" },
+        "parentSessionId": { "type": "string" },
         "createdAt": { "type": "string" },
         "cliType": { "type": "string" },
         "agentType": { "type": "string" }
@@ -1616,6 +1693,7 @@
           "format": "uuid",
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
+        "parentSessionId": { "type": "string", "minLength": 1 },
         "billingEntitlement": {
           "anyOf": [{ "$ref": "BillingEntitlement" }, { "type": "null" }]
         }
@@ -1752,7 +1830,7 @@
       "properties": {
         "outcome": {
           "type": "string",
-          "enum": ["saved", "created", "dismissed"]
+          "enum": ["saved", "created", "applied", "dismissed"]
         },
         "scheduleId": { "type": "string" }
       },
@@ -1824,6 +1902,7 @@
         }
       ]
     },
+    "DiffScope": { "type": "string", "enum": ["branch", "uncommitted"] },
     "DiffSide": {
       "type": "object",
       "properties": {
@@ -2108,7 +2187,8 @@
       "type": "object",
       "properties": {
         "sessionId": { "type": "string", "minLength": 1 },
-        "path": { "type": "string" }
+        "path": { "type": "string" },
+        "scope": { "$ref": "DiffScope" }
       },
       "required": ["sessionId", "path"]
     },
@@ -2212,6 +2292,38 @@
         "methods": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["protocol", "methods"]
+    },
+    "InspectProposalParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "entryId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId", "entryId", "itemId"]
+    },
+    "InspectProposalResult": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "unavailable",
+            "stale",
+            "not_owner",
+            "machine_unsupported",
+            "target_unavailable"
+          ]
+        },
+        "isOwner": { "type": "boolean" },
+        "currentTitle": { "type": "string" },
+        "currentRule": { "$ref": "ScheduleRule" },
+        "timeZone": { "type": "string" },
+        "promptDiff": { "type": "array", "items": { "$ref": "PromptDiffLine" } }
+      },
+      "required": ["state", "isOwner", "timeZone"]
     },
     "IosSimulatorControlParams": {
       "type": "object",
@@ -2693,7 +2805,8 @@
               "subtitle": { "type": "string" },
               "insertText": { "type": "string" },
               "roleName": { "type": "string" },
-              "emoji": { "type": "string" }
+              "emoji": { "type": "string" },
+              "revision": { "type": "string" }
             },
             "required": ["path", "name", "kind", "subtitle"]
           }
@@ -2732,7 +2845,14 @@
     },
     "OpenSessionParams": {
       "type": "object",
-      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "historyStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
       "required": ["sessionId"]
     },
     "PinSection": {
@@ -2835,6 +2955,14 @@
         "groups": { "type": "array", "items": { "$ref": "ProjectGroupItem" } }
       },
       "required": ["groups"]
+    },
+    "PromptDiffLine": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["same", "add", "del", "gap"] },
+        "text": { "type": "string" }
+      },
+      "required": ["kind", "text"]
     },
     "PromptShortcut": {
       "type": "object",
@@ -2995,6 +3123,16 @@
             "entry": { "$ref": "PromptShortcutIndexEntry" }
           },
           "required": ["workspaceId", "userId", "action", "entry"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
+            "userId": { "type": "string" },
+            "action": { "type": "string", "const": "select" },
+            "id": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          "required": ["workspaceId", "userId", "action", "id"]
         },
         {
           "type": "object",
@@ -3489,6 +3627,11 @@
         "reserved": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "historyStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": ["ids", "current", "reserved"]
@@ -3867,6 +4010,11 @@
         "sessionId": { "type": "string", "minLength": 1 },
         "session": { "type": "string" },
         "synced": { "type": "boolean" },
+        "historyStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "backgroundWork": { "$ref": "SessionBackgroundWork" }
       },
       "required": ["sessionId", "session", "synced"]
@@ -4285,6 +4433,53 @@
           "type": "object",
           "properties": {
             "workspaceId": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "const": "historyToken" },
+            "args": {
+              "type": "object",
+              "properties": {
+                "intent": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "machineId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "cloudHistory": { "type": "boolean" },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "intentDigest": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": ["workspaceId", "machineId", "sessionId"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["intent"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["workspaceId", "operation", "args"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": { "type": "string", "minLength": 1 },
             "operation": { "type": "string", "const": "previewToken" },
             "args": {
               "type": "object",
@@ -4321,133 +4516,6 @@
       ]
     },
     "ShareRequestResult": {
-      "type": "object",
-      "properties": { "value": {} },
-      "required": ["value"]
-    },
-    "ShortcutCloudParams": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "operation": {
-              "type": "string",
-              "const": "listAccessibleDocuments"
-            },
-            "args": { "type": "object", "properties": {} }
-          },
-          "required": ["workspaceId", "operation", "args"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "operation": { "type": "string", "const": "getStreamToken" },
-            "args": {
-              "type": "object",
-              "properties": {
-                "target": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "kind": { "type": "string", "const": "index" },
-                        "ownerUserId": { "type": "string", "minLength": 1 },
-                        "visibility": {
-                          "type": "string",
-                          "enum": ["private", "workspace"]
-                        }
-                      },
-                      "required": ["kind", "ownerUserId", "visibility"]
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "kind": { "type": "string", "const": "body" },
-                        "bodyDocId": { "type": "string", "minLength": 1 }
-                      },
-                      "required": ["kind", "bodyDocId"]
-                    }
-                  ]
-                },
-                "write": { "type": "boolean" }
-              },
-              "required": ["target", "write"]
-            }
-          },
-          "required": ["workspaceId", "operation", "args"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "operation": { "type": "string", "const": "stageDocument" },
-            "args": {
-              "type": "object",
-              "properties": {
-                "ownerUserId": { "type": "string", "minLength": 1 },
-                "shortcutId": { "type": "string", "minLength": 1 },
-                "bodyDocId": { "type": "string", "minLength": 1 },
-                "visibility": {
-                  "type": "string",
-                  "enum": ["private", "workspace"]
-                }
-              },
-              "required": [
-                "ownerUserId",
-                "shortcutId",
-                "bodyDocId",
-                "visibility"
-              ]
-            }
-          },
-          "required": ["workspaceId", "operation", "args"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "workspaceId": { "type": "string", "minLength": 1 },
-            "operation": { "type": "string", "const": "activateDocument" },
-            "args": {
-              "type": "object",
-              "properties": {
-                "bodyDocId": { "type": "string", "minLength": 1 },
-                "previousBodyDocId": {
-                  "anyOf": [
-                    { "type": "string", "minLength": 1 },
-                    { "type": "null" }
-                  ]
-                },
-                "previousRevision": {
-                  "anyOf": [
-                    { "type": "string", "minLength": 1 },
-                    { "type": "null" }
-                  ]
-                },
-                "revision": { "type": "string", "minLength": 1 },
-                "slug": { "type": "string", "minLength": 1 },
-                "indexBytes": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "bodyDocId",
-                "previousBodyDocId",
-                "previousRevision",
-                "revision",
-                "slug",
-                "indexBytes"
-              ]
-            }
-          },
-          "required": ["workspaceId", "operation", "args"]
-        }
-      ]
-    },
-    "ShortcutCloudResult": {
       "type": "object",
       "properties": { "value": {} },
       "required": ["value"]
@@ -4779,7 +4847,10 @@
     },
     "WorkspaceChangesParams": {
       "type": "object",
-      "properties": { "sessionId": { "type": "string", "minLength": 1 } },
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "scope": { "$ref": "DiffScope" }
+      },
       "required": ["sessionId"]
     }
   }

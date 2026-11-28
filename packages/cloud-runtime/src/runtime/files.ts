@@ -139,14 +139,17 @@ export type WorkspaceChanges =
 
 export async function workspaceChanges(
   ctx: FileContext,
-  args: { sessionId: string },
+  args: { sessionId: string; scope?: 'branch' | 'uncommitted' },
 ): Promise<WorkspaceChanges> {
   const response = (await sealedRpc(
     ctx.workspaceId,
     ctx.machineId,
     'code-collab/open-all-changes-diff',
     ctx.ownerSessionId,
-    { sessionId: args.sessionId },
+    {
+      sessionId: args.sessionId,
+      ...(args.scope === undefined ? {} : { scope: args.scope }),
+    },
     ctx.getGrant,
     ctx.signal,
   )) as
@@ -180,7 +183,7 @@ export async function workspaceChanges(
 
 export async function fileDiff(
   ctx: FileContext,
-  args: { sessionId: string; path: string },
+  args: { sessionId: string; path: string; scope?: 'branch' | 'uncommitted' },
 ): Promise<DiffResult> {
   const target = at(ctx, args.path);
   const response = (await sealedRpc(
@@ -188,7 +191,11 @@ export async function fileDiff(
     ctx.machineId,
     'code-collab/open-current-diff',
     ctx.ownerSessionId,
-    { sessionId: args.sessionId, ...target },
+    {
+      sessionId: args.sessionId,
+      ...target,
+      ...(args.scope === undefined ? {} : { scope: args.scope }),
+    },
     ctx.getGrant,
     ctx.signal,
   )) as DiffResponse;

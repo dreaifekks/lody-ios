@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { ScheduleRule as ScheduleRuleRef } from './schedules.ts';
 
 const workspaceId = z.string().min(1);
 const sessionId = z.string().min(1);
@@ -56,6 +57,8 @@ export const CreateSessionParams = z
      * group fresh and writes its `projectRun` snapshot. `projectId` is then omitted.
      */
     projectGroupId: z.string().uuid().optional(),
+    /** Root conversation of a shared-directory Tab; the runtime copies its directory context from meta. */
+    parentSessionId: z.string().min(1).optional(),
     billingEntitlement: BillingEntitlement.nullable(),
   })
   .meta({ id: 'CreateSessionParams' });
@@ -69,6 +72,7 @@ export const CreatedSession = z
     archived: z.boolean(),
     pinned: z.boolean(),
     projectId: z.string(),
+    parentSessionId: z.string().optional(),
     createdAt: z.string(),
     cliType: z.string().optional(),
     agentType: z.string().optional(),
@@ -155,6 +159,52 @@ export const ConversationMarkdownResult = z
     }),
   ])
   .meta({ id: 'ConversationMarkdownResult' });
+
+export const ConversationShareReference = z
+  .object({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().positive(),
+    kind: z.string(),
+    label: z.string(),
+    target: z.string().optional(),
+    mark: z.string().optional(),
+    quote: z.string().optional(),
+  })
+  .meta({ id: 'ConversationShareReference' });
+
+export const ConversationShareMessage = z
+  .object({
+    id: z.string().min(1),
+    role: z.enum(['user', 'assistant']),
+    text: z.string(),
+    references: z.array(ConversationShareReference).optional(),
+    estimatedTokens: z.number().nonnegative(),
+    modelName: z.string().optional(),
+    userTurnId: z.string().optional(),
+  })
+  .meta({ id: 'ConversationShareMessage' });
+
+export const ConversationShareMessagesParams = z
+  .object({
+    workspaceId,
+    sessionId,
+  })
+  .meta({ id: 'ConversationShareMessagesParams' });
+
+export const ConversationShareMessagesResult = z
+  .discriminatedUnion('state', [
+    z.object({ state: z.literal('empty') }),
+    z.object({
+      state: z.literal('ready'),
+      title: z.string().optional(),
+      createdAt: z.string().optional(),
+      cliType: z.string().optional(),
+      agentType: z.string().optional(),
+      agentName: z.string().optional(),
+      messages: z.array(ConversationShareMessage),
+    }),
+  ])
+  .meta({ id: 'ConversationShareMessagesResult' });
 
 export const CheckTurnQuotaParams = z
   .object({ sessionId, billingEntitlement: BillingEntitlement.nullable() })
@@ -362,7 +412,8 @@ export const RespondPermissionResult = z
 
 /**
  * Accept or dismiss an Agent's proposal notice (`agent_role_proposal` saves the
- * Role, `schedule_proposal` creates the schedule) and record the outcome in history.
+ * Role, `schedule_proposal` creates the schedule, `schedule_edit_proposal` applies
+ * the change) and record the outcome in history.
  */
 export const DecideProposalParams = z
   .object({
@@ -376,10 +427,53 @@ export const DecideProposalParams = z
 
 export const DecideProposalResult = z
   .object({
-    outcome: z.enum(['saved', 'created', 'dismissed']),
+    outcome: z.enum(['saved', 'created', 'applied', 'dismissed']),
     scheduleId: z.string().optional(),
   })
   .meta({ id: 'DecideProposalResult' });
+
+/** Read what an undecided `schedule_edit_proposal` would change in the live schedule. */
+export const InspectProposalParams = z
+  .object({
+    workspaceId,
+    sessionId,
+    entryId: z.string().min(1),
+    itemId: z.string().min(1),
+  })
+  .meta({ id: 'InspectProposalParams' });
+
+export const PromptDiffLine = z
+  .object({
+    kind: z.enum(['same', 'add', 'del', 'gap']),
+    text: z.string(),
+  })
+  .meta({ id: 'PromptDiffLine' });
+
+/**
+ * Web `ScheduleEditProposalNotice` reasons, in its order: `unavailable` (deleted or
+ * a scheduled message), `stale` (edited since the proposal), then the save rule
+ * (`not_owner`, `machine_unsupported`, `target_unavailable`). Only `ready` applies.
+ */
+export const InspectProposalResult = z
+  .object({
+    state: z.enum([
+      'ready',
+      'unavailable',
+      'stale',
+      'not_owner',
+      'machine_unsupported',
+      'target_unavailable',
+    ]),
+    /** The owner may dismiss even when Apply is refused. */
+    isOwner: z.boolean(),
+    currentTitle: z.string().optional(),
+    currentRule: ScheduleRuleRef.optional(),
+    /** The execution machine's zone a proposed wall-clock rule is read in. */
+    timeZone: z.string(),
+    /** Web `diffPromptLines` of a proposed prompt; absent when it cannot be compared. */
+    promptDiff: z.array(PromptDiffLine).optional(),
+  })
+  .meta({ id: 'InspectProposalResult' });
 
 export type BillingEntitlement = z.infer<typeof BillingEntitlement>;
 export type CreateSessionResult = z.input<typeof CreateSessionResult>;

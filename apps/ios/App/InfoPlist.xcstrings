@@ -15,6 +15,42 @@
             "state": "translated",
             "value": "Lody"
           }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lody"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lody"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lody"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lody"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lody"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lody"
+          }
         }
       }
     },
@@ -31,6 +67,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "Take photos to attach to your messages."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拍攝照片以附加至你的訊息。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メッセージに添付する写真を撮影します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지에 첨부할 사진을 촬영합니다."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toma fotos para adjuntarlas a tus mensajes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prendre des photos pour les joindre à vos messages."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Делайте фото, чтобы прикреплять их к сообщениям."
           }
         }
       }
@@ -49,6 +121,42 @@
             "state": "translated",
             "value": "Connect to your Lody LAN hub and its machines on the local network."
           }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連線至區域網路上的 Mac，以檢視並控制其 iOS 模擬器。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローカルネットワーク上のMacに接続して、iOSシミュレータを表示・操作します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로컬 네트워크에서 Mac에 연결하여 iOS 시뮬레이터를 보고 제어합니다."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conéctate a tu Mac en la red local para ver y controlar su Simulador de iOS."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se connecter à votre Mac sur le réseau local pour afficher et contrôler son Simulateur iOS."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключайтесь к вашему Mac в локальной сети, чтобы просматривать его симулятор iOS и управлять им."
+          }
         }
       }
     },
@@ -65,6 +173,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "用于听写消息。语音在本机转换为文字，录音不会被保存或上传。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇照片以附加至你的訊息。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メッセージに添付する写真を選択します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지에 첨부할 사진을 선택합니다."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elige fotos para adjuntarlas a tus mensajes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir des photos pour les joindre à vos messages."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выбирайте фото, чтобы прикреплять их к сообщениям."
           }
         }
       }
@@ -83,6 +227,42 @@
             "state": "translated",
             "value": "Save images from your conversations to Photos."
           }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將對話中的圖片儲存至「照片」。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会話内の画像を「写真」に保存します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "대화의 이미지를 사진 앱에 저장합니다."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guarda imágenes de tus conversaciones en Fotos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer des images de vos conversations dans Photos."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сохраняйте изображения из диалогов в «Фото»."
+          }
         }
       }
     },
@@ -100,6 +280,42 @@
             "state": "translated",
             "value": "Choose photos to attach to your messages."
           }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聽寫訊息。你的語音會在此裝置上轉換為文字，錄音不會被儲存或上傳。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メッセージを音声入力します。音声はこのデバイス上でテキストに変換され、録音データが保存またはアップロードされることはありません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지를 받아쓰기합니다. 음성은 이 기기에서 텍스트로 변환되며 녹음 내용은 저장되거나 업로드되지 않습니다."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dicta mensajes. Tu voz se convierte en texto en este dispositivo y la grabación no se guarda ni se sube."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dicter des messages. Votre voix est convertie en texte sur cet appareil, et l'enregistrement n'est ni sauvegardé ni envoyé."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Диктуйте сообщения. Ваш голос преобразуется в текст на этом устройстве, а запись не сохраняется и не передаётся."
+          }
         }
       }
     },
@@ -116,6 +332,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "将你听写的内容转为消息文字。识别在本机完成。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將你聽寫的內容轉換為訊息文字。辨識會在此裝置上進行。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力した内容をメッセージのテキストに変換します。音声認識はこのデバイス上で実行されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "받아쓰기한 내용을 메시지 텍스트로 변환합니다. 인식은 이 기기에서 처리됩니다."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convierte lo que dictas en texto para tus mensajes. El reconocimiento se realiza en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convertir ce que vous dictez en texte de message. La reconnaissance s'effectue sur cet appareil."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Преобразуйте надиктованную речь в текст сообщения. Распознавание выполняется на этом устройстве."
           }
         }
       }

@@ -76,17 +76,13 @@ final class RuntimeContractTests: XCTestCase {
       .file(.init(editId: "original:1", fileName: "notes.md", mimeType: "text/markdown", sizeBytes: 12, fileId: "file-1",
         sha256: "abc123", textPreview: true, transport: "r2", uploadedAt: 1_700_000_000_000)),
     ]
-    XCTAssertEqual(decoded.map(\.gen), Array(repeating: 3, count: 88))
+    XCTAssertEqual(decoded.map(\.gen), Array(repeating: 3, count: 93))
     XCTAssertEqual(decoded.map(\.message), [
       .result(id: "req-hello", .hello(.init(protocol: 1, methods: ["hello", "ensureSession"]))),
       .result(id: "req-ensure", .ensureSession(.init())),
       .error(id: "req-ensure", method: "ensureSession", .init(code: "session_not_ready", retryable: false)),
       .request(id: "req-grant", .grant(.init())),
       .event(.catalog(.init(catalog: #"{"projects":[]}"#, revision: 4))),
-      .request(id: "req-shortcut", .shortcutCloud(.getStreamToken(.init(
-        workspaceId: "workspace-1",
-        args: .init(target: .index(.init(ownerUserId: "user-1", visibility: .workspace)), write: false)
-      )))),
       .request(id: "req-github", .githubMentions(.init(workspaceId: "workspace-1", repoFullName: "lody/app"))),
       .request(id: "req-share-revoke", .shareRequest(.api(.init(
         workspaceId: "workspace-1",
@@ -143,6 +139,9 @@ final class RuntimeContractTests: XCTestCase {
         success: true, preview: .init(operationId: "op-1", udid: simulatorUdid, phase: .booting, transport: .remote)))),
       .result(id: "req-simulator-old", .iosSimulatorControl(.init(error: "unsupported", capabilities: ["previewControl": 1]))),
       .error(id: "req-simulator", method: "iosSimulatorControl", .init(code: "metadata_not_ready", retryable: false)),
+      .result(id: "req-emulator", .androidEmulatorControl(.init(type: "android-emulator/control_response", sessionId: "session-1",
+        success: true, preview: .init(operationId: "op-2", id: "Pixel_8", phase: .booting, transport: .remote)))),
+      .result(id: "req-emulator-old", .androidEmulatorControl(.init(error: "unsupported", capabilities: ["previewControl": 1]))),
       .result(id: "req-item-detail", .itemDetail(.init(itemId: "tool-1", rev: 3, blocks: [
         .object(["type": .string("diff"), "path": .string("src/app.ts"), "oldText": .string("a\n"), "newText": .string("b\n")]),
         .object(["type": .string("terminal_output"), "output": .string("ok"),
@@ -197,23 +196,26 @@ final class RuntimeContractTests: XCTestCase {
           cliType: .string("builtin"), agentType: .string("claude"),
           models: .array([.object(["id": .string("sonnet"), "name": .string("Sonnet")])]), configOptionFields: ["fast"])])]))),
       .error(id: "req-probe-schema", method: "probeSchema", .init(code: "metadata_not_ready", retryable: false)),
+      .result(id: "forget-input-1", .forgetPendingInput(.init())),
+      .result(id: "req-status-move", .statusViewCommand(.init(writes: 1))),
+      .error(id: "req-status-section", method: "statusViewCommand", .init(code: "workspace_not_ready", retryable: true)),
+      .result(id: "req-snooze-presets", .snoozePresets(.init(nowMs: 1_763_712_000_000, presets: [
+        .init(id: .oneHour, until: 1_763_715_600_000, countdown: "1h"),
+        .init(id: .laterToday, until: 1_763_722_800_000, countdown: "3h"),
+        .init(id: .tomorrowMorning, until: 1_763_773_200_000, countdown: "17h"),
+        .init(id: .nextWeek, until: 1_764_032_400_000, countdown: "4d"),
+      ]))),
     ])
   }
 
   func testHostEnvelopesMatchFixtures() async throws {
     let expected = try fixtures("to-runtime")
     let replies = try fixtures("to-host")
-    let harness = Harness(ids: [
-      "req-hello", "req-ensure", "req-start", "req-restore", "req-restore-none",
-      "req-active", "req-open", "req-close", "req-release", "req-ping",
-      "req-shortcuts", "req-settings", "req-memory", "req-roles", "req-shares", "req-mentions", "req-shortcut-save",
-      "req-options", "req-projects-browse", "req-sharing", "req-sharing-close",
-      "req-preview", "req-simulator",
-      "req-item-detail", "req-turn-diff", "req-file-diff", "req-workspace-changes", "req-read-file", "req-list-dir",
-      "req-create-session", "req-delete-session", "req-archive-session", "req-pin-session", "req-mark-read",
-      "req-rename-session", "req-turn-quota", "req-send-turn", "req-edit-read", "req-edit-send", "req-control-turn",
-      "req-respond-permission", "req-probe-schema",
-    ])
+    // Requests take the fixtures' ids in order, so every call meets its own reply.
+    let harness = Harness(ids: try expected.compactMap { text in
+      let envelope = try json(text)
+      return envelope["kind"] as? String == "request" ? envelope["id"] as? String : nil
+    })
     let channel = channel(harness)
 
     let hello = Task { try await channel.call(Contract.Calls.Hello.self, .init(protocol: 1, gen: 3)) }
@@ -234,11 +236,6 @@ final class RuntimeContractTests: XCTestCase {
     channel.fail(id: "req-grant", method: "grant", code: "grant_failed", retryable: true)
     XCTAssertEqual(try json(harness.posts[3]), try json(expected[3]))
 
-    channel.reply(Contract.HostCalls.ShortcutCloud.self, id: "req-shortcut", .init(value: .object([
-      "token": .string("synthetic"), "expiresIn": .number(600),
-      "gatewayBaseUrl": .string("https://gateway.example"), "streamId": .string("stream-1"),
-    ])))
-    channel.fail(id: "req-shortcut", method: Contract.HostCalls.ShortcutCloud.method, code: "shortcut_unavailable")
     channel.reply(Contract.HostCalls.GithubMentions.self, id: "req-github", .init(
       items: [.init(path: "issue:7", name: "Fix login", kind: .issue, subtitle: "lody/app #7", insertText: "#7")],
       truncated: false, incomplete: false
@@ -251,83 +248,102 @@ final class RuntimeContractTests: XCTestCase {
     channel.reply(Contract.HostCalls.ShareRequest.self, id: "req-share-revoke", .init(value: .null))
     channel.fail(id: "req-share", method: Contract.HostCalls.ShareRequest.method, code: "share_request_failed")
 
-    func roundTrip<C: RuntimeCall>(_ call: C.Type, _ params: C.Params, reply: Int) async throws {
+    /// Sends one call and settles it with the fixture reply for its id: its result, else its error.
+    /// A request the fixtures never answer gets an error, so no call waits for its long timeout.
+    func roundTrip<C: RuntimeCall>(_ call: C.Type, _ params: C.Params) async throws {
       let count = harness.posts.count + 1
       let task = Task { try await channel.call(call, params) }
       await posted(harness, count: count)
-      channel.receive(replies[reply])
-      _ = try await task.value
+      XCTAssertEqual(harness.posts.count, count, "\(C.method) did not post its request")
+      let id = try XCTUnwrap(try json(XCTUnwrap(harness.posts.last))["id"] as? String)
+      let answers = try replies.filter { try json($0)["id"] as? String == id }
+      if let result = try answers.first(where: { try json($0)["kind"] as? String == "result" }) {
+        channel.receive(result)
+        _ = try await task.value
+        return
+      }
+      channel.receive(answers.first ?? #"{"v":1,"gen":3,"kind":"error","id":"\#(id)","method":"\#(C.method)","error":{"code":"unanswered"}}"#)
+      _ = try? await task.value
     }
-    try await roundTrip(Contract.Calls.Start.self, .init(workspaceId: "workspace-1", userId: "user-1", active: true), reply: 17)
-    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: ["session-1", "session-2"], current: "session-1", reserved: ["session-2"]), reply: 19)
-    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: [], current: nil, reserved: []), reply: 20)
-    try await roundTrip(Contract.Calls.SetActive.self, .init(active: false), reply: 21)
-    try await roundTrip(Contract.Calls.OpenSession.self, .init(sessionId: "session-1"), reply: 22)
-    try await roundTrip(Contract.Calls.CloseSession.self, .init(), reply: 23)
-    try await roundTrip(Contract.Calls.ReleaseReserve.self, .init(sessionId: "session-2"), reply: 24)
-    try await roundTrip(Contract.Calls.Ping.self, .init(), reply: 25)
+    /// A call whose parameters are the fixture request's own payload.
+    func fixtureTrip<C: RuntimeCall>(_ call: C.Type, _ index: Int) async throws where C.Params: Decodable {
+      let payload = try XCTUnwrap(try json(expected[index])["payload"])
+      try await roundTrip(call, try JSONDecoder().decode(C.Params.self, from: JSONSerialization.data(withJSONObject: payload)))
+    }
+    try await roundTrip(Contract.Calls.Start.self, .init(workspaceId: "workspace-1", userId: "user-1", active: true))
+    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: ["session-1", "session-2"], current: "session-1", reserved: ["session-2"]))
+    try await roundTrip(Contract.Calls.RestoreSessions.self, .init(ids: [], current: nil, reserved: []))
+    try await roundTrip(Contract.Calls.SetActive.self, .init(active: false))
+    try await roundTrip(Contract.Calls.OpenSession.self, .init(sessionId: "session-1"))
+    try await roundTrip(Contract.Calls.CloseSession.self, .init())
+    try await roundTrip(Contract.Calls.ReleaseReserve.self, .init(sessionId: "session-2"))
+    try await roundTrip(Contract.Calls.Ping.self, .init())
     let github = Contract.PromptShortcutProject.github(.init(repository: "lody/app"))
     let readme = Contract.PromptShortcutTarget.file(.init(project: github, path: "README.md"))
     let shortcut = Contract.PromptShortcut(v: 1, id: "shortcut-2", workspaceId: "workspace-1", ownerUserId: "user-1",
       name: "Review", slug: "review", scope: .init(project: github), revision: "rev-2",
       createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, prompt: "Review @README.md",
       mentions: [.init(start: 7, end: 17, label: "@README.md", target: readme)])
-    try await roundTrip(Contract.Calls.PromptShortcuts.self, .list(.init(workspaceId: "workspace-1", userId: "user-1")), reply: 26)
-    try await roundTrip(Contract.Calls.RemoteSettings.self, .init(workspaceId: "workspace-1", userId: "user-1", kind: .machine), reply: 27)
+    try await roundTrip(Contract.Calls.PromptShortcuts.self, .list(.init(workspaceId: "workspace-1", userId: "user-1")))
+    try await roundTrip(Contract.Calls.RemoteSettings.self, .init(workspaceId: "workspace-1", userId: "user-1", kind: .machine))
     try await roundTrip(Contract.Calls.AgentRoles.self, .save(.init(workspaceId: "workspace-1", userId: "user-1", id: "role-1",
       base: nil, fields: .init(name: "Reviewer", description: "", promptPrefix: "Review carefully", visibility: .workspace),
-      target: .init(machineId: "machine-1", agentConfigId: "agent-1"))), reply: 28)
+      target: .init(machineId: "machine-1", agentConfigId: "agent-1"))))
     try await roundTrip(Contract.Calls.MentionCatalog.self, .init(workspaceId: "workspace-1", userId: "user-1",
-      category: .session, sessionId: "session-1"), reply: 29)
+      category: .session, sessionId: "session-1"))
     try await roundTrip(Contract.Calls.PromptShortcuts.self, .save(.init(workspaceId: "workspace-1", userId: "user-1",
-      entry: nil, value: shortcut, bodyDocId: "body-2")), reply: 30)
-    try await roundTrip(Contract.Calls.CreationOptions.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1"), reply: 35)
+      entry: nil, value: shortcut, bodyDocId: "body-2")))
+    try await roundTrip(Contract.Calls.CreationOptions.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1"))
     try await roundTrip(Contract.Calls.LocalProjects.self, .browse(.init(workspaceId: "workspace-1", browserId: "browser-1",
-      userId: "user-1", machineId: "machine-1", path: "/Users/dev", cursor: "cursor-1")), reply: 37)
+      userId: "user-1", machineId: "machine-1", path: "/Users/dev", cursor: "cursor-1")))
     try await roundTrip(Contract.Calls.SessionSharing.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      editorId: "ios-share-1", action: .publish, selected: ["session-1"]), reply: 40)
+      editorId: "ios-share-1", action: .publish, selected: ["session-1"]))
     try await roundTrip(Contract.Calls.SessionSharing.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      editorId: "ios-share-1", action: .close), reply: 41)
-    try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create), reply: 43)
+      editorId: "ios-share-1", action: .close))
+    try await roundTrip(Contract.Calls.SessionPreview.self, .init(sessionId: "session-1", userId: "user-1", action: .create))
     try await roundTrip(Contract.Calls.IosSimulatorControl.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))), reply: 45)
-    try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"), reply: 48)
-    try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"), reply: 50)
-    try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"), reply: 51)
-    try await roundTrip(Contract.Calls.WorkspaceChanges.self, .init(sessionId: "session-1"), reply: 52)
-    try await roundTrip(Contract.Calls.ReadFile.self, .init(sessionId: "session-1", path: "README.md"), reply: 53)
+      userId: "user-1", command: .start(.init(udid: "00000000-0000-4000-8000-000000000001"))))
+    try await fixtureTrip(Contract.Calls.AndroidEmulatorControl.self, 28)
+    try await roundTrip(Contract.Calls.ItemDetail.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1", cursor: "2"))
+    try await roundTrip(Contract.Calls.TurnDiff.self, .init(sessionId: "session-1", entryId: "entry-1", path: "src/app.ts"))
+    try await roundTrip(Contract.Calls.FileDiff.self, .init(sessionId: "session-1", path: "src/app.ts"))
+    try await roundTrip(Contract.Calls.WorkspaceChanges.self, .init(sessionId: "session-1"))
+    try await roundTrip(Contract.Calls.ReadFile.self, .init(sessionId: "session-1", path: "README.md"))
     try await roundTrip(Contract.Calls.ListDir.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      relativePath: "src", userId: "user-1"), reply: 56)
+      relativePath: "src", userId: "user-1"))
     let free = Contract.BillingEntitlement(effectivePlanTier: .free, checkoutPending: false)
     try await roundTrip(Contract.Calls.CreateSession.self, .init(workspaceId: "workspace-1", projectId: "machine-1:local:p1",
       sessionId: "00000000-0000-4000-8000-000000000002", machineId: "machine-1", agentConfigId: "agent-1", userId: "user-1",
-      title: "Fix login", billingEntitlement: free), reply: 58)
+      title: "Fix login", billingEntitlement: free))
     try await roundTrip(Contract.Calls.DeleteSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      sessionIds: ["session-1", "session-3"]), reply: 59)
-    try await roundTrip(Contract.Calls.ArchiveSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", archived: true), reply: 60)
-    try await roundTrip(Contract.Calls.PinSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", pinned: true), reply: 61)
+      sessionIds: ["session-1", "session-3"]))
+    try await roundTrip(Contract.Calls.ArchiveSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", archived: true))
+    try await roundTrip(Contract.Calls.PinSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", pinned: true))
     try await roundTrip(Contract.Calls.MarkSessionRead.self, .init(workspaceId: "workspace-1", sessionId: "session-1",
-      lastReadAt: 1_700_000_000_000), reply: 62)
-    try await roundTrip(Contract.Calls.RenameSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", title: "Renamed"), reply: 63)
-    try await roundTrip(Contract.Calls.CheckTurnQuota.self, .init(sessionId: "session-1", billingEntitlement: nil), reply: 64)
+      lastReadAt: 1_700_000_000_000))
+    try await roundTrip(Contract.Calls.RenameSession.self, .init(workspaceId: "workspace-1", sessionId: "session-1", title: "Renamed"))
+    try await roundTrip(Contract.Calls.CheckTurnQuota.self, .init(sessionId: "session-1", billingEntitlement: nil))
     try await roundTrip(Contract.Calls.SendTurn.self, .init(sessionId: "session-1", id: "00000000-0000-4000-8000-000000000003",
       backgroundTaskId: "task-1", queue: false, guide: false, machineId: "machine-1", userId: "user-1", text: "Hello",
       attachmentBlocks: [["type": .string("image"), "imageId": .string("image-1"), "mimeType": .string("image/png"), "sizeBytes": .number(2048)]],
       cliType: "builtin", agentType: "claude", modelId: .init(value: nil), reasoningEffort: .init(value: "high"),
       reasoningEffortConfigId: "reasoning_effort", configOptionValues: ["fast": .bool(true)],
-      billingEntitlement: .init(effectivePlanTier: .plus, checkoutPending: false)), reply: 65)
+      billingEntitlement: .init(effectivePlanTier: .plus, checkoutPending: false)))
     try await roundTrip(Contract.Calls.EditSession.self, .read(.init(sessionId: "session-1", expectedUserTurnId: "turn-1",
-      userId: "user-1", billingEntitlement: nil)), reply: 66)
+      userId: "user-1", billingEntitlement: nil)))
     try await roundTrip(Contract.Calls.EditSession.self, .send(.init(sessionId: "session-1", expectedUserTurnId: "turn-1", id: "turn-2",
       userId: "user-1", billingEntitlement: free, backgroundTaskId: "task-2", text: "Edited", retainedIds: ["original:0"],
-      attachmentBlocks: [])), reply: 67)
+      attachmentBlocks: [])))
     try await roundTrip(Contract.Calls.ControlTurn.self, .init(action: .steer, sessionId: "session-1", machineId: "machine-1",
-      turnId: "turn-3", messageId: "turn-4", interrupt: false), reply: 68)
+      turnId: "turn-3", messageId: "turn-4", interrupt: false))
     try await roundTrip(Contract.Calls.RespondPermission.self, .init(sessionId: "session-1", entryId: "entry-1", itemId: "tool-1",
       requestId: "permission-1", optionId: "submit", answers: [
         "Scope": .string("Repository"), "Checks": .array([.string("Lint"), .string("Tests")]),
-      ]), reply: 69)
-    try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"), reply: 86)
+      ]))
+    try await roundTrip(Contract.Calls.ProbeSchema.self, .init(workspaceId: "workspace-1"))
+    try await fixtureTrip(Contract.Calls.ForgetPendingInput.self, 48)
+    for index in 49...51 { try await fixtureTrip(Contract.Calls.StatusViewCommand.self, index) }
+    try await fixtureTrip(Contract.Calls.SnoozePresets.self, 52)
     XCTAssertEqual(harness.posts.count, expected.count)
     for index in 4..<expected.count {
       XCTAssertEqual(try json(harness.posts[index]), try json(expected[index]))
@@ -411,7 +427,7 @@ final class RuntimeContractTests: XCTestCase {
     channel.onRequest = { id, request in requests.append("\(id):\(request.method)") }
     channel.onEvent = { events.append($0) }
     for index in 3..<replies.count { channel.receive(replies[index]) }
-    XCTAssertEqual(requests, ["req-grant:grant", "req-shortcut:shortcutCloud", "req-github:githubMentions", "req-share:shareRequest", "req-share-revoke:shareRequest"])
+    XCTAssertEqual(requests, ["req-grant:grant", "req-github:githubMentions", "req-share-revoke:shareRequest"])
     let expected = try replies.compactMap { text -> Contract.Event? in
       guard case .event(let event) = try JSONDecoder().decode(Contract.Envelope.self, from: Data(text.utf8)).message else { return nil }
       return event

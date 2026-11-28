@@ -53,6 +53,7 @@ import {
 } from '../protocol/permissionQuestions.ts';
 import type { QuestionMeta, TurnAuthor } from '../models/session.ts';
 import { billableTurnCount } from './billing';
+import type { RoostHistorySyncState } from './upstream-roost.js';
 import { previewSummary } from './preview';
 
 export type SystemNoticeMeta = {
@@ -71,6 +72,13 @@ export type SystemNoticeMeta = {
   };
   before?: RoleProposalFields;
   outcome?: string;
+  /** `agent_warning`: which Lody path raised it (web `AgentWarningNoticeBody`). */
+  source?: string;
+  /** `session_fork_origin`: the conversation this one was forked from. */
+  sourceSessionId?: string;
+  sourceTitle?: string;
+  /** `resume_from_external_chat_history`: the imported history was cut to fit. */
+  truncated?: boolean;
 };
 type RoleProposalFields = {
   name?: string;
@@ -81,6 +89,9 @@ export type OperationMemberSummary = {
   title: string;
   status: string;
 };
+
+/** Web `WorktreeScriptNoticeView` reads at most this much of a step's output. */
+const WORKTREE_OUTPUT_TAIL = 8000;
 
 export type ItemSummary =
   | {
@@ -101,8 +112,21 @@ export type ItemSummary =
       type: 'system_notice';
       name: string;
       meta?: SystemNoticeMeta;
-      /** `agent_role_proposal` / `schedule_proposal`, when well-formed. */
+      /** `agent_role_proposal` / `schedule_proposal` / `schedule_edit_proposal`, when well-formed. */
       proposal?: ProposalPresentation;
+    }
+  | {
+      itemId: string;
+      rev: number;
+      type: 'worktree_script';
+      phase: 'setup' | 'cleanup';
+      status: 'in_progress' | 'completed' | 'failed';
+      /** Each command with the tail of its output. */
+      steps: {
+        command: string;
+        status: 'in_progress' | 'completed' | 'failed';
+        output: string;
+      }[];
     }
   | { itemId: string; rev: number; type: 'text'; text: string }
   | { itemId: string; rev: number; type: 'thought'; text: string }
@@ -209,10 +233,13 @@ export type Envelope = {
   status: string;
   reason?: string;
   revision: number;
+  sendReady?: boolean;
+  controlReady?: boolean;
   billableTurnCount?: number;
   usage?: SessionUsage;
   historyHasMore?: boolean;
   historyLoading?: boolean;
+  historySync?: RoostHistorySyncState;
   /** Locally persisted owner inputs whose delivery is still being reconciled. */
   pendingRoostInputs?: readonly Record<string, unknown>[];
   awaitingUserSince?: number;
@@ -582,13 +609,20 @@ function summarizeItem(
 
   if (type === 'system_notice') {
     const name = typeof raw.name === 'string' ? raw.name : '';
+    const string = (field: string) =>
+      typeof raw.meta?.[field] === 'string'
+        ? (raw.meta[field] as string)
+        : undefined;
     const noticeMeta: SystemNoticeMeta = {
-      reason:
-        typeof raw.meta?.reason === 'string' ? raw.meta.reason : undefined,
-      code: typeof raw.meta?.code === 'string' ? raw.meta.code : undefined,
-      message:
-        typeof raw.meta?.message === 'string' ? raw.meta.message : undefined,
+      reason: string('reason'),
+      code: string('code'),
+      message: string('message'),
     };
+    for (const field of ['source', 'sourceSessionId', 'sourceTitle'] as const) {
+      const value = string(field);
+      if (value !== undefined) noticeMeta[field] = value;
+    }
+    if (raw.meta?.truncated === true) noticeMeta.truncated = true;
     if (name === 'board_context_maintenance') {
       Object.assign(noticeMeta, {
         trigger: raw.meta?.trigger,
@@ -624,6 +658,42 @@ function summarizeItem(
       meta: noticeMeta,
       ...(proposal ? { proposal } : {}),
     };
+  }
+
+  if (
+    type === 'worktree_script' &&
+    (raw.phase === 'setup' || raw.phase === 'cleanup') &&
+    ['in_progress', 'completed', 'failed'].includes(raw.status)
+  ) {
+    const status = (value: unknown) =>
+      value === 'in_progress' || value === 'completed' || value === 'failed'
+        ? value
+        : undefined;
+    const steps = (Array.isArray(raw.steps) ? raw.steps : []).flatMap(
+      (step: any) => {
+        const state = status(step?.status);
+        if (typeof step?.command !== 'string' || !state) return [];
+        const output = typeof step.output === 'string' ? step.output : '';
+        return [
+          {
+            command: step.command,
+            status: state,
+            output: output.slice(-WORKTREE_OUTPUT_TAIL),
+          },
+        ];
+      },
+    );
+    const script = {
+      phase: raw.phase,
+      status: raw.status,
+      steps,
+    };
+    return {
+      itemId,
+      rev: bump(projection, key, JSON.stringify(script)),
+      type,
+      ...script,
+    } as ItemSummary;
   }
 
   if (type === 'text' || type === 'thought') {

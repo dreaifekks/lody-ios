@@ -31,6 +31,8 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     /// nil when the group cannot collapse.
     let expanded: Bool?
     let canToggle: Bool
+    /// An expanded family's first child carries the family's collapse chevron.
+    var firstChild = false
   }
 
   var forwarded: ((String, [String: Any]) -> Void)?
@@ -184,7 +186,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
     let cell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
       self?.configure(cell, item)
     }
-    let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+    let header = UICollectionView.SupplementaryRegistration<ChatSectionHeaderCell>(
       elementKind: UICollectionView.elementKindSectionHeader
     ) { [weak self] view, _, path in
       let id = self?.dataSource.sectionIdentifier(for: path.section)
@@ -193,13 +195,12 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       let count = id.flatMap { self?.titleCounts[$0] } ?? ""
       let menu = id.flatMap { self?.titleMenus[$0] } ?? []
       guard let folds = self?.groupFolds else { return }
+      let hasMenu = !title.isEmpty && folds.enabled && !menu.isEmpty
+      view.setMenu(hasMenu ? menu : [], groupId: id ?? "") { [weak self] action in
+        if let id { self?.forwarded?("sectionAction", ["id": id, "actionId": action]) }
+      }
       view.contentConfiguration = UIHostingConfiguration {
-        SectionTitle(
-          text: title, repository: repository, count: count, menu: menu, folds: folds, groupId: id ?? "",
-          onMenu: { [weak self] action in
-            if let id { self?.forwarded?("sectionAction", ["id": id, "actionId": action]) }
-          }
-        ) { [weak self] in
+        SectionTitle(text: title, repository: repository, count: count, hasMenu: hasMenu, folds: folds, groupId: id ?? "") { [weak self] in
           if let id { self?.toggleGroup(id) }
         }
       }
@@ -309,6 +310,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
       // A collapsed group keeps its label, which UIKit still lays out for an empty section.
       if !(nextTitles[section.id] ?? "").isEmpty, groupFolds.isCollapsed(section.id) { continue }
       let children = section.rows.contains { !$0.parent }
+      var previous: String?
       for row in section.rows {
         let item = Item(section: section.id, row: row.id)
         let entry: Entry
@@ -327,17 +329,20 @@ final class ChatListView: UIView, UICollectionViewDelegate {
           let open = !foldedOpeners.contains(row.id)
           entry = Entry(kind: .session, row: row, expanded: open, canToggle: true)
         } else {
-          entry = Entry(kind: .session, row: row, expanded: nil, canToggle: false)
+          entry = Entry(
+            kind: .session, row: row, expanded: nil, canToggle: false,
+            firstChild: !row.parentId.isEmpty && row.parentId == previous)
         }
         guard next[item] == nil else { continue }
         next[item] = entry
+        previous = row.id
         snapshot.appendItems([item], toSection: section.id)
       }
     }
     let nextMoveDirections = status?.moveDirections() ?? [:]
     let changed = Set(next.keys).filter { key in
       guard let old = entries[key], let new = next[key] else { return false }
-      return !Self.same(old.row, new.row, old.expanded, new.expanded)
+      return !Self.same(old.row, new.row, old.expanded, new.expanded) || old.firstChild != new.firstChild
         || moveDirections[key.row] != nextMoveDirections[key.row]
     }
     // Recreate cells when commands change to discard the previous swipe presentation.
@@ -492,6 +497,7 @@ final class ChatListView: UIView, UICollectionViewDelegate {
           expanded: entry.canToggle ? entry.expanded : nil,
           onOpen: { [weak self] in self?.openSelecting(item, id: entry.row.id) },
           onToggle: { [weak self] in self?.toggleOpener(entry.row.id) },
+          collapseFamily: entry.firstChild ? { [weak self] in self?.toggleOpener(entry.row.parentId) } : nil,
           moveUp: moveDirections[item.row]?.up == true ? move(item.row, up: true) : nil,
           moveDown: moveDirections[item.row]?.down == true ? move(item.row, up: false) : nil
         )
@@ -1000,11 +1006,14 @@ private struct ChatRowContent: View {
   var owner: WorkspaceMember?
   /// Archived list: the title drops to grey ink so every row reads as archived.
   var muted = false
-  /// Set on a row with nested chats: whether they are shown. A "⌄ 4 opened chats" line below the
-  /// row heads the family; both parent and child status marks stay trailing.
+  /// Set on a row with nested chats: whether they are shown. While folded, a "› 4 opened chats"
+  /// line below the row stands for the family; once expanded that line gives way to the children,
+  /// the first of which carries the collapse chevron. Parent and child status marks stay trailing.
   var expanded: Bool?
   let onOpen: () -> Void
   var onToggle: () -> Void = {}
+  /// Set on an expanded family's first child: its leading chevron folds the family.
+  var collapseFamily: (() -> Void)?
   /// Status view reordering for VoiceOver (every drag has an accessible alternative).
   var moveUp: (() -> Void)?
   var moveDown: (() -> Void)?
@@ -1028,21 +1037,51 @@ private struct ChatRowContent: View {
     // Reserve separate space for navigation and disclosure; the family target must not
     // consume the opener's bottom padding.
     VStack(alignment: .leading, spacing: 0) {
-      if let expanded {
+      if expanded == false {
         // Adjacent SwiftUI buttons arbitrate touch tolerance together. Leaving the
         // opener to UIKit cell selection lets disclosure steal taps above its bounds.
         Button(action: onOpen) {
-          content.contentShape(Rectangle())
+          content().contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        familyToggle(expanded)
+        familyToggle
+      } else if let collapseFamily {
+        // The leading gutter (chevron) folds the family; the rest of the row opens the child.
+        Button(action: onOpen) {
+          content(gutter: false).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, Self.childIndent)
+        .overlay(alignment: .leading) {
+          Button(action: collapseFamily) {
+            Color.clear.frame(width: Self.childIndent).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityHidden(true)
+        }
       } else {
-        content
+        content()
       }
     }
+    // A little air between an expanded family and the next conversation; children stay tight.
+    .padding(.bottom, nested && row.lastChild ? LodySpacing.sm : 0)
     .backgroundPreferenceValue(ChatRowTitleBounds.self) { anchor in
       GeometryReader { geometry in
-        if nested, let anchor {
+        if nested, let anchor, collapseFamily != nil {
+          // The first child: the family's collapse chevron sits on the trunk, level with the title.
+          let turn = geometry[anchor].midY
+          ZStack(alignment: .topLeading) {
+            if !row.lastChild {
+              Path { path in
+                path.move(to: CGPoint(x: Self.railX, y: turn + Self.chevronSize / 2 + LodySpacing.xs))
+                path.addLine(to: CGPoint(x: Self.railX, y: geometry.size.height))
+              }
+              .stroke(LodyColor.borderDefault, style: StrokeStyle(lineWidth: Self.railWidth, lineCap: .round))
+            }
+            chevron(expanded: true)
+              .position(x: Self.railX, y: turn)
+          }
+        } else if nested, let anchor {
           let turn = geometry[anchor].midY
           Path { path in
             let fork = max(0, turn - LodySpacing.md)
@@ -1072,14 +1111,18 @@ private struct ChatRowContent: View {
       if let expanded {
         Button(String(localized: String.LocalizationValue(expanded ? "home.tree.collapse" : "home.tree.expand"), bundle: .lody), action: onToggle)
       }
+      if let collapseFamily {
+        Button(String(localized: "home.tree.collapse", bundle: .lody), action: collapseFamily)
+      }
       if let moveUp { Button(String(localized: "home.status.moveUp", bundle: .lody), action: moveUp) }
       if let moveDown { Button(String(localized: "home.status.moveDown", bundle: .lody), action: moveDown) }
     }
   }
 
-  private var content: some View {
+  /// `gutter: false` drops the leading inset when the first child's collapse target owns it.
+  private func content(gutter: Bool = true) -> some View {
     HStack(alignment: .center, spacing: 0) {
-      if nested { Color.clear.frame(width: Self.childLevel, height: 1) }
+      if nested, gutter { Color.clear.frame(width: Self.childLevel, height: 1) }
       VStack(alignment: .leading, spacing: LodySpacing.xxs) {
         HStack(alignment: .center, spacing: LodySpacing.sm) {
           Text(row.title)
@@ -1119,7 +1162,8 @@ private struct ChatRowContent: View {
         }
       }
     }
-    .padding(.horizontal, LodyLayout.listEdgeX)
+    .padding(.leading, gutter ? LodyLayout.listEdgeX : 0)
+    .padding(.trailing, LodyLayout.listEdgeX)
     .padding(.vertical, snippet != nil || hasDetailLine ? LodySpacing.sm : 0)
     .frame(maxWidth: .infinity, minHeight: nested ? LodySize.controlMd : LodySize.listRow, alignment: .leading)
   }
@@ -1141,22 +1185,25 @@ private struct ChatRowContent: View {
   /// A nested title's leading edge: the list edge plus one level.
   static let childIndent = LodyLayout.listEdgeX + childLevel
 
-  /// The whole family line toggles its children; the opener above still opens the chat.
-  private func familyToggle(_ expanded: Bool) -> some View {
+  private func chevron(expanded: Bool) -> some View {
+    Image(systemName: "chevron.right")
+      .font(.system(size: 11, weight: .semibold))
+      .foregroundStyle(LodyColor.iconSecondary)
+      .frame(width: Self.chevronSize, height: Self.chevronSize)
+      .rotationEffect(.degrees(expanded ? 90 : 0))
+  }
+
+  /// A folded family's line; the whole line expands its children, the opener above opens the chat.
+  private var familyToggle: some View {
     Button(action: onToggle) {
       HStack(spacing: LodySpacing.xs) {
-        Image(systemName: "chevron.right")
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(LodyColor.iconSecondary)
-          .frame(width: Self.chevronSize, height: Self.chevronSize)
-          .rotationEffect(.degrees(expanded ? 90 : 0))
-          .animation(LodySpring.snappy, value: expanded)
+        chevron(expanded: false)
         Text(String.localizedStringWithFormat(String(localized: "home.tree.count", bundle: .lody), row.childCount))
           .lodyTextStyle(.footnote)
           .foregroundStyle(LodyColor.textSecondary)
           .monospacedDigit()
         Spacer(minLength: LodySpacing.sm)
-        if !expanded, let status = Attention(tint: row.collapsedImageTint, unread: false) {
+        if let status = Attention(tint: row.collapsedImageTint, unread: false) {
           AttentionGlyph(attention: status)
             .frame(width: LodyIconSize.md, height: LodyIconSize.md)
         }
@@ -1268,11 +1315,10 @@ private struct SectionTitle: View {
   var repository = ""
   /// Shown beside the label while the group is collapsed.
   var count = ""
-  /// The label's ⋯ menu (pin section management).
-  var menu: [LodyListAction] = []
+  /// Reserves room for the header cell's ⋯ menu (pin section management).
+  var hasMenu = false
   @ObservedObject var folds: ChatGroupFolds
   let groupId: String
-  var onMenu: (String) -> Void = { _ in }
   let onToggle: () -> Void
 
   var body: some View {
@@ -1293,7 +1339,8 @@ private struct SectionTitle: View {
             .filter { !$0.isEmpty }.joined(separator: ", ")
         )
         .accessibilityIdentifier("label:" + groupId)
-        if !menu.isEmpty { sectionMenu }
+        // The header cell draws the menu over this space; its 44 pt target overhangs the label.
+        if hasMenu { Color.clear.frame(width: LodySize.touchTarget + LodySpacing.xs, height: 0) }
       }
     } else {
       label(chevron: nil)
@@ -1301,25 +1348,6 @@ private struct SectionTitle: View {
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("label:" + groupId)
     }
-  }
-
-  private var sectionMenu: some View {
-    Menu {
-      ForEach(menu, id: \.id) { action in
-        Button(role: action.destructive ? .destructive : nil) { onMenu(action.id) } label: {
-          Label(action.title, systemImage: action.symbol)
-        }
-      }
-    } label: {
-      Image(systemName: "ellipsis")
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(LodyColor.iconSecondary)
-        .frame(width: LodySize.touchTarget, height: LodySize.touchTarget)
-        .contentShape(Rectangle())
-    }
-    .accessibilityLabel(String(localized: "home.pins.menu", bundle: .lody))
-    .accessibilityIdentifier("label-menu:" + groupId)
-    .padding(.trailing, LodySpacing.xs)
   }
 
   /// `chevron` is the collapsed state when the group can fold: pointing down while open, right when collapsed.

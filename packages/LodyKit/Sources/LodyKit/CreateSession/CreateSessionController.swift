@@ -35,6 +35,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   var onCancel: (() -> Void)?
   var showMessage: ((String, LodyToastKind) -> Void)?
   var restoreDraft: ((Int) -> Void)?
+  var presentSheet: ((UIViewController, Bool) -> Void)?
   private(set) var sending = false
   /// Pushed full screen: lead with a back button instead of the sheet's close button.
   var pushed = false
@@ -46,9 +47,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   /// composer chip's run-config sheet, both driven by one state object.
   private let panelState = CreatePanelState()
   private lazy var context = UIHostingController(rootView: CreateContextPanel(state: panelState))
-  private weak var runConfigSheet: UIViewController?
+  private(set) weak var runConfigSheet: CreateRunConfigSheetController?
   private let signedOutLabel = UILabel()
   private lazy var hostHeight = host.heightAnchor.constraint(equalToConstant: 64)
+  private lazy var contextBottom = context.view.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -64)
+  private var collapsedContextHeight: CGFloat = 0
   private var optionsTask: Task<Void, Never>?
   private var composingConstraints: [NSLayoutConstraint] = []
   private var searchingConstraints: [NSLayoutConstraint] = []
@@ -100,7 +103,21 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       self.form.current.worktree = on
       self.changed(prefs: false)
     }
+    panelState.onCollapsedHeight = { [weak self] height in
+      guard let self, abs(self.collapsedContextHeight - height) > 0.5 else { return }
+      self.collapsedContextHeight = height
+      self.updateComposerReservedHeight()
+    }
+    panelState.onOpenChange = { [weak self] _ in
+      self?.updateComposerReservedHeight()
+    }
     composer.onRunConfig = { [weak self] in self?.presentRunConfig() }
+    composer.onBeginEditing = { [weak self] in
+      guard let self else { return }
+      if self.panelState.open != nil { self.panelState.open = nil }
+      self.updateComposerReservedHeight()
+    }
+    composer.cardStyle = true
     addChild(context)
     context.view.backgroundColor = .clear
     context.view.translatesAutoresizingMaskIntoConstraints = false
@@ -119,7 +136,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     view.addSubview(host)
     let keyboard = host.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -LodySpacing.sm)
     keyboard.priority = .defaultHigh
-    composingConstraints = [keyboard, context.view.bottomAnchor.constraint(equalTo: host.topAnchor)]
+    composingConstraints = [keyboard, contextBottom]
     let searchBottom = context.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -LodySpacing.sm)
     searchBottom.priority = .defaultHigh
     searchingConstraints = [
@@ -135,7 +152,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       host.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -16),
       hostHeight,
       // The context fills the space above the composer, bottom-aligned within thumb reach, and
-      // rides up with it; expanded lists grow upward and scroll when they run out of room.
+      // rides up with inline typing; dragging the grabber lets the composer glide directly over it.
       context.view.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
       context.view.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
       context.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -144,6 +161,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       signedOutLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -LodyLayout.screenPaddingX * 2),
     ])
     NSLayoutConstraint.activate(composingConstraints)
+    composer.fullScreenContainer = view
+    composer.allowsFullScreen = true
     composer.setInputIdentifier("create-session-input")
     composer.setComposerState(CreateJSON.encode(["placeholder": String(localized: "create.composer.placeholder", bundle: .lody)]))
 #if !LODY_SHARE_EXTENSION
@@ -160,6 +179,11 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     loadGroups()
   }
 
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    composer.fitPageRoom()
+  }
+
   @objc private func searchFocusChanged(_ notification: Notification) {
     guard let field = notification.object as? UITextField, field.isDescendant(of: context.view) else { return }
     let searching = notification.name == UITextField.textDidBeginEditingNotification
@@ -171,6 +195,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
   @objc private func dismissKeyboard() { view.endEditing(true) }
 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    guard !composer.isFullScreenActive else { return false }
     guard let target = touch.view, !target.isDescendant(of: host) else { return false }
     // Search fields in expanded pickers must still be able to take focus.
     var ancestor: UIView? = target
@@ -183,9 +208,24 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
 
+  private func updateComposerReservedHeight() {
+    guard isViewLoaded else { return }
+    if panelState.open != nil {
+      composer.inlineTopReservedHeight = nil
+    } else if collapsedContextHeight > 0 {
+      composer.inlineTopReservedHeight = collapsedContextHeight
+    } else {
+      composer.inlineTopReservedHeight = nil
+    }
+  }
+
   func setComposerHeight(_ height: CGFloat) {
-    guard hostHeight.constant != height else { return }
+    let inline = composer.inlineTotalHeight > 0 ? min(height, composer.inlineTotalHeight) : height
+    let hostChanged = hostHeight.constant != height
+    let contextChanged = contextBottom.constant != -inline
+    guard hostChanged || contextChanged else { return }
     hostHeight.constant = height
+    contextBottom.constant = -inline
     viewIfLoaded?.setNeedsLayout()
   }
 
@@ -197,38 +237,60 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     if !signedOut {
       let panel = CreateSessionContext.panel(form)
       if panelState.panel != panel { panelState.panel = panel }
+      if let open = panelState.open {
+        let pickers = panel.cards + (panel.branch.map { [$0] } ?? [])
+        if !pickers.contains(where: { $0.id == open && !$0.options.isEmpty }) {
+          panelState.open = nil
+        }
+      }
       let rows = CreateSessionContext.runConfig(form)
-      if panelState.runConfig != rows { panelState.runConfig = rows }
       let recents = CreateSessionContext.recents(form)
+      if panelState.runConfig != rows { panelState.runConfig = rows }
       if panelState.recents != recents { panelState.recents = recents }
+      if rows.isEmpty {
+        dismissRunConfigSheet()
+      } else if let sheet = runConfigSheet, !sheet.isDismissPending {
+        if sheet.state.runConfig != rows { sheet.state.runConfig = rows }
+        if sheet.state.recents != recents { sheet.state.recents = recents }
+        if let open = sheet.state.openInSheet,
+           !rows.contains(where: { $0.id == open && !$0.options.isEmpty }) {
+          sheet.state.openInSheet = nil
+        }
+      }
+    } else {
+      if panelState.open != nil { panelState.open = nil }
+      if !panelState.runConfig.isEmpty { panelState.runConfig = [] }
+      if !panelState.recents.isEmpty { panelState.recents = [] }
+      dismissRunConfigSheet()
     }
     renderComposer()
+  }
+
+  private func dismissRunConfigSheet(animated: Bool = UIView.areAnimationsEnabled) {
+    guard let sheet = runConfigSheet else { return }
+    runConfigSheet = nil
+    sheet.dismissCleanly(animated: animated)
   }
 
   /// Web's run-config sheet from the composer chip: Agent (when there is a choice), Model,
   /// Reasoning and Mode rows that expand in place, then the Plan and Fast switches when offered.
   private func presentRunConfig() {
-    guard !sending, runConfigSheet == nil, !panelState.runConfig.isEmpty else { return }
+    let rows = CreateSessionContext.runConfig(form)
+    guard !sending, !form.signedOut, presentedViewController == nil,
+          runConfigSheet?.isActive != true, !rows.isEmpty else { return }
     view.endEditing(true)
-    panelState.openInSheet = nil
-    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: panelState))
-    var contentHeight = CGFloat(panelState.runConfig.count + panelState.recents.count) * (LodySize.controlMd + LodySpacing.xs * 2)
-      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
-    sheet.rootView = CreateRunConfigSheet(state: panelState, onHeightChange: { [weak sheet] height in
-      guard height > 0, abs(contentHeight - height) > 1 else { return }
-      contentHeight = height
-      sheet?.sheetPresentationController?.animateChanges {
-        sheet?.sheetPresentationController?.invalidateDetents()
-      }
-    })
-    if let presentation = sheet.sheetPresentationController {
-      presentation.detents = [.custom(identifier: .init("runConfigContent")) { context in
-        min(contentHeight, context.maximumDetentValue)
-      }]
-      presentation.prefersGrabberVisible = true
-    }
+    let state = CreatePanelState()
+    state.runConfig = rows
+    state.recents = CreateSessionContext.recents(form)
+    state.onPick = { [weak self] id, option in self?.optionPicked(id, option) }
+    let sheet = CreateRunConfigSheetController(state: state)
+    sheet.view.accessibilityIdentifier = "create-run-config"
     runConfigSheet = sheet
-    present(sheet, animated: true)
+    if let presentSheet {
+      presentSheet(sheet, UIView.areAnimationsEnabled)
+    } else {
+      present(sheet, animated: UIView.areAnimationsEnabled)
+    }
   }
 
   /// A choice in the context panel or the run-config sheet.
@@ -277,7 +339,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
       form.selectRecent(option)
       changed()
       // A recent entry is a terminal "run it like this" choice (web closes its menu).
-      runConfigSheet?.dismiss(animated: true)
+      dismissRunConfigSheet()
     default:
       break
     }
@@ -289,6 +351,8 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     let fast = CreateLogic.fastMode(capability, page.choice)
     var options: [String: Any] = [
       "modelId": page.choice.modelId ?? "", "effort": page.choice.effort ?? "",
+      "displayModelId": CreateLogic.resolvedModelId(capability, modelId: page.choice.modelId) ?? "",
+      "displayEffort": CreateLogic.resolvedEffort(capability, page.choice) ?? "",
       "models": (capability?.models ?? []).map { ["id": $0.id, "title": $0.name] },
       "efforts": CreateLogic.effortsFor(capability, modelId: page.choice.modelId).map { ["id": $0, "title": $0] },
     ]
@@ -598,6 +662,7 @@ final class CreateSessionController: UIViewController, UIGestureRecognizerDelega
     form.updateChoice(form.current.choice)
     if draft != nil { form.recordRecent() }
     if let value = form.prefs { onPrefs?(value) }
+    dismissRunConfigSheet()
     sending = true
     renderComposer()
     onSubmit?(draft, payload)

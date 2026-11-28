@@ -147,6 +147,7 @@ enum LodyNativePages {
     },
     "item-detail-preview": { params in ItemDetailPreviewController(scenario: params["scenario"] as! String) },
     "message-share": { params in MessageShareController(contentJSON: params["contentJSON"] as? String ?? "") },
+    "chat-share-image": { _ in ChatShareImagePreviewFixture.makeController() },
     "notification-settings": { _ in NotificationSettingsController() },
     "notification-preview": { _ in NotificationPreviewController() },
     "onboarding": { _ in OnboardingController() },

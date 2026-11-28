@@ -160,15 +160,15 @@
 
 ### 对话块与身份
 
-| 状态    | 项                                              | 缺口                           | 本仓锚点                                                      | OSS 锚点                             |
-| ------- | ----------------------------------------------- | ------------------------------ | ------------------------------------------------------------- | ------------------------------------ |
-| done    | thought / plan / subagent_task / tool_call 投影 | 能投、能摘要                   | `ChatTranscript.swift`、`project.ts`                          | `packages/shared/src/ai.ts`          |
-| missing | Goal 横幅 / `/goal`                             | 无 ACP goal 生命周期           | 无                                                            | `goal.ts`、`session-goal-banner.tsx` |
-| missing | 定时任务                                        | 不展示 cron / wakeup           | 无                                                            | `scheduled-tasks-panel.tsx`          |
-| missing | Agent 产出文件卡片                              | 无预览 / 下载入口              | 附件主要是用户发出                                            | `session-file-card.tsx`              |
-| missing | 发送者身份                                      | 团队会话不显示谁发的           | 无                                                            | `#524` `show chat sender identities` |
-| missing | 大段粘贴 chip                                   | 长粘贴整段进输入框             | `ChatComposerView` paste                                      | `pasted-text-draft.ts`               |
-| drift   | `system_notice`                                 | `agent_warning` 被丢掉，不展示 | `ChatTranscript.swift` 过滤 `system_notice` + `agent_warning` | 应可见的系统通知                     |
+| 状态    | 项                                              | 缺口                                                                                       | 本仓锚点                                                                | OSS 锚点                             |
+| ------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------ |
+| done    | thought / plan / subagent_task / tool_call 投影 | 能投、能摘要                                                                               | `ChatTranscript.swift`、`project.ts`                                    | `packages/shared/src/ai.ts`          |
+| missing | Goal 横幅 / `/goal`                             | 无 ACP goal 生命周期                                                                       | 无                                                                      | `goal.ts`、`session-goal-banner.tsx` |
+| missing | 定时任务                                        | 不展示 cron / wakeup                                                                       | 无                                                                      | `scheduled-tasks-panel.tsx`          |
+| missing | Agent 产出文件卡片                              | 无预览 / 下载入口                                                                          | 附件主要是用户发出                                                      | `session-file-card.tsx`              |
+| missing | 发送者身份                                      | 团队会话不显示谁发的                                                                       | 无                                                                      | `#524` `show chat sender identities` |
+| missing | 大段粘贴 chip                                   | 长粘贴整段进输入框                                                                         | `ChatComposerView` paste                                                | `pasted-text-draft.ts`               |
+| done    | `system_notice`                                 | `agent_warning`、分叉来源、恢复历史、worktree 脚本、定时任务修改提议均已渲染；未知通知隐藏 | `ChatTranscript.swift`、`ChatProposalCell.swift`、`ChatErrorCell.swift` | `view.tsx` `SystemMessageRowView`    |
 
 ### 官方 mobile 有、本仓没有
 

@@ -71,7 +71,7 @@ struct ChatEntry: Decodable {
   /// A later visible process settles earlier prose, even while the turn runs.
   var textTailID: String? {
     guard let item = items.last(where: {
-      !$0.hidesFromTranscript && !($0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning"))
+      !$0.hidesFromTranscript && !($0.type == "system_notice" && $0.name == nil)
     }), item.type == "text" || item.type == "thought" else { return nil }
     return item.itemId
   }
@@ -292,18 +292,26 @@ struct ChatItem: Decodable {
     let patch: ProposalFields?
   }
   struct NoticeMeta: Decodable, Equatable, Sendable {
-    let reason: String?; let code: String?; let message: String?
+    let reason: String?
+    let code: String?
+    let message: String?
     var trigger: String? = nil
     var status: String? = nil
     var kind: String? = nil
     var command: ProposalCommand? = nil
     var before: ProposalFields? = nil
     var outcome: String? = nil
+    var source: String? = nil
+    var sourceSessionId: String? = nil
+    var sourceTitle: String? = nil
+    var truncated: Bool? = nil
   }
   struct OperationMember: Decodable, Sendable {
     let title: String
     let status: String
   }
+  /// One command of a `worktree_script` with the tail of its output.
+  struct ScriptStep: Decodable, Equatable { let command: String; let status: String; let output: String }
   var memberCount: Int? = nil
   var members: [OperationMember]? = nil
   var deliveryStatus: String? = nil
@@ -316,6 +324,10 @@ struct ChatItem: Decodable {
       || (type == "system_notice" && ["board_context_maintenance", "board_chain_limit", "agent_role_proposal"].contains(name ?? ""))
   }
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
+  /// Web system rows (notices and worktree scripts) stand on their own; they never fold into work.
+  var isNotice: Bool { (type == "system_notice" && name != nil) || type == "worktree_script" }
+  var phase: String? = nil
+  var steps: [ScriptStep]? = nil
   var itemId: String
   var type: String
   let name: String?
@@ -343,7 +355,7 @@ struct ChatItem: Decodable {
   /// Web `isProcessStatusToolCall`: `context_compaction` reads as a one-line status, not a tool.
   var activityKind: String? = nil
   var isContextCompaction: Bool { type == "tool_call" && activityKind == "context_compaction" }
-  var isProcess: Bool { !isOrchestration && operation == nil && proposal == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isChatFailure && type != "subagent_task" }
+  var isProcess: Bool { !isOrchestration && operation == nil && proposal == nil && type != "text" && type != "proposed_plan" && !isAttachment && !isNotice && type != "subagent_task" }
   var hidesFromTranscript: Bool {
     if let operation { return operation.cards.isEmpty && operation.notices.isEmpty }
     if type == "proposed_plan" {
@@ -375,6 +387,8 @@ struct ChatRow: Equatable {
   var references: [ChatTextReference] = []
   var errorMeta: ChatItem.NoticeMeta? = nil
   var errorRetry: ChatErrorRetryState? = nil
+  /// The failure asks for agent sign-in and this session's agent can start it from here.
+  var errorSignIn = false
   var planIsLatest = true
   var planPermissionItemID = ""
   var planDecision: ChatPlanDecisionState? = nil
@@ -403,6 +417,8 @@ struct ChatRow: Equatable {
   /// The signed-in user may decide this proposal (a Role proposal binds its requester).
   var proposalDecidable = false
   var proposalState: ChatProposalState? = nil
+  /// A `schedule_edit` proposal's live schedule (runtime `inspectProposal`); nil until read.
+  var proposalInspection: RuntimeContract.InspectProposalResult? = nil
   var operationCurrent = false
   var operationPeers: [ChatOperationPeer] = []
   var operationCLIType: String? = nil
@@ -770,9 +786,8 @@ struct ChatTranscript {
       var entry = source
       if entry.role == "system", !entry.items.isEmpty,
          entry.items.allSatisfy({ $0.type == "system_notice" && $0.name == "board_context_maintenance" && $0.meta?.trigger == "idle" && $0.meta?.status == "interrupted" }) { return [] }
-      // Older cached projections omitted notice names. Neither these placeholders nor
-      // agent warnings belong in the conversation's execution process.
-      entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && ($0.name == nil || $0.name == "agent_warning")) }
+      // Older cached projections omitted notice names; these placeholders are not part of the conversation.
+      entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && $0.name == nil) }
       let processOnly = !processEntryID.isEmpty
       if processOnly && entry.id != processEntryID { return [] }
       if entry.role == "user" {
@@ -857,19 +872,19 @@ struct ChatTranscript {
             if toolGroup { return item.type != "tool_call" || item.kind == "switch_mode" || item.isContextCompaction }
             return item.type == "text" || item.type == "proposed_plan" || item.isAttachment
           } ?? entry.items.endIndex
-          visible = Array(start..<end).filter { entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && !entry.items[$0].hidesFromTranscript }
+          visible = Array(start..<end).filter { entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isNotice && !entry.items[$0].hidesFromTranscript }
         } else {
-          visible = entry.items.indices.filter { !answer.contains($0) && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].hidesFromTranscript }
+          visible = entry.items.indices.filter { !answer.contains($0) && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isNotice && !entry.items[$0].hidesFromTranscript }
         }
       } else if folds && !expandedWork.contains(entry.id) {
         let process = entry.items.indices.filter {
-          !answer.contains($0) && !entry.items[$0].isOrchestration && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isChatFailure && entry.items[$0].type != "subagent_task" && entry.items[$0].operation == nil && entry.items[$0].proposal == nil
+          !answer.contains($0) && !entry.items[$0].isOrchestration && entry.items[$0].type != "proposed_plan" && !entry.items[$0].isAttachment && !entry.items[$0].isNotice && entry.items[$0].type != "subagent_task" && entry.items[$0].operation == nil && entry.items[$0].proposal == nil
         }
         if let first = process.first { groups[first] = process }
         visible = process.first.map { [$0] } ?? []
         visible.append(contentsOf: answer)
         visible.append(contentsOf: entry.items.indices.filter {
-          entry.items[$0].type == "proposed_plan" || entry.items[$0].isAttachment || entry.items[$0].isChatFailure
+          entry.items[$0].type == "proposed_plan" || entry.items[$0].isAttachment || entry.items[$0].isNotice
             || entry.items[$0].isOrchestration || entry.items[$0].operation != nil || entry.items[$0].proposal != nil
             || (entry.items[$0].type == "subagent_task" && !entry.items[$0].hidesFromTranscript)
         })
@@ -1041,6 +1056,39 @@ struct ChatTranscript {
           row.kind = "orchestration"
           row.symbol = "person.crop.rectangle"
           row.text = Self.roleProposal(item.meta)
+        case "system_notice" where item.name == "agent_warning":
+          // Web `AgentWarningNoticeView`: nothing without a message; the label names the Lody path.
+          guard let warning = ChatNotice.warning(item.meta) else { continue }
+          row.kind = "agent_warning"
+          row.text = warning.label
+          row.detail = warning.summary
+          row.errorMeta = item.meta
+          row.actionable = false
+        case "system_notice" where item.name == "session_fork_origin":
+          guard let title = item.meta?.sourceTitle, let source = item.meta?.sourceSessionId, !source.isEmpty else { continue }
+          row.kind = "notice"
+          row.symbol = "arrow.triangle.branch"
+          row.text = String.localizedStringWithFormat(String(localized: "native.chat.notice.forkOrigin", bundle: .lody), title)
+          row.actionable = true
+        case "system_notice" where item.name == "resume_from_external_chat_history":
+          row.kind = "notice"
+          row.symbol = "clock.arrow.circlepath"
+          row.text = String(localized: "native.chat.notice.resumeHistory", bundle: .lody)
+          if item.meta?.truncated == true { row.text += " " + String(localized: "native.chat.notice.resumeHistoryTruncated", bundle: .lody) }
+          row.actionable = false
+        case "system_notice":
+          // Web renders no other notice (unknown names, `task_proposal`, malformed proposals).
+          continue
+        case "worktree_script":
+          // Web `WorktreeScriptNoticeView`: the phase, live or failed; its commands open on tap.
+          row.symbol = item.phase == "cleanup" ? "paintbrush" : "wrench.and.screwdriver"
+          let phase = String(localized: String.LocalizationValue(item.phase == "cleanup" ? "native.chat.worktree.cleanup" : "native.chat.worktree.setup"), bundle: .lody)
+          row.text = item.status == "failed"
+            ? String.localizedStringWithFormat(String(localized: "native.chat.transcript.failed", bundle: .lody), phase)
+            : phase
+          row.running = item.status == "in_progress"
+          row.attention = item.status == "failed"
+          row.actionable = !(item.steps ?? []).isEmpty
         case "file", "local_attachment":
           guard let file = item.file else { continue }
           if item.type == "file", let image = file.shownAsImage.image {
@@ -1078,7 +1126,7 @@ struct ChatTranscript {
         case "tool_call":
           row.symbol = ["read": "doc.text.magnifyingglass", "search": "magnifyingglass", "edit": "square.and.pencil",
             "write": "square.and.pencil", "execute": "terminal", "bash": "terminal", "fetch": "globe"][item.kind ?? ""] ?? "wrench.and.screwdriver"
-          row.text = item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody)
+          row.text = ChatTranscript.compactParentHops(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.path ?? String(localized: "native.chat.transcript.tool", bundle: .lody))
           if item.permission?.pending == true { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.pending", bundle: .lody), String(describing: row.text)) }
           else if item.status == "failed" { row.text = String.localizedStringWithFormat(String(localized: "native.chat.transcript.failed", bundle: .lody), String(describing: row.text)) }
           // Web `PermissionRequestBlock`: an answered plan approval reads as the chosen option.
@@ -1127,6 +1175,10 @@ struct ChatTranscript {
 }
 
 extension ChatTranscript {
+  static func compactParentHops(_ text: String) -> String {
+    text.replacingOccurrences(of: #"(?:\.\./){2,}"#, with: "…/", options: .regularExpression)
+  }
+
   /// Images of one turn that only tool work separates (an agent uploading several images, one
   /// image group, or repeated upload calls) become ONE fanned `imageStack` row instead of a long
   /// column of photos. The stack sits where its first image was; the process rows between its
@@ -1174,7 +1226,7 @@ extension ChatTranscript {
   /// last text item. Empty when the turn ends in work.
   static func answerRun(_ items: [ChatItem]) -> [Int] {
     func neverFolded(_ item: ChatItem) -> Bool {
-      item.type == "proposed_plan" || item.type == "plan" || item.isAttachment || item.isChatFailure
+      item.type == "proposed_plan" || item.type == "plan" || item.isAttachment || item.isNotice
         || item.type == "subagent_task" || (item.type == "tool_call" && item.kind == "switch_mode")
     }
     func prose(_ item: ChatItem) -> Bool { item.type == "text" && !(item.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -1455,9 +1507,9 @@ extension ChatPendingSend {
     if !hasReply && !acknowledged && !hasDelivery {
       let delivery = status.isEmpty ? String(localized: "send.status.awaitingConnection", bundle: .lody) : status
       let recoverable = ["unknown", "uploaded"].contains(phase ?? "") && queue != true && guide != true
-      var label = delivery
-      if recoverable { label += " · " + String(localized: "send.recover.hint", bundle: .lody) }
-      else if phase == "unknown" { label += " · " + String(localized: "send.forget.hint", bundle: .lody) }
+      let label = phase == "unknown" && !recoverable
+        ? delivery + " · " + String(localized: "send.forget.hint", bundle: .lody)
+        : delivery
       result.append(ChatRow(id: id + ":delivery", entryID: id, kind: "delivery", text: label,
         actionable: phase == "unknown" || recoverable, attention: phase == "unknown"))
     }
@@ -1479,6 +1531,33 @@ extension ChatPendingSend {
 }
 
 // Unknown reasons retain their payload in the detail page and use a localized fallback.
+/// Web `AgentWarningNoticeBody` copy for an `agent_warning`.
+enum ChatNotice {
+  private static let sources = [
+    "sessionCancelFailed": "stopRequestFailed", "sessionStopTimedOut": "stopTimedOut",
+    "sessionTerminationFailed": "stopTerminationFailed", "nativeWorkInterrupted": "nativeWorkInterrupted",
+  ]
+
+  static func warning(_ meta: ChatItem.NoticeMeta?) -> (label: String, summary: String, detail: String)? {
+    let message = (meta?.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !message.isEmpty else { return nil }
+    let key = sources[meta?.source ?? ""]
+    let label = String(localized: String.LocalizationValue("native.chat.warning." + (key ?? "title")), bundle: .lody)
+    let guidance = key.map { String(localized: String.LocalizationValue("native.chat.warning." + $0 + "Guidance"), bundle: .lody) }
+    let summary = guidance ?? message.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? message
+    return (label, summary, guidance.map { $0 + "\n\n" + message } ?? message)
+  }
+
+  /// A worktree script's commands, each followed by the tail of its output.
+  static func script(_ steps: [ChatItem.ScriptStep]) -> String {
+    steps.map { step in
+      let output = step.output.trimmingCharacters(in: .whitespacesAndNewlines)
+      let waiting = step.status == "in_progress" ? String(localized: "native.chat.worktree.waiting", bundle: .lody) : ""
+      return "$ " + step.command + "\n" + (output.isEmpty ? waiting : output)
+    }.joined(separator: "\n\n")
+  }
+}
+
 enum ChatFailure {
   static func title(_ meta: ChatItem.NoticeMeta?) -> String {
     if meta?.code == "git_executable_not_found" {
@@ -1564,12 +1643,18 @@ enum ChatOperationGrouping {
   }
 }
 
-/// web `AgentRoleProposalMeta` / `ScheduleProposalMeta` as the runtime presents them.
+/// web `AgentRoleProposalMeta` / `ScheduleProposalMeta` / `ScheduleEditProposalMeta` as the runtime presents them.
 struct ChatProposal: Decodable, Equatable {
   struct Fields: Decodable, Equatable {
     var name: String? = nil
     var description: String? = nil
     var promptPrefix: String? = nil
+  }
+  /// `schedule_edit`: only these fields change.
+  struct Patch: Decodable, Equatable {
+    var title: String? = nil
+    var prompt: String? = nil
+    var rule: RuntimeContract.ScheduleRule? = nil
   }
   let kind: String
   var action: String? = nil
@@ -1584,8 +1669,11 @@ struct ChatProposal: Decodable, Equatable {
   var rule: RuntimeContract.ScheduleRule? = nil
   var destination: String? = nil
   var scheduleId: String? = nil
+  var patch: Patch? = nil
+  var baseActivityId: String? = nil
 
   var isRole: Bool { kind == "agent_role" }
+  var isEdit: Bool { kind == "schedule_edit" }
   var decided: Bool { outcome != nil }
 
   /// The card's heading: the question while open, the receipt once decided.
@@ -1596,6 +1684,8 @@ struct ChatProposal: Decodable, Equatable {
     case ("agent_role", "saved"?, _): key = "native.chat.proposal.role.saved"
     case ("agent_role", _, "update"?): key = "native.chat.proposal.role.update"
     case ("agent_role", _, _): key = "native.chat.proposal.role.create"
+    case ("schedule_edit", "applied"?, _): key = "native.chat.proposal.edit.applied"
+    case ("schedule_edit", _, _): key = "native.chat.proposal.edit.title"
     case (_, "created"?, _): key = "native.chat.proposal.schedule.created"
     default: key = "native.chat.proposal.schedule.title"
     }

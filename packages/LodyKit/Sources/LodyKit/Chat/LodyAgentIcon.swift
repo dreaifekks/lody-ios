@@ -46,6 +46,68 @@ enum LodyAgentIcon {
     "chatglm": "glm",
   ]
 
+  private static let displayNames: [String: String] = [
+    "agoragentic-acp": "Agoragentic",
+    "amp-acp": "Amp",
+    "antigravity": "Antigravity",
+    "antigravity-acp": "Antigravity",
+    "auggie": "Auggie",
+    "autohand": "Autohand",
+    "claude": "Claude Code",
+    "claude-code": "Claude Code",
+    "claude-p": "Claude Code",
+    "cline": "Cline",
+    "codebuddy-code": "CodeBuddy",
+    "codex": "Codex",
+    "cortex-code": "Cortex Code",
+    "cursor": "Cursor",
+    "deepagents": "DeepAgents",
+    "deepseek": "DeepSeek",
+    "devin": "Devin",
+    "factory-droid": "Factory Droid",
+    "fast-agent": "Fast Agent",
+    "gemini": "Gemini",
+    "github-copilot-cli": "GitHub Copilot",
+    "glm": "GLM",
+    "glm-acp-agent": "GLM",
+    "goose": "Goose",
+    "grok": "Grok",
+    "grok-build": "Grok",
+    "junie": "Junie",
+    "kilo": "Kilo",
+    "kimi": "Kimi Code",
+    "kimi-code": "Kimi Code",
+    "mimo": "MiMo",
+    "minimax": "MiniMax",
+    "minimax-code": "MiniMax",
+    "mistral-vibe": "Mistral Vibe",
+    "openai": "OpenAI",
+    "opencode": "OpenCode",
+    "opencode-v2": "OpenCode",
+    "pi": "Pi",
+    "pi-acp": "Pi",
+    "poolside": "Poolside",
+    "qoder": "Qoder",
+    "qwen-code": "Qwen Code",
+    "stakpak": "Stakpak",
+  ]
+
+  /// Display label for a session's agent configuration; falls back to "Lody" when unspecified.
+  static func displayName(cliType: String?, agentType: String?) -> String {
+    let raw = (agentType ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let key = raw.lowercased()
+    if let mapped = displayNames[key] { return mapped }
+    if !raw.isEmpty {
+      let words = raw.split(whereSeparator: { $0 == "-" || $0 == "_" }).map { part -> String in
+        guard let first = part.first else { return "" }
+        return String(first).uppercased() + part.dropFirst()
+      }
+      let joined = words.joined(separator: " ")
+      if !joined.isEmpty { return joined }
+    }
+    return "Lody"
+  }
+
   /// Web `AgentIcon`: the provider of an agent config / session by its cliType and agentType.
   static func mark(cliType: String?, agentType: String?) -> Mark {
     if cliType == "custom" { return .terminal }

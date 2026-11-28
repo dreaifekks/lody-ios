@@ -193,6 +193,15 @@ public final class ListItemNode: ElementNode {
   }
 
   override public func insertNewAfter(selection: RangeSelection?) throws -> Node? {
+    if getChildrenSize() == 0 {
+      if getIndent() > 0 {
+        try setIndent(getIndent() - 1)
+        return self
+      }
+      let paragraph = createParagraphNode()
+      return try replace(replaceWith: paragraph)
+    }
+
     let newElement = ListItemNode()
     _ = try self.insertAfter(nodeToInsert: newElement)
 
@@ -200,39 +209,20 @@ public final class ListItemNode: ElementNode {
   }
 
   override public func collapseAtStart(selection: RangeSelection) throws -> Bool {
+    if getIndent() > 0 {
+      try setIndent(getIndent() - 1)
+      return true
+    }
+
     let paragraph = createParagraphNode()
-    let children = self.getChildren()
-    try paragraph.append(children)
-    let listNode = try self.getParentOrThrow()
-    let listNodeParent = try listNode.getParentOrThrow()
-    let isIndented = listNodeParent is ListItemNode
+    _ = try replace(replaceWith: paragraph, includeChildren: true)
 
-    if listNode.getChildrenSize() == 1 {
-      if isIndented {
-        // if the list node is nested, we just want to remove it,
-        // effectively unindenting it.
-        try listNode.remove()
-        try listNodeParent.select(anchorOffset: nil, focusOffset: nil)
-      } else {
-        try listNode.insertBefore(nodeToInsert: paragraph)
-        try listNode.remove()
-        // If we have selection on the list item, we'll need to move it
-        // to the paragraph
-        let anchor = selection.anchor
-        let focus = selection.focus
-        let key = paragraph.getKey()
-
-        if anchor.type == .element && anchor.key == self.getKey() {
-          anchor.updatePoint(key: key, offset: anchor.offset, type: .element)
-        }
-
-        if focus.type == .element && focus.key == self.getKey() {
-          focus.updatePoint(key: key, offset: focus.offset, type: .element)
-        }
-      }
-    } else {
-      try listNode.insertBefore(nodeToInsert: paragraph)
-      try self.remove()
+    let key = paragraph.getKey()
+    if selection.anchor.type == .element && selection.anchor.key == getKey() {
+      selection.anchor.updatePoint(key: key, offset: selection.anchor.offset, type: .element)
+    }
+    if selection.focus.type == .element && selection.focus.key == getKey() {
+      selection.focus.updatePoint(key: key, offset: selection.focus.offset, type: .element)
     }
 
     return true
@@ -314,11 +304,24 @@ public final class ListItemNode: ElementNode {
       }
     }
 
-    // the magic number is to horizontally position the bullet further left than the indent size, but not so far as to hit the previous indent stop.
+    let paddingHead: CGFloat
+    if let cg = attributes[.paddingHead] as? CGFloat {
+      paddingHead = cg
+    } else if let dbl = attributes[.paddingHead] as? Double {
+      paddingHead = CGFloat(dbl)
+    } else if let num = attributes[.paddingHead] as? NSNumber {
+      paddingHead = CGFloat(num.doubleValue)
+    } else {
+      paddingHead = CGFloat(theme.indentSize)
+    }
+
+    let markerGutter: CGFloat = (listNode?.getListType() == .bullet) ? 14.0 : 20.0
+    let bulletIndent = CGFloat(getIndent()) * CGFloat(theme.indentSize) + max(0, paddingHead - markerGutter)
+
     attributes[.listItem] = ListItemAttribute(
       itemNodeKey: node.key,
       listItemCharacter: character,
-      characterIndentationPixels: (CGFloat(getIndent() + 1) - 0.8) * theme.indentSize
+      characterIndentationPixels: bulletIndent
     )
 
     return attributes

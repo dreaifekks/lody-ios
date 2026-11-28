@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 /// Authenticated sharing operations stay native. The WebView receives only
-/// per-share capabilities, never the Better Auth credential or Convex JWT.
+/// narrow capabilities, never the Better Auth credential or Convex JWT.
 @MainActor enum SessionSharing {
   private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -18,7 +18,33 @@ import Security
     guard let value = value as? String, value.range(of: #"^[a-zA-Z0-9_-]{1,128}$"#, options: .regularExpression) != nil else { throw failure() }
     return value
   }
-  static func run(_ operation: String, args: [String: Any], workspace: String, userId: String, session: URLSession? = nil) async throws -> Any {
+  /// A Roost history read grant may only name a published `lody-rh` stream of
+  /// this workspace on the workspace Streams gateway, matching Android's StreamAccess.
+  static func validCloudHistoryGrant(_ grant: [String: Any], workspace: String, gatewayOrigin: String) -> Bool {
+    if let state = grant["state"] as? String, state == "pending" || state == "owner-required" {
+      return grant.count == 1
+    }
+    guard grant["state"] as? String == "published",
+      let token = grant["token"] as? String, !token.isEmpty, token.utf8.count <= 8192,
+      let expiresIn = grant["expiresIn"] as? Int, expiresIn > 0,
+      let binding = grant["binding"] as? [String: Any],
+      let generation = binding["generation"] as? String,
+      let owner = binding["ownerPublicKey"] as? String,
+      owner.range(of: #"^[A-Za-z0-9_-]{43}$"#, options: .regularExpression) != nil,
+      let address = grant["streamUrl"] as? String,
+      let url = URLComponents(string: address),
+      url.scheme == "https", let host = url.host, "https://\(host.lowercased())" == gatewayOrigin,
+      url.port == nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil
+    else { return false }
+    let parts = url.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false)
+    guard parts.count == 4, parts[0].isEmpty, parts[1] == "ds", parts[2] == "lody-rh",
+      let stream = String(parts[3]).removingPercentEncoding else { return false }
+    let pattern = "^" + NSRegularExpression.escapedPattern(for: workspace)
+      + #":rh:[a-zA-Z0-9_-]{1,256}:[a-zA-Z0-9_-]{1,256}:[a-zA-Z0-9_-]{43}:(?:root|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})$"#
+    return stream.range(of: pattern, options: .regularExpression) != nil
+      && stream.hasSuffix(":\(owner):\(generation)")
+  }
+  static func run(_ operation: String, args: [String: Any], workspace: String, userId: String, gatewayOrigin: String? = nil, session: URLSession? = nil) async throws -> Any {
     guard !LanInvite.isWorkspace(workspace) else { throw failure() }
     let transport = session ?? Self.transport
     guard !workspace.isEmpty, !userId.isEmpty, let credential = try AuthKeychain.read(), !credential.isEmpty else { throw failure() }
@@ -67,6 +93,46 @@ import Security
       let bytes = try Data(contentsOf: file)
       return ["base64": bytes.base64EncodedString(), "mediaType": response.mimeType ?? "application/octet-stream"]
     }
+    if operation == "historyToken" {
+      guard let intent = args["intent"] as? [String: Any],
+        intent["workspaceId"] as? String == workspace else { throw failure() }
+      let edit = intent["requestId"] != nil
+      guard edit == (intent["intentDigest"] != nil) else { throw failure() }
+      if let cloud = intent["cloudHistory"] {
+        guard (cloud as? Bool) == true, !edit else { throw failure() }
+        var target = intent
+        target.removeValue(forKey: "cloudHistory")
+        guard let gatewayOrigin else { throw failure() }
+        let grant: [String: Any]
+        do {
+          grant = try await request("\(BackendEnvironment.site)/api/session-history/roost-read-grant",
+            credential: credential, body: target, transport: transport, timeout: 10)
+        } catch let error as HTTPStatus {
+          try check()
+          // A backend without the cloud read-grant route keeps the owner read path.
+          if error.code == 404 { return ["state": "owner-required"] }
+          return ["status": error.code]
+        } catch let error as URLError {
+          try check()
+          switch error.code {
+          case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed, .notConnectedToInternet:
+            return ["failure": "transport"]
+          default:
+            throw error
+          }
+        }
+        try check()
+        guard validCloudHistoryGrant(grant, workspace: workspace, gatewayOrigin: gatewayOrigin) else { throw failure() }
+        return grant
+      }
+      let endpoint = edit ? "request-edit-token" : "request-token"
+      let response = try await request("\(BackendEnvironment.site)/api/session-history/\(endpoint)",
+        credential: credential, body: intent, transport: transport, timeout: 10)
+      try check()
+      guard response.count == 1, let token = response["requestToken"] as? String,
+        !token.isEmpty, token.utf8.count <= 8192 else { throw failure() }
+      return token
+    }
     if operation == "previewToken" {
       guard let intent = args["intent"] as? [String: Any], intent["workspaceId"] as? String == workspace else { throw failure() }
       let response: [String: Any]
@@ -98,6 +164,7 @@ import Security
   }
   private static func request(_ address: String, credential: String, body: [String: Any]? = nil, transport: URLSession, timeout: TimeInterval = 30) async throws -> [String: Any] {
     var request = URLRequest(url: URL(string: address)!, timeoutInterval: timeout)
+    request.httpShouldHandleCookies = false
     request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
     if let body {
       request.httpMethod = "POST"

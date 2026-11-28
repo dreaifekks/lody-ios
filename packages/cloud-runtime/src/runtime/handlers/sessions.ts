@@ -6,6 +6,7 @@ import type { Value } from '@loro-dev/flock-wasm/base64';
 import { tabOwner } from '../directory-tab';
 import { projectRows } from '../../protocol/catalog.ts';
 import { buildConversationMarkdown } from '../../protocol/conversation-markdown.ts';
+import { buildConversationShareMessages } from '../../protocol/conversation-share-image.ts';
 import { resolveSessionWorkspacePath } from '../../protocol/session-workspace-path.ts';
 import {
   archiveSession,
@@ -20,6 +21,7 @@ import {
   creationOptions,
   createSession,
   forgetCreation,
+  machineMeta,
 } from '../create-session';
 import { planCommand } from '../status-view.ts';
 import { readWorkspaceProjects } from '../project-groups';
@@ -41,7 +43,6 @@ import {
   confirmTurn,
 } from '../session';
 import {
-  scopedShortcutCloud,
   scopedWorkspaceGrant,
   type MetaReplica,
   type RuntimeContext,
@@ -153,31 +154,56 @@ export function registerSessions(
       ),
     );
   });
+  function readTabContext(replica: MetaReplica, parentSessionId: string) {
+    const owner = tabOwner(parentSessionId, (id) => {
+      const room = `session-${id}`;
+      if (replica.flock.get(['e', room]) === false) return undefined;
+      const base = replica.flock.get(['m', room]);
+      const rows = replica.flock.scan({ prefix: ['m', room] });
+      if (!base && !rows.length) return undefined;
+      const value = {
+        ...(base && typeof base === 'object' && !Array.isArray(base)
+          ? base
+          : {}),
+      } as Record<string, Value | undefined>;
+      for (const row of rows)
+        if (row.key.length === 3 && typeof row.key[2] === 'string')
+          value[row.key[2]] = row.value;
+      return value;
+    });
+    const session = projectRows(replica.flock.scan(), 'meta').sessions.find(
+      (s) => s.id === owner.id,
+    );
+    if (!session) return undefined;
+    return {
+      owner,
+      session,
+      tabContext: {
+        parentSessionId: owner.id,
+        projectId: session.projectId,
+        project: owner.value.project as Value | undefined,
+        repoFullName: owner.value.repoFullName as Value | undefined,
+        baseBranch: owner.value.baseBranch as Value | undefined,
+        projectRun: owner.value.projectRun as Value | undefined,
+      },
+    };
+  }
   channel.handle('createTab', async (args) => {
-    const replica = metaWrite(args, true);
-    if (creating || !state.userId) return { state: 'rejected' };
+    if (
+      creating ||
+      !state.userId ||
+      args.workspaceId !== state.workspace ||
+      !state.metaReplica ||
+      state.unhealthy.has('meta')
+    )
+      return { state: 'rejected' };
+    const replica = state.metaReplica;
     creating = true;
     try {
-      const owner = tabOwner(args.parentSessionId, (id) => {
-        const room = `session-${id}`;
-        if (replica.flock.get(['e', room]) === false) return undefined;
-        const base = replica.flock.get(['m', room]);
-        const rows = replica.flock.scan({ prefix: ['m', room] });
-        if (!base && !rows.length) return undefined;
-        const value = {
-          ...(base && typeof base === 'object' && !Array.isArray(base)
-            ? base
-            : {}),
-        } as Record<string, Value | undefined>;
-        for (const row of rows)
-          if (row.key.length === 3 && typeof row.key[2] === 'string')
-            value[row.key[2]] = row.value;
-        return value;
-      });
-      const session = projectRows(replica.flock.scan(), 'meta').sessions.find(
-        (s) => s.id === owner.id,
-      );
-      if (!session) return { state: 'rejected' };
+      const resolved = readTabContext(replica, args.parentSessionId);
+      if (!resolved || state.unhealthy.has(resolved.session.machineId))
+        return { state: 'rejected' };
+      const { owner, session, tabContext } = resolved;
       const options = creationOptions(
         undefined,
         replica.flock,
@@ -202,13 +228,7 @@ export function registerSessions(
           preferRoost: args.preferRoost,
           title: args.title,
           billingEntitlement: args.billingEntitlement,
-          tabContext: {
-            parentSessionId: owner.id,
-            projectId: session.projectId,
-            project: owner.value.project as Value | undefined,
-            repoFullName: owner.value.repoFullName as Value | undefined,
-            baseBranch: owner.value.baseBranch as Value | undefined,
-          },
+          tabContext,
         },
         options,
         replica,
@@ -239,25 +259,39 @@ export function registerSessions(
     const replica = state.metaReplica;
     creating = true;
     try {
+      const resolvedTab = args.parentSessionId
+        ? readTabContext(replica, args.parentSessionId)
+        : undefined;
+      if (
+        args.parentSessionId &&
+        (!resolvedTab || resolvedTab.session.machineId !== args.machineId)
+      )
+        return { state: 'rejected' };
+      const tabContext = resolvedTab?.tabContext;
       // A multi-repository project: read the group fresh; its run picks the machine's agents.
       const workspace = state.workspace;
-      const group = args.projectGroupId
-        ? (
-            await readWorkspaceProjects(
-              workspace,
-              getGrant,
-              AbortSignal.timeout(30000),
-            )
-          ).find((project) => project.id === args.projectGroupId)
-        : undefined;
-      if (args.projectGroupId && (!group || state.workspace !== workspace))
+      const group =
+        !tabContext && args.projectGroupId
+          ? (
+              await readWorkspaceProjects(
+                workspace,
+                getGrant,
+                AbortSignal.timeout(30000),
+              )
+            ).find((project) => project.id === args.projectGroupId)
+          : undefined;
+      if (
+        !tabContext &&
+        args.projectGroupId &&
+        (!group || state.workspace !== workspace)
+      )
         return { state: 'rejected' };
       const options = creationOptions(
-        group ? undefined : args.projectId,
+        tabContext || group ? undefined : args.projectId,
         replica.flock,
         state.machineReplicas,
       );
-      const sources = ctx.statusSources?.();
+      const sources = tabContext ? undefined : ctx.statusSources?.();
       const [order] = sources
         ? planCommand(sources, {
             type: 'newSessionOrder',
@@ -265,7 +299,16 @@ export function registerSessions(
           })
         : [];
       const result = await createSession(
-        group ? { ...args, projectId: undefined } : args,
+        tabContext
+          ? {
+              ...args,
+              projectId: undefined,
+              branch: undefined,
+              tabContext,
+            }
+          : group
+            ? { ...args, projectId: undefined }
+            : args,
         options,
         replica,
         getGrant,
@@ -482,8 +525,55 @@ export function registerSessions(
       toolResultsTruncated: stats.toolResultsTruncated,
     };
   });
+  channel.handle('conversationShareMessages', async (args) => {
+    const { flock } = metaWrite(args);
+    const meta = metaOf(flock, `session-${args.sessionId}`);
+    if (!meta) throw new Error('session_not_found');
+    const history = await readyHistory(args.sessionId);
+    const messages = buildConversationShareMessages(history);
+    if (!messages.length) return { state: 'empty' as const };
+    const cliType = text(meta.cliType) || undefined;
+    const agentType = text(meta.agentType) || undefined;
+    const machineId = text(meta.machineId);
+    const agentConfigId = text(meta.agentConfigId);
+    let agentName: string | undefined;
+    if (cliType === 'custom' && agentConfigId) {
+      const fromMachine = machineId
+        ? state.machineReplicas
+            .get(machineId)
+            ?.get(['agentConfig', agentConfigId])
+        : undefined;
+      const fromMeta = metaOf(flock, `agent-${agentConfigId}`);
+      const candidate =
+        fromMachine &&
+        typeof fromMachine === 'object' &&
+        !Array.isArray(fromMachine)
+          ? (fromMachine as Record<string, unknown>)
+          : fromMeta;
+      agentName = text(candidate?.name) || undefined;
+    }
+    return {
+      state: 'ready' as const,
+      ...(text(meta.title) ? { title: text(meta.title) } : {}),
+      ...(text(meta.createdAt) ? { createdAt: text(meta.createdAt) } : {}),
+      ...(cliType ? { cliType } : {}),
+      ...(agentType ? { agentType } : {}),
+      ...(agentName ? { agentName } : {}),
+      messages,
+    };
+  });
   channel.handle('respondPermission', respondPermission);
-  channel.handle('controlTurn', controlTurn);
+  channel.handle('controlTurn', (args) => {
+    const flock = state.metaReplica?.flock;
+    const capabilities = flock
+      ? machineMeta(flock, args.machineId).protocolCapabilities
+      : undefined;
+    const supportsOperationInbox =
+      !!capabilities &&
+      typeof capabilities === 'object' &&
+      Number((capabilities as Record<string, unknown>).operationInbox) >= 1;
+    return controlTurn(args, { supportsOperationInbox });
+  });
   channel.handle('checkTurnQuota', checkTurnQuota);
   channel.handle('editSession', (args) => {
     if (!state.metaReplica || state.unhealthy.size)
@@ -536,7 +626,6 @@ export function registerSessions(
       sourceWorkspace,
       state.userId,
       scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
-      scopedShortcutCloud(ctx, sourceWorkspace, state.userId),
       AbortSignal.timeout(30000),
     );
     const scoped = () => {
@@ -580,9 +669,13 @@ export function registerSessions(
         scoped();
         const ids = await sessionMcpSelection(
           sourceWorkspace,
-          getGrant,
+          scopedWorkspaceGrant(ctx, sourceWorkspace, state.userId),
           persisted,
-          AbortSignal.timeout(30000),
+          AbortSignal.timeout(state.workspaceReplica ? 8000 : 30000),
+          () =>
+            state.workspace === sourceWorkspace
+              ? state.workspaceReplica
+              : undefined,
         );
         scoped();
         return ids;

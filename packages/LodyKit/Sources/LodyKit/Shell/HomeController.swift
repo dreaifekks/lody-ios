@@ -158,7 +158,10 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
   }
   func reset() {
     for navigation in Set(tabNavigations.values).union([primary]) { navigation.popToRootViewController(animated: false) }
-    if compactTabsInstalled { compactNavigation.popToRootViewController(animated: false) }
+    if compactTabsInstalled {
+      compactNavigation.popToRootViewController(animated: false)
+      compactNavigation.view.layoutIfNeeded()
+    }
     let keepsSchedules = schedulesInDetail
     clearSession()
     if keepsSchedules { showSchedulesInDetail() }
@@ -195,6 +198,22 @@ final class HomeController: UIViewController, UISplitViewControllerDelegate, UIP
       if !query.isEmpty { session?.find(query: query, keyboard: false) }
       if let turnId, !turnId.isEmpty { session?.scrollToTurn(turnId) }
     }
+    markListSelection()
+    layoutColumns()
+    if !folded, !panelOpen { split.show(.secondary) }
+  }
+  /// Opens a local draft Tab (Web draftTabs): no remote write until the first message is sent.
+  func openDraftTab(_ draft: SessionItem, choice: ModelChoice? = nil) {
+    if listInPopover {
+      dismissBookList { [weak self] in self?.openDraftTab(draft, choice: choice) }
+      return
+    }
+    leaveSchedulesDetail()
+    closePanel()
+    let next = SessionController(sessionId: draft.id, choice: choice, source: source, draftTab: draft)
+    session = next
+    secondary.setViewControllers([page(next, title: "")], animated: false)
+    updateBookSidebar()
     markListSelection()
     layoutColumns()
     if !folded, !panelOpen { split.show(.secondary) }

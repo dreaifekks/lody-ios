@@ -30,7 +30,9 @@ struct PermissionProjection: Equatable {
       }
       guard next > revision else { return }
       revision = next
-      state = status == "live" ? .ready(try SessionPermission.first(in: entries)) : .waiting
+      // Roost answers follow command readiness, which survives a subscription reconnect.
+      let ready = value["controlReady"] as? Bool ?? (status == "live")
+      state = ready ? .ready(try SessionPermission.first(in: entries)) : .waiting
     } catch { state = .invalid(error.localizedDescription) }
   }
 }

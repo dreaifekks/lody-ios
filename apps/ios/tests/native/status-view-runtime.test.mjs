@@ -51,6 +51,8 @@ async function runtimeFixture({
   const created = [];
   const appends = [];
   const bootstraps = [];
+  const pollers = new Map();
+  const pollerWaiters = new Map();
   globalThis.__statusClient = class {
     constructor({ url }) {
       this.stream = decodeURIComponent(url.split('/ds/lody/')[1]);
@@ -72,8 +74,16 @@ async function runtimeFixture({
         },
       };
     }
-    readOnce() {
-      return new Promise(() => {});
+    readOnce({ offset }) {
+      return new Promise((resolve) => {
+        const entry = { offset, resolve };
+        pollers.set(this.stream, entry);
+        const waiting = pollerWaiters.get(this.stream);
+        if (waiting) {
+          pollerWaiters.delete(this.stream);
+          waiting(entry);
+        }
+      });
     }
     async create() {
       const exists = !!snapshots[this.stream] || created.includes(this.stream);
@@ -103,6 +113,7 @@ async function runtimeFixture({
   };
   const catalogs = [];
   const waiters = [];
+  const eventWaiters = [];
   const replies = new Map();
   const events = [];
   globalThis.webkit = {
@@ -111,7 +122,14 @@ async function runtimeFixture({
         postMessage(event) {
           if (event.type !== 'envelope') return;
           const message = JSON.parse(event.envelope);
-          if (message.kind === 'event') events.push(message);
+          if (message.kind === 'event') {
+            events.push(message);
+            for (const waiter of [...eventWaiters])
+              if (waiter.match(events)) {
+                eventWaiters.splice(eventWaiters.indexOf(waiter), 1);
+                waiter.resolve(message);
+              }
+          }
           replies.get(message.id)?.(message);
           if (message.kind === 'request' && message.method === 'grant')
             queueMicrotask(() =>
@@ -209,6 +227,46 @@ async function runtimeFixture({
         once: true,
       });
     });
+  const pushWorkspaceUpdate = (mutate) => {
+    const poller = pollers.get('w1:wf:workspace');
+    assert.ok(poller, 'expected active long-poll on w1:wf:workspace');
+    pollers.delete('w1:wf:workspace');
+    const version = workspace.version();
+    mutate(workspace);
+    workspace.commit();
+    const json = new TextEncoder().encode(
+      JSON.stringify(workspace.exportJson(version)),
+    );
+    const frame = new Uint8Array(4 + json.length);
+    new DataView(frame.buffer).setUint32(0, json.length);
+    frame.set(json, 4);
+    poller.resolve({
+      ok: true,
+      result: {
+        payload: { body: frame },
+        nextOffset: String(Number(poller.offset) + 1),
+        upToDate: true,
+      },
+    });
+  };
+  const waitForPoller = (stream) =>
+    pollers.has(stream)
+      ? Promise.resolve(pollers.get(stream))
+      : new Promise((resolve, reject) => {
+          pollerWaiters.set(stream, resolve);
+          signal?.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        });
+  const waitForEvent = (match) =>
+    match(events)
+      ? Promise.resolve()
+      : new Promise((resolve, reject) => {
+          eventWaiters.push({ match, resolve });
+          signal?.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        });
   return {
     call,
     catalog,
@@ -217,6 +275,9 @@ async function runtimeFixture({
     bootstraps,
     catalogs,
     events,
+    waitForPoller,
+    waitForEvent,
+    pushWorkspaceUpdate,
     dispose() {
       delete globalThis.webkit;
       delete globalThis.__statusClient;
@@ -483,12 +544,98 @@ test(
       );
       assert.ok(first.statusView.nowMs - Date.now() < 11 * 60_000);
       offset = 20 * 60_000;
-      // Foregrounding samples the clock again; the layouts stay the same.
+      // A device clock adjustment invalidates the recent calibration on resume.
+      const wallNow = Date.now.bind(Date);
+      t.mock.method(Date, 'now', () => wallNow() + 5_000);
       await runtime.call('setActive', { active: true });
       const second = await runtime.catalog(
         (c) => c.statusView && c.statusView.nowMs - Date.now() > 19 * 60_000,
       );
       assert.deepEqual(second.statusView.team, first.statusView.team);
+    } finally {
+      await runtime.call('setActive', { active: false });
+      runtime.dispose();
+    }
+  },
+);
+
+test(
+  'workspace stream emits agentRolesChanged only when agentRole rows change and keeps list synced',
+  { timeout: 30_000 },
+  async (t) => {
+    const runtime = await runtimeFixture({
+      signal: t.signal,
+      serverOffset: 0,
+    });
+    try {
+      await runtime.call('hello', { protocol: 1, gen: 1 });
+      await runtime.call('start', {
+        workspaceId: 'w1',
+        userId: 'u1',
+        active: true,
+      });
+      await runtime.catalog((c) => c.statusView?.sectionsLoaded);
+      await runtime.waitForPoller('w1:wf:workspace');
+      const roleEvents = () =>
+        runtime.events.filter((e) => e.method === 'agentRolesChanged').length;
+      const initialCount = roleEvents();
+      assert.equal(initialCount, 1);
+      // Pin-section-only updates must not emit agentRolesChanged.
+      runtime.pushWorkspaceUpdate((flock) => {
+        flock.set(['pinSection', 's2'], {
+          id: 's2',
+          name: 'Two',
+          orderKey: '90',
+        });
+      });
+      await runtime.catalog((c) =>
+        c.pinSections?.some((section) => section.id === 's2'),
+      );
+      await runtime.waitForPoller('w1:wf:workspace');
+      assert.equal(roleEvents(), initialCount);
+      // An agentRole update on the workspace stream emits agentRolesChanged and feeds live agentRoles list.
+      runtime.pushWorkspaceUpdate((flock) => {
+        flock.set(['agentRole', 'r1'], {
+          v: 1,
+          id: 'r1',
+          ownerUserId: 'u1',
+          visibility: 'private',
+          name: 'Live Role',
+          description: 'Synced live',
+          promptPrefix: 'Help.',
+          machineId: 'm1',
+          agentConfigId: 'a1',
+          runConfig: {},
+          revision: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      });
+      await runtime.waitForEvent(
+        (all) =>
+          all.filter((e) => e.method === 'agentRolesChanged').length ===
+          initialCount + 1,
+      );
+      assert.equal(roleEvents(), initialCount + 1);
+      const beforeBootstraps = runtime.bootstraps.filter(
+        (stream) => stream === 'w1:wf:workspace',
+      ).length;
+      const listed = await runtime.call('agentRoles', {
+        workspaceId: 'w1',
+        userId: 'u1',
+        action: 'list',
+      });
+      assert.equal(listed.kind, 'result');
+      assert.deepEqual(
+        listed.payload.roles.map((r) => r.name),
+        ['Live Role'],
+      );
+      assert.equal(
+        runtime.bootstraps.filter((stream) => stream === 'w1:wf:workspace')
+          .length,
+        beforeBootstraps,
+        'Synced workspaceReplica serves agentRoles list without re-bootstrapping',
+      );
     } finally {
       await runtime.call('setActive', { active: false });
       runtime.dispose();

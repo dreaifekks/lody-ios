@@ -47,6 +47,7 @@ export type CreateSessionArgs = {
     project?: Value;
     repoFullName?: Value;
     baseBranch?: Value;
+    projectRun?: Value;
   };
 };
 
@@ -559,6 +560,7 @@ export async function createSession(
           ...(tab.project ? { project: tab.project } : {}),
           ...(tab.repoFullName ? { repoFullName: tab.repoFullName } : {}),
           ...(tab.baseBranch ? { baseBranch: tab.baseBranch } : {}),
+          ...(tab.projectRun ? { projectRun: tab.projectRun } : {}),
         }
       : {}),
     ...(github

@@ -16,6 +16,7 @@ export const RestoreSessionsParams = z
     ids: z.array(z.string().min(1)),
     current: z.string().min(1).nullable(),
     reserved: z.array(z.string().min(1)),
+    historyStart: z.number().int().nonnegative().optional(),
   })
   .meta({ id: 'RestoreSessionsParams' });
 
@@ -24,7 +25,10 @@ export const SetActiveParams = z
   .meta({ id: 'SetActiveParams' });
 
 export const OpenSessionParams = z
-  .object({ sessionId: z.string().min(1) })
+  .object({
+    sessionId: z.string().min(1),
+    historyStart: z.number().int().nonnegative().optional(),
+  })
   .meta({ id: 'OpenSessionParams' });
 
 export const ReleaseReserveParams = z

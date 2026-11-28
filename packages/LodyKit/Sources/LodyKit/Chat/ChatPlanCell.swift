@@ -1,3 +1,4 @@
+import Litext
 import UIKit
 
 final class ChatPlanCell: UICollectionViewCell {
@@ -16,7 +17,10 @@ final class ChatPlanCell: UICollectionViewCell {
   private let decisionMessage = UILabel()
   var onDecision: ((String) -> Void)?
   private var markdown: ChatMarkdownView?
-  private var row: ChatRow?
+  private(set) var row: ChatRow?
+  var selectionLabels: [TextLabelView] { markdown?.selectionLabels ?? [] }
+  var codeSelectionLabels: [TextLabelView] { markdown?.codeSelectionLabels ?? [] }
+  var tableSelectionGroups: [TextSelectionGroup] { markdown?.tableSelectionGroups ?? [] }
   var expanded = false { didSet { setNeedsLayout() } }
   var onToggle: (() -> Void)?
   var onReview: (() -> Void)?

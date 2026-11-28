@@ -6,28 +6,56 @@ import UIKit
   private static let pattern = try! NSRegularExpression(pattern:
     #"(?s:`{3,}.*?(?:`{3,}|$))|`+[^`\n]*`+|https?://[^\s]+|\\[@#$]|(?<!\S)use /([^\s]+) \[Skill Path\]\(((?:\\.|[^\\)])+)\)|(?<!\S)@(?:"((?:\\.|[^"\\])*)"|([^\s@"`]+))|(?<!\S)#([1-9][0-9]*)(?=$|\s|[.,;:!?\)\]])"#)
 
-  static func decorate(_ source: NSAttributedString, references: [ChatTextReference], repository: String, traits: UITraitCollection) -> NSAttributedString {
-    guard !references.isEmpty else { return decorate(source, repository: repository, traits: traits) }
+  static func decorate(
+    _ source: NSAttributedString,
+    references: [ChatTextReference],
+    repository: String,
+    traits: UITraitCollection,
+    expandQuotes: Bool = false,
+    accentColor: UIColor = .lodyAccent,
+    chipFill: UIColor = ChatReferenceNode.chipFill,
+    quoteColor: UIColor = .secondaryLabel
+  ) -> NSAttributedString {
+    guard !references.isEmpty else {
+      return decorate(source, repository: repository, traits: traits, accentColor: accentColor, chipFill: chipFill)
+    }
     let result = NSMutableAttributedString(string: "")
     var cursor = 0
-    for reference in references.sorted(by: { $0.start < $1.start }) {
+    let sorted = references.sorted(by: { $0.start < $1.start })
+    let text = source.string as NSString
+    for (index, reference) in sorted.enumerated() {
       guard reference.start >= cursor, reference.end > reference.start, reference.end <= source.length else { continue }
-      result.append(decorate(source.attributedSubstring(from: NSRange(location: cursor, length: reference.start - cursor)), repository: repository, traits: traits))
+      let leading = source.attributedSubstring(from: NSRange(location: cursor, length: reference.start - cursor))
+      result.append(decorate(leading, repository: repository, traits: traits, accentColor: accentColor, chipFill: chipFill))
       if reference.kind == "message_quote", let quote = reference.quote {
-        result.append(quoteBlock(quote, attributes: source.attributes(at: reference.start, effectiveRange: nil)))
+        result.append(
+          quoteBlock(
+            quote,
+            attributes: source.attributes(at: reference.start, effectiveRange: nil),
+            expandQuotes: expandQuotes,
+            quoteColor: quoteColor
+          )
+        )
         cursor = reference.end
+        let nextQuote = sorted.dropFirst(index + 1).first { $0.kind == "message_quote" && $0.quote != nil }
+        if cursor + 2 <= text.length, text.substring(with: NSRange(location: cursor, length: 2)) == "\n\n",
+           nextQuote?.start != cursor + 2 {
+          result.append(source.attributedSubstring(from: NSRange(location: cursor, length: 1)))
+          cursor += 2
+        }
         continue
       }
       let label = NSMutableAttributedString(attributedString: source.attributedSubstring(from: NSRange(location: reference.start, length: reference.end - reference.start)))
-      label.addAttributes([.foregroundColor: UIColor.lodyAccent, .lodyReferenceChip: ChatReferenceNode.chipFill],
+      label.addAttributes([.foregroundColor: accentColor, .lodyReferenceChip: chipFill],
         range: NSRange(location: 0, length: label.length))
-      if ["file", "dir", "skill"].contains(reference.kind), let path = reference.target.flatMap(fileTarget) {
+      if !expandQuotes, ["file", "dir", "skill"].contains(reference.kind), let path = reference.target.flatMap(fileTarget) {
         label.addAttribute(.link, value: path, range: NSRange(location: 0, length: label.length))
       }
       result.append(label)
       cursor = reference.end
     }
-    result.append(decorate(source.attributedSubstring(from: NSRange(location: cursor, length: source.length - cursor)), repository: repository, traits: traits))
+    let trailing = source.attributedSubstring(from: NSRange(location: cursor, length: source.length - cursor))
+    result.append(decorate(trailing, repository: repository, traits: traits, accentColor: accentColor, chipFill: chipFill))
     return result
   }
 
@@ -36,24 +64,43 @@ import UIKit
   private static let quoteCharacters = 240
 
   /// A sent quote (a valid `message_quote` span) drawn as web's quote block: secondary ink
-  /// indented past a leading bar, clipped to a few lines, opening the full snapshot on tap.
-  static func quoteBlock(_ quote: String, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
-    let lines = quote.components(separatedBy: "\n")
-    var shown = lines.prefix(quoteLines).joined(separator: "\n")
-    if shown.count > quoteCharacters { shown = String(shown.prefix(quoteCharacters)) }
-    if shown.count < quote.count { shown = shown.trimmingCharacters(in: .whitespaces) + "…" }
+  /// indented past a leading bar, clipped to a few lines unless `expandQuotes` is true.
+  static func quoteBlock(
+    _ quote: String,
+    attributes: [NSAttributedString.Key: Any],
+    expandQuotes: Bool = false,
+    quoteColor: UIColor = .secondaryLabel
+  ) -> NSAttributedString {
+    let shown: String
+    if expandQuotes {
+      shown = quote
+    } else {
+      let lines = quote.components(separatedBy: "\n")
+      var truncated = lines.prefix(quoteLines).joined(separator: "\n")
+      if truncated.count > quoteCharacters { truncated = String(truncated.prefix(quoteCharacters)) }
+      if truncated.count < quote.count { truncated = truncated.trimmingCharacters(in: .whitespaces) + "…" }
+      shown = truncated
+    }
     var style = attributes
     let paragraph = ((attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
     paragraph.firstLineHeadIndent = 12
     paragraph.headIndent = 12
     style[.paragraphStyle] = paragraph
-    style[.foregroundColor] = UIColor.secondaryLabel
+    style[.foregroundColor] = quoteColor
     style[.lodyQuoteBar] = true
-    style[.link] = ChatQuoteLink.prefix + quote
+    if !expandQuotes {
+      style[.link] = ChatQuoteLink.prefix + quote
+    }
     return NSAttributedString(string: shown, attributes: style)
   }
 
-  static func decorate(_ source: NSAttributedString, repository: String, traits: UITraitCollection) -> NSAttributedString {
+  static func decorate(
+    _ source: NSAttributedString,
+    repository: String,
+    traits: UITraitCollection,
+    accentColor: UIColor = .lodyAccent,
+    chipFill: UIColor = ChatReferenceNode.chipFill
+  ) -> NSAttributedString {
     let result = NSMutableAttributedString(attributedString: source)
     let text = source.string as NSString
     let repo = repository.range(of: #"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil
@@ -89,14 +136,14 @@ import UIKit
         symbol = "link"
       } else { continue }
       var attributes = source.attributes(at: match.range.location, effectiveRange: nil)
-      attributes[.foregroundColor] = UIColor.lodyAccent
-      attributes[.lodyReferenceChip] = ChatReferenceNode.chipFill
+      attributes[.foregroundColor] = accentColor
+      attributes[.lodyReferenceChip] = chipFill
       attributes[.link] = target
       let font = attributes[.font] as? UIFont ?? .preferredFont(forTextStyle: .body)
       let size = font.pointSize * 0.85
       let attachment = NSTextAttachment()
       attachment.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size))?
-        .withTintColor(UIColor.lodyAccent.resolvedColor(with: traits), renderingMode: .alwaysOriginal)
+        .withTintColor(accentColor.resolvedColor(with: traits), renderingMode: .alwaysOriginal)
       attachment.bounds = CGRect(x: 0, y: font.descender / 2, width: size, height: size)
       let node = NSMutableAttributedString(attachment: attachment)
       node.append(NSAttributedString(string: "\u{00a0}" + label))

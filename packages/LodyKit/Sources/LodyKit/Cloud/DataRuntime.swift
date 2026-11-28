@@ -9,6 +9,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   static weak var current: DataRuntime?
   var webView: WKWebView?
   var sessionId: String?
+  private var sessionHistoryStart: Int?
   private(set) var sessionSnapshot: (generation: Int, json: String)?
   private var retainedSessions: [String] = []
   private var sessionWatchers = SessionSubscriptions()
@@ -23,6 +24,9 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   var attachmentTasks: [String: Task<Void, Never>] = [:]
   var attachmentAttempts: [String: UUID] = [:]
   var grantTask: URLSessionDataTask?
+  var prefetchedGrant: (value: RuntimeContract.Grant, requestedAt: ContinuousClock.Instant)?
+  /// The Streams gateway origin of the latest workspace grant; Roost history grants must name it.
+  var streamsOrigin: (workspace: String, origin: String)?
   var grantWaiters: [String] = []
   var channel: RuntimeChannel?
   var contractReady = false
@@ -47,6 +51,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   var backgrounded = false
   private var phase = "stopped"
   private var reason = ""
+  private var restartLimitReached: Bool { phase == "failed" && reason == "restart_limit" }
   private var lastStartReason = ""
   private var acknowledgements = 0
   var backgroundProbe = false
@@ -65,7 +70,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       MainActor.assumeIsolated {
         guard let self, self.workspace != nil else { return }
         self.backgrounded = true
-        self.health.suspend()
+        self.health.suspend(at: self.now)
         self.publishPresenceUnknown()
         self.dispatch(RuntimeContract.Calls.SetActive.self, .init(active: false))
       }
@@ -73,28 +78,34 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     observers.add(NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
       MainActor.assumeIsolated { ContentStore.shared.clearAll() }
     })
-    observers.add(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self, self.workspace != nil, self.backgrounded else { return }
-        self.backgrounded = false
-        self.recordRuntime("runtime_resume", phase: self.phase, reason: self.reason, extra: [
-          "hasView": String(self.webView != nil), "contractReady": String(self.contractReady),
-          "handshakeDeferred": String(self.handshakeDeferred),
-        ])
-        self.lanHandler?.reconnect()
-        self.followHub(force: true)
-        self.health.resume(at: self.now)
-        if self.webView == nil { self.build(reason: "foreground") }
-        else {
-          self.dispatch(RuntimeContract.Calls.SetActive.self, .init(active: true))
-          if self.handshakeDeferred, let view = self.webView {
-            self.handshakeDeferred = false
-            self.handshake(view)
-          }
-          self.tick()
-        }
+    for notification in [UIApplication.willEnterForegroundNotification, UIApplication.didBecomeActiveNotification] {
+      observers.add(NotificationCenter.default.addObserver(forName: notification, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.resumeFromBackground() }
+      })
+    }
+  }
+  private func resumeFromBackground() {
+    guard workspace != nil, backgrounded else { return }
+    backgrounded = false
+    recordRuntime("runtime_resume", phase: phase, reason: reason, extra: [
+      "hasView": String(webView != nil), "contractReady": String(contractReady),
+      "handshakeDeferred": String(handshakeDeferred),
+    ])
+    lanHandler?.reconnect()
+    followHub(force: true)
+    health.resume(at: now)
+    if webView == nil {
+      guard !restartLimitReached else { return }
+      if health.startupExpired(at: now) { publish("failed", reason: "restart_limit"); return }
+      build(reason: "foreground")
+    } else {
+      dispatch(RuntimeContract.Calls.SetActive.self, .init(active: true))
+      if handshakeDeferred, let view = webView {
+        handshakeDeferred = false
+        handshake(view)
       }
-    })
+      tick()
+    }
   }
   func start(workspace: String, slug: String = "", name: String = "", owner: String, userId: String) {
     guard LanInvite.isWorkspace(workspace) || WorkspaceModePins.shared.mode(workspace) == .plaintext else { stop(); return }
@@ -104,7 +115,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     followedAt = -.infinity
     disposeView()
     if self.workspace != workspace || self.userId != userId {
-      sessionId = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
+      sessionId = nil; sessionHistoryStart = nil; sessionSnapshot = nil; retainedSessions = []; reservedSessions = []; billing.clear()
     }
     self.userId = userId; cacheErrorShown = false
     self.workspace = workspace; self.owner = owner; health = RuntimeHealth()
@@ -119,7 +130,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   func stop(owner: String? = nil) {
     if let owner, self.owner != owner { return }
     cancelFollow(); lastCatalog = nil; lan = nil
-    workspace = nil; sessionId = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
+    workspace = nil; sessionId = nil; sessionHistoryStart = nil; retainedSessions = []; reservedSessions = []; userId = ""; billing.clear(); disposeView(); publish("stopped", reason: "unsubscribe")
   }
   func status() -> [String: any Sendable] {
     var value: [String: any Sendable] = ["owner": owner, "generation": generation, "state": phase, "reason": reason, "acknowledgements": acknowledgements, "lastStartReason": lastStartReason]
@@ -175,6 +186,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
     do {
       try RuntimeDocument.load(in: view, bundle: Bundle.main, origin: pageOrigin)
+      if lan == nil { fetchGrant() }
     } catch { disposeView(); publish("failed", reason: "missing_resource") }
   }
   private func disposeView() {
@@ -184,7 +196,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     attachmentTasks.removeAll()
     attachmentAttempts.removeAll()
     timer?.invalidate(); timer = nil
-    grantTask?.cancel(); grantTask = nil; grantWaiters.removeAll()
+    grantTask?.cancel(); grantTask = nil; grantWaiters.removeAll(); prefetchedGrant = nil
     channel?.close("runtime_replaced"); channel = nil; contractReady = false; handshakeDeferred = false
     githubTasks.values.forEach { $0.cancel() }; githubTasks.removeAll()
     shareTasks.values.forEach { $0.cancel() }; shareTasks.removeAll()
@@ -238,7 +250,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     default: break
     }
   }
-  private func receiveSession(_ id: String, session: String?, synced: Bool?, work: (id: String, state: String)?, active: Bool) {
+  private func receiveSession(_ id: String, session: String?, synced: Bool?, work: (id: String, state: String)?, active: Bool, historyStart: Int? = nil) {
     if let work { SessionBackgroundTasks.shared.update(id: work.id, state: work.state, owner: owner) }
     guard let session else { return }
     let fits = session.utf8.count <= 12 * 1024 * 1024
@@ -257,6 +269,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       }
     }
     guard active, id == sessionId else { return }
+    if fits, synced == true || historyStart != nil { sessionHistoryStart = historyStart }
     if !fits, overflowReported != id {
       overflowReported = id
       DiagnosticsStore.shared.record("session-sync", "session_overflow", fields: [
@@ -266,10 +279,19 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     let payload = fits ? session : #"{"v":1,"overflow":true}"#
     emitStatus(["sessionId": id, "session": payload])
   }
+  func reconnectSession(_ id: String) {
+    if restartLimitReached {
+      guard !backgrounded, sessionId == id else { return }
+      health = RuntimeHealth()
+      build(reason: "manual_retry")
+      return
+    }
+    openSession(id)
+  }
   func openSession(_ id: String) {
-    if sessionId != id { sessionSnapshot = nil; overflowReported = nil }
+    if sessionId != id { sessionHistoryStart = nil; sessionSnapshot = nil; overflowReported = nil }
     sessionId = id
-    dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id))
+    dispatch(RuntimeContract.Calls.OpenSession.self, .init(sessionId: id, historyStart: sessionHistoryStart))
   }
   func loadOlderSession(_ id: String) {
     dispatch(RuntimeContract.Calls.LoadOlderSession.self, .init(sessionId: id))
@@ -277,6 +299,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
   func watchSession(_ id: String) {
     sessionWatchers.retain(id)
     openSession(id)
+    if restartLimitReached { emitStatus() }
   }
   // A replaced chat page can deinit after its successor opened the same session.
   func unwatchSession(_ id: String) {
@@ -286,6 +309,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     ContentStore.shared.clear(session: id)
     guard sessionId == id else { return }
     sessionId = nil
+    sessionHistoryStart = nil
     sessionSnapshot = nil
     dispatch(RuntimeContract.Calls.CloseSession.self, .init())
     emitStatus()
@@ -338,9 +362,11 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       let started = (try? await channel.call(RuntimeContract.Calls.Start.self, params)) != nil
       guard let self, let view, self.webView === view, self.channel === channel else { return }
       guard started else { self.recover("start_failed"); return }
+      self.health.startupCompleted()
       let current = self.sessionId.flatMap { $0.isEmpty ? nil : $0 }
       self.dispatch(RuntimeContract.Calls.RestoreSessions.self, .init(
-        ids: self.retainedSessions, current: current, reserved: self.reservedSessions))
+        ids: self.retainedSessions, current: current, reserved: self.reservedSessions,
+        historyStart: self.sessionHistoryStart))
     }
   }
   private func handle(_ event: RuntimeContract.Event) {
@@ -351,6 +377,8 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       publish("live", reason: "catalog", catalog: value.catalog)
     case .agentProvidersChanged(let value):
       NotificationCenter.default.post(name: .lodyProvidersChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
+    case .agentRolesChanged:
+      NotificationCenter.default.post(name: .lodyRolesChanged, object: nil, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .agentProviderAuthChanged(let value):
       NotificationCenter.default.post(name: .lodyProviderAuthChanged, object: value, userInfo: ["scopeKey": "\(userId):\(workspace ?? "")"])
     case .agentProviderOperationProgress(let value):
@@ -377,7 +405,7 @@ final class DataRuntime: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
       reservedSessions = value.reserved
     case .session(let value):
       receiveSession(value.sessionId, session: value.session, synced: value.synced,
-        work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: true)
+        work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: true, historyStart: value.historyStart)
     case .sessionCache(let value):
       receiveSession(value.sessionId, session: value.session, synced: value.synced,
         work: value.backgroundWork.map { ($0.id, $0.state.rawValue) }, active: false)

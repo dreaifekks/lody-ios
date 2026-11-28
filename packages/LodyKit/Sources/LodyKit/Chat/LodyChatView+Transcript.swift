@@ -1,3 +1,4 @@
+import LodyCore
 import UIKit
 
 extension LodyChatView {
@@ -13,6 +14,23 @@ extension LodyChatView {
     let key = entryId + "/" + itemId
     guard proposalStates[key] != state else { return }
     proposalStates[key] = state
+    applyRows()
+  }
+
+  /// An edit proposal's live schedule; `nil` forgets it so the next projection reads it again.
+  func setProposalInspection(entryId: String, itemId: String, _ value: RuntimeContract.InspectProposalResult?) {
+    let key = entryId + "/" + itemId
+    if value == nil { proposalInspectRequested.remove(key) }
+    guard proposalInspections[key] != value else { return }
+    proposalInspections[key] = value
+    applyRows()
+  }
+
+  /// Native has no schedule subscription: edit proposals read their schedule again whenever the
+  /// conversation returns to the screen. The last answer stays shown until the new one lands.
+  func rereadProposals() {
+    guard !proposalInspectRequested.isEmpty else { return }
+    proposalInspectRequested.removeAll()
     applyRows()
   }
 
@@ -32,11 +50,12 @@ extension LodyChatView {
 
   func setProcessEntryID(_ id: String) {
     guard processEntryID != id else { return }
+    if !id.isEmpty, shareSelection != nil { endShareSelection() }
     processEntryID = id
     deferredRows.removeAll()
     backgroundColor = processBackground
-    composer.isHidden = !id.isEmpty || composerRetired
-    edgeFade.isHidden = !id.isEmpty
+    composer.isHidden = !id.isEmpty || composerRetired || shareSelection != nil
+    edgeFade.isHidden = !id.isEmpty || shareSelection != nil
     setNeedsLayout()
     applyRows()
   }
@@ -217,7 +236,7 @@ extension LodyChatView {
       overlay.slot = .idle
       return
     }
-    overlay.slot = ChatOverlay.slot(connection: composer.connection)
+    overlay.slot = ChatOverlay.slot(connection: composer.connection, historySyncLabel: composer.historySyncLabel)
   }
 
   func applyRows() {
@@ -294,12 +313,18 @@ extension LodyChatView {
     }
     for index in projected.indices where projected[index].kind == "proposal" {
       let row = projected[index]
-      projected[index].proposalState = proposalStates[row.entryID + "/" + row.itemID]
+      let key = row.entryID + "/" + row.itemID
+      projected[index].proposalState = proposalStates[key]
+      projected[index].proposalInspection = proposalInspections[key]
+      if row.proposal?.isEdit == true, row.proposal?.decided == false, proposalInspectRequested.insert(key).inserted {
+        onProposalInspect(row)
+      }
       let requester = row.proposal?.requesterUserId
       projected[index].proposalDecidable = !proposalUserID.isEmpty
         && (row.proposal?.isRole != true || requester == proposalUserID)
     }
     for index in projected.indices where projected[index].kind == "chat_failed" {
+      projected[index].errorSignIn = agentSignInAvailable && projected[index].errorMeta?.reason == "acp_auth_required"
       if let state = errorRetryState, state.entryId == projected[index].entryID, state.itemId == projected[index].itemID {
         projected[index].errorRetry = state
       }
@@ -344,7 +369,7 @@ extension LodyChatView {
       for row in rows.values where row.kind == "delivery" && !activeIDs.contains(row.id) {
         guard let index = projected.lastIndex(where: { $0.entryID == row.entryID }) else { continue }
         if deliveryExits[row.id] == nil {
-          let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
+          let width = transcriptItemWidth
           let height = rowHeight(row, width: width)
           deliveryExits[row.id] = height
           rowHeights[row.id] = (height, 0, width)
@@ -447,7 +472,7 @@ extension LodyChatView {
     store.nonAnimatedRows = Set(projected.filter { catchingUpEntries.contains($0.entryID) }.map(\.id))
     prepareRowHeights(projected, previous: previous, animate: !folding && delivered == nil)
     for (id, height) in deliveryExits where rowHeights[id] == nil {
-      rowHeights[id] = (height, 0, ChatReadingColumn.itemWidth(in: collection.bounds.width))
+      rowHeights[id] = (height, 0, transcriptItemWidth)
     }
     rows = Dictionary(projected.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     let settlingDelivery = hasPositionedContent && window != nil && !insertingHistory && catchingUpEntries.isEmpty
@@ -511,6 +536,8 @@ extension LodyChatView {
         self.updateDeferredStreams()
         self.refreshFind()
         self.updateHistoryHeader()
+        self.syncShareSelectionToolbar()
+        self.refreshVisibleShareSelections()
         self.prefetchHistoryIfNeeded()
         self.deliverPendingContent()
         if let tail = projected.last(where: { $0.streaming }) {
@@ -603,7 +630,7 @@ extension LodyChatView {
     historyStartID = entryIDs[start]
     hasEarlierHistory = start > 0 || remoteHasEarlierHistory
     hasPagedHistory = hasEarlierHistory || (retainedStart != nil && hasPagedHistory)
-    let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
+    let width = transcriptItemWidth
     if width != historyWidth {
       preparedHistory.removeAll()
       historyWidth = width
@@ -663,7 +690,7 @@ extension LodyChatView {
     let work = DispatchWorkItem { [weak self] in
       guard let self, self.window != nil else { return }
       self.historyPreparation = nil
-      guard ChatReadingColumn.itemWidth(in: self.collection.bounds.width) == width else {
+      guard self.transcriptItemWidth == width else {
         self.applyRows()
         return
       }

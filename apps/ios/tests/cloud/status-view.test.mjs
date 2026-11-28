@@ -245,6 +245,33 @@ test('server clock uses the round-trip midpoint and keeps it through bad samples
   assert.equal(clock.synced(), true);
 });
 
+test('a brief foreground return reuses the calibration unless the wall clock moved', async () => {
+  let wall = 1_000_000;
+  let mono = 0;
+  let reads = 0;
+  const clock = createServerClock({
+    wallNow: () => wall,
+    monotonicNow: () => mono,
+    fetchServerTime: async () => {
+      reads++;
+      return 2_000_000 + mono;
+    },
+  });
+  const resume = () => clock.sync(undefined, 60_000);
+  assert.equal(await resume(), true);
+  mono += 15_000;
+  wall += 15_000;
+  assert.equal(await resume(), false);
+  assert.equal(reads, 1);
+  assert.equal(clock.now(), 2_015_000);
+  wall += 60_000;
+  assert.equal(await resume(), true);
+  assert.equal(clock.now(), 2_015_000);
+  mono += 60_000;
+  wall += 60_000;
+  assert.equal(await resume(), true);
+});
+
 const NOW = Date.UTC(2026, 10, 21, 12);
 const session = (id, fields = {}) => ({
   id,

@@ -317,6 +317,10 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
     setNeedsLayout()
   }
   override func accessibilityActivate() -> Bool {
+    if !contentView.isUserInteractionEnabled {
+      onActivate?()
+      return true
+    }
     if expandable { onToggle?(); return true }
     guard row?.actionable == true else { return super.accessibilityActivate() }
     onActivate?()
@@ -433,6 +437,7 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       ? nil
       : UIImage(systemName: row.symbol, withConfiguration: Self.iconSymbolConfiguration(for: row))
     let tint = chromeColor(for: row)
+    icon.contentMode = row.kind == "tool_call" ? .scaleAspectFit : .center
     let animated = markReady
       && sameRow
       && window != nil
@@ -545,8 +550,13 @@ final class ChatCell: UICollectionViewCell, UIContextMenuInteractionDelegate {
       let size: CGFloat = 8
       return CGRect(x: railCenter - size / 2, y: textY + (textHeight - size) / 2, width: size, height: size)
     }
+    if row.kind == "tool_call" {
+      let size = toolGlyphSize
+      return CGRect(x: 2 + (20 - size) / 2, y: textY + (min(textHeight, 20) - size) / 2, width: size, height: size)
+    }
     return CGRect(x: 2, y: textY, width: 20, height: min(textHeight, 20))
   }
+  static let toolGlyphSize: CGFloat = 15
   static func textWidth(_ row: ChatRow, width: CGFloat) -> CGFloat {
     if row.kind == "user" { return max(1, width - 26 - avatarSlot) }
     if row.kind == "delivery" { return max(1, width - avatarSlot) }

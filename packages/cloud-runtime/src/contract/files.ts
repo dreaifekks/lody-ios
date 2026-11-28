@@ -3,16 +3,21 @@ import { z } from 'zod/v4';
 const sessionId = z.string().min(1);
 export const DiffBase = z.enum(['turn', 'current']).meta({ id: 'DiffBase' });
 
+/** `branch` includes committed changes; `uncommitted` compares HEAD against the working tree. */
+export const DiffScope = z
+  .enum(['branch', 'uncommitted'])
+  .meta({ id: 'DiffScope' });
+
 export const TurnDiffParams = z
   .object({ sessionId, entryId: z.string().min(1), path: z.string() })
   .meta({ id: 'TurnDiffParams' });
 
 export const FileDiffParams = z
-  .object({ sessionId, path: z.string() })
+  .object({ sessionId, path: z.string(), scope: DiffScope.optional() })
   .meta({ id: 'FileDiffParams' });
 
 export const WorkspaceChangesParams = z
-  .object({ sessionId })
+  .object({ sessionId, scope: DiffScope.optional() })
   .meta({ id: 'WorkspaceChangesParams' });
 
 export const ReadFileParams = z

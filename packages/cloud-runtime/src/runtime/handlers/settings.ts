@@ -15,11 +15,7 @@ import {
 } from '../provider-detail';
 import { createProviderRpc } from '../provider-rpc';
 import { projectRows } from '../../protocol/catalog';
-import {
-  scopedShortcutCloud,
-  scopedWorkspaceGrant,
-  type RuntimeContext,
-} from './context.ts';
+import { scopedWorkspaceGrant, type RuntimeContext } from './context.ts';
 
 export function registerSettings(ctx: RuntimeContext) {
   const { channel, state, getGrant } = ctx;
@@ -30,12 +26,11 @@ export function registerSettings(ctx: RuntimeContext) {
       args as ShortcutRequest,
       args.userId,
       scopedWorkspaceGrant(ctx, args.workspaceId, args.userId),
-      scopedShortcutCloud(ctx, args.workspaceId, args.userId),
       AbortSignal.timeout(120000),
     );
     if (args.action === 'list')
       return { action: 'list', entries: value as PromptShortcutIndexEntry[] };
-    if (args.action === 'read')
+    if (args.action === 'read' || args.action === 'select')
       return { action: 'read', shortcut: value as PromptShortcut };
     return { action: 'save', entry: value as PromptShortcutIndexEntry };
   });
@@ -76,7 +71,7 @@ export function registerSettings(ctx: RuntimeContext) {
         args.userId !== state.userId ||
         !replica ||
         state.metaReplica !== replica ||
-        state.unhealthy.size
+        state.unhealthy.has('meta')
       )
         throw new Error('workspace_changed');
     };
@@ -238,14 +233,30 @@ export function registerSettings(ctx: RuntimeContext) {
   });
   channel.handle('agentRoles', async (args) => {
     const { flock, check, scopedGrant } = replicaScope(args);
+    const machines = new Map(
+      [...state.machineReplicas].filter(([id]) => !state.unhealthy.has(id)),
+    );
     return roleSettings(
       args,
       args.userId,
       flock,
-      state.machineReplicas,
+      machines,
       scopedGrant,
       AbortSignal.timeout(35000),
       check,
+      {
+        workspaceReplica: () => state.workspaceReplica,
+        onStreamDiscovered: () => ctx.refreshWorkspace(),
+        onWritten: (written, created) => {
+          const live = state.workspaceReplica;
+          if (created || live?.missing) {
+            ctx.refreshWorkspace();
+            return;
+          }
+          if (live && live.synced && !live.missing)
+            live.flock.importFile(written.exportFile());
+        },
+      },
     );
   });
 }

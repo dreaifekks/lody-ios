@@ -85,6 +85,15 @@ for index in range(2 if embedded else 3):
     subprocess.run(launch, check=True, timeout=30)
     ui.element('ui-verify-ready', timeout=90)
     home(f'cold-home-{index}')
+# iOS 18 aborted when a link replaced the open conversation: Home's queued pop and the
+# detail navigation's queued swap both ran inside the keyboard-guide layout pass.
+open_url('ui-home/sessions/ui-design')
+session('首页交互设计')
+open_url('ui-home/sessions/ui-chat')
+session('纯对话草稿')
+ui.capture('relinked-open-session')
+ui.axe('tap', '--id', 'BackButton', '--post-delay', '1')
+stack(['index'])
 # Exercise the production row push, then cancel an edge pop before completing
 # it. The recording also covers toolbar retirement during the push itself.
 # Separate HID down/up events can become a long press on a busy CI Simulator.

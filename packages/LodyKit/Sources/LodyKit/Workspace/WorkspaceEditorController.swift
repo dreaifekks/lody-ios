@@ -31,6 +31,8 @@ final class WorkspaceEditorController: LodyFormController {
   private let service: WorkspaceEditorService
   private var busy = false
   private var saving = false
+  /// The icon uploads as soon as it is picked, so it alone makes the form confirmable.
+  private var iconChanged = false
   private var imageTask: Task<Void, Never>?
   private lazy var name = LodyFormField(id: "workspace-name", label: text("name"), text: original, limit: 120)
   private let avatar = UIImageView()
@@ -144,7 +146,7 @@ final class WorkspaceEditorController: LodyFormController {
   private func render() {
     let trimmed = name.trimmed
     letter.text = String((trimmed.isEmpty ? original : name.text ?? "").prefix(1))
-    saveItem.isEnabled = !busy && !trimmed.isEmpty && trimmed != original
+    saveItem.isEnabled = !busy && !trimmed.isEmpty && (trimmed != original || iconChanged)
     cancelItem.isEnabled = !busy
     name.isEnabled = !busy
     iconButton.isEnabled = !busy
@@ -153,13 +155,14 @@ final class WorkspaceEditorController: LodyFormController {
 
   private func save() {
     let trimmed = name.trimmed
-    guard !saving, !trimmed.isEmpty, trimmed != original else { return }
+    let renamed = trimmed != original
+    guard !saving, !trimmed.isEmpty, renamed || iconChanged else { return }
     saving = true
     busy = true
     render()
     Task {
       do {
-        try await service.rename(workspaceId, trimmed)
+        if renamed { try await service.rename(workspaceId, trimmed) }
         LodyShell.shared.finish(from: self, value: nil)
         closeForm()
       } catch {
@@ -180,6 +183,7 @@ final class WorkspaceEditorController: LodyFormController {
         uploading(true)
         render()
         setImage(try await service.upload(workspaceId, file))
+        iconChanged = true
       } catch {
         LodyToastOverlay.shared.show(message: error.localizedDescription, kind: .error)
       }

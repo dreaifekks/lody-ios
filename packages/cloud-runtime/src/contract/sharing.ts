@@ -1,5 +1,25 @@
 import { z } from 'zod/v4';
 
+const HistoryTokenIntent = z
+  .strictObject({
+    workspaceId: z.string().min(1).max(256),
+    machineId: z.string().min(1).max(256),
+    sessionId: z.string().min(1).max(256),
+    cloudHistory: z.boolean().optional(),
+    requestId: z.uuid().optional(),
+    intentDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  })
+  .refine(
+    (intent) =>
+      !!intent.requestId === !!intent.intentDigest &&
+      intent.cloudHistory !== false &&
+      !(intent.cloudHistory && intent.requestId),
+  );
+export type HistoryTokenIntent = z.input<typeof HistoryTokenIntent>;
+
 export const ShareRequestParams = z
   .discriminatedUnion('operation', [
     z.object({
@@ -77,6 +97,11 @@ export const ShareRequestParams = z
         sessionId: z.string().min(1),
         imageId: z.string().min(1),
       }),
+    }),
+    z.object({
+      workspaceId: z.string().min(1),
+      operation: z.literal('historyToken'),
+      args: z.strictObject({ intent: HistoryTokenIntent }),
     }),
     z.object({
       workspaceId: z.string().min(1),

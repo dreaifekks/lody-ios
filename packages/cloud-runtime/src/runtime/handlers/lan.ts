@@ -44,6 +44,7 @@ export function registerLan(ctx: RuntimeContext) {
       AbortSignal.timeout(6000),
       undefined,
       30000,
+      undefined,
       () => {
         sentAt = performance.now();
       },

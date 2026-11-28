@@ -34,6 +34,7 @@ private struct ChatComposerState: Decodable {
   var quotaNotice: String?
   var reconnect = false
   var connection: String?
+  var historySyncLabel: String?
   var placeholder = String(localized: "native.chat.composer.placeholder", bundle: .lody)
 }
 
@@ -218,6 +219,7 @@ final class ChatComposerInput: TextView {
 
   static func makeEditorView() -> LexicalView {
     let theme = Theme()
+    theme.indentSize = 22.0
     theme.root = [.font: UIFont.dynamic(of: 17), .foregroundColor: UIColor.label]
     theme.code = [
       .paddingHead: 8.0, .paddingTail: -8.0,
@@ -394,38 +396,75 @@ final class ChatComposerInput: TextView {
   }
 
   /// Inserts a reference chip over `range`. With a `label` the chip shows it and sends `token`.
-  func insertReference(_ token: String, label: String? = nil, replacing range: NSRange) {
-    insertSegments([ChatComposerSegment(text: label ?? token, token: label == nil ? nil : token, reference: true)], replacing: range)
+  @discardableResult
+  func insertReference(_ token: String, label: String? = nil, replacing range: NSRange) -> NodeKey? {
+    insertSegments([ChatComposerSegment(text: label ?? token, token: label == nil ? nil : token, reference: true)], replacing: range).first
   }
 
   /// Inserts text and reference chips over `range` (a prompt shortcut's body, with its references
-  /// as chips), then a space.
-  func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) {
-    selectedRange = range
-    for segment in segments where segment.reference {
-      if let token = segment.token, token != segment.text { labelledReferences[segment.text] = token }
-    }
+  /// as chips), then a space. Returns the inserted chips' node keys.
+  @discardableResult
+  func insertSegments(_ segments: [ChatComposerSegment], replacing range: NSRange) -> [NodeKey] {
+    var keys: [NodeKey] = []
     try? editor.update {
       guard let selection = try getSelection() as? RangeSelection else { return }
-      var nodes: [Node] = []
-      for segment in segments where !segment.text.isEmpty {
-        if segment.reference {
-          let node = ChatReferenceNode(text: segment.text, key: nil)
-          node.referenceToken = segment.token ?? segment.text
-          nodes.append(node)
-          continue
-        }
-        // A body's newlines become line breaks.
-        let lines = segment.text.components(separatedBy: "\n")
-        for (index, line) in lines.enumerated() {
-          if index > 0 { nodes.append(createLineBreakNode()) }
-          if !line.isEmpty { nodes.append(createTextNode(text: line)) }
-        }
-      }
-      nodes.append(createTextNode(text: " "))
+      try selection.applyNativeSelection(NativeSelection(range: range, affinity: .forward))
+      let nodes = try makeNodes(segments) + [createTextNode(text: " ")]
       _ = try selection.insertNodes(nodes: nodes, selectStart: false)
+      keys = nodes.compactMap { ($0 as? ChatReferenceNode)?.key }
     }
     delegate?.textViewDidChange?(self)
+    return keys
+  }
+
+  /// Replaces one chip (still sending `token`) with `segments`, leaving the rest of the prompt
+  /// and the caret where they are. False when the chip is gone (deleted, sent or replaced).
+  @discardableResult
+  func replaceReference(_ key: NodeKey, token: String, with segments: [ChatComposerSegment]) -> Bool {
+    var replaced = false
+    try? editor.update {
+      guard let chip: ChatReferenceNode = getNodeByKey(key: key), chip.referenceToken == token,
+            chip.getParent() != nil else { return }
+      let selection = try getSelection() as? RangeSelection
+      let caretOnChip = selection.map { $0.anchor.key == key || $0.focus.key == key } ?? false
+      let label = chip.getTextContent()
+      let nodes = try makeNodes(segments)
+      guard let first = nodes.first else { return }
+      var last = try chip.replace(replaceWith: first)
+      for node in nodes.dropFirst() { last = try last.insertAfter(nodeToInsert: node) }
+      if caretOnChip { _ = try last.selectNext(anchorOffset: 0, focusOffset: 0) }
+      // The chip's label leaves the draft's references once no chip shows it.
+      var shown = false
+      func find(_ node: Node) {
+        if let reference = node as? ChatReferenceNode, reference.getTextContent() == label { shown = true }
+        (node as? ElementNode)?.getChildren().forEach(find)
+      }
+      getRoot().map(find)
+      if !shown { labelledReferences[label] = nil }
+      replaced = true
+    }
+    if replaced { delegate?.textViewDidChange?(self) }
+    return replaced
+  }
+
+  private func makeNodes(_ segments: [ChatComposerSegment]) throws -> [Node] {
+    var nodes: [Node] = []
+    for segment in segments where !segment.text.isEmpty {
+      if segment.reference {
+        if let token = segment.token, token != segment.text { labelledReferences[segment.text] = token }
+        let node = ChatReferenceNode(text: segment.text, key: nil)
+        node.referenceToken = segment.token ?? segment.text
+        nodes.append(node)
+        continue
+      }
+      // A body's newlines become line breaks.
+      let lines = segment.text.components(separatedBy: "\n")
+      for (index, line) in lines.enumerated() {
+        if index > 0 { nodes.append(createLineBreakNode()) }
+        if !line.isEmpty { nodes.append(createTextNode(text: line)) }
+      }
+    }
+    return nodes
   }
 
   var referenceTokens: [String] {
@@ -783,9 +822,28 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   private var composerOptions = ChatComposerOptions()
   private var composerExpanded = false
   var allowsFullScreen = false { didSet { updateComposer() } }
+  /// Container whose bounds bound full-screen expansion, grabber drag, and dimming.
+  /// Nil defaults to `superview` (when the composer sits directly inside the page view).
+  weak var fullScreenContainer: UIView?
   /// Host chrome below the safe area (a page-owned header) that full screen must stay under.
   var fullScreenTopInset: CGFloat = 0 { didSet { if fullScreen { updateComposer() } } }
+  /// Vertical room reserved above the composer while auto-growing inline (such as the new-chat
+  /// context rows). When set, typing grows the input until the reserved content reaches the header
+  /// instead of stopping at `maximumCollapsedHeight`; dragging the grabber still covers that room.
+  var inlineTopReservedHeight: CGFloat? {
+    didSet {
+      guard oldValue != inlineTopReservedHeight else { return }
+      updateComposer()
+    }
+  }
+  /// Inline height (before full-screen drag/expansion) so hosts can anchor content above the
+  /// composer at its inline top while full-screen expansion glides over it.
+  private(set) var inlineTotalHeight: CGFloat = 64
+  var isFullScreenActive: Bool { fullScreen || dragProgress != nil }
+  var onBeginEditing: (() -> Void)?
   private var fullScreen = false
+  private var fittedRoom: CGFloat?
+  private var fittingRoom = false
   private let grabber = ChatComposerGrabber(frame: .zero)
   private var grabberHeight: NSLayoutConstraint!
   private var dragProgress: CGFloat?
@@ -1579,29 +1637,64 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     return nil
   }
-  private func fullScreenInputHeight(chrome: CGFloat) -> CGFloat {
-    guard let superview, let host = owningController()?.view else { return ChatMessageContent.maximumCollapsedHeight }
-    // Touches outside the superview never reach the composer, so the controller's safe area alone is not enough.
-    let top = max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: superview).y, superview.safeAreaInsets.top) + fullScreenTopInset + 8
-    return max(ChatMessageContent.maximumCollapsedHeight, frame.maxY - top - chrome)
+  private var roomContainer: UIView? { fullScreenContainer ?? superview }
+
+  /// Direct subview of `container` holding the composer (`self` in `LodyChatView`, `host` in `CreateSessionController`).
+  private func containerAnchor(in container: UIView) -> UIView? {
+    var current: UIView? = self
+    while let view = current {
+      if view.superview === container { return view }
+      current = view.superview
+    }
+    return nil
+  }
+
+  /// The highest edge the composer may reach, in `container`: under the safe area and the page's header.
+  private func pageTop(in container: UIView) -> CGFloat? {
+    guard let host = owningController()?.view else { return nil }
+    // Touches outside `container` never reach the composer, so the controller's safe area alone is not enough.
+    return max(host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top), to: container).y, container.safeAreaInsets.top) + fullScreenTopInset + 8
+  }
+  private var layoutRoot: UIView { owningController()?.view ?? superview ?? self }
+  private func fullScreenInputHeight(chrome: CGFloat, minimum: CGFloat) -> CGFloat {
+    guard let room = pageRoom else { return max(ChatMessageContent.maximumCollapsedHeight, minimum) }
+    return max(minimum, room - chrome)
+  }
+  /// Room above the keyboard in hosts that let the composer grow up to their header.
+  private var pageRoom: CGFloat? {
+    guard allowsFullScreen, let container = roomContainer, let anchor = containerAnchor(in: container),
+          let top = pageTop(in: container), anchor.frame.maxY > 0
+    else { return nil }
+    return anchor.frame.maxY - top
+  }
+  /// The keyboard or the header moved: fit the docked panel and the input to the new room.
+  func fitPageRoom() {
+    guard let room = pageRoom, abs(room - (fittedRoom ?? 0)) > 0.5 else { return }
+    // Called from the host's layout pass, which already carries any keyboard animation.
+    fittingRoom = true
+    updateComposer()
+    fittingRoom = false
+  }
+  private func attachFullScreenDim(in container: UIView, behind anchor: UIView) {
+    fullScreenDim.frame = container.bounds
+    if fullScreenDim.superview !== container {
+      fullScreenDim.alpha = 0
+      container.addSubview(fullScreenDim)
+    }
+    container.bringSubviewToFront(anchor)
   }
   @objc private func toggleFullScreen() {
     setFullScreen(!fullScreen)
   }
   private func setFullScreen(_ value: Bool, animated: Bool = true) {
-    guard fullScreen != value, let superview else { return }
-    superview.layoutIfNeeded()
+    guard fullScreen != value, let container = roomContainer, let anchor = containerAnchor(in: container) else { return }
+    layoutRoot.layoutIfNeeded()
     fullScreen = value
-    if value {
-      fullScreenDim.frame = superview.bounds
-      fullScreenDim.alpha = 0
-      superview.addSubview(fullScreenDim)
-      superview.bringSubviewToFront(self)
-    }
+    if value { attachFullScreenDim(in: container, behind: anchor) }
     updateComposer()
     let changes = {
       self.fullScreenDim.alpha = value ? 1 : 0
-      superview.layoutIfNeeded()
+      self.layoutRoot.layoutIfNeeded()
       self.input.scrollRangeToVisible(self.input.selectedRange)
     }
     let finish = { (_: Bool) in
@@ -1621,16 +1714,15 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     return progress > 0.5 ? .fullScreen : .sheet
   }
   private func dragGrabber(_ pan: UIPanGestureRecognizer) {
-    guard let superview, allowsFullScreen, input.isFirstResponder else { return }
-    let translation = pan.translation(in: superview).y
+    guard let container = roomContainer, let anchor = containerAnchor(in: container),
+          allowsFullScreen, input.isFirstResponder
+    else { return }
+    let translation = pan.translation(in: container).y
     switch pan.state {
     case .began:
       dragStart = fullScreen ? 1 : 0
-      if fullScreenDim.superview == nil {
-        fullScreenDim.frame = superview.bounds
-        fullScreenDim.alpha = 0
-        superview.addSubview(fullScreenDim)
-        superview.bringSubviewToFront(self)
+      if fullScreenDim.superview !== container {
+        attachFullScreenDim(in: container, behind: anchor)
       }
       dragProgress = dragStart
     case .changed:
@@ -1638,9 +1730,9 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       dragProgress = progress
       fullScreenDim.alpha = progress
       updateComposer()
-      superview.layoutIfNeeded()
+      layoutRoot.layoutIfNeeded()
     default:
-      let velocity = pan.velocity(in: superview).y
+      let velocity = pan.velocity(in: container).y
       let progress = dragProgress ?? dragStart
       dragProgress = nil
       let release = Self.grabberRelease(fromFullScreen: dragStart == 1, progress: progress, translation: translation, velocity: velocity)
@@ -1654,7 +1746,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       updateComposer()
       let settle = {
         self.fullScreenDim.alpha = target ? 1 : 0
-        superview.layoutIfNeeded()
+        self.layoutRoot.layoutIfNeeded()
         self.input.scrollRangeToVisible(self.input.selectedRange)
       }
       let finish = { (_: Bool) in
@@ -1669,6 +1761,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
   }
   var connection: String { state.connection ?? "" }
+  var historySyncLabel: String? { state.historySyncLabel }
 
   private(set) var suppressesComposer = false
 
@@ -1705,15 +1798,6 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     }
     input.hydrateReferences(activeMentionItems ?? [])
     mentionPanel.update(input: input, items: activeMentionItems ?? [], enabled: activeMentionItems != nil)
-    let dockChanged = mentionHeight.constant != mentionPanel.panelHeight
-    mentionHeight.constant = mentionPanel.panelHeight
-    // The prompt (and everything above it) sits on top of the docked panel.
-    (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(mentionPanel.panelHeight)
-    if dockChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
-      UIView.lodySpring(duration: 0.32, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-        (self.window ?? self.superview ?? self).layoutIfNeeded()
-      }
-    }
     // Card style (new session) has no @ button, like web: typing @ still opens mentions.
     mentionButton.isHidden = cardStyle || activeMentionItems == nil || !input.isFirstResponder
     mentionButton.isEnabled = state.editable && !state.sending && pendingDraft == nil
@@ -1835,7 +1919,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     grabber.isHidden = !showsGrabber
     grabberHeight.constant = showsGrabber ? ChatComposerGrabber.height : 0
     grabber.accessibilityLabel = String(localized: String.LocalizationValue(fullScreen ? "native.chat.composer.collapse" : "native.chat.composer.expand"), bundle: .lody)
-    let fullProgress = dragProgress ?? (fullScreen ? 1 : 0)
+    var fullProgress = dragProgress ?? (fullScreen ? 1 : 0)
     accessoryHeight.constant = expanded ? 48 : 0
     attachLeading.constant = expanded ? 8 : 2
     sheetContentBottom.constant = expanded && !cardStyle ? -ChatComposerLiquidGlassSurfaceLayout.sheetBleed : 0
@@ -1864,8 +1948,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     hintLeading.constant = leadingInset + input.textContainer.lineFragmentPadding
     hintTop.constant = topInset
     let height = input.sizeThatFits(CGSize(width: max(1, input.bounds.width), height: .greatestFiniteMagnitude)).height
-    let overflows = height > ChatMessageContent.maximumCollapsedHeight
-    let chrome = mentionHeight.constant + queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
+    let others = queueHeight.constant + queueGap.constant + actionBarHeight.constant + noticeHeight.constant + attachmentTop.constant + attachmentHeight.constant + quotaNoticeHeight.constant + accessoryHeight.constant + grabberHeight.constant + (expanded ? 8 : 16)
     // Attached media takes the third line's room so larger previews grow upward
     // without adding an empty writing line. Typed text can still grow naturally.
     var minimumHeight: CGFloat = 132
@@ -1874,27 +1957,52 @@ final class ChatComposerView: UIView, UITextViewDelegate {
       if input.isFirstResponder { lines = showsAttachmentRow ? 2 : 3 }
       minimumHeight = topInset + verticalInset + lines * input.font!.lineHeight
     }
-    let inlineHeight = expanded ? min(ChatMessageContent.maximumCollapsedHeight, max(minimumHeight, height)) : 48
+    // Below the page header: the docked panel gives up rows first (its lists scroll), then the
+    // input stops growing and scrolls, down to one line.
+    var dock = mentionPanel.panelHeight
+    fittedRoom = pageRoom
+    var inlineCap = ChatMessageContent.maximumCollapsedHeight
+    if let reserved = inlineTopReservedHeight, let room = fittedRoom {
+      inlineCap = max(minimumHeight, room - reserved - others - dock)
+    }
+    var inlineHeight = expanded ? min(inlineCap, max(minimumHeight, height)) : 48
+    if let room = fittedRoom, expanded {
+      if dock > 0 { dock = min(dock, max(ChatMentionPanel.minimumDockHeight, room - others - inlineHeight)) }
+      inlineHeight = min(inlineHeight, max(topInset + verticalInset + input.font!.lineHeight, room - others - dock))
+    }
+    let dockChanged = mentionHeight.constant != dock
+    mentionHeight.constant = dock
+    // The prompt (and everything above it) sits on top of the docked panel.
+    (surfaceLayout as? ChatComposerLiquidGlassSurfaceLayout)?.setBottomInset(dock)
+    let chrome = others + dock
+    if dock > 0 { fullProgress = 0 }
     // A conversation's card opens with focus (the expansion's own animation carries it).
     // A conversation's card can also stay open across a focus change when a draft keeps it open.
     let cardFocusChanged = cardStyle && !expansionChanged && cardFocused != input.isFirstResponder
     cardFocused = input.isFirstResponder
+    let fullHeight = fullScreenInputHeight(chrome: chrome, minimum: inlineHeight)
+    dragDistance = max(1, fullHeight - inlineHeight)
     if fullProgress > 0 {
-      let fullHeight = fullScreenInputHeight(chrome: chrome)
-      dragDistance = max(1, fullHeight - inlineHeight)
       inputHeight.constant = inlineHeight + (fullHeight - inlineHeight) * fullProgress
     } else {
-      dragDistance = max(1, fullScreenInputHeight(chrome: chrome) - inlineHeight)
       inputHeight.constant = inlineHeight
     }
-    input.isScrollEnabled = expanded && (fullProgress > 0 || overflows)
+    let wasScrollEnabled = input.isScrollEnabled
+    input.isScrollEnabled = expanded && (fullProgress > 0 || height > inputHeight.constant + 0.5)
+    if !wasScrollEnabled && input.isScrollEnabled && input.isFirstResponder {
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.input.isFirstResponder, self.input.isScrollEnabled else { return }
+        self.input.scrollRangeToVisible(self.input.selectedRange)
+      }
+    }
     if !expanded { input.contentOffset = .zero }
     updateComposerOptions()
+    inlineTotalHeight = chrome + inlineHeight
     onHeightChange?(chrome + inputHeight.constant)
     setNeedsLayout()
     // The card is always "expanded", so its focus change grows the input here: ride along with
     // the keyboard on the same spring rather than jumping.
-    if cardFocusChanged && window != nil && !UIAccessibility.isReduceMotionEnabled {
+    if (cardFocusChanged || dockChanged) && !fittingRoom && window != nil && !UIAccessibility.isReduceMotionEnabled {
       UIView.lodySpring(duration: 0.35, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
         (self.window ?? self.superview ?? self).layoutIfNeeded()
       }
@@ -2001,14 +2109,18 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     // Web's run-config chip: assistant mark, model · effort, and a fast bolt, in one line.
     let font = LodyTextStyle.subhead.uiFont
     let dot = NSAttributedString(string: "  ·  ", attributes: [.foregroundColor: UIColor.tertiaryLabel])
-    var triggerTitle = composerOptions.modelTitle
-    if hasRunConfig && composerOptions.models.isEmpty {
-      triggerTitle = composerOptions.agentName.flatMap { $0.isEmpty ? nil : $0 } ?? triggerTitle
+    let modelId = composerOptions.displayModelId ?? composerOptions.modelId
+    let modelTitle: String
+    if !modelId.isEmpty && modelId.lowercased() != "default" {
+      modelTitle = composerOptions.models.first { $0.id == modelId }?.title ?? modelId
+    } else {
+      modelTitle = composerOptions.agentName.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "model.title", bundle: .lody)
     }
-    let title = NSMutableAttributedString(string: triggerTitle, attributes: [.foregroundColor: UIColor.label])
-    if !composerOptions.efforts.isEmpty || !composerOptions.effort.isEmpty {
+    let title = NSMutableAttributedString(string: modelTitle, attributes: [.foregroundColor: UIColor.label])
+    let effort = composerOptions.displayEffort ?? composerOptions.effort
+    if !effort.isEmpty && effort.lowercased() != "default" {
       title.append(dot)
-      title.append(NSAttributedString(string: composerOptions.effortTitle, attributes: [.foregroundColor: UIColor.label]))
+      title.append(NSAttributedString(string: composerOptions.effortTitle(for: effort), attributes: [.foregroundColor: UIColor.label]))
     }
     var summary = title.string
     if cardStyle, let mode = composerOptions.permissions?.first(where: { $0.id == composerOptions.permissionId }) {
@@ -2175,6 +2287,8 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   private func selectModel(_ id: String) {
     guard composerOptions.modelId != id else { return }
+    composerOptions.displayModelId = nil
+    composerOptions.displayEffort = nil
     composerOptions.modelId = id
     composerOptions.effort = ""
     composerOptions.efforts = []
@@ -2183,6 +2297,7 @@ final class ChatComposerView: UIView, UITextViewDelegate {
   }
   private func selectEffort(_ id: String) {
     guard composerOptions.effort != id else { return }
+    composerOptions.displayEffort = nil
     composerOptions.effort = id
     updateComposerOptions()
     onComposerOptionChange?(["modelId": composerOptions.modelId, "effort": id])
@@ -2216,7 +2331,10 @@ final class ChatComposerView: UIView, UITextViewDelegate {
     updateComposer()
     scheduleDraftSave()
   }
-  func textViewDidBeginEditing(_ textView: UITextView) { updateComposer() }
+  func textViewDidBeginEditing(_ textView: UITextView) {
+    onBeginEditing?()
+    updateComposer()
+  }
   func textViewDidEndEditing(_ textView: UITextView) {
     setFullScreen(false)
     updateComposer()

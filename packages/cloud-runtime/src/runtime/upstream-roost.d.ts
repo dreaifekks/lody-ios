@@ -19,6 +19,44 @@ type OwnerResponse = {
   retryReason?: 'superseded';
 };
 
+export type HistoryReadTransportFailure = {
+  source: 'transport';
+  code: 'response_timeout' | 'request_failed';
+  requestId: string;
+  machineId: string;
+};
+
+export type HistorySubscriptionOpen = {
+  action: 'open';
+  id: string;
+  checkpoint?: string;
+  includeBodiesFrom?: number;
+  withPatches?: true;
+};
+export type HistoryPublication = {
+  revision: number;
+  checkpoint: string;
+  delta?: {
+    baseCheckpoint: string;
+    includeBodiesFrom: number;
+    withPatches?: true;
+    response: OwnerResponse;
+  };
+};
+export const SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS: number;
+export function parseHistorySubscriptionResponse(value: unknown): {
+  sessionId: string;
+  subscriptionId: string;
+} & (
+  | { event: 'publication'; publication: HistoryPublication }
+  | { event: 'closed'; error?: string }
+);
+export function sessionHistoryWriteIntentDigest(
+  requestId: string,
+  operation: string,
+  payload: Record<string, unknown>,
+): Promise<string>;
+
 export function buildPendingUserHistoryEntry(args: {
   userId: string | undefined;
   inputBlocks: readonly Record<string, unknown>[];
@@ -50,20 +88,32 @@ export type RoostSessionData = ReturnType<
 >;
 
 export function createRemoteRoostSessionDataFactory(options: {
+  cloudHistory?: (
+    sessionId: string,
+  ) => ReturnType<typeof createRoostHistoryReplica>;
+  onCloudHistoryRoute?: (active: boolean) => void;
+  onHistorySync?: (state: RoostHistorySyncState) => void;
   accountId?: string | null;
   workspaceId: string;
   machineId: string;
   incremental?: boolean;
-  watch?: boolean;
+  live?: boolean;
   coherentInspection?: boolean;
   patches?: boolean;
   active?: () => boolean;
   subscribeWake?: (wake: () => void) => () => void;
+  subscribeHistory?: (
+    machineId: string,
+    sessionId: string,
+    open: HistorySubscriptionOpen,
+    publish: (publication: HistoryPublication) => void,
+    signal: AbortSignal,
+  ) => Promise<void>;
   requestHistoryRead: (
     machineId: string,
     sessionId: string,
     query: { kind: string; [key: string]: unknown },
-  ) => Promise<OwnerResponse>;
+  ) => Promise<OwnerResponse & { rpcFailure?: HistoryReadTransportFailure }>;
   requestHistoryWrite: (args: {
     machineId: string;
     sessionId: string;
@@ -128,6 +178,62 @@ export function createRemoteRoostSessionDataFactory(options: {
   dispose: () => void;
 };
 
+type RoostCloudBinding = { generation: string; ownerPublicKey: string };
+type RoostCloudGrant = {
+  state: 'published';
+  newerVersionPending: boolean;
+  binding: RoostCloudBinding;
+  streamUrl: string;
+  token: string;
+  expiresIn: number;
+};
+type RoostCloudReadResult =
+  { state: 'pending' } | { state: 'owner-required' } | RoostCloudGrant;
+
+export type RoostHistorySyncState = {
+  source: 'machine' | 'streams';
+  phase:
+    | 'idle'
+    | 'checking'
+    | 'pending'
+    | 'owner-required'
+    | 'syncing'
+    | 'ready'
+    | 'retrying'
+    | 'refused';
+  httpStatus?: number;
+  newerVersionPending?: boolean;
+};
+export function roostCloudHistoryBinding(
+  meta?: Record<string, unknown>,
+): RoostCloudBinding | undefined;
+export function parseRoostCloudHistoryReadResult(
+  value: unknown,
+): RoostCloudReadResult;
+export class RoostCloudHistoryRequestError extends Error {
+  constructor(status: number);
+  readonly status: number;
+  readonly retryable: boolean;
+}
+export class RoostCloudHistoryTransportError extends Error {
+  constructor(options?: ErrorOptions);
+}
+export function createRoostHistoryReplica(options: {
+  accountId?: string | null;
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  replicaNamespace: string;
+  getBinding: () => RoostCloudBinding | undefined;
+  observeBinding: (wake: () => void) => () => void;
+  requestGrant: (signal: AbortSignal) => Promise<RoostCloudReadResult>;
+  onSyncState?: (state: { checkpoint: string } | { reason: string }) => void;
+}): {
+  history: RoostSessionData['history'];
+  refresh: () => void;
+  dispose: () => void;
+};
+
 type CapabilityCarrier =
   | {
       protocolCapabilities?: Record<string, unknown>;
@@ -141,7 +247,7 @@ export function machineSupportsSessionHistoryProtocol(
 export function machineSupportsSessionHistoryIncremental(
   machine: CapabilityCarrier,
 ): boolean;
-export function machineSupportsSessionHistoryWatch(
+export function machineSupportsSessionHistorySubscription(
   machine: CapabilityCarrier,
 ): boolean;
 export function machineSupportsSessionHistoryPatches(

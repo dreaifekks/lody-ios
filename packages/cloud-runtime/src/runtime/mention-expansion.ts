@@ -6,12 +6,13 @@ import type {
 } from '../models/mentions';
 
 // Explicit session and Role instance IDs survive native text-only draft
-// restoration and renames. Quoted file references own their text, including
-// any dollar signs. A session/Role chip may follow non-ASCII text with no space
-// (`让@role:<id>`); a skill keeps its whitespace boundary so prose like `价格$5`
+// restoration and renames. Code spans/fences and quoted file references own
+// their text, including any dollar signs. A session/Role chip may follow
+// non-ASCII text with no space (`让@role:<id>`); a skill keeps its whitespace
+// boundary and requires a letter so prose like `价格$5`, `costs $100`, or `$1`
 // stays prose.
 const referencePattern =
-  /@"(?:\\.|[^"\\])*"|(^|\s)(\$[^\s$@]+)(?=\s|$)|(^|\s|(?<![\w$@./:-]))(@session:[^\s@]+|@role:[^\s@]+(?:@[^\s@]+){0,2})(?=\s|$)/g;
+  /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`+[^`\n]*`+|@"(?:\\.|[^"\\])*"|(^|\s)(\$(?=[^\s$@]*\p{L})[^\s$@]+)(?=\s|$)|(^|\s|(?<![\w$@./:-]))(@session:[^\s@]+|@role:[^\s@]+(?:@[^\s@]+){0,2})(?=\s|$)/gu;
 
 function categoryOf(token: string): MentionCategory {
   if (token.startsWith('$')) return 'skill';
@@ -67,10 +68,16 @@ export async function expandMentions(
     if (token) categories.add(categoryOf(token));
   }
   try {
-    const catalogs = await Promise.all([...categories].map(load));
-    // A partial skill scan can hide the project override of a global token.
-    if (catalogs.some((catalog) => catalog.incomplete || catalog.truncated))
-      throw new Error('mention_catalog_incomplete');
+    const catalogs = await Promise.all(
+      [...categories].map(async (category) => {
+        const catalog = await load(category);
+        // A partial skill scan can hide a project override. Role IDs bind to an
+        // exact live target, so missing rows on another machine cannot shadow it.
+        if (catalog.truncated || (catalog.incomplete && category !== 'role'))
+          throw new Error('mention_catalog_incomplete');
+        return catalog;
+      }),
+    );
     const items = catalogs.flatMap((catalog) => catalog.items);
     const resolve = createMentionResolver(items);
     for (const match of text.matchAll(referencePattern))

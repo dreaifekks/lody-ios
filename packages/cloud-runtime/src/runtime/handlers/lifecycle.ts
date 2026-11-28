@@ -11,14 +11,15 @@ import {
   startAcceptedInputs,
   stopSessions,
   resumeAcceptedInputs,
+  resumeSessions,
 } from '../session';
 import type { RuntimeContext } from './context.ts';
+import type { HistoryTokenIntent } from '../../contract/sharing.ts';
 import { sessionActionMeta } from '../fork-session';
 
 import {
-  machineSupportsSessionHistoryProtocol,
   machineSupportsSessionHistoryIncremental,
-  machineSupportsSessionHistoryWatch,
+  machineSupportsSessionHistorySubscription,
   machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistoryInspection,
   machineSupportsSessionInputAcceptance,
@@ -68,15 +69,20 @@ export function registerLifecycle(ctx: RuntimeContext) {
             protocolCapabilities?: Record<string, unknown>;
           }
         | undefined;
-      if (!machineSupportsSessionHistoryProtocol(capabilityCarrier))
-        throw new Error('roost_history_unsupported');
       return {
         backend: 'roost' as const,
+        cloud: {
+          metadata: () =>
+            isCurrent() ? getDocMeta(`session-${id}`)?.meta : undefined,
+          observe: (wake: () => void) => ctx.observeMeta(wake),
+        },
         accountId: user,
         machineId: meta.machineId as string,
         incremental:
           machineSupportsSessionHistoryIncremental(capabilityCarrier),
-        watch: machineSupportsSessionHistoryWatch(capabilityCarrier),
+        live: machineSupportsSessionHistorySubscription(capabilityCarrier),
+        getHistoryProof: (intent: HistoryTokenIntent) =>
+          ctx.broker('historyToken', { intent }),
         acceptsInput: machineSupportsSessionInputAcceptance(capabilityCarrier),
         dispatchesInput: machineSupportsSessionInputDispatch(capabilityCarrier),
         isArchived: meta.isArchived === true,
@@ -134,7 +140,9 @@ export function registerLifecycle(ctx: RuntimeContext) {
         await ctx.disposeProviderOperations?.();
       }
       if (version !== scopeStartVersion) return {};
-      if (workspaceId !== state.workspace || userId !== state.userId) {
+      const scopeChanged =
+        workspaceId !== state.workspace || userId !== state.userId;
+      if (scopeChanged) {
         stopSessions();
         state.workspaceReplica = undefined;
         state.pinSections = { sections: [], loaded: false };
@@ -166,6 +174,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       );
       ctx.setForeground?.(active);
       ctx.watch('meta');
+      if (scopeChanged) ctx.refreshWorkspace();
       refreshClock();
       if (active) ctx.startPresence();
       return {};
@@ -183,6 +192,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       refreshClock();
       ctx.publish();
       ctx.startPresence();
+      resumeSessions();
       traceSessionResume();
       resumeAcceptedInputs();
     } else ctx.stopPresence();
@@ -192,7 +202,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
     traceStalledReads();
     return {};
   });
-  channel.handle('openSession', async ({ sessionId }) => {
+  channel.handle('openSession', async ({ sessionId, historyStart }) => {
     const result = openSession(
       sessionId,
       state.workspace,
@@ -201,6 +211,7 @@ export function registerLifecycle(ctx: RuntimeContext) {
       markDispatch,
       true,
       resolveTarget(sessionId),
+      historyStart,
     );
     ctx.publishSubscriptions();
     await result;
@@ -220,41 +231,45 @@ export function registerLifecycle(ctx: RuntimeContext) {
     ctx.publishSubscriptions();
     return {};
   });
-  channel.handle('restoreSessions', ({ ids, current, reserved }) => {
-    const { workspace } = state;
-    for (const id of ids) {
-      if (id === current || reserved.includes(id)) continue;
-      void openSession(
-        id,
-        workspace,
-        getGrant,
-        emitSession,
-        markDispatch,
-        false,
-        resolveTarget(id),
-      );
-    }
-    for (const id of reserved)
-      void ensureSession(
-        id,
-        workspace,
-        getGrant,
-        emitSession,
-        markDispatch,
-        resolveTarget(id),
-      ).catch(() => {});
-    if (current)
-      void openSession(
-        current,
-        workspace,
-        getGrant,
-        emitSession,
-        markDispatch,
-        true,
-        resolveTarget(current),
-      );
-    else closeSession();
-    ctx.publishSubscriptions();
-    return {};
-  });
+  channel.handle(
+    'restoreSessions',
+    ({ ids, current, reserved, historyStart }) => {
+      const { workspace } = state;
+      for (const id of ids) {
+        if (id === current || reserved.includes(id)) continue;
+        void openSession(
+          id,
+          workspace,
+          getGrant,
+          emitSession,
+          markDispatch,
+          false,
+          resolveTarget(id),
+        );
+      }
+      for (const id of reserved)
+        void ensureSession(
+          id,
+          workspace,
+          getGrant,
+          emitSession,
+          markDispatch,
+          resolveTarget(id),
+        ).catch(() => {});
+      if (current)
+        void openSession(
+          current,
+          workspace,
+          getGrant,
+          emitSession,
+          markDispatch,
+          true,
+          resolveTarget(current),
+          historyStart,
+        );
+      else closeSession();
+      ctx.publishSubscriptions();
+      return {};
+    },
+  );
 }

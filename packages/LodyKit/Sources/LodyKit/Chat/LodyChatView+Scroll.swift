@@ -2,8 +2,11 @@ import UIKit
 
 extension LodyChatView {
   var composerInset: CGFloat {
+    if shareSelection != nil, !shareSelectionToolbar.isHidden {
+      return max(0, bounds.maxY - shareSelectionToolbar.frame.minY - collection.safeAreaInsets.bottom) + 8
+    }
     // Retiring glass keeps its drawing space, not the transcript's scroll space.
-    processEntryID.isEmpty ? max(0, bounds.maxY - composer.frame.minY - composer.retiringQueueHeight - collection.safeAreaInsets.bottom) + 8 : 0
+    return processEntryID.isEmpty ? max(0, bounds.maxY - composer.frame.minY - composer.retiringQueueHeight - collection.safeAreaInsets.bottom) + 8 : 0
   }
 
   @discardableResult
@@ -30,12 +33,21 @@ extension LodyChatView {
 
   func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
     guard let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id] else { return false }
+    if let selection = shareSelection {
+      return selection.selectableEntryIDs(loadedEntryIDs: loadedShareEntryIDs).contains(row.entryID)
+    }
     if let cell = collectionView.cellForItem(at: indexPath) as? ChatCell, cell.expandable && !cell.expanded { return true }
     return row.actionable || row.image != nil || row.kind == "imageStack"
   }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
     collectionView.deselectItem(at: indexPath, animated: false)
+    if shareSelection != nil {
+      if let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id] {
+        toggleShareEntry(row.entryID)
+      }
+      return
+    }
     if let cell = collectionView.cellForItem(at: indexPath) as? ChatCell,
        cell.expandable, !cell.expanded, let row = cell.row {
       toggleExpansion(row)
@@ -97,8 +109,8 @@ extension LodyChatView {
       onRetrySend(["forget": true, "id": row.entryID])
       return
     }
-    if let pendingSend, id == pendingSend.id + ":pending", pendingSend.failed == true {
-      onRetrySend([:])
+    if let pendingSend, pendingSend.failed == true, id == pendingSend.id + ":pending" {
+      onRetrySend(["id": pendingSend.id])
       return
     }
     onActivityPress(["entryId": row.entryID, "itemId": row.itemID, "processStartId": row.processStartID])
@@ -175,7 +187,16 @@ extension LodyChatView {
   func openAttachment(_ attachment: ChatMessageAttachment) {
     guard let controller = presenter(), controller.presentedViewController == nil else { return }
     pauseTracking()
-    if let uri = attachment.localURI, let url = URL(string: uri), url.isFileURL {
+    let local = attachment.localURI.flatMap(URL.init(string:)).flatMap { $0.isFileURL ? $0 : nil }
+    if ChatMarkdownAttachmentSheet.handles(attachment) {
+      ChatMarkdownAttachmentSheet.present(file: attachment, localURL: local, workspace: imageWorkspace, session: imageSession, from: controller)
+      return
+    }
+    if SessionVideoPreviewController.handles(attachment) {
+      SessionVideoPreviewController.present(file: attachment, localURL: local, workspace: imageWorkspace, session: imageSession, from: controller)
+      return
+    }
+    if let url = local {
       controller.present(ChatAttachmentPreview([ChatAttachment(id: attachment.id, name: attachment.fileName, url: url, isImage: false)], index: 0), animated: true)
       return
     }
@@ -426,7 +447,7 @@ extension LodyChatView {
       rowHeights.removeAll()
       return
     }
-    let width = ChatReadingColumn.itemWidth(in: collection.bounds.width)
+    let width = transcriptItemWidth
     for row in projected where row != previous[row.id] {
       if catchingUpEntries.contains(row.entryID) { rowHeights[row.id] = nil; continue }
       // Long replies grow at the content-commit cadence. Animating their height
@@ -479,9 +500,10 @@ extension LodyChatView {
 
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
     let inset = ChatReadingColumn.horizontalInset(in: collectionView.bounds.width)
+    let leadingGutter: CGFloat = shareSelection == nil ? 0 : ChatShareSelectionMetrics.leadingGutter
     return UIEdgeInsets(
       top: ChatReadingColumn.sectionTop,
-      left: inset,
+      left: inset + leadingGutter,
       bottom: ChatReadingColumn.sectionBottom,
       right: inset
     )
@@ -492,7 +514,7 @@ extension LodyChatView {
   }
 
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-    let width = ChatReadingColumn.itemWidth(in: collectionView.bounds.width)
+    let width = transcriptItemWidth
     guard let id = dataSource.itemIdentifier(for: indexPath), let row = rows[id] else { return CGSize(width: width, height: 0) }
     if let height = rowHeights[id], height.width == width {
       return CGSize(width: width, height: height.current)
@@ -511,7 +533,7 @@ extension LodyChatView {
       return ChatMessageAttachmentsCell.height(count: row.attachments.count, width: width,
         expanded: expandedAttachments.contains(row.entryID), author: !row.author.isEmpty)
     }
-    if row.kind == "chat_failed" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
+    if row.kind == "chat_failed" || row.kind == "agent_warning" { return ChatErrorCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "proposal" { return ChatProposalCell.height(row, width: width, traits: traitCollection) }
     if row.kind == "file", row.file != nil { return ChatFileCardCell.height(traits: traitCollection) }
     if row.kind == "tasksHeader" { return row.detail.isEmpty ? ChatFileCell.headerHeight : 56 }
@@ -533,7 +555,7 @@ extension LodyChatView {
     // Process summaries sit close together (32 pt rows, the whole width taps); other actionable
     // rows keep the 44 pt floor.
     if row.kind == "summary" { return max(ChatCell.summaryHeight, measuredHeight) }
-    let tapFloor = row.actionable || row.kind == "pending"
+    let tapFloor = row.actionable || row.kind == "pending" || row.kind == "tool_call"
     if tapFloor { return max(44, measuredHeight) }
     if row.kind == "delivery" {
       return max(ChatCell.messageFont(for: row, compatibleWith: traitCollection).lineHeight, measuredHeight)

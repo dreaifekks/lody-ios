@@ -63,7 +63,7 @@ final class AgentProviderEditorController: LodyFormController {
   private var commandGroup: LodyFormGroup?
   private var accountGroup: LodyFormGroup?
   private var titleGroup: LodyFormGroup?
-  private weak var titleConfigSheet: UIViewController?
+  private weak var titleConfigSheet: CreateRunConfigSheetController?
   private var nameValue: String
   private let promptValue: String
   private var commandValue: String
@@ -228,6 +228,10 @@ final class AgentProviderEditorController: LodyFormController {
     advanced.setEditable(canEdit)
     accountGroup?.isHidden = !advanced.hasCredentials && !advanced.showsCodex
     titleGroup?.isHidden = !advanced.showsTitle
+    if (!canEdit || !advanced.showsTitle), let sheet = titleConfigSheet {
+      titleConfigSheet = nil
+      sheet.dismissCleanly()
+    }
 
     saveItem.isEnabled = canEdit && advanced.isValid && selected != nil && !name.isEmpty
       && (selected?.cliType != "custom" || !command.isEmpty)
@@ -303,29 +307,18 @@ final class AgentProviderEditorController: LodyFormController {
   }
 
   private func presentTitleConfig() {
-    guard editable, advanced.showsTitle, titleConfigSheet == nil else { return }
+    guard editable, advanced.showsTitle, presentedViewController == nil,
+          titleConfigSheet?.isActive != true else { return }
     view.endEditing(true)
     let state = advanced.makeTitleConfigState()
     guard !state.runConfig.isEmpty else { return }
-    let title = text("titleGeneration")
-    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: state, title: title))
-    var contentHeight = CGFloat(state.runConfig.count) * (LodySize.controlMd + LodySpacing.xs * 2)
-      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
-    sheet.rootView = CreateRunConfigSheet(state: state, title: title, onHeightChange: { [weak sheet] height in
-      guard height > 0, abs(contentHeight - height) > 1 else { return }
-      contentHeight = height
-      sheet?.sheetPresentationController?.animateChanges {
-        sheet?.sheetPresentationController?.invalidateDetents()
-      }
-    })
-    if let presentation = sheet.sheetPresentationController {
-      presentation.detents = [.custom(identifier: .init("titleConfigContent")) { context in
-        min(contentHeight, context.maximumDetentValue)
-      }]
-      presentation.prefersGrabberVisible = true
-    }
+    let sheet = CreateRunConfigSheetController(
+      state: state,
+      title: text("titleGeneration"),
+      detentIdentifier: "titleConfigContent"
+    )
     titleConfigSheet = sheet
-    present(sheet, animated: true)
+    present(sheet, animated: UIView.areAnimationsEnabled)
   }
 
   private func showUsage() {

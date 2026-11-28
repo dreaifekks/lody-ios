@@ -477,7 +477,7 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
       .underlineStyle: NSUnderlineStyle.single.rawValue,
       .underlineColor: LoginPalette.secondaryLabel,
     ]
-    let chinese = Bundle.lody.preferredLocalizations.first?.hasPrefix("zh") == true
+    let prefix = Self.legalPathPrefix(for: Bundle.lody.preferredLocalizations.first)
     let terms = String(localized: "auth.login.terms", bundle: .lody)
     let privacy = String(localized: "auth.login.privacy", bundle: .lody)
     let text = String.localizedStringWithFormat(String(localized: "auth.login.legal", bundle: .lody), terms, privacy)
@@ -486,7 +486,7 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
     let attributed = NSMutableAttributedString(string: text, attributes: [
       .font: LoginType.legal, .foregroundColor: LoginPalette.tertiaryLabel, .paragraphStyle: paragraph,
     ])
-    for (word, path) in [(terms, chinese ? "/zh/terms" : "/terms"), (privacy, chinese ? "/zh/privacy" : "/privacy")] {
+    for (word, path) in [(terms, "\(prefix)/terms"), (privacy, "\(prefix)/privacy")] {
       let range = (text as NSString).range(of: word)
       if range.location != NSNotFound, let url = URL(string: "https://lody.ai" + path) {
         attributed.addAttribute(.link, value: url, range: range)
@@ -494,6 +494,23 @@ class OnboardingController: UIViewController, UITextFieldDelegate {
     }
     legal.attributedText = attributed
     legal.accessibilityIdentifier = "auth-legal"
+  }
+
+  static func legalPathPrefix(for localization: String?) -> String {
+    guard let tag = localization?.replacingOccurrences(of: "_", with: "-").lowercased(), !tag.isEmpty else {
+      return ""
+    }
+    if tag.hasPrefix("zh") {
+      let traditional = tag.contains("-hant") || tag.contains("-tw") || tag.contains("-hk") || tag.contains("-mo")
+      return traditional ? "/zh-hant" : "/zh"
+    }
+    let primary = tag.split(separator: "-").first.map(String.init) ?? ""
+    switch primary {
+    case "ja", "ko", "es", "fr", "ru":
+      return "/\(primary)"
+    default:
+      return ""
+    }
   }
 
   private func configure(_ field: UITextField, placeholder: String, identifier: String, content: UITextContentType) {

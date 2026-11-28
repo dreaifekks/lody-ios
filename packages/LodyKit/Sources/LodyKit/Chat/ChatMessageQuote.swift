@@ -344,20 +344,32 @@ final class ChatQuoteViewerController: UIViewController {
     let done = UIButton(configuration: doneConfig)
     done.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .touchUpInside)
     let header = quoteSheetHeader(title: String(localized: "native.chat.quote.viewerTitle", bundle: .lody), leading: nil, trailing: done)
-    snapshot.text.isScrollEnabled = true
+    snapshot.text.isScrollEnabled = false
     snapshot.text.textColor = .label
-    for child in [header, snapshot] as [UIView] {
+    let scroll = UIScrollView()
+    scroll.alwaysBounceVertical = false
+    snapshot.translatesAutoresizingMaskIntoConstraints = false
+    scroll.addSubview(snapshot)
+    for child in [header, scroll] as [UIView] {
       child.translatesAutoresizingMaskIntoConstraints = false
       view.addSubview(child)
     }
+    let fitsContent = scroll.heightAnchor.constraint(equalTo: scroll.contentLayoutGuide.heightAnchor)
+    fitsContent.priority = .defaultLow
     NSLayoutConstraint.activate([
       header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
       header.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
       header.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
-      snapshot.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
-      snapshot.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
-      snapshot.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
-      snapshot.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+      scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
+      scroll.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+      scroll.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+      scroll.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+      fitsContent,
+      snapshot.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+      snapshot.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+      snapshot.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+      snapshot.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+      snapshot.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
     ])
   }
 }

@@ -38,6 +38,8 @@ final class ChatMarkdownView: UIView {
   }
 
   var selectionLabels: [TextLabelView] { blocks.map(\.label) }
+  var codeSelectionLabels: [TextLabelView] { ChatTableViewport.codeLabels(in: self) }
+  var tableSelectionGroups: [TextSelectionGroup] { ChatTableViewport.selectionGroups(in: self) }
 
   func clearSelection() {
     func clear(_ view: UIView) {
@@ -113,7 +115,9 @@ final class ChatMarkdownView: UIView {
         return node.children.contains(where: containsCode)
       }
       var blockTheme = theme
-      if !containsCode(source.node) { blockTheme.colors.code = .secondaryLabel }
+      if !containsCode(source.node), blockTheme.colors.body != .secondaryLabel {
+        blockTheme.colors.code = .lodyInlineCode
+      }
       UIView.performWithoutAnimation { block.view.setContentImmediately(source.content, theme: blockTheme) }
       if blockAnimation {
         block.label.prepare(animate: false, reset: true)

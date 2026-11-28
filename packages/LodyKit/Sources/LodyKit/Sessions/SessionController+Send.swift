@@ -77,16 +77,21 @@ extension SessionController {
   }
 
   func wireSendEvents() {
+    composerModel.changed = { [weak self] in self?.renderComposer() }
     chat.onSend = { [weak self] body in
       guard let self, !SessionActions.isDeleting(self.source.state.workspaceId, self.sessionId), !self.planDecision.pending
       else { return }
+      if self.isDraftTab {
+        self.submitDraftTab(body)
+        return
+      }
       self.sender?.submit(body, choice: self.composerModel.sendChoice, role: self.composerModel.sendRole)
     }
     chat.onRetrySend = { [weak self] body in
       if body["pendingActions"] as? Bool == true { self?.presentPendingActions(body["id"] as? String) }
       else if body["forget"] as? Bool == true { self?.confirmForgetPendingInput(body["id"] as? String) }
       else if body["retryPending"] as? Bool == true, let id = body["id"] as? String { self?.retryPendingInput(id) }
-      else { self?.sender?.retry() }
+      else if let id = body["id"] as? String { self?.sender?.retry(id) }
     }
     chat.onComposerOptionChange = { [weak self] body in self?.composerModel.change(body) }
     // The conversation composer is the new-chat composer (web's mobile session page): a card
@@ -99,6 +104,24 @@ extension SessionController {
     chat.composer.quotesSupported = { [weak self] in self?.supportsMessageQuotes == true }
     chat.onStop = { [weak self] _ in self?.controlTurn("stop") }
     chat.onSteer = { [weak self] body in self?.controlTurn("steer", messageId: body["id"] as? String) }
+  }
+
+  /// A computer that catches up, comes online or a runtime that becomes ready changes the
+  /// creation options; the composer reads them again while its last read was incomplete.
+  func observeCreationOptions() -> NSObjectProtocol {
+    NotificationCenter.default.addObserver(forName: .lodyDataRuntimeEvent, object: nil, queue: .main) { [weak self] note in
+      let optionsChanged = note.userInfo?["creationOptionsChanged"] as? Bool == true
+      let live = note.userInfo?["state"] as? String == "live"
+      guard optionsChanged || live else { return }
+      MainActor.assumeIsolated {
+        guard let self, DataRuntime.current?.workspace == self.source.state.workspaceId else { return }
+        self.optionsRefresh?.cancel()
+        self.optionsRefresh = Task { [weak self] in
+          do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+          self?.composerModel.optionsChanged()
+        }
+      }
+    }
   }
 
   var supportsMessageQuotes: Bool {
@@ -175,14 +198,76 @@ extension SessionController {
   private func controlTurn(_ action: String, messageId: String? = nil) {
     guard let session = source.state.catalog.session(sessionId), let state = feed?.state else { return }
     control.act(
-      action, messageId: messageId, session: session, transcript: state.transcript, live: state.status == "live",
+      action, messageId: messageId, session: session, transcript: state.transcript, live: state.controlReady,
       overflow: state.overflow, steerable: composerModel.steerable
     )
   }
 
   func renderComposer() {
-    guard isViewLoaded, let session = source.state.catalog.session(sessionId) else { return }
+    guard isViewLoaded, let session = activeSession else { return }
     renderComposer(session, feed?.state ?? SessionFeedState())
+  }
+
+  /// Creates the shared-directory Tab and sends its first turn through the shared Outbox pipeline
+  /// (same createSession + sendTurn flow as CreateSessionHostController).
+  func submitDraftTab(_ body: [String: Any]) {
+    let state = source.state
+    guard let draft = draftTab,
+          state.workspace?.resolvedMode == .plaintext,
+          !state.userId.isEmpty, !state.workspaceId.isEmpty,
+          let agentConfigId = draft.agentConfigId ?? composerModel.matchedAgentConfigId,
+          let store = environment.store(state.userId, state.workspaceId),
+          let parentSessionId = draft.parentSessionId, !parentSessionId.isEmpty,
+          var send = SessionSender.object(body) else {
+      draftRestoreToken += 1
+      chat.restoreDraft(token: draftRestoreToken)
+      LodyToastOverlay.shared.show(message: String(localized: "session.tabs.failed", bundle: .lody), kind: .error)
+      return
+    }
+    let message = body["text"] as? String ?? ""
+    let shown = (body["displayText"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let title = CreateDraftRecord.title(shown ?? message, fallback: String(localized: "session.tabs.defaultTitle", bundle: .lody))
+    let createdAt = CreateDraftRecord.now()
+    var sessionValue: [String: OutboxValue] = [
+      "id": .string(sessionId),
+      "projectId": .string(draft.projectId),
+      "machineId": .string(draft.machineId),
+      "cliType": .string(draft.cliType),
+      "agentType": .string(draft.agentType),
+      "agentConfigId": .string(agentConfigId),
+      "parentSessionId": .string(parentSessionId),
+      "title": .string(title),
+      "status": .string("idle"),
+      "archived": .bool(false),
+      "pinned": .bool(false),
+      "createdAt": .string(createdAt),
+    ]
+    if let branch = draft.branchName, !branch.isEmpty { sessionValue["branchName"] = .string(branch) }
+    var creationFields: [String: Any] = [
+      "workspaceId": state.workspaceId,
+      "sessionId": sessionId,
+      "parentSessionId": parentSessionId,
+      "machineId": draft.machineId,
+      "agentConfigId": agentConfigId,
+      "userId": state.userId,
+      "title": title,
+    ]
+    if let role = composerModel.activeRole?.role {
+      creationFields["agentRoleId"] = role.id
+      creationFields["agentRoleRevision"] = role.revision
+    }
+    send["choice"] = .object(composerModel.sendChoice)
+    send["agentRoleId"] = composerModel.sendRole
+    send["creation"] = .string(Self.json(creationFields))
+    send["phase"] = .string("waiting")
+    let record = OutboxRecord(session: sessionValue, send: send)
+    draftTabSubmitted = true
+    let put = store.put(record)
+    render()
+    Task { @MainActor in
+      guard case .failure = await put.result else { return }
+      store.put(record.with(phase: "failed", reason: String(localized: "send.error.draftSaveShort", bundle: .lody)))
+    }
   }
 
   func renderComposer(_ session: SessionItem, _ feed: SessionFeedState) {
@@ -196,14 +281,14 @@ extension SessionController {
     // A multi-repository project's session reads workspace-wide options, as a plain chat.
     let optionsProject = project?.id.hasPrefix(CreateSessionSelection.groupPrefix) == true ? nil : project?.id
     composerModel.load(workspaceId: state.workspaceId, projectId: optionsProject, session: session)
-    let billable = live ? feed.billableTurnCount : nil
+    let billable = feed.sendReady ? feed.billableTurnCount : nil
     composerModel.watchTier(workspaceId: state.workspaceId, userId: state.userId, watch: (billable ?? 0) >= 25)
     let locked = SessionQuota.locked(count: billable, tier: composerModel.tier)
     announceQuota(live: live, locked: locked)
     let steerable = composerModel.steerable
     let behavior = queuedMessageBehavior
     let context = OutboxForeground(
-      live: live, overflow: feed.overflow, serverCreated: environment.serverCreated(sessionId), steerable: steerable,
+      live: feed.sendReady, overflow: feed.overflow, serverCreated: environment.serverCreated(sessionId), steerable: steerable,
       promptBusy: OutboxDispatcher.busy.contains(session.status), queuedMessageBehavior: behavior, transcript: feed.transcript
     )
     let inputs = SessionSender.Inputs(
@@ -211,12 +296,16 @@ extension SessionController {
     )
     if let sender, sender.inputs != inputs { sender.update(inputs) }
     let control = self.control.state(
-      session: session, transcript: feed.transcript, live: live, overflow: feed.overflow, steerable: steerable
+      session: session, transcript: feed.transcript, live: feed.controlReady, overflow: feed.overflow, steerable: steerable
     )
     let deleting = SessionActions.isDeleting(state.workspaceId, sessionId)
+    let draft = isDraftTab
+    let draftReady = draft && state.workspace?.resolvedMode == .plaintext
+      && !state.userId.isEmpty && !state.workspaceId.isEmpty
+      && (session.agentConfigId ?? composerModel.matchedAgentConfigId) != nil
     var composer: [String: Any] = [
       "editable": !session.archived && !deleting && !locked,
-      "canSend": sender?.canSend == true && !deleting && !locked && !planDecision.pending && !errorRetry.pending,
+      "canSend": (draft ? draftReady : sender?.canSend == true) && !deleting && !locked && !planDecision.pending && !errorRetry.pending,
       "sending": sender?.sending == true,
       "running": control.running || sender?.awaitingReply == true,
       "canStop": control.canStop, "stopping": control.stopping, "controlling": control.controlling,
@@ -226,15 +315,29 @@ extension SessionController {
       "quotaNotice": locked ? "" : quotaNotice(feed.billableTurnCount, live: live),
       "quotaLocked": locked,
       "reconnect": feed.overflow,
-      "connection": connection(feed),
+      "connection": draft ? "" : connection(feed),
       "placeholder": placeholder(session, locked: locked),
     ]
+    if let historySync = feed.historySync { composer["historySyncLabel"] = historySync.label }
     let busy = control.running || sender?.awaitingReply == true || sender?.sending == true || OutboxDispatcher.busy.contains(session.status)
-    composer["actionBar"] = actionBarState(session, busy: busy)
+    composer["actionBar"] = draft ? [:] : actionBarState(session, busy: busy)
     composer["usage"] = sessionUsage(session, feed: feed)
     adjustComposer(&composer)
     apply("composer", Self.json(composer), chat.setComposerState)
     apply("options", composerModel.optionsJSON, chat.setComposerOptions)
+    if let sheet = runConfigSheet {
+      let rows = composerModel.runConfig
+      if rows.isEmpty || session.archived || deleting {
+        runConfigSheet = nil
+        sheet.dismissCleanly()
+      } else if !sheet.isDismissPending {
+        if sheet.state.runConfig != rows { sheet.state.runConfig = rows }
+        if let open = sheet.state.openInSheet,
+           !rows.contains(where: { $0.id == open && !$0.options.isEmpty }) {
+          sheet.state.openInSheet = nil
+        }
+      }
+    }
     apply("pending", sender?.pendingSendJSON ?? "", chat.setPendingSendJSON)
     renderDecisions(feed)
     renderEditable(feed, enabled: live && state.connected && !state.loading && !session.archived && sender?.sending != true
@@ -265,9 +368,29 @@ extension SessionController {
   }
 
   private func connection(_ feed: SessionFeedState) -> String {
-    if feed.overflow { return "" }
-    if ["offline", "failed", "stopped"].contains(feed.status) { return "paused" }
-    return feed.status == "live" ? "" : "connecting"
+    if feed.overflow || feed.status == "live" {
+      connectingTask?.cancel()
+      connectingTask = nil
+      connectingShown = false
+      return ""
+    }
+    if ["offline", "failed", "stopped"].contains(feed.status) {
+      connectingTask?.cancel()
+      connectingTask = nil
+      connectingShown = false
+      return "paused"
+    }
+    if connectingShown { return "connecting" }
+    if connectingTask == nil {
+      connectingTask = Task { @MainActor [weak self] in
+        do { try await Task.sleep(for: .milliseconds(4000)) } catch { return }
+        guard let self else { return }
+        self.connectingTask = nil
+        self.connectingShown = true
+        self.renderComposer()
+      }
+    }
+    return ""
   }
 
   private func placeholder(_ session: SessionItem, locked: Bool) -> String {
@@ -292,7 +415,7 @@ extension SessionController {
 
   /// Web's mobile run-config sheet from the composer chip, the same sheet as a new chat.
   func presentRunConfig() {
-    guard presentedViewController == nil else { return }
+    guard presentedViewController == nil, runConfigSheet?.isActive != true else { return }
     let rows = composerModel.runConfig
     guard !rows.isEmpty else { return }
     chat.endEditing(true)
@@ -303,24 +426,10 @@ extension SessionController {
       self.composerModel.pick(row, option)
       state?.runConfig = self.composerModel.runConfig
     }
-    let sheet = UIHostingController(rootView: CreateRunConfigSheet(state: state))
-    var contentHeight = CGFloat(rows.count) * (LodySize.controlMd + LodySpacing.xs * 2)
-      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
-    sheet.rootView = CreateRunConfigSheet(state: state, onHeightChange: { [weak sheet] height in
-      guard height > 0, abs(contentHeight - height) > 1 else { return }
-      contentHeight = height
-      sheet?.sheetPresentationController?.animateChanges {
-        sheet?.sheetPresentationController?.invalidateDetents()
-      }
-    })
-    if let presentation = sheet.sheetPresentationController {
-      presentation.detents = [.custom(identifier: .init("runConfigContent")) { context in
-        min(contentHeight, context.maximumDetentValue)
-      }]
-      presentation.prefersGrabberVisible = true
-    }
+    let sheet = CreateRunConfigSheetController(state: state)
     sheet.view.accessibilityIdentifier = "session-run-config"
-    present(sheet, animated: true)
+    runConfigSheet = sheet
+    present(sheet, animated: UIView.areAnimationsEnabled)
   }
 
   private func quotaNotice(_ count: Int?, live: Bool) -> String {
@@ -339,5 +448,42 @@ extension SessionController {
     )
     alert.addAction(UIAlertAction(title: String(localized: "common.ok", bundle: .lody), style: .default))
     present(alert, animated: true)
+  }
+}
+
+private extension RoostHistorySync {
+  var label: String {
+    let source = switch self.source {
+    case .machine: String(localized: "native.chat.historySync.machine", bundle: .lody)
+    case .streams: String(localized: "native.chat.historySync.streams", bundle: .lody)
+    }
+    let detail: String? = switch phase {
+    case .idle, .ready: nil
+    case .checking: String(localized: "native.chat.historySync.checking", bundle: .lody)
+    case .pending: String(localized: "native.chat.historySync.pending", bundle: .lody)
+    case .ownerRequired:
+      String(localized: "native.chat.historySync.ownerRequired", bundle: .lody)
+    case .syncing: String(localized: "native.chat.historySync.syncing", bundle: .lody)
+    case .retrying where httpStatus == 403:
+      String(localized: "native.chat.historySync.unconfirmed", bundle: .lody)
+    case .retrying:
+      if let httpStatus {
+        String(format: String(localized: "native.chat.historySync.retryingHttp", bundle: .lody), httpStatus)
+      } else {
+        String(localized: "native.chat.historySync.retrying", bundle: .lody)
+      }
+    case .refused where httpStatus == 401 || httpStatus == 403:
+      String(localized: "native.chat.historySync.denied", bundle: .lody)
+    case .refused:
+      if let httpStatus {
+        String(format: String(localized: "native.chat.historySync.refused", bundle: .lody), httpStatus)
+      } else {
+        String(localized: "native.chat.historySync.unavailable", bundle: .lody)
+      }
+    }
+    let previous = newerVersionPending && self.source == .streams
+      ? String(localized: "native.chat.historySync.previous", bundle: .lody)
+      : nil
+    return [source, previous, detail].compactMap { $0 }.joined(separator: "\n")
   }
 }

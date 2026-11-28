@@ -16,6 +16,7 @@ final class AgentRoleEditorController: LodyFormController {
   private let role: AgentRole?
   private let agents: [AgentRoleAgent]
   private let service: AgentRoleService
+  private let writable: Bool
   private let readOnly: Bool
   private let id: String
   private var target: AgentRoleAgent?
@@ -26,6 +27,12 @@ final class AgentRoleEditorController: LodyFormController {
   private var observer: NSObjectProtocol?
   private let emojiButton = UIButton(type: .system)
   private let emojiHint = UILabel()
+  private let savingSpinner: UIActivityIndicatorView = {
+    let view = UIActivityIndicatorView(style: .medium)
+    view.hidesWhenStopped = true
+    return view
+  }()
+  private lazy var savingItem = UIBarButtonItem(customView: savingSpinner)
   private lazy var name = LodyFormField(
     id: "role-name", label: String(localized: "settings.remote.name", bundle: .lody), text: role?.name, limit: 60
   )
@@ -50,13 +57,15 @@ final class AgentRoleEditorController: LodyFormController {
     [weak self] in self?.mutate()
   }
 
-  init(workspace: SettingsWorkspace, scope: SettingsScope, role: AgentRole?, agents: [AgentRoleAgent], service: @escaping AgentRoleService) {
+  init(workspace: SettingsWorkspace, scope: SettingsScope, role: AgentRole?, agents: [AgentRoleAgent], writable: Bool = true, service: @escaping AgentRoleService) {
     self.workspace = workspace
     self.scope = scope
     self.role = role
     self.agents = agents
+    self.writable = writable
     self.service = service
-    readOnly = role.map { !AgentRoleSections.editable($0, userId: workspace.userId) } ?? false
+    let roleReadOnly = role.map { !AgentRoleSections.editable($0, userId: workspace.userId) } ?? false
+    readOnly = !writable || roleReadOnly
     id = role?.id ?? UUID().uuidString.lowercased()
     target = agents.first
     emoji = role?.emoji ?? AgentRoleSections.defaultEmoji
@@ -78,7 +87,7 @@ final class AgentRoleEditorController: LodyFormController {
     errorLabel.accessibilityIdentifier = "role-error"
     errorLabel.numberOfLines = 0
     stack.addArrangedSubview(emojiHeader())
-    if let hint = role.flatMap({ AgentRoleSections.readOnlyHint($0, userId: workspace.userId) }) {
+    if let hint = role.flatMap({ AgentRoleSections.readOnlyHint($0, userId: workspace.userId, live: writable) }) {
       let label = LodyFormGroup.caption()
       label.text = hint
       label.numberOfLines = 0
@@ -211,6 +220,16 @@ final class AgentRoleEditorController: LodyFormController {
     errorView.isHidden = failure.isEmpty
     cancelItem.isEnabled = !busy
     saveItem.isEnabled = editable && valid
+    if readOnly {
+      header?.rightBarButtonItems = []
+      savingSpinner.stopAnimating()
+    } else if busy {
+      savingSpinner.startAnimating()
+      header?.rightBarButtonItems = [savingItem]
+    } else {
+      savingSpinner.stopAnimating()
+      header?.rightBarButtonItems = [saveItem]
+    }
     isModalInPresentation = busy
   }
 

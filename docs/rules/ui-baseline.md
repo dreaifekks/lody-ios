@@ -8,7 +8,7 @@ Read before changing any native UI: text, colour, canvases, touch targets, group
 
 - Apple HIG is the primary UI requirement. Chat references inform behavior only; preserve native conventions.
 
-- Native text uses system fonts, with system monospaced fonts for code. Keep semantic sizes, weights and Dynamic Type in `LodyTextStyle`; do not bundle or select custom font families for native UI. Chat inline code uses body size and secondary-label ink, retaining link colours. Preserve fenced-code themes; with the current per-block renderer, containers holding fences retain their original code colours.
+- Native text uses system fonts, with system monospaced fonts for code. Keep semantic sizes, weights and Dynamic Type in `LodyTextStyle`; do not bundle or select custom font families for native UI. Chat inline code uses body size and `lodyInlineCode` ink (secondary-label ink in secondary prose), retaining link colours. Preserve fenced-code themes; with the current per-block renderer, containers holding fences retain their original code colours.
 
 - Use fixed Ink for the app accent; do not expose an accent picker or read legacy accent preferences. Preserve conversation activity/status colors from the design system. Diff additions use systemGreen, paired with systemRed deletions. Use UIKit semantic content colors, Ink actions, neutral backgrounds, and explicit toast semantics: neutral information/completion, orange warnings, red failures. Preserve automatic dark mode and accessibility contrast adaptation.
 

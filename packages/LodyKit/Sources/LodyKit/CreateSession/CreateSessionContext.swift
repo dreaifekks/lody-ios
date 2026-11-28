@@ -1,6 +1,7 @@
 import LodyCore
 import LodyDesignSystem
 import SwiftUI
+import UIKit
 
 // The new-session page's context and run configuration, after web's mobile new-chat page
 // (`components/mobile/mobile-new-chat-sheet.tsx`, `mobile-inline-picker.tsx`,
@@ -346,43 +347,66 @@ final class CreatePanelState: ObservableObject {
   /// Recently used configurations atop the run-config sheet; empty hides the group.
   @Published var recents: [CreateOption] = []
   /// The one expanded list on the page, and separately in the sheet.
-  @Published var open: String?
+  @Published var open: String? {
+    didSet { if oldValue != open { onOpenChange?(open != nil) } }
+  }
   @Published var openInSheet: String?
   var onPick: (String, String) -> Void = { _, _ in }
   var onWorktree: (Bool) -> Void = { _ in }
   var onRetry: () -> Void = {}
+  var onCollapsedHeight: ((CGFloat) -> Void)?
+  var onOpenChange: ((Bool) -> Void)?
 }
 
 // MARK: - Page panel
 
 struct CreateContextPanel: View {
   @ObservedObject var state: CreatePanelState
+  @State private var cardHeights: [String: CGFloat] = [:]
+  @State private var branchRowHeight: CGFloat = 0
+  @State private var noteHeight: CGFloat = 0
+
+  private var collapsedHeight: CGFloat {
+    var heights: [CGFloat] = []
+    for card in state.panel.cards {
+      if let height = cardHeights[card.id], height > 0 { heights.append(height) }
+    }
+    if (state.panel.worktree != nil || state.panel.branch != nil), branchRowHeight > 0 {
+      heights.append(branchRowHeight)
+    }
+    if !state.panel.note.isEmpty, noteHeight > 0 {
+      heights.append(noteHeight)
+    }
+    guard !heights.isEmpty else { return 0 }
+    return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * LodySpacing.sm + LodySpacing.md
+  }
 
   var body: some View {
     GeometryReader { geometry in
       ScrollView {
-        VStack(alignment: .leading, spacing: LodySpacing.sm) {
+        VStack(spacing: 0) {
           Spacer(minLength: 0)
-          ForEach(state.panel.cards) { picker in
-            VStack(spacing: 0) {
-              PickerFace(picker: picker, prominent: true) { toggle(picker.id) }
-              list(picker)
-            }
-          }
-          if state.panel.worktree != nil || state.panel.branch != nil { branchLine }
-          if !state.panel.note.isEmpty {
-            if state.panel.noteRetry {
-              Button { state.onRetry() } label: {
-                note.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+          VStack(alignment: .leading, spacing: LodySpacing.sm) {
+            ForEach(state.panel.cards) { picker in
+              VStack(spacing: 0) {
+                PickerFace(picker: picker, prominent: true) { toggle(picker.id) }
+                  .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if abs((cardHeights[picker.id] ?? 0) - height) > 0.5 { cardHeights[picker.id] = height }
+                  }
+                list(picker)
               }
-              .buttonStyle(.plain)
-            } else {
-              note
+            }
+            if state.panel.worktree != nil || state.panel.branch != nil { branchLine }
+            if !state.panel.note.isEmpty {
+              noteRow
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                  if abs(noteHeight - height) > 0.5 { noteHeight = height }
+                }
             }
           }
+          .padding(.horizontal, LodyLayout.screenPaddingX)
+          .padding(.bottom, LodySpacing.md)
         }
-        .padding(.horizontal, LodyLayout.screenPaddingX)
-        .padding(.bottom, LodySpacing.md)
         .frame(minHeight: geometry.size.height, alignment: .bottom)
         .background {
           Color.clear.contentShape(Rectangle()).onTapGesture { state.open = nil }
@@ -390,6 +414,20 @@ struct CreateContextPanel: View {
       }
       .scrollBounceBehavior(.basedOnSize)
       .lodyScrollAnchor(.bottom)
+    }
+    .onChange(of: collapsedHeight) { height in state.onCollapsedHeight?(height) }
+    .onAppear { if collapsedHeight > 0 { state.onCollapsedHeight?(collapsedHeight) } }
+  }
+
+  @ViewBuilder
+  private var noteRow: some View {
+    if state.panel.noteRetry {
+      Button { state.onRetry() } label: {
+        note.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+    } else {
+      note
     }
   }
 
@@ -425,6 +463,9 @@ struct CreateContextPanel: View {
           PickerFace(picker: branch, prominent: false) { toggle(branch.id) }
         }
         Spacer(minLength: 0)
+      }
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+        if abs(branchRowHeight - height) > 0.5 { branchRowHeight = height }
       }
       if let branch = state.panel.branch { list(branch) }
     }
@@ -648,13 +689,16 @@ struct CreateRunConfigSheet: View {
         .padding(.bottom, LodySpacing.lg)
         .animation(.smooth(duration: 0.3), value: state.openInSheet)
       }
+      .frame(maxWidth: .infinity)
       .onGeometryChange(for: CGFloat.self) { geometry in
         geometry.size.height
       } action: { height in
+        guard !state.runConfig.isEmpty || !state.recents.isEmpty else { return }
         onHeightChange(height)
       }
     }
-    .background(LodyColor.bgBase)
+    .frame(maxWidth: .infinity)
+    .background(LodyColor.bgBase.ignoresSafeArea())
   }
 
   /// Terminal "run it like this" rows: a pick applies the whole configuration and closes nothing
@@ -734,6 +778,115 @@ struct CreateRunConfigSheet: View {
   private func valueColor(_ row: CreatePicker) -> Color {
     if row.placeholder { return LodyColor.textTertiary }
     return row.options.isEmpty ? LodyColor.textSecondary : LodyColor.textPrimary
+  }
+}
+
+@MainActor
+final class CreateRunConfigSheetController: UIHostingController<CreateRunConfigSheet> {
+  static let minimumDetentHeight: CGFloat = LodySpacing.xl + LodySize.controlMd + LodySpacing.md
+    + (LodySize.controlMd + LodySpacing.xs * 2) + LodySpacing.lg
+
+  let state: CreatePanelState
+  var onDismissed: (() -> Void)?
+  private(set) var isDismissPending = false
+  private var didNotifyDismissed = false
+  private(set) var contentHeight: CGFloat
+
+  var isActive: Bool {
+    !isDismissPending && !isBeingDismissed && !didNotifyDismissed
+  }
+
+  init(
+    state: CreatePanelState,
+    title: String = String(localized: "create.runConfig.title", bundle: .lody),
+    detentIdentifier: String = "runConfigContent"
+  ) {
+    self.state = state
+    let rowCount = max(1, state.runConfig.count + state.recents.count)
+    let estimated = CGFloat(rowCount) * (LodySize.controlMd + LodySpacing.xs * 2)
+      + LodySpacing.xl + LodySize.controlMd + LodySpacing.lg
+    contentHeight = max(estimated, Self.minimumDetentHeight)
+    super.init(rootView: CreateRunConfigSheet(state: state, title: title))
+    modalPresentationStyle = .pageSheet
+    rootView = CreateRunConfigSheet(state: state, title: title) { [weak self] height in
+      guard let self, height > 0, !self.isDismissPending, !self.isBeingDismissed else { return }
+      let clamped = max(height, Self.minimumDetentHeight)
+      guard abs(self.contentHeight - clamped) > 1 else { return }
+      self.contentHeight = clamped
+      guard self.presentingViewController != nil else { return }
+      self.sheetPresentationController?.animateChanges {
+        self.sheetPresentationController?.invalidateDetents()
+      }
+    }
+    if let presentation = sheetPresentationController {
+      presentation.detents = [.custom(identifier: .init(detentIdentifier)) { [weak self] context in
+        let desired = max(self?.contentHeight ?? Self.minimumDetentHeight, Self.minimumDetentHeight)
+        return min(desired, context.maximumDetentValue)
+      }]
+      presentation.prefersGrabberVisible = true
+    }
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    view.backgroundColor = LodyUIColor.bgBase
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    if isBeingDismissed || presentingViewController == nil {
+      notifyDismissed()
+    }
+  }
+
+  private func notifyDismissed() {
+    guard !didNotifyDismissed else { return }
+    didNotifyDismissed = true
+    let callback = onDismissed
+    onDismissed = nil
+    callback?()
+  }
+
+  func dismissCleanly(animated: Bool = UIView.areAnimationsEnabled, completion: (() -> Void)? = nil) {
+    isDismissPending = true
+    state.openInSheet = nil
+    let finish = { [weak self] in
+      self?.notifyDismissed()
+      completion?()
+    }
+    if isBeingDismissed {
+      if let coordinator = transitionCoordinator,
+         coordinator.animate(alongsideTransition: nil, completion: { _ in finish() }) {
+        return
+      }
+      DispatchQueue.main.async { finish() }
+      return
+    }
+    let performDismiss = { [weak self] in
+      guard let self else {
+        finish()
+        return
+      }
+      guard !self.isBeingDismissed, let presenter = self.presentingViewController else {
+        finish()
+        return
+      }
+      presenter.dismiss(animated: animated, completion: finish)
+    }
+    if let coordinator = transitionCoordinator,
+       coordinator.animate(alongsideTransition: nil, completion: { _ in
+         DispatchQueue.main.async(execute: performDismiss)
+       }) {
+      return
+    }
+    if isBeingPresented {
+      DispatchQueue.main.async(execute: performDismiss)
+      return
+    }
+    performDismiss()
   }
 }
 

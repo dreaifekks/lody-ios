@@ -20,9 +20,14 @@ extension SessionController {
       }
     }
     chat.onProposalDecision = { [weak self] row, accept in self?.decideProposal(row, accept: accept) }
-    chat.onProposalOpenSchedule = { [weak self] _ in
+    chat.onProposalInspect = { [weak self] row in self?.inspectProposal(row) }
+    chat.onAgentSignIn = { [weak self] in self?.signInAgent() }
+    chat.onProposalOpenSchedule = { [weak self] id in
       guard let self else { return }
-      LodyShell.shared.pushNative("schedules", title: String(localized: "native.chat.proposal.schedules", bundle: .lody), from: self)
+      // Schedules opens that schedule's editor once its live list names it.
+      let page = SchedulesController()
+      page.opening = id
+      _ = LodyShell.shared.pushNative(page, title: String(localized: "native.chat.proposal.schedules", bundle: .lody), from: self)
     }
     chat.onEditMessage = { [weak self] body in
       guard let self, let entryId = body["entryId"] as? String, !entryId.isEmpty, entryId == chat.editableMessageID else { return }
@@ -52,6 +57,7 @@ extension SessionController {
   func decideProposal(_ row: ChatRow, accept: Bool) {
     let (entryId, itemId) = (row.entryID, row.itemID)
     let workspaceId = source.state.workspaceId, sessionId = self.sessionId
+    chat.proposalInspectFailures.remove(entryId + "/" + itemId)
     chat.setProposalState(entryId: entryId, itemId: itemId, ChatProposalState(pending: true))
     Task { [weak self] in
       var failure: String?
@@ -68,13 +74,57 @@ extension SessionController {
       }
       guard let self, self.sessionId == sessionId else { return }
       self.chat.setProposalState(entryId: entryId, itemId: itemId, failure.map { ChatProposalState(message: $0) })
+      // A refused edit may be refused because its schedule moved: read it again.
+      if failure != nil, row.proposal?.isEdit == true { self.chat.setProposalInspection(entryId: entryId, itemId: itemId, nil) }
+    }
+  }
+
+  /// Web's `AcpAuthenticationPanel` under an `acp_auth_required` failure: the same machine
+  /// authentication flow Settings › Agents uses, for this session's computer and Agent config.
+  func signInAgent() {
+    let state = source.state
+    guard chat.agentSignInAvailable, let session = state.catalog.session(sessionId),
+      let config = session.agentConfigId, !config.isEmpty else { return }
+    let target = ProviderTarget(workspaceId: state.workspaceId, machineId: session.machineId, id: config)
+    let page = AgentProviderAuthController(target: target, methods: [], scope: .live(["userId": state.userId, "workspaceId": state.workspaceId]),
+      service: .cloud)
+    LodyShell.shared.presentNative(page, title: String(localized: "native.chat.error.signIn", bundle: .lody), detents: [1])
+  }
+
+  /// Web `ScheduleEditProposalNotice` follows the live schedule; the card reads it once per
+  /// appearance (`inspectProposal`) and again after a refused decision.
+  func inspectProposal(_ row: ChatRow) {
+    let (entryId, itemId) = (row.entryID, row.itemID)
+    let workspaceId = source.state.workspaceId, sessionId = self.sessionId
+    Task { [weak self] in
+      var result: RuntimeContract.InspectProposalResult?
+      var failure: String?
+      do {
+        guard let runtime = DataRuntime.current, runtime.sessionId == sessionId, runtime.workspace == workspaceId else {
+          throw OutboxError.scopeExpired
+        }
+        result = try await runtime.perform(RuntimeContract.Calls.InspectProposal.self, .init(
+          workspaceId: workspaceId, sessionId: sessionId, entryId: entryId, itemId: itemId
+        ))
+      } catch {
+        failure = Self.proposalFailure(error)
+      }
+      guard let self, self.sessionId == sessionId else { return }
+      let key = entryId + "/" + itemId
+      if let result {
+        if self.chat.proposalInspectFailures.remove(key) != nil { self.chat.setProposalState(entryId: entryId, itemId: itemId, nil) }
+        self.chat.setProposalInspection(entryId: entryId, itemId: itemId, result)
+      } else if let failure {
+        self.chat.proposalInspectFailures.insert(key)
+        self.chat.setProposalState(entryId: entryId, itemId: itemId, ChatProposalState(message: failure))
+      }
     }
   }
 
   static let proposalCodes = [
     "proposal_not_requester", "proposal_unavailable", "role_duplicate", "role_read_only", "role_forbidden",
     "role_target_unavailable", "schedule_target_unavailable", "schedule_not_owner", "schedule_machine_unsupported",
-    "schedule_trigger_invalid",
+    "schedule_trigger_invalid", "schedule_edit_stale",
   ]
 
   static func proposalFailure(_ error: Error) -> String {
@@ -101,6 +151,11 @@ extension SessionController {
   }
 
   func renderDecisions(_ feed: SessionFeedState) {
+    let live = feed.status == "live"
+    if live, !proposalsLive {
+      chat.proposalInspectRequested = chat.proposalInspectRequested.filter { chat.proposalInspections[$0] != nil }
+    }
+    proposalsLive = live
     let enabled = decisionsEnabled
     let plan = planDecision.state(target: feed.transcript.proposedPlan, enabled: enabled.plan, answered: feed.transcript.answered)
     let retry = errorRetry.state(target: feed.transcript.retryableError, enabled: enabled.retry, answered: feed.transcript.answered)

@@ -41,6 +41,16 @@ extension SessionController {
     }
   }
 
+  /// The text an `agent_warning` (guidance, then message) or `worktree_script` (commands and output)
+  /// opens in the report page; nil for any other item.
+  static func noticeReport(_ item: [String: Any]) -> String? {
+    guard let data = try? JSONSerialization.data(withJSONObject: item),
+      let decoded = try? JSONDecoder().decode(ChatItem.self, from: data) else { return nil }
+    if decoded.type == "worktree_script", let steps = decoded.steps, !steps.isEmpty { return ChatNotice.script(steps) }
+    if decoded.type == "system_notice", decoded.name == "agent_warning" { return ChatNotice.warning(decoded.meta)?.detail }
+    return nil
+  }
+
   func openRelatedSession(_ id: String) {
     guard let target = SessionRelations.target(id, sessions: source.state.catalog.sessions) else { return }
     LodyShell.shared.openSessionFromExternal(target)
@@ -126,6 +136,15 @@ extension SessionController {
       ?? Self.item(in: feed?.state.entriesJSON ?? "[]", entryId: entryId, itemId: itemId)
     if item?["type"] as? String == "system_notice", item?["name"] as? String == "chat_failed" {
       open("agent-error", item?["meta"] as? [String: Any] ?? [:], present: true, from: source)
+      return
+    }
+    if let item, let report = Self.noticeReport(item) {
+      open("agent-error", ["message": report], present: true, from: source)
+      return
+    }
+    if item?["type"] as? String == "system_notice", item?["name"] as? String == "session_fork_origin",
+       let meta = item?["meta"] as? [String: Any], let id = meta["sourceSessionId"] as? String, !id.isEmpty {
+      openRelatedSession(id)
       return
     }
     guard feed?.state.status == "live" else {
@@ -231,8 +250,9 @@ extension SessionController {
       chat.composer.setMentionItems("null")
       return
     }
+    let mentionSessionId = isDraftTab ? (session.parentSessionId ?? sessionId) : sessionId
     let source = MentionSource(
-      workspaceId: state.workspaceId, sessionId: sessionId, cliType: session.cliType, agentType: session.agentType
+      workspaceId: state.workspaceId, sessionId: mentionSessionId, cliType: session.cliType, agentType: session.agentType
     )
     guard mentions?.source != source || mentions?.userId != state.userId else { return }
     let store = MentionCatalogStore(source: source, userId: state.userId)

@@ -234,7 +234,7 @@ enum InboxSections {
     case .focus, .later:
       row.actions = [listAction(statusActions.settle, "home.status.settle", "checkmark.circle"), listAction(statusActions.later, "home.status.later", "clock")]
     case .settled:
-      row.actions = [SessionRows.archive(false)]
+      row.actions = [SessionRows.archive(false), listAction(statusActions.focus, "home.status.focus", "arrow.uturn.backward.circle")]
     case .pinned:
       break
     }
@@ -526,5 +526,28 @@ enum InboxSections {
     section.header = header
     section.rows = rows
     return section
+  }
+}
+
+extension StatusViewArea {
+  /// The Home list section rendering this area.
+  var sectionId: String {
+    switch self {
+    case .focus: InboxSections.focusId
+    case .pinned(nil): InboxSections.pinnedId
+    case .pinned(let id?): InboxSections.pinSectionPrefix + id
+    }
+  }
+
+  init?(sectionId: String) {
+    if sectionId == InboxSections.focusId {
+      self = .focus
+    } else if sectionId == InboxSections.pinnedId {
+      self = .pinned(nil)
+    } else if sectionId.hasPrefix(InboxSections.pinSectionPrefix) {
+      self = .pinned(String(sectionId.dropFirst(InboxSections.pinSectionPrefix.count)))
+    } else {
+      return nil
+    }
   }
 }

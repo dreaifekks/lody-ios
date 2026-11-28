@@ -8,6 +8,12 @@ struct SessionComposerService {
   var tier: @MainActor (_ workspaceId: String, _ userId: String) async -> String?
   /// Agent Roles readable by this user (runtime `agentRoles` list).
   var roles: @MainActor (_ workspaceId: String) async throws -> [RuntimeContract.AgentRoleItem] = { _ in [] }
+  /// Asks the computer to probe an agent config the options list without a capability (the
+  /// new-chat page's `creationOptions` with `agentConfigId`); the result arrives as changed options.
+  var probe: @MainActor (_ workspaceId: String, _ projectId: String?, _ agentConfigId: String) async -> Void = { _, _, _ in }
+  /// The agent config's configured name from the computer's synced configs, whether or not it is
+  /// online (creation options list only online agents).
+  var configName: @MainActor (_ machineId: String, _ agentConfigId: String) -> String? = { _, _ in nil }
 
   static let live = SessionComposerService(
     options: { workspaceId, projectId in
@@ -28,12 +34,30 @@ struct SessionComposerService {
       return try await runtime.workspaceCall(RuntimeContract.Calls.AgentRoles.self) { workspace, userId in
         .list(.init(workspaceId: workspace, userId: userId))
       }.roles
+    },
+    probe: { workspaceId, projectId, agentConfigId in
+      guard let runtime = DataRuntime.current else { return }
+      var body: [String: Any] = ["workspaceId": workspaceId, "agentConfigId": agentConfigId]
+      if let projectId { body["projectId"] = projectId }
+      let payload = SessionController.json(body)
+      _ = try? await withCheckedThrowingContinuation { (done: CheckedContinuation<String, Error>) in
+        runtime.creationOptions(payload, sink: .continuation(done))
+      }
+    },
+    configName: { machineId, agentConfigId in
+      RemoteSettingsContext.current().agentUsage[machineId]?.configs.first { $0.id == agentConfigId }?.name
     }
   )
 }
 
 @MainActor
 final class SessionComposerModel {
+  private struct OptionsRead {
+    var workspaceId: String
+    var projectId: String?
+    var session: SessionItem
+  }
+
   var changed: (() -> Void)?
   private(set) var capability: Capability?
   private(set) var tier: String?
@@ -45,7 +69,15 @@ final class SessionComposerModel {
   private var restored = ""
   private var snapshotChoice: ModelChoice?
   private var capabilityKey: String?
-  private var capabilityTask: Task<Void, Never>?
+  private(set) var capabilityTask: Task<Void, Never>?
+  /// The last options read failed, or the runtime listed this conversation's computer before
+  /// its capability or agent caught up; `optionsChanged` reads it again.
+  private var optionsRead: OptionsRead?
+  /// The conversation's agent config was probed once for a missing capability (per load key).
+  private var probed = false
+  private(set) var probeTask: Task<Void, Never>?
+  /// The agent config's synced name, for when the options do not list its agent.
+  private var configuredName: String?
   private var tierKey = ""
   private var tierTimer: Timer?
   /// The conversation's agent: it never changes here (web locks the Agent row once a chat has history).
@@ -53,6 +85,8 @@ final class SessionComposerModel {
   private var agentKind: (cliType: String, agentType: String) = ("", "")
   private var machineId = ""
   private var agentConfigId: String?
+  /// Resolved agent config id (from session metadata, or matched from options for legacy sessions).
+  private(set) var matchedAgentConfigId: String?
   /// Agent configs online on the conversation's computer, from the creation options.
   private var online: Set<String> = []
   /// Readable Roles; nil until listed, and then no Role is claimed either way.
@@ -73,6 +107,7 @@ final class SessionComposerModel {
 
   isolated deinit {
     capabilityTask?.cancel()
+    probeTask?.cancel()
     rolesTask?.cancel()
     tierTimer?.invalidate()
   }
@@ -110,8 +145,12 @@ final class SessionComposerModel {
     agentKind = (session.cliType, session.agentType)
     machineId = session.machineId
     agentConfigId = session.agentConfigId
+    matchedAgentConfigId = session.agentConfigId
     capabilityKey = key
     capabilityTask?.cancel()
+    optionsRead = nil
+    probed = false
+    configuredName = session.agentConfigId.flatMap { service.configName(session.machineId, $0) }
     loadRoles(workspaceId)
     // A plain chat's `<machine>:unassigned` project is not in the catalog: still load the
     // workspace's options, or the composer loses its model, reasoning and permission controls.
@@ -119,21 +158,52 @@ final class SessionComposerModel {
       capability = nil
       return
     }
-    let service = service
+    readOptions(.init(workspaceId: workspaceId, projectId: projectId, session: session), key: key, retry: false)
+  }
+
+  /// The runtime reports changed creation options (a computer caught up, came online or the
+  /// runtime became ready): read them again while the last read left this conversation's
+  /// capability or agent unlisted.
+  func optionsChanged() {
+    guard let read = optionsRead, let key = capabilityKey else { return }
+    readOptions(read, key: key, retry: true)
+  }
+
+  private func readOptions(_ read: OptionsRead, key: String, retry: Bool) {
+    optionsRead = read
+    capabilityTask?.cancel()
+    let service = service, session = read.session
     capabilityTask = Task { [weak self] in
-      let options = try? await service.options(workspaceId, projectId)
+      let options = try? await service.options(read.workspaceId, read.projectId)
       guard let self, !Task.isCancelled, self.capabilityKey == key else { return }
-      // A failed read (runtime not ready, computer unreachable) is retried on the next render.
-      if options == nil { self.capabilityKey = nil }
-      self.capability = options.flatMap {
-        CreateLogic.capability(
-          in: $0.capabilities, machineId: session.machineId, configId: session.agentConfigId,
-          cliType: session.cliType, agentType: session.agentType)
+      // A retry keeps what an earlier read of this conversation found: the computer drops out of
+      // the options again while its stream imports updates or reconnects.
+      guard let options else {
+        if !retry {
+          self.capability = nil
+          self.agentName = nil
+          self.online = []
+          self.changed?()
+        }
+        return
       }
-      let agents = (options?.agents ?? []).filter { $0.machineId == session.machineId }
+      let capability = CreateLogic.capability(
+        in: options.capabilities, machineId: session.machineId, configId: session.agentConfigId,
+        cliType: session.cliType, agentType: session.agentType)
+      let agents = options.agents.filter { $0.machineId == session.machineId }
+      let matched = agents.first { $0.id == session.agentConfigId }
+        ?? agents.first { session.agentConfigId == nil && $0.cliType == session.cliType && $0.agentType == session.agentType }
+      let agentName = matched?.name
+      if let id = matched?.id { self.matchedAgentConfigId = id }
       self.online = Set(agents.map(\.id))
-      self.agentName = agents.first { $0.id == session.agentConfigId }?.name
-        ?? agents.first { session.agentConfigId == nil && $0.cliType == session.cliType && $0.agentType == session.agentType }?.name
+      self.capability = capability ?? (retry ? self.capability : nil)
+      self.agentName = agentName ?? (retry ? self.agentName : nil)
+      if let configId = session.agentConfigId, let name = service.configName(session.machineId, configId) { self.configuredName = name }
+      if self.capability != nil && self.agentName != nil { self.optionsRead = nil }
+      if self.capability == nil, !self.probed, let configId = session.agentConfigId, self.online.contains(configId) {
+        self.probed = true
+        self.probeTask = Task { await service.probe(read.workspaceId, read.projectId, configId) }
+      }
       self.changed?()
     }
   }
@@ -257,6 +327,8 @@ final class SessionComposerModel {
   /// computer's options, as the collapsed mark already shows the agent from the session alone.
   private var displayAgentName: String? {
     if let agentName, !agentName.isEmpty { return agentName }
+    if let configuredName, !configuredName.isEmpty { return configuredName }
+    if agentKind.cliType == "custom" { return String(localized: "settings.providers.custom", bundle: .lody) }
     return agentKind.agentType.isEmpty ? nil : RemoteSettingsSections.agentName(agentKind.agentType)
   }
 
@@ -300,6 +372,8 @@ final class SessionComposerModel {
       "permissions": (permission?.options ?? []).map { ["id": $0.id, "title": $0.name, "description": $0.description ?? ""] },
       "modelId": value.modelId ?? "",
       "effort": value.effort ?? "",
+      "displayModelId": CreateLogic.resolvedModelId(capability, modelId: value.modelId) ?? "",
+      "displayEffort": CreateLogic.resolvedEffort(capability, value) ?? "",
       "models": (capability?.models ?? []).map { ["id": $0.id, "title": $0.name] },
       "efforts": CreateLogic.effortsFor(capability, modelId: value.modelId).map { ["id": $0, "title": $0] },
     ]

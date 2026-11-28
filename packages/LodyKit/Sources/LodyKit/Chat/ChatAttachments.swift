@@ -342,7 +342,8 @@ final class ChatAttachmentBar: CKAttachmentStrip {
     let ids = Set(attachments.map(\.id))
     projected = projected.filter { ids.contains($0.key) }
     let side = attachments.isEmpty ? Self.compactTileSide : Self.tileSide
-    if style.tileSide != side { style.tileSide = side }
+    // A new tile size rebuilds every pill, so the last one leaving keeps its size and animates out.
+    if style.tileSide != side && !(items + cards).isEmpty { style.tileSide = side }
     super.render(items + cards, animatedRemoval: animatedRemoval)
   }
 }

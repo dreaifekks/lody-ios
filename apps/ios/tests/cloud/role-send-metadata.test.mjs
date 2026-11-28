@@ -77,7 +77,7 @@ test('deleted session metadata cannot authorize a Role send', async () => {
   });
 });
 
-test('session opening waits for metadata and negotiates Roost capabilities with the owner', async () => {
+async function loadLifecycle() {
   const bundle = await build({
     entryPoints: ['packages/cloud-runtime/src/runtime/handlers/lifecycle.ts'],
     bundle: true,
@@ -97,16 +97,22 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
         export const openSession = (...args) => { globalThis.__target = args[6]; };
         export const ensureSession = () => {}, closeSession = () => {}, loadOlderSession = () => {}, releaseReserve = () => {},
           traceSessionResume = () => {}, traceStalledReads = () => {},
-          startAcceptedInputs = () => {}, resumeAcceptedInputs = () => {}, stopSessions = () => {};
+          startAcceptedInputs = () => {}, resumeAcceptedInputs = () => {}, resumeSessions = () => {}, stopSessions = () => {};
       `,
           }));
         },
       },
     ],
   });
-  const { registerLifecycle } = await import(
-    `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
-  );
+  return (
+    await import(
+      `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`
+    )
+  ).registerLifecycle;
+}
+
+test('Roost opening can use Streams before publication and machine capability hints reach the device', async () => {
+  const registerLifecycle = await loadLifecycle();
   const handlers = new Map();
   const state = {
     workspace: 'w',
@@ -131,7 +137,7 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
       protocolCapabilities: {
         sessionHistory: SESSION_HISTORY_PROTOCOL_VERSION,
         sessionHistoryIncremental: 1,
-        sessionHistoryWatch: 1,
+        sessionHistorySubscription: 1,
         sessionHistoryInspection: 2,
         sessionInputAcceptance: 1,
         sessionInputDispatch: 1,
@@ -141,13 +147,15 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     const target = globalThis.__target();
     assert.equal(globalThis.__target.legacyFallbackAllowed(), false);
     assert.equal(target.isCurrent(), true);
-    const { isCurrent, ...capabilities } = target;
+    const { isCurrent, getHistoryProof, cloud, ...capabilities } = target;
+    assert.equal(typeof getHistoryProof, 'function');
+    assert.equal(cloud.metadata().roostCloudAuthor, undefined);
     assert.deepEqual(capabilities, {
       backend: 'roost',
       accountId: 'u',
       machineId: 'm',
       incremental: true,
-      watch: true,
+      live: true,
       acceptsInput: true,
       dispatchesInput: true,
       isArchived: false,
@@ -162,10 +170,19 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     flock.set(['m', 'machine-m', 'protocolCapabilities'], {
       sessionHistory: String(SESSION_HISTORY_PROTOCOL_VERSION),
       sessionHistoryIncremental: 1,
-      sessionHistoryWatch: 1,
+      sessionHistorySubscription: 1,
     });
     flock.commit();
-    assert.throws(() => globalThis.__target(), /roost_history_unsupported/);
+    const withoutOwnerProtocol = globalThis.__target();
+    assert.equal(withoutOwnerProtocol.backend, 'roost');
+    assert.equal(typeof withoutOwnerProtocol.getHistoryProof, 'function');
+    assert.equal(
+      withoutOwnerProtocol.cloud.metadata().roostCloudAuthor,
+      undefined,
+    );
+    assert.equal(withoutOwnerProtocol.acceptsInput, false);
+    assert.equal(withoutOwnerProtocol.dispatchesInput, false);
+    assert.equal(globalThis.__target.legacyFallbackAllowed(), false);
     flock.set(['m', 'machine-m', 'protocolCapabilities'], {
       sessionHistory: SESSION_HISTORY_PROTOCOL_VERSION,
     });
@@ -173,12 +190,59 @@ test('session opening waits for metadata and negotiates Roost capabilities with 
     const compatible = globalThis.__target();
     assert.equal(compatible.backend, 'roost');
     assert.equal(compatible.incremental, false);
-    assert.equal(compatible.watch, false);
+    assert.equal(compatible.live, false);
     flock.set(['m', 'session-s', 'historyBackend'], 'loro');
     flock.set(['m', 'session-s', 'machineId'], undefined);
     flock.commit();
     assert.deepEqual(globalThis.__target(), { backend: 'loro' });
     assert.equal(globalThis.__target.legacyFallbackAllowed(), true);
+  } finally {
+    delete globalThis.__target;
+  }
+});
+
+test('an open Roost session can observe the publication of its first history binding', async () => {
+  const registerLifecycle = await loadLifecycle();
+  const handlers = new Map();
+  const flock = new Flock('history-binding');
+  const observed = [];
+  registerLifecycle({
+    state: {
+      workspace: 'w',
+      userId: 'u',
+      unhealthy: new Set(),
+      metaReplica: { flock },
+    },
+    channel: { handle: (name, fn) => handlers.set(name, fn) },
+    publishSubscriptions() {},
+    observeMeta: (wake) => {
+      observed.push(wake);
+      return () => {};
+    },
+  });
+  flock.set(['e', 'session-s'], true);
+  flock.set(['m', 'session-s'], { machineId: 'm', historyBackend: 'roost' });
+  flock.set(['e', 'machine-m'], true);
+  flock.set(['m', 'machine-m'], {
+    protocolCapabilities: { sessionHistory: SESSION_HISTORY_PROTOCOL_VERSION },
+  });
+  flock.commit();
+  await handlers.get('openSession')({ sessionId: 's' });
+  try {
+    const owner = globalThis.__target();
+    assert.equal(owner.backend, 'roost');
+    assert.equal(owner.cloud.metadata().roostCloudAuthor, undefined);
+    let notified;
+    const stop = owner.cloud.observe(() => {
+      notified = owner.cloud.metadata().roostCloudAuthor;
+    });
+
+    flock.set(['m', 'session-s', 'roostCloudGeneration'], 'root');
+    flock.set(['m', 'session-s', 'roostCloudAuthor'], 'A'.repeat(43));
+    flock.commit();
+    for (const wake of observed) wake();
+    assert.equal(notified, 'A'.repeat(43));
+    stop();
   } finally {
     delete globalThis.__target;
   }

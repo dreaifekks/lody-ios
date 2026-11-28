@@ -14,7 +14,8 @@ final class SendPreviewController: SessionController {
     let fixture = SendPreviewFixture(options: .init(
       queue: params["queue"] as? Bool == true, steer: params["steer"] as? Bool != false,
       behavior: params["queuedMessageBehavior"] as? String == "guide" ? "guide" : "queue",
-      longContext: params["longContext"] as? Bool == true
+      longContext: params["longContext"] as? Bool == true,
+      lateOptions: params["lateOptions"] as? Bool == true
     ))
     self.fixture = fixture
     let headerPreview = params["headerPreview"] as? Bool == true
@@ -42,6 +43,16 @@ final class SendPreviewController: SessionController {
   isolated deinit {
     fixture.stop()
     if let outboxObserver { NotificationCenter.default.removeObserver(outboxObserver) }
+  }
+
+  /// The computer's options change only once the run-config sheet is open, as when its stream
+  /// catches up while the user looks at the sheet.
+  override func present(_ controller: UIViewController, animated: Bool, completion: (() -> Void)? = nil) {
+    let runConfig = fixture.options.lateOptions && controller.view.accessibilityIdentifier == "session-run-config"
+    super.present(controller, animated: animated) { [weak self] in
+      completion?()
+      if runConfig { self?.composerModel.optionsChanged() }
+    }
   }
 
   override var queuedMessageBehavior: String { fixture.options.behavior }

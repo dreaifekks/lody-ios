@@ -13,15 +13,20 @@ enum AgentRoleRequest: Sendable {
 
 typealias AgentRoleService = @MainActor (AgentRoleRequest) async throws -> AgentRoleSnapshot
 
+extension Notification.Name {
+  static let lodyRolesChanged = Notification.Name("lody.roles-changed")
+}
+
 enum AgentRoleSections {
   static func editable(_ role: AgentRole, userId: String) -> Bool {
     role.ownerUserId == userId && role.name.unicodeScalars.count <= 60
       && role.description.unicodeScalars.count <= 140 && role.promptPrefix.utf16.count <= 32000
   }
 
-  static func readOnlyHint(_ role: AgentRole, userId: String) -> String? {
+  static func readOnlyHint(_ role: AgentRole, userId: String, live: Bool = true) -> String? {
     if role.ownerUserId != userId { return text("readOnly") }
     if !editable(role, userId: userId) { return text("longReadOnly") }
+    if !live { return text("cachedReadOnly") }
     return nil
   }
 

@@ -47,32 +47,6 @@
     "v": 1,
     "gen": 3,
     "kind": "result",
-    "id": "req-shortcut",
-    "method": "shortcutCloud",
-    "payload": {
-      "value": {
-        "token": "synthetic",
-        "expiresIn": 600,
-        "gatewayBaseUrl": "https://gateway.example",
-        "streamId": "stream-1"
-      }
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "error",
-    "id": "req-shortcut",
-    "method": "shortcutCloud",
-    "error": {
-      "code": "shortcut_unavailable",
-      "retryable": false
-    }
-  },
-  {
-    "v": 1,
-    "gen": 3,
-    "kind": "result",
     "id": "req-github",
     "method": "githubMentions",
     "payload": {

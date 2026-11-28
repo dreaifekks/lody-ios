@@ -79,7 +79,9 @@ final class NativeShareCoordinator {
       let projects = InboxSections.sortProjects(state.catalog.projects, sessions: state.catalog.sessions, sort: sort)
         .filter { !SessionRows.isChat($0.id) }
         .map { CreateProject(id: $0.id, machineId: $0.machineId, name: $0.name, rootPath: $0.rootPath) }
-      let catalog = ShareCatalog(userId: state.userId, workspaceId: state.workspaceId, projects: projects, machineNames: state.catalog.machineNames)
+      let catalog = ShareCatalog(
+        userId: state.userId, workspaceId: state.workspaceId, projects: projects,
+        machineNames: state.catalog.machineNames, machineOs: state.catalog.machineOs)
       snapshotCache = (state.key, state.catalog, sort, projects, CreateJSON.encode(catalog))
     }
     guard let cached = snapshotCache else { return }
@@ -96,6 +98,11 @@ final class NativeShareCoordinator {
     prefetch?.cancel()
     let workspaceMode = self.workspaceMode
     prefetch = Task { [weak self] in
+      if ShareStore.prefs() == nil,
+        let prefs = await CreateSessionService.live.readPrefs(CreateSessionService.prefsKey(userId: state.userId, workspaceId: state.workspaceId)) {
+        guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
+        try? ShareStore.writePrefs(prefs)
+      }
       for project in [nil] + projects.prefix(10).map({ Optional($0.id) }) {
         guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
         do {
@@ -104,6 +111,18 @@ final class NativeShareCoordinator {
           try ShareStore.writeOptions(options, target: project ?? "chat")
         } catch { self?.report(error, operation: "options") }
       }
+      guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
+      do {
+        let roles = try await CreateSessionService.live.roles(state.workspaceId)
+        guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
+        try ShareStore.writeRoles(roles, userId: state.userId, workspaceId: state.workspaceId)
+      } catch { self?.report(error, operation: "roles") }
+      guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
+      do {
+        let groups = try await CreateSessionService.live.projectGroups(state.workspaceId)
+        guard !Task.isCancelled, SessionSource.live.state.key == state.key, workspaceMode(state.workspaceId) == .plaintext else { return }
+        try ShareStore.writeProjectGroups(groups, userId: state.userId, workspaceId: state.workspaceId)
+      } catch { self?.report(error, operation: "groups") }
     }
   }
 
@@ -122,13 +141,21 @@ final class NativeShareCoordinator {
     var available = adopted.draft != nil
     if let draft = adopted.draft {
       do {
-        let options = try await CreateSessionService.live.options(draft.workspaceId, draft.projectId)
+        let target = draft.projectId?.hasPrefix(CreateSessionSelection.groupPrefix) == true ? nil : draft.projectId
+        let options = try await CreateSessionService.live.options(draft.workspaceId, target)
         available = options.agents.contains { $0.id == draft.agent.id && $0.machineId == draft.agent.machineId }
         if let model = draft.choice.modelId, !model.isEmpty {
           let capability = CreateLogic.capability(
             in: options.capabilities, machineId: draft.agent.machineId, configId: draft.agent.id,
             cliType: draft.agent.cliType, agentType: draft.agent.agentType)
           available = available && capability?.models.contains { $0.id == model } == true
+        }
+        if available, let roleId = draft.agentRoleId {
+          let roles = try await CreateSessionService.live.roles(draft.workspaceId)
+          let role = roles.first { $0.id == roleId }
+          let bound = role?.targets.first { $0.machineId == draft.agent.machineId && $0.agentConfigId == draft.agent.id }
+          available = role != nil && bound?.state == .configured
+            && (draft.agentRoleRevision == nil || role?.revision == draft.agentRoleRevision)
         }
       } catch {
         // An unavailable network does not invalidate a cached selection: the ordinary outbox owns its failure and draft restoration.

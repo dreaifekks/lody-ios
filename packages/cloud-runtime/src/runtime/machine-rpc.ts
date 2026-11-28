@@ -1,4 +1,5 @@
 import { clientFor } from './session';
+import type { StreamError } from '@loro-dev/streams-client';
 
 type Grant = () => Promise<{ token: string; gatewayBaseUrl: string }>;
 
@@ -7,24 +8,25 @@ export type RpcReply = {
   error?: { code?: string; message?: string; data?: unknown };
 };
 
-export async function machineRpc(
+export class MachineRpcTransportError extends Error {
+  constructor(readonly code: 'timeout' | 'network_error') {
+    super(code);
+  }
+}
+
+function rpcStreamError({ code }: StreamError): Error {
+  return code === 'timeout' || code === 'network_error'
+    ? new MachineRpcTransportError(code)
+    : new Error(code);
+}
+
+async function prepareReply(
   workspaceId: string,
   machineId: string,
-  method: string,
-  params: unknown,
-  getGrant: Grant,
+  grant: Grant,
   signal: AbortSignal,
-  onProgress?: (progress: Record<string, unknown>) => void,
-  timeoutMs = 30000,
-  /** Called as the request leaves, after its reply stream exists. */
-  onSend?: () => void,
-): Promise<RpcReply> {
-  const grant = async () => {
-    signal.throwIfAborted();
-    const value = await getGrant();
-    signal.throwIfAborted();
-    return value;
-  };
+  timeoutMs: number,
+) {
   const replyTo = `${workspaceId}:rpc:res:${machineId}:${crypto.randomUUID()}`;
   const response = await clientFor(replyTo, grant);
   signal.throwIfAborted();
@@ -32,13 +34,47 @@ export async function machineRpc(
     contentType: 'application/json',
     ttlSeconds: Math.max(300, Math.ceil(timeoutMs / 1000) + 60),
   });
-  if (!created.ok) throw new Error(created.result.code);
+  if (!created.ok) throw rpcStreamError(created.result);
   signal.throwIfAborted();
+  return { replyTo, response };
+}
+
+function scopedGrant(getGrant: Grant, signal: AbortSignal): Grant {
+  return async () => {
+    signal.throwIfAborted();
+    const value = await getGrant();
+    signal.throwIfAborted();
+    return value;
+  };
+}
+
+async function appendRequest(args: {
+  workspaceId: string;
+  machineId: string;
+  method: string;
+  params: unknown;
+  replyTo: string;
+  id: string;
+  timeoutMs: number;
+  grant: Grant;
+  signal: AbortSignal;
+  onSend?: () => void;
+}) {
+  const {
+    workspaceId,
+    machineId,
+    method,
+    params,
+    replyTo,
+    id,
+    timeoutMs,
+    grant,
+    signal,
+    onSend,
+  } = args;
   const client = await clientFor(`${workspaceId}:rpc:req:${machineId}`, grant);
   signal.throwIfAborted();
-  const id = crypto.randomUUID(),
-    now = Date.now();
-  signal.throwIfAborted();
+  const now = Date.now();
   onSend?.();
   const sent = await client.append({
     part: {
@@ -57,35 +93,151 @@ export async function machineRpc(
       }),
     },
   });
-  if (!sent.ok) throw new Error(sent.result.code);
+  if (!sent.ok) throw rpcStreamError(sent.result);
+}
+
+function decodeReplies(bytes: Uint8Array): (RpcReply & { id?: string })[] {
+  const parsed = JSON.parse(new TextDecoder().decode(bytes));
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+export async function machineRpc(
+  workspaceId: string,
+  machineId: string,
+  method: string,
+  params: unknown,
+  getGrant: Grant,
+  signal: AbortSignal,
+  onProgress?: (progress: Record<string, unknown>) => void,
+  timeoutMs = 30000,
+  id: string = crypto.randomUUID(),
+  /** Called as the request leaves, after its reply stream exists. */
+  onSend?: () => void,
+): Promise<RpcReply> {
+  const grant = scopedGrant(getGrant, signal);
+  const { replyTo, response } = await prepareReply(
+    workspaceId,
+    machineId,
+    grant,
+    signal,
+    timeoutMs,
+  );
+  await appendRequest({
+    workspaceId,
+    machineId,
+    method,
+    params,
+    replyTo,
+    id,
+    timeoutMs,
+    grant,
+    signal,
+    onSend,
+  });
   let offset = '-1';
   while (!signal.aborted) {
     const read = await response.readOnce({ offset, live: 'long-poll', signal });
-    if (!read.ok) throw new Error(read.result.code);
+    if (!read.ok) throw rpcStreamError(read.result);
     offset = read.result.nextOffset;
     if (!read.result.payload) continue;
-    const parsed = JSON.parse(
-      new TextDecoder().decode(read.result.payload.body),
-    );
-    for (const reply of Array.isArray(parsed) ? parsed : [parsed])
-      if (reply.id === id) {
-        if (
-          (reply.result?.type === 'machine/acp-binary-progress' &&
-            [
-              'machine/acp-capabilities-refresh',
-              'machine/acp-binary-install',
-              'machine/acp-binary-status',
-            ].includes(method)) ||
-          (method === 'machine/acp-authenticate' &&
-            reply.result?.type === 'machine/acp-authentication-progress')
-        ) {
-          onProgress?.(reply.result);
-          continue;
-        }
-        return reply as RpcReply;
+    for (const reply of decodeReplies(read.result.payload.body)) {
+      if (reply.id !== id) continue;
+      const progress = reply.result as Record<string, unknown> | undefined;
+      if (
+        (progress?.type === 'machine/acp-binary-progress' &&
+          [
+            'machine/acp-capabilities-refresh',
+            'machine/acp-binary-install',
+            'machine/acp-binary-status',
+          ].includes(method)) ||
+        (method === 'machine/acp-authenticate' &&
+          progress?.type === 'machine/acp-authentication-progress')
+      ) {
+        onProgress?.(progress);
+        continue;
       }
+      return reply;
+    }
   }
   throw new Error('cancelled');
+}
+
+export async function subscribeMachineHistory(options: {
+  workspaceId: string;
+  machineId: string;
+  params: ContentEnvelope;
+  closeParams: () => Promise<ContentEnvelope>;
+  getGrant: Grant;
+  signal: AbortSignal;
+  timeoutMs: number;
+  onReply: (reply: RpcReply) => Promise<boolean>;
+}): Promise<void> {
+  const { workspaceId, machineId, getGrant, signal, timeoutMs, params } =
+    options;
+  const grant = scopedGrant(getGrant, signal);
+  const { replyTo, response } = await prepareReply(
+    workspaceId,
+    machineId,
+    grant,
+    signal,
+    timeoutMs,
+  );
+  const id = crypto.randomUUID();
+  let closed = false;
+  try {
+    await appendRequest({
+      workspaceId,
+      machineId,
+      method: 'session/history-subscribe',
+      params,
+      replyTo,
+      id,
+      timeoutMs,
+      grant,
+      signal,
+    });
+    for await (const event of response.live({
+      offset: '-1',
+      mode: 'long-poll',
+      signal,
+    })) {
+      signal.throwIfAborted();
+      // Reopen from an owner-confirmed checkpoint after a broken reply stream.
+      if (event.type === 'error' || event.type === 'reconnecting')
+        throw new Error(event.error.code);
+      if (event.type !== 'data') continue;
+      for (const reply of decodeReplies(event.payload.body)) {
+        if (reply.id === id && (await options.onReply(reply))) {
+          closed = true;
+          return;
+        }
+      }
+    }
+    signal.throwIfAborted();
+    throw new Error('history_subscription_closed');
+  } finally {
+    if (!closed) {
+      // The open append may have reached the computer even if the upload failed.
+      // Close is separately bounded and retains the original reply stream and proof.
+      const closeSignal = AbortSignal.timeout(10_000);
+      void options
+        .closeParams()
+        .then((closeParams) =>
+          appendRequest({
+            workspaceId,
+            machineId,
+            method: 'session/history-unsubscribe',
+            params: closeParams,
+            replyTo,
+            id: crypto.randomUUID(),
+            timeoutMs: 10_000,
+            grant: scopedGrant(getGrant, closeSignal),
+            signal: closeSignal,
+          }),
+        )
+        .catch(() => {});
+    }
+  }
 }
 
 // Code Collab and file/preview payloads travel inside an AES-GCM envelope whose

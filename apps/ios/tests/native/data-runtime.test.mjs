@@ -543,7 +543,8 @@ async function providerHandlerFixture(t) {
   const events = [],
     replies = new Map(),
     services = [],
-    transitions = [];
+    transitions = [],
+    workspaceRefreshes = [];
   let sequence = 0,
     cleanup;
   const channel = createChannel((text) => {
@@ -565,6 +566,9 @@ async function providerHandlerFixture(t) {
     watch: () => {
       transitions.push([state.workspace, state.userId]);
       state.metaReplica = { flock: new Flock('synthetic-new') };
+    },
+    refreshWorkspace() {
+      workspaceRefreshes.push([state.workspace, state.userId]);
     },
     startPresence() {},
     stopPresence() {},
@@ -642,7 +646,15 @@ async function providerHandlerFixture(t) {
     };
     return cleanup;
   };
-  return { state, call, events, services, transitions, blockCleanup };
+  return {
+    state,
+    call,
+    events,
+    services,
+    transitions,
+    workspaceRefreshes,
+    blockCleanup,
+  };
 }
 
 const providerScope = {
@@ -761,6 +773,7 @@ test('overlapping starts preserve the old scope until provider cleanup completes
   assert.equal((await first).kind, 'result');
   assert.equal((await latest).kind, 'result');
   assert.deepEqual(f.transitions, [['workspace-c', 'user-c']]);
+  assert.deepEqual(f.workspaceRefreshes, [['workspace-c', 'user-c']]);
   assert.deepEqual(
     (
       await f.call('agentProviderOperation', {

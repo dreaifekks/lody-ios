@@ -62,15 +62,17 @@ def rail_photo_pixels(identifier):
 
 
 
-# The family button is hidden from AX (VoiceOver exposes a custom action on
-# the parent). Its physical target is the bottom 40 points of the parent frame.
-# Probe that contract directly, without locating text ink or invoking AX actions.
+# The family buttons are hidden from AX (VoiceOver exposes custom actions on
+# the parent and first child). Folded, the count line is the bottom 40 points
+# of the parent frame. Expanded, that line is gone and the first child's leading
+# gutter folds the family. Probe both targets directly by coordinate.
 FAMILY_HEIGHT = 40
+GUTTER_WIDTH = 52
 PARENT = 'st-ship'
 CHILDREN = {'st-ship-mac', 'st-ship-fix'}
 
 
-def family_frame(expanded):
+def family_frames(expanded):
     previous = None
 
     def ready(items):
@@ -78,28 +80,34 @@ def family_frame(expanded):
         state = catalog.text('home.tree.expanded' if expanded else 'home.tree.collapsed')
         parent = next((i for i in items if i.get('AXUniqueId') == PARENT
                        and state in (i.get('AXValue') or '')), None)
-        visible = {i.get('AXUniqueId') for i in items}
-        children_match = CHILDREN <= visible if expanded else CHILDREN.isdisjoint(visible)
+        visible = {i.get('AXUniqueId'): i['frame'] for i in items if i.get('AXUniqueId')}
+        children_match = CHILDREN <= visible.keys() if expanded else CHILDREN.isdisjoint(visible.keys())
         if not parent or not children_match or 'session-input' in visible:
             previous = None
             return None
         frame = parent['frame']
-        geometry = tuple(frame[key] for key in ('x', 'y', 'width', 'height'))
+        first = min((visible[c] for c in CHILDREN), key=lambda f: f['y']) if expanded else None
+        geometry = tuple(f[key] for f in [frame] + ([first] if first else []) for key in ('x', 'y', 'width', 'height'))
         settled = previous is not None and all(abs(a - b) < .5 for a, b in zip(previous, geometry))
         previous = geometry
-        return frame if settled else None
+        return (frame, first) if settled else None
 
-    frame = ui.wait(ready, f'Parent and both children did not settle with expanded={expanded}')
-    assert frame['height'] > FAMILY_HEIGHT, ('Parent content must precede its family target', frame)
-    return frame
+    frame, first = ui.wait(ready, f'Parent and both children did not settle with expanded={expanded}')
+    if expanded:
+        # No count line between the opener and its children: they sit directly below it.
+        assert frame['height'] <= FAMILY_HEIGHT + 24, ('An expanded opener drops its count line', frame)
+        assert abs(first['y'] - (frame['y'] + frame['height'])) < 2, ('The first child follows its opener', frame, first)
+    else:
+        assert frame['height'] > FAMILY_HEIGHT, ('Parent content must precede its family target', frame)
+    return frame, first
 
 
 def tap_at(point):
     ui.axe('tap', '-x', str(point[0]), '-y', str(point[1]), '--tap-style', 'physical')
 
 
-def open_parent_above_family(expanded):
-    frame = family_frame(expanded)
+def open_parent_above_family():
+    frame, _ = family_frames(False)
     # One point above the boundary is blank parent content, where the old
     # overlapping button stole the conversation tap.
     tap_at((frame['x'] + frame['width'] * .75,
@@ -108,24 +116,28 @@ def open_parent_above_family(expanded):
     ui.wait(lambda items: any(i.get('AXUniqueId') == 'chat-navigation-title'
                              and 'Ship 0.42 release' in (i.get('AXLabel') or '') for i in items),
             'The boundary tap did not open the parent conversation')
-    ui.capture('states-parent-from-' + ('expanded' if expanded else 'collapsed'))
+    ui.capture('states-parent-from-collapsed')
     ui.axe('tap', '--id', 'BackButton')
-    family_frame(expanded)
+    family_frames(False)
 
 
-open_parent_above_family(True)
-# Blank space across the row must toggle, including near its top and bottom,
-# not just the count/chevron. Every coordinate gets a collapse and an expand;
-# fresh frames avoid assuming diffable updates leave the row in the same place.
-for index, (fraction, offset) in enumerate(((.5, 2), (.75, 22), (.95, 42))):
-    for expanded in (True, False):
-        frame = family_frame(expanded)
-        tap_at((frame['x'] + frame['width'] * fraction,
-                frame['y'] + frame['height'] - FAMILY_HEIGHT + offset))
-        family_frame(not expanded)
-        if index == 0 and expanded:
-            ui.capture('states-folded')
-            open_parent_above_family(False)
+def fold_from_first_child(fraction):
+    _, first = family_frames(True)
+    tap_at((first['x'] + GUTTER_WIDTH * fraction, first['y'] + first['height'] / 2))
+    family_frames(False)
+
+
+# Blank space across the folded count line must expand, including near its top
+# and bottom, not just the count/chevron; the first child's gutter folds again.
+for index, (fraction, offset) in enumerate(((.5, 2), (.75, 22), (.95, 38))):
+    fold_from_first_child((.3, .5, .9)[index])
+    if index == 0:
+        ui.capture('states-folded')
+        open_parent_above_family()
+    frame, _ = family_frames(False)
+    tap_at((frame['x'] + frame['width'] * fraction,
+            frame['y'] + frame['height'] - FAMILY_HEIGHT + offset))
+    family_frames(True)
 ui.capture('states-expanded')
 assert rail_photo_pixels('label:group:states:lody-ios') > 20, 'A project with an owner photo shows it in the heading'
 ui.axe('drag', '--start-x', '200', '--start-y', '700', '--end-x', '200', '--end-y', '300', '--duration', '.4', '--post-delay', '.6')
@@ -146,4 +158,4 @@ spoken = ' '.join([hit.get('AXLabel') or ''] + [child.get('AXLabel') or '' for c
 assert 'watermark' in spoken, ('A message match shows its snippet', spoken)
 assert hit['frame']['height'] > 58, ('The snippet takes a second line', hit['frame'])
 ui.capture('states-search')
-print('PASS: the Design states workspace shows every rail state, keeps parent navigation separate from the full family touch target, toggles both children and highlights message search hits.')
+print('PASS: the Design states workspace shows every rail state, keeps parent navigation separate from the folded family line, folds from the first child gutter, toggles both children and highlights message search hits.')

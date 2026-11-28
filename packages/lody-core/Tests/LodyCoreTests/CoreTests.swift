@@ -19,7 +19,7 @@ final class CoreTests: XCTestCase {
     health.started(at: 100)
     XCTAssertTrue(health.timedOut(at: 120))
     health.acknowledged(at: 120)
-    health.suspend()
+    health.suspend(at: 120)
     XCTAssertFalse(health.timedOut(at: 900))
     health.resume(at: 900)
     XCTAssertTrue(health.ready)

@@ -10,6 +10,8 @@ struct ChatComposerOption: Decodable {
 struct ChatComposerOptions: Decodable {
   var modelId = ""
   var effort = ""
+  var displayModelId: String?
+  var displayEffort: String?
   var permissionId: String?
   var permissions: [ChatComposerOption]?
   var fast: Bool?
@@ -30,6 +32,9 @@ extension ChatComposerOptions {
       ?? (modelId.isEmpty ? String(localized: "native.chat.composer.defaultModel", bundle: .lody) : modelId)
   }
   var effortTitle: String {
+    effortTitle(for: effort)
+  }
+  func effortTitle(for effort: String) -> String {
     let title = efforts.first { $0.id == effort }?.title ?? effort
     switch title.lowercased() {
     case "": return String(localized: "native.chat.composer.defaultEffort", bundle: .lody)

@@ -20,6 +20,7 @@ export async function workspaceRoleMentions(
   getPresence: () => MachinePresence,
   machineNames: Record<string, string> | Map<string, string> = {},
   preferredMachineId?: string,
+  unhealthy?: ReadonlySet<string>,
 ): Promise<MentionCatalog> {
   const { flock } = await openSettings(
     `${workspaceId}:wf:workspace`,
@@ -33,6 +34,7 @@ export async function workspaceRoleMentions(
     getPresence(),
     machineNames,
     preferredMachineId,
+    unhealthy,
   );
 }
 
@@ -43,11 +45,13 @@ export function roleMentions(
   presence: MachinePresence,
   machineNames: Record<string, string> | Map<string, string> = {},
   preferredMachineId?: string,
+  unhealthy?: ReadonlySet<string>,
 ): MentionCatalog {
   const machineLabel = (id: string) =>
     machineNames instanceof Map ? machineNames.get(id) : machineNames[id];
   const items: MentionItem[] = [];
   const itemMachines = new Map<string, string>();
+  let incomplete = presence.state !== 'live';
   for (const row of rows) {
     if (
       row.key.length !== 2 ||
@@ -59,6 +63,10 @@ export function roleMentions(
     const role = readRole(row.value, row.key[1]);
     if (!role || !readableRole(role, userId)) continue;
     for (const target of role.targets) {
+      if (unhealthy?.has(target.machineId)) {
+        incomplete = true;
+        continue;
+      }
       const agent = machines
         .get(target.machineId)
         ?.get(['agentConfig', target.agentConfigId]) as
@@ -104,7 +112,7 @@ export function roleMentions(
       a.name.localeCompare(b.name) ||
       a.path.localeCompare(b.path),
   );
-  return { items, truncated: false, incomplete: presence.state !== 'live' };
+  return { items, truncated: false, incomplete };
 }
 
 /** A Role as one session's first turn runs it (web `bindAgentRoleTarget` + snapshot). */

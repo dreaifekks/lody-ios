@@ -8,6 +8,12 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   let chat = LodyChatView(frame: .zero)
   let source: SessionSource
   let sessionId: String
+  /// Local unsent Tab (Web draftTabs); nil once the catalog holds the created session.
+  var draftTab: SessionItem?
+  var draftTabSubmitted = false
+  var draftRestoreToken = 0
+  var activeSession: SessionItem? { source.state.catalog.session(sessionId) ?? draftTab }
+  var isDraftTab: Bool { draftTab != nil && !draftTabSubmitted && source.state.catalog.session(sessionId) == nil }
   var environment: SessionSendEnvironment
   private let feedService: SessionFeedService
   private let findQuery: String
@@ -50,6 +56,10 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var mentionSequence = 0
   var editable = ""
   var editCheck = ""
+  /// Whether the last rendered feed was live; edit proposals that could not be read retry on going live.
+  var proposalsLive = false
+  /// Debug fixtures without a live computer still show the sign-in action.
+  var fixtureSignIn = false
   var quotaEntry = "pending"
   var rendered: [String: String] = [:]
   var infoBar: SessionInfoBar?
@@ -57,6 +67,11 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   var githubScope = ""
   var githubUpdates = SessionPullRequestUpdates()
   var githubSettle: Task<Void, Never>?
+  var optionsRefresh: Task<Void, Never>?
+  var connectingShown = false
+  var connectingTask: Task<Void, Never>?
+  /// The open run-config sheet, refreshed when the computer's options arrive.
+  weak var runConfigSheet: CreateRunConfigSheetController?
   private let initialChoice: ModelChoice?
   private var observers: [NSObjectProtocol] = []
   private var findToken = 0
@@ -75,11 +90,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   private var tabViewsKey = ""
   private var tabViewsLoad = 0
   private var browsingVisible = false
-  private var navigationVisit = UUID()
+  var navigationVisit = UUID()
   private var renderedEntries: String?
   private var memberScope = ""
   private var memberTask: Task<Void, Never>?
   var copyService = SessionCopyService.live
+  var shareImageLoading = false
+  weak var shareImageSheet: ChatShareImageController?
   var pendingOwner: (sessionId: String, userId: String)?
   /// Read receipts already sent from this page, by session, so each render does not resend them.
   private var sentReadReceipts: [String: Double] = [:]
@@ -89,7 +106,9 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
        itemDetail: ItemDetailService? = nil, simulator: SimulatorService? = nil, emulator: SimulatorService? = nil,
        pullRequest: @escaping @MainActor (SessionPullRequest, SessionListState) -> PullRequestController = SessionController.livePullRequest,
        browser: BrowserRequest? = nil, messageLinks: SessionMessageLinkService = .live,
-       previewCache: SessionPreviewCache = .shared) {
+       previewCache: SessionPreviewCache = .shared,
+       draftTab: SessionItem? = nil) {
+    self.draftTab = draftTab
     self.previewCache = previewCache
     requestBrowserPreview = browser ?? { state, action, restart, stopProcess in
       guard let runtime = DataRuntime.current, runtime.workspace == state.workspaceId, runtime.userId == state.userId else { throw OutboxError.scopeExpired }
@@ -131,6 +150,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   isolated deinit {
     memberTask?.cancel()
     githubSettle?.cancel()
+    optionsRefresh?.cancel()
+    connectingTask?.cancel()
     browserCheckTask?.cancel()
     feed?.finish()
     for store in devicePreviews.values where !previewCache.isDeviceCached(store) { store.finish() }
@@ -163,17 +184,21 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
       if let action = body["action"] as? String { self?.contextAction(action) }
     }
     wireMentionEvents()
-    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyPreferencesDidChange, .lodyWorkspaceRoleDidChange]).map { name in
+    observers = (source.changes + [UIApplication.didBecomeActiveNotification, .lodyPreferencesDidChange, .lodyWorkspaceRoleDidChange, .lodyWorkspaceEncryptionObserved]).map { name in
       NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
         let activated = note.name == UIApplication.didBecomeActiveNotification
         let viewsChanged = note.name == .lodySessionViewsDidChange
         MainActor.assumeIsolated {
           if viewsChanged { self?.loadTabViews() }
           self?.render()
-          if activated { self?.markViewed() }
+          if activated {
+            self?.markViewed()
+            self?.chat.rereadProposals()
+          }
         }
       }
     }
+    observers.append(observeCreationOptions())
     render()
   }
 
@@ -185,6 +210,8 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     let slug = source.state.workspace?.slug ?? ""
     PushNotifications.shared.visibleRoute = slug.isEmpty ? "" : "/\(slug)/sessions/\(sessionId)"
     markViewed()
+    // Returning from the schedule editor (Open) or another page may have changed an edit proposal's schedule.
+    chat.rereadProposals()
   }
 
   override func viewDidAppear(_ animated: Bool) {
@@ -223,37 +250,54 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
           await WorkspaceMembers.load(userId: state.userId, workspaceId: state.workspaceId) { [weak self] members in
             guard let self, self.source.state.key == state.key else { return }
             self.chat.members = members
-            // Change owner lists the members, so the menu follows the loaded list.
-            if let session = self.source.state.catalog.session(self.sessionId) {
-              self.updateMoreMenu(session)
+            if self.source.state.catalog.session(self.sessionId) != nil {
               self.render()
             }
           }
         }
       }
     }
-    guard let session = state.catalog.session(sessionId) else {
+    if state.catalog.session(sessionId) != nil { draftTab = nil }
+    if let activeSelection = chat.shareSelection {
+      let validScope = state.userId == activeSelection.userId
+        && state.workspaceId == activeSelection.workspaceId
+        && sessionId == activeSelection.sessionId
+        && WorkspaceModePins.shared.mode(activeSelection.workspaceId) == .plaintext
+        && activeSession?.isTabClosed != true
+      if !validScope {
+        chat.endShareSelection()
+        shareImageSheet?.navigationController?.presentingViewController?.dismiss(animated: false)
+      }
+    }
+    guard let session = activeSession else {
       permissionPage?.update(nil, ready: true)
       if listed, !state.loading { LodyShell.shared.close(from: self) }
       return
     }
-    listed = true
+    let draft = isDraftTab
+    if !draft { listed = true }
     if tabViewsKey != state.key {
       tabViewsKey = state.key
       tabViews = [:]
       loadTabViews()
     }
-    markViewed()
-    prepareSimulator(state, session)
     chat.showsThoughts = session.cliType == "builtin" && session.agentType == "deepseek"
-    startFeed(state)
+    if !draft {
+      markViewed()
+      prepareSimulator(state, session)
+      startFeed(state)
+    }
     chat.setAttachmentContext(Self.json(["workspaceId": state.workspaceId, "sessionId": sessionId]))
-    if chat.proposalUserID != state.userId {
+    let signIn = !draft && (fixtureSignIn || state.presence.status(of: session.machineId) == "online" && !session.archived
+      && SessionDecision.canAuthenticate(session, capabilities: state.catalog.machineCapabilities[session.machineId]))
+    if chat.proposalUserID != state.userId || chat.agentSignInAvailable != signIn {
       chat.proposalUserID = state.userId
+      chat.agentSignInAvailable = signIn
       chat.applyRows()
     }
     chat.setNavigationTitle(session.title)
-    let tabs = DirectoryTabs.sessions(current: session, all: state.catalog.sessions)
+    let tabSessions = draft ? state.catalog.sessions + [session] : state.catalog.sessions
+    let tabs = DirectoryTabs.sessions(current: session, all: tabSessions)
     chat.setDirectoryTabs("", symbol: "")
     chat.setNavigationMachine(state.catalog.machineNames[session.machineId] ?? "")
     chat.setNavigationMachineState(state.presence.status(of: session.machineId))
@@ -266,7 +310,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     tabsButton.accessibilityLabel = String(format: String(localized: "session.tabs.count", bundle: .lody), tabs.count)
     // The trailing directory button opens the panel below the header.
     directoryTabs = tabs
-    closedDirectoryTabs = DirectoryTabs.closed(current: session, all: state.catalog.sessions)
+    closedDirectoryTabs = DirectoryTabs.closed(current: session, all: tabSessions)
     if let panel = ChatTabsOverlay.shown(in: (parent ?? self).view) {
       panel.state.tabs = tabItems(directoryTabs)
       panel.state.closed = tabItems(closedDirectoryTabs)
@@ -289,7 +333,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     renderMentions(state, session)
     renderFeed(session)
-    updateMoreMenu(session)
+    updateHeaderButtons()
   }
 
   private func startFeed(_ state: SessionListState) {
@@ -320,9 +364,9 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     }
     chat.setTabClosed(false)
     renderComposer(session, state)
-    renderPermission()
+    if !isDraftTab { renderPermission() }
     chat.transcriptLive = state.status == "live"
-    chat.setEmptyText(String(localized: String.LocalizationValue(state.status == "live" ? "chat.empty.prompt" : "chat.empty.loading"), bundle: .lody))
+    chat.setEmptyText(String(localized: String.LocalizationValue(isDraftTab || state.status == "live" ? "chat.empty.prompt" : "chat.empty.loading"), bundle: .lody))
     guard state.entriesJSON != renderedEntries else {
       if pagingChanged { chat.scheduleUpdate() }
       if state.status == "live" { chat.scrollToTargetTurn() }
@@ -345,8 +389,6 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     return catalog.projects.first { $0.id == session.projectId }?.name ?? ""
   }
 
-  private var creatingTab = false
-  private var attemptedTab: String?
   /// The conversation's Tabs (itself first), for the directory panel.
   private var directoryTabs: [SessionItem] = []
   private var closedDirectoryTabs: [SessionItem] = []
@@ -367,6 +409,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     let index = before.firstIndex { $0.id == id }
     let next = index.flatMap { index in before.dropFirst(index + 1).first ?? before.prefix(index).last }
     let overlay = ChatTabsOverlay.shown(in: (parent ?? self).view)
+    if isDraftTab, id == sessionId, closed {
+      overlay?.close {
+        if let next { self.titleMenuSelected("tab:" + next.id) }
+        else { self.goBack() }
+      }
+      return
+    }
     changingTab = true
     overlay?.state.busy = id
     Task { [weak self] in
@@ -410,52 +459,60 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     overlay = ChatTabsOverlay.present(panel, tabs: items.count, in: host, source: directoryTabs.count > 1 ? tabsButton : chat.tabsAnchorView)
   }
 
+  /// Opens a local draft Tab in the current working directory (matching Web's draftTabs):
+  /// no remote write happens until the user sends the first message.
   private func createTab() {
-    guard !creatingTab, let runtime = DataRuntime.current else { return }
-    if let attemptedTab {
-      LodyShell.shared.openSessionFromExternal(attemptedTab)
-      return
-    }
-    let target = UUID().uuidString.lowercased()
-    attemptedTab = target
-    creatingTab = true
-    render()
-    Task { [weak self] in
-      guard let self else { return }
-      defer { self.creatingTab = false; self.render() }
-      do {
-        // A Tab is a session: the free-plan session quota applies, as on Web.
-        let entitlement = await runtime.billingEntitlement()
-        let result = try await runtime.workspaceCall(RuntimeContract.Calls.CreateTab.self) { workspace, _ in
-          RuntimeContract.CreateTabParams(workspaceId: workspace, sessionId: target, parentSessionId: self.sessionId, preferRoost: LodyPreferences.roostHistoryEnabled, title: String(localized: "session.tabs.defaultTitle", bundle: .lody), billingEntitlement: entitlement)
-        }
-        switch result {
-        case .created:
-          self.attemptedTab = nil
-          LodyShell.shared.openSessionFromExternal(target)
-        case .rejected(let rejected):
-          self.attemptedTab = nil
-          let message = switch rejected.reason {
-          case .freeSessionLimitReached: String(localized: "session.tabs.freeSessionLimit", bundle: .lody)
-          case .workspacePaymentRequired: String(localized: "session.tabs.workspacePaymentRequired", bundle: .lody)
-          default: String(localized: "session.tabs.failed", bundle: .lody)
-          }
-          LodyToastOverlay.shared.show(message: message, kind: .error)
-        case .unknown:
-          LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
-        }
-      } catch {
-        LodyToastOverlay.shared.show(message: String(localized: "session.tabs.unknown", bundle: .lody), kind: .warning)
-      }
+    let state = source.state
+    guard let current = activeSession, state.workspace?.resolvedMode == .plaintext else { return }
+    let rootId = DirectoryTabs.root(current, all: state.catalog.sessions)
+    let owner = state.catalog.session(rootId) ?? current
+    guard !owner.archived else { return }
+    let draft = SessionItem(
+      id: UUID().uuidString.lowercased(),
+      title: String(localized: "session.tabs.defaultTitle", bundle: .lody),
+      status: "idle",
+      archived: false,
+      isTabClosed: false,
+      pinned: false,
+      userId: state.userId.isEmpty ? owner.userId : state.userId,
+      agentConfigId: owner.agentConfigId,
+      projectId: owner.projectId,
+      createdAt: CreateDraftRecord.now(),
+      parentSessionId: rootId,
+      branchName: owner.branchName,
+      baseBranch: owner.baseBranch,
+      machineId: owner.machineId,
+      cliType: owner.cliType,
+      agentType: owner.agentType,
+      projectRun: owner.projectRun,
+      pending: true
+    )
+    if let home = HomeController.current {
+      home.openDraftTab(draft, choice: composerModel.active)
+    } else {
+      let page = SessionController(sessionId: draft.id, choice: composerModel.active, source: source, draftTab: draft)
+      LodyShell.shared.pushRootNative(page, title: "")
     }
   }
 
-  private func updateMoreMenu(_ session: SessionItem) {
+  private func updateHeaderButtons() {
+    moreButton.isHidden = isDraftTab && closedDirectoryTabs.isEmpty
+    tabsButton.isHidden = directoryTabs.count <= 1
+  }
+
+  /// Built on demand when the More button opens (uncached), so background catalog/status
+  /// renders never replace an open `UIMenu` and cause UIKit to reload/flash it.
+  private func moreMenuElements() -> [UIMenuElement] {
+    if isDraftTab {
+      guard !closedDirectoryTabs.isEmpty else { return [] }
+      return [UIAction(title: String(localized: "session.tabs.closed", bundle: .lody), image: UIImage(systemName: "clock.arrow.circlepath")) { [weak self] _ in
+        self?.presentTabs(showClosed: true)
+      }]
+    }
+    guard let session = activeSession else { return [] }
     let state = source.state
     let canManage = !StatusViewActions.readOnly(state)
     let deleting = SessionActions.isDeleting(state.workspaceId, sessionId)
-    let more = moreButton
-    more.accessibilityLabel = String(localized: "common.more", bundle: .lody)
     var changes: [UIMenuElement] = []
     if reviewable {
       changes.append(UIAction(title: String(localized: "workspaceChanges.title", bundle: .lody), image: UIImage(systemName: "plus.forwardslash.minus")) {
@@ -472,15 +529,24 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     children.append(UIAction(title: String(localized: "session.action.find", bundle: .lody), image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
       self?.find(query: "", keyboard: true)
     })
-    children.append(UIAction(title: String(localized: "session.tabs.new", bundle: .lody), image: UIImage(systemName: "plus"), attributes: creatingTab ? [.disabled] : []) { [weak self] _ in
-      self?.createTab()
-    })
+    if !session.archived {
+      children.append(UIAction(title: String(localized: "session.tabs.new", bundle: .lody), image: UIImage(systemName: "plus")) { [weak self] _ in
+        self?.createTab()
+      })
+    }
     if !closedDirectoryTabs.isEmpty {
       children.append(UIAction(title: String(localized: "session.tabs.closed", bundle: .lody), image: UIImage(systemName: "clock.arrow.circlepath")) { [weak self] _ in
         self?.presentTabs(showClosed: true)
       })
     }
     children += sessionMenuItems(session, canManage: canManage)
+    if WorkspaceModePins.shared.mode(state.workspaceId) == .plaintext {
+      let shareImage = UIAction(title: String(localized: "session.action.shareImage", bundle: .lody), image: UIImage(systemName: "photo")) { [weak self] _ in
+        self?.beginShareAsImage()
+      }
+      shareImage.accessibilityIdentifier = "session.more.shareImage"
+      children.append(shareImage)
+    }
     if !isLANSession, AuthSession.shared.snapshot.account?.lan == nil {
       children.append(UIAction(title: String(localized: "session.action.share", bundle: .lody), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
         self?.perform("share")
@@ -498,8 +564,7 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
         ) { [weak self] _ in self?.perform("delete") },
       ]))
     }
-    more.menu = UIMenu(children: children)
-    tabsButton.isHidden = directoryTabs.count <= 1
+    return children
   }
 
 
@@ -520,7 +585,13 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
     backButton.accessibilityLabel = String(localized: "common.back", bundle: .lody)
     backButton.addAction(UIAction { [weak self] _ in self?.goBack() }, for: .touchUpInside)
     moreButton.accessibilityIdentifier = "chat-more"
+    moreButton.accessibilityLabel = String(localized: "common.more", bundle: .lody)
     moreButton.showsMenuAsPrimaryAction = true
+    moreButton.menu = UIMenu(children: [
+      UIDeferredMenuElement.uncached { [weak self] completion in
+        completion(self?.moreMenuElements() ?? [])
+      }
+    ])
     var tabsConfiguration = UIButton.Configuration.lodyGlass()
     tabsConfiguration.image = tabsButton.image(for: .normal)
     tabsConfiguration.baseForegroundColor = .label
@@ -608,18 +679,26 @@ class SessionController: UIViewController, LodyPageOwnedHeader, UIPopoverPresent
   }
 
   private func wireEvents() {
-    chat.onReconnect = { [weak self] _ in self?.feed?.reconnect() }
+    chat.onReconnect = { [weak self] _ in
+      guard let self else { return }
+      self.connectingShown = true
+      self.feed?.reconnect()
+      self.renderComposer()
+    }
     chat.onLoadEarlierHistory = { [weak self] in
       guard let self else { return }
       DataRuntime.current?.loadOlderSession(self.sessionId)
     }
     chat.onTitleMenu = { [weak self] body in self?.titleMenuSelected(body["id"] as? String ?? "") }
     chat.onTitlePress = { [weak self] _ in self?.presentMachine() }
+    chat.onPreviewShareImage = { [weak self] selection, messages in
+      self?.presentShareImagePreview(selection: selection, orderedMessages: messages)
+    }
   }
 
   private func presentMachine() {
     let state = source.state
-    guard let session = state.catalog.session(sessionId),
+    guard let session = activeSession,
       let name = state.catalog.machineNames[session.machineId], !name.isEmpty,
       (parent ?? self).presentedViewController == nil else { return }
     let panel = UIHostingController(rootView: ChatMachinePanel(name: name, machine: .init(

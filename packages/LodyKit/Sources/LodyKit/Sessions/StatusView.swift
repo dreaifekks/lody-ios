@@ -233,27 +233,6 @@ enum StatusViewArea: Hashable, Sendable {
 
   case focus
   case pinned(String?)
-
-  /// The Home list section rendering this area.
-  var sectionId: String {
-    switch self {
-    case .focus: Self.focusId
-    case .pinned(nil): Self.pinnedId
-    case .pinned(let id?): Self.pinSectionPrefix + id
-    }
-  }
-
-  init?(sectionId: String) {
-    if sectionId == Self.focusId {
-      self = .focus
-    } else if sectionId == Self.pinnedId {
-      self = .pinned(nil)
-    } else if sectionId.hasPrefix(Self.pinSectionPrefix) {
-      self = .pinned(String(sectionId.dropFirst(Self.pinSectionPrefix.count)))
-    } else {
-      return nil
-    }
-  }
 }
 
 /// The runtime's command union; encodes to the note's JSON shape.

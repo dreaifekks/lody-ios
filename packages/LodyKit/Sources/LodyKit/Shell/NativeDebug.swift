@@ -130,6 +130,10 @@ enum NativeDebug {
       fields["headerPreview"] = scenario == "send-header-preview"
       fields["queuedMessageBehavior"] = scenario.hasSuffix("guide") ? "guide" : "queue"
     }
+    if scenario == "send-run-config-late" {
+      id = "send-preview"
+      fields["lateOptions"] = true
+    }
     let aliases = ["pull-request-preview": "pull-request-native-preview", "permission-native-waiting": "permission-native-preview",
       "diagnostics-settings-preview": "settings",
       "preferences-preview": "preferences", "queued-message-behavior-preview": "preferences",
@@ -139,7 +143,13 @@ enum NativeDebug {
     if scenario == "item-detail-preview" { fields["scenario"] = "paging" }
     if scenario == "project-preview-empty" || scenario == "project-preview-offline" { fields["projectId"] = "preview-empty" }
     if scenario == "project-preview-offline" { fields["offline"] = true }
-    if ["create-parity", "create-recovery", "create-scope", "create-lan", "model-memory", "project-picker-preview"].contains(scenario) {
+    if scenario == "preferences-preview" || scenario == "queued-message-behavior-preview" {
+      var sharing = true
+      content = PreferencesController { enabled in
+        if let enabled { sharing = enabled }
+        return sharing
+      }
+    } else if ["create-parity", "create-recovery", "create-run-config-offline", "create-scope", "create-lan", "model-memory", "project-picker-preview"].contains(scenario) {
       content = CreateSessionPreviewController(scenario: scenario == "project-picker-preview" ? "create-parity" : scenario)
     } else {
       guard let page = LodyNativePages.make(id, params: SessionController.json(fields)) else {

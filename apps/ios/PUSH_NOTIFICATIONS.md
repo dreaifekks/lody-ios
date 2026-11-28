@@ -44,6 +44,14 @@ language, a persistent random installation ID, and the running app's actual Bund
 ID. The backend owns APNs environment selection and requires a live auth session.
 No APNs key, JWT, token or installation ID is logged. Live Activities register separate push-to-start and per-activity tokens for direct APNs. OneSignal manages these tokens for its provider.
 
+With OneSignal 5.5.1, the SDK also records time spent in the foreground. Its
+[`SESSION_OUTCOMES_TASK`](https://github.com/OneSignal/OneSignal-iOS-SDK/blob/5.5.1/iOS_SDK/OneSignalSDK/Source/OSUnattributedFocusTimeProcessor.m)
+can hold a UIKit background allowance while sending session duration and outcomes.
+Lody does not use this event for machine presence, Streams synchronization, or
+notification routing. Direct APNs uses the backend's own installation and
+ActivityKit token registrations. Switching delivery providers requires a matching
+backend configuration.
+
 Registration, provider retirement and logout cleanup use a serial process-owned
 queue with the captured login credential. Each HTTP operation has a 15-second
 request timeout. Pending client writes settle before retirement and successor writes;

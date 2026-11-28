@@ -15,8 +15,13 @@ final class ShareProtocol: URLProtocol {
     let host = request.url!.host!
     Self.calls.withLock { $0.append(host) }
     var body: [String: Any]
+    var status = 200
     let token = request.value(forHTTPHeaderField: "Authorization")
-    if host == "backend.lody.ai" {
+    if host == "backend.lody.ai" && request.url!.path == "/api/session-history/roost-read-grant" {
+      precondition(token == "Bearer synthetic-app-credential")
+      status = 404
+      body = ["error": "No matching routes found"]
+    } else if host == "backend.lody.ai" {
       precondition(token == "Bearer synthetic-app-credential")
       body = ["token": "synthetic-jwt"]
     } else {
@@ -38,7 +43,7 @@ final class ShareProtocol: URLProtocol {
       body = ["status": "success", "value": NSNull()]
       if path.hasSuffix("revoke") { body = ["status": "error", "errorMessage": "forbidden"] }
     }
-    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
     client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: body))
     client?.urlProtocolDidFinishLoading(self)
   }
@@ -72,6 +77,30 @@ final class ShareProtocol: URLProtocol {
       fatalError("Rejected mutation reported success")
     } catch { precondition(error.localizedDescription == "share_unavailable") }
     precondition(ShareProtocol.calls.withLock { $0.count } == before + 2, "Never replay a mutation")
+    // A Roost history read grant may name only a published stream of this workspace on its gateway.
+    let key = String(repeating: "A", count: 43)
+    func grant(_ url: String, owner: String = key) -> [String: Any] {
+      ["state": "published", "binding": ["generation": "root", "ownerPublicKey": owner], "streamUrl": url, "token": "t", "expiresIn": 60]
+    }
+    let gateway = "https://streams.lody.ai"
+    let published = "\(gateway)/ds/lody-rh/workspace%3Arh%3Am%3As%3A\(key)%3Aroot"
+    precondition(SessionSharing.validCloudHistoryGrant(grant(published), workspace: "workspace", gatewayOrigin: gateway))
+    for waiting in ["pending", "owner-required"] {
+      precondition(SessionSharing.validCloudHistoryGrant(["state": waiting], workspace: "workspace", gatewayOrigin: gateway))
+      precondition(!SessionSharing.validCloudHistoryGrant(["state": waiting, "token": "t"], workspace: "workspace", gatewayOrigin: gateway))
+    }
+    for rejected in [
+      grant(published.replacingOccurrences(of: gateway, with: "https://evil.example")),
+      grant(published.replacingOccurrences(of: "/lody-rh/", with: "/lody/")),
+      grant(published.replacingOccurrences(of: "/workspace%3A", with: "/other%3A")),
+      grant(published + "?x=1"),
+      grant(published, owner: String(repeating: "B", count: 43)),
+    ] {
+      precondition(!SessionSharing.validCloudHistoryGrant(rejected, workspace: "workspace", gatewayOrigin: gateway))
+    }
+    // A backend without the cloud read-grant route keeps the owner read path.
+    let missingRoute = try await SessionSharing.run("historyToken", args: ["intent": ["workspaceId": "workspace", "machineId": "m", "sessionId": "s", "cloudHistory": true]], workspace: "workspace", userId: "user", gatewayOrigin: gateway, session: session)
+    precondition((missingRoute as? [String: Any])?["state"] as? String == "owner-required", "A missing read-grant route must fall back to the owner")
     print("Sharing native boundary passed: scoped operations, native-only credentials, null state, rejected mutation and no replay")
   }
 }

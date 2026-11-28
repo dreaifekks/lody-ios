@@ -1,6 +1,6 @@
 /**
- * Agent proposals carried as `system_notice` items (web `AgentRoleProposalNotice`
- * and `ScheduleProposalNotice`), read into a bounded presentation for the native
+ * Agent proposals carried as `system_notice` items (web `AgentRoleProposalNotice`,
+ * `ScheduleProposalNotice` and `ScheduleEditProposalNotice`), read into a bounded presentation for the native
  * transcript cards. Stored history stays as written; anything malformed is not a
  * proposal and the notice keeps its generic row.
  */
@@ -77,7 +77,20 @@ export type ScheduleProposal = {
   scheduleId?: string;
 };
 
-export type ProposalPresentation = RoleProposal | ScheduleProposal;
+/** Web `ScheduleEditProposalMeta`: only `patch` fields change, against `baseActivityId`. */
+export type ScheduleEditProposal = {
+  kind: 'schedule_edit';
+  proposalId: string;
+  scheduleId: string;
+  /** The schedule's name when proposed. */
+  title: string;
+  patch: { title?: string; prompt?: string; rule?: ProposalRule };
+  baseActivityId: string;
+  outcome?: 'applied' | 'dismissed';
+};
+
+export type ProposalPresentation =
+  RoleProposal | ScheduleProposal | ScheduleEditProposal;
 
 function roleFields(value: unknown): RoleProposalFields | undefined {
   if (!record(value)) return undefined;
@@ -269,6 +282,107 @@ export function scheduleProposal(meta: unknown): ScheduleProposal | undefined {
   };
 }
 
+/** Web `ScheduleEditProposalMetaSchema`; an empty or malformed patch is not a proposal. */
+export function scheduleEditProposal(
+  meta: unknown,
+): ScheduleEditProposal | undefined {
+  if (!record(meta) || !id(meta.proposalId) || !id(meta.scheduleId))
+    return undefined;
+  const title = bounded(meta.title, 200)?.trim();
+  if (!title || typeof meta.baseActivityId !== 'string' || !record(meta.patch))
+    return undefined;
+  const raw = meta.patch;
+  if (
+    Object.keys(raw).some((key) => !['title', 'prompt', 'rule'].includes(key))
+  )
+    return undefined;
+  const patch: ScheduleEditProposal['patch'] = {};
+  if (raw.title !== undefined) {
+    const next = bounded(raw.title, 200)?.trim();
+    if (!next) return undefined;
+    patch.title = next;
+  }
+  if (raw.prompt !== undefined) {
+    const next = bounded(raw.prompt, 32768);
+    if (!next) return undefined;
+    patch.prompt = next;
+  }
+  if (raw.rule !== undefined) {
+    const next = proposalRule(raw.rule);
+    if (!next) return undefined;
+    patch.rule = next;
+  }
+  if (!Object.keys(patch).length) return undefined;
+  const outcome =
+    meta.outcome === 'applied' || meta.outcome === 'dismissed'
+      ? meta.outcome
+      : undefined;
+  if (meta.outcome !== undefined && !outcome) return undefined;
+  return {
+    kind: 'schedule_edit',
+    proposalId: meta.proposalId,
+    scheduleId: meta.scheduleId,
+    title,
+    patch,
+    baseActivityId: meta.baseActivityId,
+    ...(outcome ? { outcome } : {}),
+  };
+}
+
+export type PromptDiffLine = {
+  kind: 'same' | 'add' | 'del' | 'gap';
+  text: string;
+};
+
+const PROMPT_DIFF_MAX_CELLS = 4_000_000;
+
+/**
+ * Web `diffPromptLines`: a line diff that keeps `context` unchanged lines beside each
+ * change and folds the rest into one `gap`; `null` when equal or too long to compare.
+ */
+export function diffPromptLines(
+  before: string,
+  after: string,
+  context = 2,
+): PromptDiffLine[] | null {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  const width = b.length + 1;
+  if (before === after || (a.length + 1) * width > PROMPT_DIFF_MAX_CELLS)
+    return null;
+  const lcs = new Uint16Array((a.length + 1) * width);
+  const at = (i: number, j: number) => lcs[i * width + j] ?? 0;
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      lcs[i * width + j] =
+        a[i] === b[j]
+          ? at(i + 1, j + 1) + 1
+          : Math.max(at(i + 1, j), at(i, j + 1));
+  const lines: PromptDiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      lines.push({ kind: 'same', text: a[i] ?? '' });
+      i++;
+      j++;
+    } else if (j >= b.length || (i < a.length && at(i + 1, j) >= at(i, j + 1)))
+      lines.push({ kind: 'del', text: a[i++] ?? '' });
+    else lines.push({ kind: 'add', text: b[j++] ?? '' });
+  }
+  const keep = lines.map((_, index) =>
+    lines
+      .slice(Math.max(0, index - context), index + context + 1)
+      .some((line) => line.kind !== 'same'),
+  );
+  return lines.flatMap((line, index) => {
+    if (keep[index]) return [line];
+    return keep[index - 1] === false
+      ? []
+      : [{ kind: 'gap' as const, text: '' }];
+  });
+}
+
 /** The proposal a notice carries, or undefined for any other notice. */
 export function proposalOf(
   name: string,
@@ -276,5 +390,6 @@ export function proposalOf(
 ): ProposalPresentation | undefined {
   if (name === 'agent_role_proposal') return roleProposal(meta);
   if (name === 'schedule_proposal') return scheduleProposal(meta);
+  if (name === 'schedule_edit_proposal') return scheduleEditProposal(meta);
   return undefined;
 }
