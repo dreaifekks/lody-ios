@@ -45,7 +45,7 @@ enum CreateModelOptions {
   }
 
   static func effortTitle(_ capability: Capability, _ value: ModelChoice) -> String {
-    if let effort = value.effort, !effort.isEmpty, effort.lowercased() != "default" { return effort }
+    if let effort = CreateLogic.selectedEffort(capability, value), effort.lowercased() != "default" { return effort }
     guard let effort = CreateLogic.resolvedEffort(capability, value) else { return text("model.effortUnavailable") }
     return effort
   }
@@ -102,16 +102,18 @@ enum CreateModelOptions {
       }
     }
     let rows: [(id: String, title: String, subtitle: String, selected: Bool)]
+    let selectedModel = CreateLogic.selectedModelId(capability, value)
+    let selectedEffort = CreateLogic.selectedEffort(capability, value)
     switch tab {
     case "effort":
-      rows = [(defaultId, text("model.useDefault"), "", value.effort == nil)]
-        + CreateLogic.effortsFor(capability, modelId: value.modelId).map { ($0, $0, "", $0 == value.effort) }
+      rows = [(defaultId, text("model.useDefault"), "", selectedEffort == nil)]
+        + CreateLogic.effortsFor(capability, modelId: selectedModel).map { ($0, $0, "", $0 == selectedEffort) }
     case "mode":
       rows = [(defaultId, text("model.useDefault"), "", value.modeId == nil)]
         + capability.modes.map { ($0.id, $0.name, $0.description ?? "", $0.id == value.modeId) }
     default:
-      rows = [(defaultId, text("model.useDefault"), "", value.modelId == nil)]
-        + capability.models.map { ($0.id, $0.name, "", $0.id == value.modelId) }
+      rows = [(defaultId, text("model.useDefault"), "", selectedModel == nil)]
+        + capability.models.map { ($0.id, $0.name, "", $0.id == selectedModel) }
     }
     let footers = ["effort": "model.footer.effort", "mode": "model.footer.mode"]
     return [.group(tab, footer: text(footers[tab] ?? "model.footer.model"), rows.map {

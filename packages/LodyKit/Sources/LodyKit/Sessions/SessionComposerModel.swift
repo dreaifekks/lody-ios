@@ -229,10 +229,13 @@ final class SessionComposerModel {
   }
 
   var activeRole: CreateRoleItem? {
-    SessionRoles.active(roleItems, picked: pickedRole, durable: durableRole, choice: active,
-                        effortId: capability?.reasoningEffortConfigId,
-                        modelOptionId: CreateLogic.modelOptionId(capability),
-                        cliType: agentKind.cliType)
+    let selectedModel = CreateLogic.selectedModelId(capability, active)
+    return SessionRoles.active(
+      roleItems, picked: pickedRole, durable: durableRole, choice: active,
+      effortId: CreateLogic.effortOptionId(capability, modelId: selectedModel),
+      modelOptionId: CreateLogic.modelOptionId(capability),
+      cliType: agentKind.cliType
+    )
   }
 
   /// Picking a Role applies the values it pins; None clears only its name (web).
@@ -290,10 +293,11 @@ final class SessionComposerModel {
         searchPlaceholder: text("create.context.searchModels")))
     }
     let efforts = CreateLogic.effortsFor(capability, modelId: selectedModel)
+    let selectedEffort = CreateLogic.selectedEffort(capability, value)
     if !efforts.isEmpty {
       rows.append(CreatePicker(
-        id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, value), placeholder: value.effort == nil,
-        options: efforts.map { CreateOption(id: $0, title: $0, selected: $0 == value.effort) }))
+        id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, value), placeholder: selectedEffort == nil,
+        options: efforts.map { CreateOption(id: $0, title: $0, selected: $0 == selectedEffort) }))
     }
     if let permission = CreateLogic.permissionMode(capability, value), !permission.options.isEmpty {
       let current = permission.options.first { $0.id == permission.value }
@@ -370,12 +374,13 @@ final class SessionComposerModel {
   var optionsJSON: String {
     let value = active
     let selectedModel = CreateLogic.selectedModelId(capability, value)
+    let selectedEffort = CreateLogic.selectedEffort(capability, value)
     let permission = CreateLogic.permissionMode(capability, value)
     var options: [String: Any] = [
       "permissionId": permission?.value ?? "",
       "permissions": (permission?.options ?? []).map { ["id": $0.id, "title": $0.name, "description": $0.description ?? ""] },
       "modelId": selectedModel ?? "",
-      "effort": value.effort ?? "",
+      "effort": selectedEffort ?? "",
       "displayModelId": CreateLogic.resolvedModelId(capability, modelId: selectedModel) ?? "",
       "displayEffort": CreateLogic.resolvedEffort(capability, value) ?? "",
       "models": (capability?.models ?? []).map { ["id": $0.id, "title": $0.name] },
@@ -400,9 +405,11 @@ final class SessionComposerModel {
   var sendChoice: [String: OutboxValue] {
     let value = active
     let selectedModel = CreateLogic.selectedModelId(capability, value)
+    let effortConfigId = CreateLogic.effortOptionId(capability, modelId: selectedModel)
+    let selectedEffort = CreateLogic.selectedEffort(capability, value, effortOptionId: effortConfigId)
     var result: [String: OutboxValue] = [:]
     let explicit = capability != nil
-    for (key, field) in [("modelId", selectedModel), ("effort", value.effort)] {
+    for (key, field) in [("modelId", selectedModel), ("effort", selectedEffort)] {
       if let field { result[key] = .string(field) } else if explicit { result[key] = .null }
     }
     if let mode = value.modeId { result["modeId"] = .string(mode) }
@@ -411,6 +418,9 @@ final class SessionComposerModel {
         let modelKey = CreateLogic.modelOptionId(capability) ?? "model"
         values.removeValue(forKey: modelKey)
         if modelKey != "model" { values.removeValue(forKey: "model") }
+        for staleEffort in [effortConfigId, "thought_level", "reasoning_effort", "effort"].compactMap({ $0 }) {
+          values.removeValue(forKey: staleEffort)
+        }
       }
       if !values.isEmpty {
         result["configOptionValues"] = .object(values.mapValues { config in
@@ -421,7 +431,7 @@ final class SessionComposerModel {
         })
       }
     }
-    if let config = capability?.reasoningEffortConfigId { result["reasoningEffortConfigId"] = .string(config) }
+    if let config = effortConfigId { result["reasoningEffortConfigId"] = .string(config) }
     return result
   }
 

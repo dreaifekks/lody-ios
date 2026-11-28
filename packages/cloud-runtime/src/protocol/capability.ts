@@ -121,20 +121,89 @@ export function effortsFor(capability?: Capability, modelId?: string) {
   );
 }
 
+const isFastToggleOption = (option: Pick<ConfigOption, 'id' | 'type'>) =>
+  ['fast-mode', 'fast'].includes(option.id) && option.type === 'boolean';
+
+const isPermissionOrModeSelectorOption = (option: ConfigOption) =>
+  option.type === 'select' &&
+  (option.id === 'permission_mode' ||
+    option.category === '_permission' ||
+    (option.category === 'mode' &&
+      option.id !== 'interaction_mode' &&
+      !isThoughtLevel(option)));
+
+function selectedModelIdFor(
+  capability: Capability | undefined,
+  choice: ModelChoice,
+): string | undefined {
+  const modelOption = capability?.configOptions?.find(isModelSelectorOption);
+  const rawOptionModel = modelOption
+    ? choice.configOptionValues?.[modelOption.id]
+    : undefined;
+  const optionModel =
+    typeof rawOptionModel === 'string' && rawOptionModel.trim()
+      ? rawOptionModel.trim()
+      : undefined;
+  const topModel =
+    typeof choice.modelId === 'string' && choice.modelId.trim()
+      ? choice.modelId.trim()
+      : undefined;
+  const isConfigOptionDriven =
+    capability?.cliType === 'registry' || capability?.cliType === 'custom';
+  if (isConfigOptionDriven) return optionModel ?? topModel;
+  return topModel ?? optionModel;
+}
+
+function permissionOptionIdsFor(
+  capability: Capability | undefined,
+): Set<string> {
+  const ids = new Set<string>(['mode', 'permission_mode']);
+  for (const option of capability?.configOptions ?? []) {
+    if (isPermissionOrModeSelectorOption(option)) ids.add(option.id);
+  }
+  for (const options of Object.values(
+    capability?.observedModelConfigOptions ?? {},
+  )) {
+    for (const option of options) {
+      if (isPermissionOrModeSelectorOption(option)) ids.add(option.id);
+    }
+  }
+  return ids;
+}
+
 export function fastModeFor(
   capability: Capability | undefined,
   choice: ModelChoice,
 ) {
+  const snapshotModel = capability?.configOptions?.find(
+    (o) => o.category === 'model',
+  )?.currentValue;
   const model =
-    choice.modelId ??
-    capability?.configOptions?.find((o) => o.category === 'model')
-      ?.currentValue;
+    selectedModelIdFor(capability, choice) ??
+    (typeof snapshotModel === 'string' && snapshotModel.length > 0
+      ? snapshotModel
+      : undefined);
   if (typeof model === 'string' && capability?.fastModes?.[model] === false)
     return undefined;
-  const option = capability?.configOptions?.find(
-    (item) =>
-      ['fast-mode', 'fast'].includes(item.id) && item.type === 'boolean',
+  const resolvedOptions = resolveConfigOptionsForModel(
+    capability?.configOptions,
+    capability?.observedModelConfigOptions,
+    model,
   );
+  let option = resolvedOptions?.find(isFastToggleOption);
+  if (
+    !option &&
+    typeof model === 'string' &&
+    capability?.fastModes?.[model] === true
+  ) {
+    option = capability.configOptions?.find(isFastToggleOption) ?? {
+      id: capability.agentType === 'claude' ? 'fast' : 'fast-mode',
+      name: 'Fast',
+      type: 'boolean',
+      currentValue: false,
+      options: [],
+    };
+  }
   if (!option) return undefined;
   const value = choice.configOptionValues?.[option.id] ?? option.currentValue;
   return { id: option.id, enabled: value === true };
@@ -153,29 +222,16 @@ export function withFastMode(
   };
 }
 
-// Match OSS resolvePermissionModeFace: explicit permissions, legacy modes,
-// then a generic mode selector. Interaction mode is a separate control.
+// Match OSS resolvePermissionModeFace: explicit permissions, config-option
+// modes on registry/custom agents, legacy modes, then generic mode fallback.
+// Interaction mode is a separate control.
 export function permissionModeFor(
   capability: Capability | undefined,
   choice: ModelChoice,
 ) {
-  const modelOption = capability?.configOptions?.find(isModelSelectorOption);
-  const rawOptionModel = modelOption
-    ? choice.configOptionValues?.[modelOption.id]
-    : undefined;
-  const optionModel =
-    typeof rawOptionModel === 'string' && rawOptionModel.trim()
-      ? rawOptionModel.trim()
-      : undefined;
-  const topModel =
-    typeof choice.modelId === 'string' && choice.modelId.trim()
-      ? choice.modelId.trim()
-      : undefined;
   const isConfigOptionDriven =
     capability?.cliType === 'registry' || capability?.cliType === 'custom';
-  const targetModelId = isConfigOptionDriven
-    ? (optionModel ?? topModel)
-    : (topModel ?? optionModel);
+  const targetModelId = selectedModelIdFor(capability, choice);
   const resolvedOptions = resolveConfigOptionsForModel(
     capability?.configOptions,
     capability?.observedModelConfigOptions,
@@ -186,6 +242,14 @@ export function permissionModeFor(
   let option = selectors.find(
     (item) => item.id === 'permission_mode' || item.category === '_permission',
   );
+  if (!option && isConfigOptionDriven) {
+    option = selectors.find(
+      (item) =>
+        item.category === 'mode' &&
+        item.id !== 'interaction_mode' &&
+        !isThoughtLevel(item),
+    );
+  }
   const modes = capability?.legacyModes ?? capability?.modes ?? [];
   if (!option && modes.length) {
     return {
@@ -204,10 +268,17 @@ export function permissionModeFor(
   );
   if (!option?.options.length) return undefined;
   const rawSelected = choice.configOptionValues?.[option.id];
+  const fallbackMode =
+    isConfigOptionDriven &&
+    rawSelected === undefined &&
+    typeof choice.modeId === 'string'
+      ? choice.modeId
+      : undefined;
+  const rawCandidate = rawSelected ?? fallbackMode;
   const selected =
-    option.id === 'mode' && typeof rawSelected === 'string'
-      ? migrateLegacyAntigravityModeId(rawSelected)
-      : rawSelected;
+    option.id === 'mode' && typeof rawCandidate === 'string'
+      ? migrateLegacyAntigravityModeId(rawCandidate)
+      : rawCandidate;
   const value = validConfigValue(option, selected)
     ? selected
     : option.currentValue;
@@ -225,13 +296,37 @@ export function withPermissionMode(
 ): ModelChoice {
   const permission = permissionModeFor(capability, choice);
   if (!permission?.options.some((item) => item.id === value)) return choice;
-  if (permission.configId)
-    return {
-      ...choice,
-      configOptionValues: {
-        ...choice.configOptionValues,
-        [permission.configId]: value,
-      },
+  const isConfigOptionDriven =
+    capability?.cliType === 'registry' || capability?.cliType === 'custom';
+  if (permission.configId) {
+    const nextConfig: Record<string, string | boolean> = {
+      ...choice.configOptionValues,
     };
+    if (isConfigOptionDriven) {
+      for (const stale of permissionOptionIdsFor(capability)) {
+        if (stale !== permission.configId) delete nextConfig[stale];
+      }
+    }
+    nextConfig[permission.configId] = value;
+    if (isConfigOptionDriven) {
+      const { modeId: _staleModeId, ...rest } = choice;
+      return { ...rest, configOptionValues: nextConfig };
+    }
+    return { ...choice, configOptionValues: nextConfig };
+  }
+  if (isConfigOptionDriven && choice.configOptionValues) {
+    const nextConfig = { ...choice.configOptionValues };
+    for (const stale of permissionOptionIdsFor(capability)) {
+      delete nextConfig[stale];
+    }
+    const { configOptionValues: _oldConfig, ...rest } = choice;
+    return {
+      ...rest,
+      modeId: value,
+      ...(Object.keys(nextConfig).length
+        ? { configOptionValues: nextConfig }
+        : {}),
+    };
+  }
   return { ...choice, modeId: value };
 }

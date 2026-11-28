@@ -140,6 +140,36 @@ do {
   check(reopenedActive?.role.id == "agy-yolo", "reopened registry Role stays active when model lives in configOptionValues")
   check(SessionRoles.send(loaded: true, active: reopenedActive, picked: nil, durable: "agy-yolo") == .role("agy-yolo"),
         "reopened registry Role sends its role id instead of clearing it")
+
+  // Antigravity Role pinning thought_level=xhigh with non-empty legacyModes + configOptions.mode.
+  let agyModes = [CapabilityChoice(id: "ask", name: "Ask"), CapabilityChoice(id: "auto", name: "Auto"), CapabilityChoice(id: "yolo", name: "YOLO")]
+  let agyCap = Capability(
+    machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+    models: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+    modes: agyModes, legacyModes: agyModes,
+    reasoningEfforts: ["gemini-4-neon": ["high", "xhigh"]],
+    reasoningEffortConfigId: "thought_level",
+    configOptions: [
+      ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-4-neon"),
+                   options: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+      ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: agyModes),
+      ConfigOption(id: "thought_level", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                   options: [CapabilityChoice(id: "high", name: "High"), CapabilityChoice(id: "xhigh", name: "XHigh")]),
+    ]
+  )
+  let xhighRole = role(
+    "agy-xhigh", "Agy XHigh", config: "agy",
+    pins: .init(configOptionValues: ["model": .string("gemini-4-neon"), "mode": .string("yolo"), "thought_level": .string("xhigh")])
+  )
+  let xhighItems = SessionRoles.items(roles: [xhighRole], machineId: "m1", agentConfigId: "agy", online: ["agy"])
+  let appliedXhigh = SessionRoles.choice(applying: xhighItems[0], to: ModelChoice(modeId: "ask"), capability: agyCap)
+  check(appliedXhigh.effort == "xhigh" && appliedXhigh.configOptionValues?["thought_level"] == nil,
+        "applying Antigravity Role lifts thought_level into effort")
+  check(appliedXhigh.configOptionValues?["mode"] == .string("yolo") && appliedXhigh.modeId == nil,
+        "applying Antigravity Role clears competing legacy modeId")
+  let reopenedXhigh = ModelChoice(modelId: "gemini-4-neon", effort: "xhigh", configOptionValues: ["mode": .string("yolo")])
+  check(SessionRoles.active(xhighItems, picked: nil, durable: "agy-xhigh", choice: reopenedXhigh, effortId: "thought_level", modelOptionId: "model", cliType: "registry")?.role.id == "agy-xhigh",
+        "reopened Antigravity Role with thought_level=xhigh stays active")
 }
 
 print("session-roles ok")

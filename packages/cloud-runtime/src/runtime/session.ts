@@ -45,6 +45,7 @@ import { resolveTurnRole, type TurnRole } from './agent-roles';
 import {
   record,
   resolveCanonicalAgentRoleRunConfig,
+  resolveEffortOptionId,
   resolveModeOptionId,
   resolveModelOptionId,
   roleRunConfigApplied,
@@ -2087,11 +2088,6 @@ export async function sendTurn(
         : {}),
       ...args.configOptionValues,
     });
-    if (args.reasoningEffort !== undefined) {
-      const id = args.reasoningEffortConfigId || 'reasoning_effort';
-      if (args.reasoningEffort === null) delete configOptionValues[id];
-      else configOptionValues[id] = args.reasoningEffort;
-    }
     const modelOptionId = resolveModelOptionId(roleTarget, configOptionValues);
     const modelOptionKey = modelOptionId ?? 'model';
     if (
@@ -2106,13 +2102,6 @@ export async function sendTurn(
         delete configOptionValues[modelOptionKey];
       }
     }
-    // An explicit pick wins; otherwise the turn inherits what the session
-    // already used, and an unset value leaves the machine on its default.
-    const rawModeId = args.modeId ?? previous.modeId;
-    const modeId =
-      typeof rawModeId === 'string'
-        ? migrateLegacyAntigravityModeId(rawModeId)
-        : rawModeId;
     const modelId =
       args.modelId === null ? undefined : (args.modelId ?? previous.modelId);
     const effectiveModelId = resolveCanonicalAgentRoleRunConfig(
@@ -2122,12 +2111,38 @@ export async function sendTurn(
       },
       roleTarget,
     ).canonicalModelId;
+    const effortOptionId =
+      args.reasoningEffortConfigId ||
+      resolveEffortOptionId(roleTarget, effectiveModelId, configOptionValues) ||
+      'reasoning_effort';
+    if (
+      args.reasoningEffort !== undefined &&
+      !hasOwn(args.configOptionValues, effortOptionId)
+    ) {
+      if (args.reasoningEffort === null) {
+        delete configOptionValues[effortOptionId];
+      } else {
+        configOptionValues[effortOptionId] = args.reasoningEffort;
+      }
+    }
     const modeOptionId = resolveModeOptionId(
       roleTarget,
       effectiveModelId,
       configOptionValues,
     );
     const modeOptionKey = modeOptionId ?? 'mode';
+    const explicitModeOption =
+      isConfigOptionDriven &&
+      modeOptionId !== undefined &&
+      hasOwn(args.configOptionValues, modeOptionId);
+    // An explicit pick wins; otherwise the turn inherits what the session
+    // already used, and an unset value leaves the machine on its default.
+    const rawModeId =
+      args.modeId ?? (explicitModeOption ? undefined : previous.modeId);
+    const modeId =
+      typeof rawModeId === 'string'
+        ? migrateLegacyAntigravityModeId(rawModeId)
+        : rawModeId;
     if (
       args.modeId !== undefined &&
       !hasOwn(args.configOptionValues, modeOptionKey)

@@ -387,4 +387,74 @@ final class SessionComposerModelTests: XCTestCase {
     let sent = try XCTUnwrap(capturedPayload)
     XCTAssertTrue(sent.contains(#""turnId":"a-compact""#), "Expected active maintenance turnId in stop payload: \(sent)")
   }
+
+  func testAntigravityRoleWithThoughtLevelAndLegacyModesStaysActiveAndEditsModeConfig() async {
+    let agyModes = [
+      CapabilityChoice(id: "ask", name: "Ask"),
+      CapabilityChoice(id: "auto", name: "Auto"),
+      CapabilityChoice(id: "yolo", name: "YOLO"),
+    ]
+    let agyCapability = Capability(
+      machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+      models: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+      modes: agyModes, legacyModes: agyModes,
+      reasoningEfforts: ["gemini-4-neon": ["high", "xhigh"]],
+      reasoningEffortConfigId: "thought_level",
+      configOptions: [
+        ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-4-neon"),
+                     options: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+        ConfigOption(id: "interaction_mode", name: "Interaction", category: "mode", type: "select", currentValue: .string("code"),
+                     options: [CapabilityChoice(id: "code", name: "Code")]),
+        ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: agyModes),
+        ConfigOption(id: "thought_level", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                     options: [CapabilityChoice(id: "high", name: "High"), CapabilityChoice(id: "xhigh", name: "XHigh")]),
+      ]
+    )
+    let agent = CreationAgent(id: "agy", name: "Antigravity", machineId: "m1", machineName: "Mini", cliType: "registry", agentType: "antigravity")
+    let agyRole = RuntimeContract.AgentRoleItem(
+      id: "agy-xhigh", ownerUserId: "u1", visibility: .private, name: "Neon XHigh", description: "", promptPrefix: "Ship.",
+      emoji: "⚡", revision: 1, updatedAt: 1,
+      targets: [.init(
+        machineId: "m1", agentConfigId: "agy",
+        runConfig: .init(configOptionValues: ["model": .string("gemini-4-neon"), "mode": .string("yolo"), "thought_level": .string("xhigh")]),
+        machineName: "Mini", agentName: "Antigravity", state: .configured
+      )]
+    )
+    let agySession = SessionItem(id: "s-agy", agentConfigId: "agy", machineId: "m1", cliType: "registry", agentType: "antigravity")
+    let model = SessionComposerModel(choice: nil, service: SessionComposerService(
+      options: { _, _ in CreationOptions(sessionId: "s-agy", agents: [agent], capabilities: [agyCapability]) },
+      tier: { _, _ in nil },
+      roles: { _ in [agyRole] }
+    ))
+    await settle(model) { model.load(workspaceId: "w1", projectId: nil, session: agySession) }
+    for _ in 0..<20 where model.roleItems.isEmpty { await Task.yield() }
+
+    // Reopen with lifted effort + configOptionValues.mode (and stale legacy modeId): Role stays active and panel shows YOLO / xhigh.
+    model.hydrate(
+      pending: nil, ready: true,
+      snapshot: ModelChoice(modelId: "gemini-4-neon", effort: "xhigh", modeId: "ask", configOptionValues: ["mode": .string("yolo")]),
+      role: .some("agy-xhigh")
+    )
+    XCTAssertEqual(model.activeRole?.role.id, "agy-xhigh")
+    XCTAssertEqual(model.sendRole, .string("agy-xhigh"))
+    XCTAssertEqual(model.sendChoice["effort"], .string("xhigh"))
+    XCTAssertEqual(model.sendChoice["reasoningEffortConfigId"], .string("thought_level"))
+    XCTAssertEqual(model.runConfig.first { $0.id == "effort" }?.title, "xhigh")
+    XCTAssertEqual(model.runConfig.first { $0.id == "permission" }?.title, "YOLO")
+
+    // Changing permission writes configOptionValues.mode = auto, clears stale modeId, preserves thought_level=xhigh, and detaches Role.
+    model.pick("permission", "auto")
+    XCTAssertEqual(model.runConfig.first { $0.id == "permission" }?.title, "Auto")
+    XCTAssertNil(model.activeRole)
+    XCTAssertEqual(model.sendRole, .null)
+    XCTAssertNil(model.sendChoice["modeId"])
+    XCTAssertEqual(model.sendChoice["effort"], .string("xhigh"))
+    XCTAssertEqual(model.sendChoice["reasoningEffortConfigId"], .string("thought_level"))
+    if case .object(let sentOptions)? = model.sendChoice["configOptionValues"] {
+      XCTAssertEqual(sentOptions["mode"], .string("auto"))
+      XCTAssertNil(sentOptions["thought_level"])
+    } else {
+      XCTFail("Expected configOptionValues in sendChoice")
+    }
+  }
 }

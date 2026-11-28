@@ -263,18 +263,20 @@ enum CreateSessionContext {
         options: page.agents.map { CreateOption(id: $0.key, title: $0.name, glyph: agentGlyph($0.cliType, $0.agentType), selected: $0.key == page.agentKey) }))
     }
     guard let capability = page.capability else { return rows }
+    let selectedModel = CreateLogic.selectedModelId(capability, page.choice)
+    let selectedEffort = CreateLogic.selectedEffort(capability, page.choice)
     if !capability.models.isEmpty {
-      let current = capability.models.first { $0.id == page.choice.modelId }
+      let current = capability.models.first { $0.id == selectedModel }
       rows.append(CreatePicker(
         id: "model", glyph: .symbol("cpu"), title: CreateModelOptions.modelTitle(capability, page.choice), placeholder: current == nil,
-        options: capability.models.map { CreateOption(id: $0.id, title: $0.name, selected: $0.id == page.choice.modelId) },
+        options: capability.models.map { CreateOption(id: $0.id, title: $0.name, selected: $0.id == selectedModel) },
         searchPlaceholder: text("create.context.searchModels")))
     }
-    let efforts = CreateLogic.effortsFor(capability, modelId: page.choice.modelId)
+    let efforts = CreateLogic.effortsFor(capability, modelId: selectedModel)
     if !efforts.isEmpty {
       rows.append(CreatePicker(
-        id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, page.choice), placeholder: page.choice.effort == nil,
-        options: efforts.map { CreateOption(id: $0, title: $0, selected: $0 == page.choice.effort) }))
+        id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, page.choice), placeholder: selectedEffort == nil,
+        options: efforts.map { CreateOption(id: $0, title: $0, selected: $0 == selectedEffort) }))
     }
     if let permission = CreateLogic.permissionMode(capability, page.choice), !permission.options.isEmpty {
       let current = permission.options.first { $0.id == permission.value }

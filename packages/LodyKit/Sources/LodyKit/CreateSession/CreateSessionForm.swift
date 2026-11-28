@@ -330,7 +330,8 @@ struct CreateSessionForm {
       branch: page.github ? page.branch.trimmingCharacters(in: .whitespacesAndNewlines) : nil,
       agent: agent,
       choice: page.choice,
-      reasoningEffortConfigId: page.capability?.reasoningEffortConfigId,
+      reasoningEffortConfigId: CreateLogic.effortOptionId(
+        page.capability, modelId: CreateLogic.selectedModelId(page.capability, page.choice)),
       agentRoleId: activeRole?.role.id,
       agentRoleRevision: activeRole?.role.revision,
       useWorktree: page.local && page.worktree ? true : nil
@@ -379,9 +380,10 @@ extension CreateSessionForm {
     guard !current.roleId.isEmpty, let item = roleItems.first(where: { $0.role.id == current.roleId }),
           item.unavailable == nil, let agent = current.agent,
           agent.id == item.target.agentConfigId, agent.machineId == item.target.machineId else { return nil }
+    let selectedModel = CreateLogic.selectedModelId(current.capability, current.choice)
     return Self.applied(
       item.target.runConfig, to: current.choice,
-      effortId: current.capability?.reasoningEffortConfigId,
+      effortId: CreateLogic.effortOptionId(current.capability, modelId: selectedModel),
       modelOptionId: Self.modelOptionId(for: current.capability),
       cliType: agent.cliType
     ) ? item : nil
@@ -395,10 +397,17 @@ extension CreateSessionForm {
           let agent = current.agents.first(where: { $0.id == item.target.agentConfigId }) else { return }
     current.agentKey = agent.key
     let capability = CreateLogic.capabilityFor(current.options, agent)
-    updateChoice(Self.choice(
+    let modelKey = Self.modelOptionId(for: capability)
+    let preliminary = Self.choice(
       item.target.runConfig,
       effortId: capability?.reasoningEffortConfigId,
-      modelOptionId: Self.modelOptionId(for: capability)
+      modelOptionId: modelKey
+    )
+    let effortKey = CreateLogic.effortOptionId(capability, modelId: preliminary.modelId)
+    updateChoice(Self.choice(
+      item.target.runConfig,
+      effortId: effortKey,
+      modelOptionId: modelKey
     ))
     current.roleId = id
   }
@@ -416,8 +425,9 @@ extension CreateSessionForm {
     var effort: String?
     var options: [String: ConfigValue] = [:]
     for (key, value) in pinned?.configOptionValues ?? [:] {
+      let isEffort = key == effortKey || (effortId == nil && ["thought_level", "reasoning_effort", "effort"].contains(key))
       switch value {
-      case .string(let text) where key == effortKey: effort = text
+      case .string(let text) where isEffort: effort = text
       case .string(let text) where key == modelKey: if modelId == nil { modelId = text }
       case .string(let text): options[key] = CreateLogic.normalizedConfigValue(.string(text), optionId: key)
       case .bool(let flag): options[key] = .bool(flag)
@@ -450,20 +460,49 @@ extension CreateSessionForm {
     let normalizedTop = topModel.flatMap { $0.isEmpty ? nil : $0 }
     let isConfigOptionDriven = cliType == "registry" || cliType == "custom"
     let effectiveModelId = isConfigOptionDriven ? (optionModel ?? normalizedTop) : (normalizedTop ?? optionModel)
-    if let mode = CreateLogic.normalizedModeId(pinned.modeId), CreateLogic.normalizedModeId(choice.modeId) != mode { return false }
+    let normalizedTopMode = CreateLogic.normalizedModeId(choice.modeId)
+    if let mode = CreateLogic.normalizedModeId(pinned.modeId) {
+      let optionMode: String?
+      if isConfigOptionDriven,
+         let raw = CreateLogic.normalizedConfigValue(
+           choice.configOptionValues?["permission_mode"] ?? choice.configOptionValues?["mode"],
+           optionId: "mode"),
+         case .string(let text) = raw {
+        optionMode = text
+      } else {
+        optionMode = nil
+      }
+      let effectiveModeId = isConfigOptionDriven ? (optionMode ?? normalizedTopMode) : (normalizedTopMode ?? optionMode)
+      if effectiveModeId != mode { return false }
+    }
     if let model = pinned.modelId, effectiveModelId != model { return false }
+    let trimmedTopEffort = choice.effort?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let topEffort = trimmedTopEffort.flatMap { $0.isEmpty ? nil : $0 }
     for (key, rawValue) in pinned.configOptionValues ?? [:] {
       let value: RuntimeContract.JSONValue = key == "mode" && rawValue == .string("auto_review") ? .string("auto") : rawValue
+      let isEffort = key == effortKey || (effortId == nil && ["thought_level", "reasoning_effort", "effort"].contains(key))
       let selected: RuntimeContract.JSONValue?
-      if key == effortKey {
-        selected = choice.effort.map { .string($0) }
+      if isEffort {
+        if let topEffort {
+          selected = .string(topEffort)
+        } else if case .string(let text)? = choice.configOptionValues?[key] {
+          let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+          selected = trimmed.isEmpty ? nil : .string(trimmed)
+        } else {
+          selected = nil
+        }
       } else if key == modelKey {
         selected = effectiveModelId.map { .string($0) }
       } else {
         switch CreateLogic.normalizedConfigValue(choice.configOptionValues?[key], optionId: key) {
         case .string(let text): selected = .string(text)
         case .bool(let flag): selected = .bool(flag)
-        case nil: selected = nil
+        case nil:
+          if isConfigOptionDriven && (key == "mode" || key == "permission_mode"), let normalizedTopMode {
+            selected = .string(normalizedTopMode)
+          } else {
+            selected = nil
+          }
         }
       }
       if key == "plan_mode", case .bool(_) = value, case .bool(_)? = selected { continue }

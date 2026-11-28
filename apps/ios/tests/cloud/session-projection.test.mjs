@@ -770,9 +770,9 @@ test('normalizes legacy Antigravity auto_review mode to auto in turn metadata an
 
   const projected = projectSession(doc, 'agy-legacy');
   assert.equal(projected.composer.modeId, 'auto');
+  assert.equal(projected.composer.effort, 'high');
   assert.deepEqual(projected.composer.configOptionValues, {
     mode: 'auto',
-    thought_level: 'high',
   });
   assert.equal(projected.entries[0].inputConfig.modeId, 'auto');
   assert.deepEqual(projected.entries[0].inputConfig.configOptionValues, {

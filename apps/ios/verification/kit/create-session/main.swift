@@ -480,4 +480,34 @@ do {
   check(updated.configOptionValues?["permission_mode"] == .string("ask")
           && !CreateSessionForm.applied(pinned, to: updated, effortId: nil, modelOptionId: "model", cliType: "registry"),
         "editing permission writes target model's permission_mode and detaches Role cleanly")
+
+  // Antigravity with non-empty legacyModes + configOptions.mode + thought_level=xhigh.
+  let agyModes = [CapabilityChoice(id: "ask", name: "Ask"), CapabilityChoice(id: "auto", name: "Auto"), CapabilityChoice(id: "yolo", name: "YOLO")]
+  let agyCap = Capability(
+    machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+    models: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+    modes: agyModes, legacyModes: agyModes,
+    reasoningEfforts: ["gemini-4-neon": ["high", "xhigh"]],
+    reasoningEffortConfigId: "thought_level",
+    configOptions: [
+      ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-4-neon"),
+                   options: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+      ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: agyModes),
+      ConfigOption(id: "thought_level", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                   options: [CapabilityChoice(id: "high", name: "High"), CapabilityChoice(id: "xhigh", name: "XHigh")]),
+    ]
+  )
+  let agyPinned = RuntimeContract.AgentRoleItemTargetsItemRunConfig(
+    configOptionValues: ["model": .string("gemini-4-neon"), "mode": .string("yolo"), "thought_level": .string("xhigh")]
+  )
+  let reopenedAgy = ModelChoice(modelId: "gemini-4-neon", effort: "xhigh", configOptionValues: ["mode": .string("yolo")])
+  check(CreateSessionForm.applied(agyPinned, to: reopenedAgy, effortId: "thought_level", modelOptionId: "model", cliType: "registry"),
+        "Antigravity Role pinning thought_level=xhigh stays active on reopen")
+  check(CreateSessionForm.applied(agyPinned, to: reopenedAgy, effortId: nil, modelOptionId: "model", cliType: "registry"),
+        "Antigravity Role pinning thought_level=xhigh stays active even before capability loads")
+  let editedAgy = CreateLogic.withPermissionMode(agyCap, reopenedAgy, value: "auto")
+  check(editedAgy.configOptionValues?["mode"] == .string("auto") && editedAgy.modeId == nil,
+        "Antigravity permission edit writes configOptionValues.mode even when legacyModes is non-empty")
+  check(!CreateSessionForm.applied(agyPinned, to: editedAgy, effortId: "thought_level", modelOptionId: "model", cliType: "registry"),
+        "Antigravity permission edit detaches Role cleanly")
 }

@@ -1414,12 +1414,18 @@ function project(
       readTurnMetadata({ inputConfig: input }).inputConfig
         ?.configOptionValues ?? {},
     ).filter(
-      ([id]) => id !== 'effort' && id !== 'reasoning_effort' && id !== 'model',
+      ([id]) =>
+        id !== 'effort' &&
+        id !== 'reasoning_effort' &&
+        id !== 'thought_level' &&
+        id !== 'model',
     ),
   );
-  const effort = [options.reasoning_effort, options.effort].find(
-    (value) => typeof value === 'string',
-  );
+  const effort = [
+    options.reasoning_effort,
+    options.effort,
+    options.thought_level,
+  ].find((value) => typeof value === 'string');
   const rawModelOption =
     typeof options.model === 'string' && options.model.trim()
       ? options.model.trim()

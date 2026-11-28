@@ -10,6 +10,7 @@ import {
   roleRunConfigApplied,
 } from '../../../../packages/cloud-runtime/src/protocol/agent-roles.ts';
 import {
+  fastModeFor,
   permissionModeFor,
   withPermissionMode,
 } from '../../../../packages/cloud-runtime/src/protocol/capability.ts';
@@ -828,4 +829,279 @@ test('roleSnapshot, bindTurnRole, creationOptions, and sendTurn preserve registr
   } finally {
     f.close();
   }
+});
+
+test('Antigravity with non-empty legacyModes, configOptions.mode, and thought_level=xhigh preserves Role across reopen and edits mode canonically', async () => {
+  const { creationOptions, readRoleTargetCapability, roleSnapshot } =
+    await loadRoleRuntime();
+  const meta = new Flock(`meta-${crypto.randomUUID()}`);
+  meta.set(['m', 'machine-m1', 'name'], 'Mini');
+  meta.commit();
+  const machine = new Flock(`machine-${crypto.randomUUID()}`);
+  machine.set(['agentConfig', 'agy'], {
+    id: 'agy',
+    machineId: 'm1',
+    name: 'Antigravity',
+    cliType: 'registry',
+    agentType: 'antigravity',
+  });
+  machine.set(['acpCapability', 'agy'], {
+    cliType: 'registry',
+    agentType: 'antigravity',
+    fetchedAt: 10,
+    modes: [
+      { id: 'ask', name: 'Ask' },
+      { id: 'auto', name: 'Auto' },
+      { id: 'yolo', name: 'YOLO' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select',
+        category: 'model',
+        currentValue: 'gemini-4-neon',
+        options: [{ value: 'gemini-4-neon', name: 'Gemini 4 Neon' }],
+      },
+      {
+        id: 'interaction_mode',
+        name: 'Interaction',
+        type: 'select',
+        category: 'mode',
+        currentValue: 'code',
+        options: [{ value: 'code', name: 'Code' }],
+      },
+      {
+        id: 'mode',
+        name: 'Permission',
+        type: 'select',
+        category: 'mode',
+        currentValue: 'ask',
+        options: [
+          { value: 'ask', name: 'Ask' },
+          { value: 'auto', name: 'Auto' },
+          { value: 'yolo', name: 'YOLO' },
+        ],
+      },
+      {
+        id: 'thought_level',
+        name: 'Reasoning',
+        type: 'select',
+        category: 'thought_level',
+        currentValue: 'high',
+        options: [
+          { value: 'high', name: 'High' },
+          { value: 'xhigh', name: 'XHigh' },
+        ],
+      },
+    ],
+  });
+  machine.commit();
+
+  const options = creationOptions(undefined, meta, new Map([['m1', machine]]));
+  const uiCapability = options.capabilities[0];
+  assert.equal(uiCapability.reasoningEffortConfigId, 'thought_level');
+  assert.equal(uiCapability.legacyModes?.length, 3);
+
+  // Even when legacyModes is non-empty, registry Antigravity reads and writes configOptions.mode.
+  const roleChoice = {
+    modelId: 'gemini-4-neon',
+    modeId: 'ask',
+    configOptionValues: { mode: 'yolo' },
+  };
+  const perm = permissionModeFor(uiCapability, roleChoice);
+  assert.equal(perm?.configId, 'mode');
+  assert.equal(perm?.value, 'yolo');
+  const edited = withPermissionMode(uiCapability, roleChoice, 'auto');
+  assert.equal(edited.configOptionValues?.mode, 'auto');
+  assert.equal(edited.modeId, undefined);
+
+  const storedRole = {
+    v: 2,
+    id: 'agy-xhigh',
+    ownerUserId: 'u1',
+    visibility: 'private',
+    name: 'Neon XHigh',
+    promptPrefix: 'Ship cleanly.',
+    revision: 1,
+    createdAt: 100,
+    updatedAt: 100,
+    targets: [
+      {
+        id: 't1',
+        machineId: 'm1',
+        agentConfigId: 'agy',
+        runConfig: {
+          configOptionValues: {
+            model: 'gemini-4-neon',
+            mode: 'yolo',
+            thought_level: 'xhigh',
+          },
+        },
+      },
+    ],
+  };
+  const workspace = new Flock(`ws-${crypto.randomUUID()}`);
+  workspace.set(['agentRole', 'agy-xhigh'], storedRole);
+  workspace.commit();
+  const snapshot = roleSnapshot(
+    workspace,
+    'u1',
+    meta,
+    new Map([['m1', machine]]),
+  );
+  assert.deepEqual(snapshot.roles[0].targets[0].runConfig, {
+    configOptionValues: {
+      model: 'gemini-4-neon',
+      mode: 'yolo',
+      thought_level: 'xhigh',
+    },
+  });
+
+  const capability = readRoleTargetCapability(machine, 'agy');
+  const calls = [];
+  const f = await openTestSession({
+    settings: () => workspace.exportFile(),
+    onRpc(request) {
+      calls.push(request);
+      return { result: { accepted: true } };
+    },
+  });
+  const finishTurn = async (id) => {
+    appendEntry(f.server, {
+      id,
+      role: 'assistant',
+      finished: true,
+      items: [],
+    });
+    await f.pushUpdate();
+  };
+  try {
+    // Turn 1: send with Antigravity Role pinning thought_level=xhigh + mode=yolo.
+    const first = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity',
+      text: 'Start with xhigh role',
+      agentConfigId: 'agy',
+      agentRoleId: 'agy-xhigh',
+      roleCapability: capability,
+      modelId: 'gemini-4-neon',
+      reasoningEffort: 'xhigh',
+      reasoningEffortConfigId: 'thought_level',
+      configOptionValues: { mode: 'yolo' },
+    });
+    assert.equal(first.state, 'accepted');
+    assert.deepEqual(calls[0].params.inputConfig.configOptionValues, {
+      model: 'gemini-4-neon',
+      mode: 'yolo',
+      thought_level: 'xhigh',
+    });
+    assert.equal(calls[0].params.inputConfig.agentRoleId, 'agy-xhigh');
+
+    // Reopen projection lifts thought_level into composer.effort and strips it from configOptionValues.
+    await finishTurn('a-1');
+    const reopened = f.runtime.projectSession(f.server, 'live');
+    assert.equal(reopened.composer.modelId, 'gemini-4-neon');
+    assert.equal(reopened.composer.effort, 'xhigh');
+    assert.equal(reopened.composer.agentRoleId, 'agy-xhigh');
+    assert.deepEqual(reopened.composer.configOptionValues, { mode: 'yolo' });
+
+    // Turn 2: follow-up after reopen keeps Role and thought_level=xhigh.
+    const followUp = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity',
+      text: 'Continue after reopen',
+      agentConfigId: 'agy',
+      agentRoleId: 'agy-xhigh',
+      roleCapability: capability,
+      modelId: reopened.composer.modelId,
+      reasoningEffort: reopened.composer.effort,
+      reasoningEffortConfigId: 'thought_level',
+      configOptionValues: reopened.composer.configOptionValues,
+    });
+    assert.equal(followUp.state, 'accepted');
+    assert.equal(calls[1].params.inputConfig.agentRoleId, 'agy-xhigh');
+    assert.deepEqual(calls[1].params.inputConfig.configOptionValues, {
+      model: 'gemini-4-neon',
+      mode: 'yolo',
+      thought_level: 'xhigh',
+    });
+
+    // Turn 3: user changes permission in panel from yolo to auto — sends auto (never stale yolo) and preserves thought_level=xhigh.
+    await finishTurn('a-2');
+    const switchedMode = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity',
+      text: 'Switch to auto mode',
+      agentConfigId: 'agy',
+      agentRoleId: null,
+      roleCapability: capability,
+      modelId: 'gemini-4-neon',
+      reasoningEffort: 'xhigh',
+      reasoningEffortConfigId: 'thought_level',
+      configOptionValues: { mode: 'auto' },
+    });
+    assert.equal(switchedMode.state, 'accepted');
+    assert.equal(calls[2].params.inputConfig.agentRoleId, null);
+    assert.equal(calls[2].params.inputConfig.modeId, undefined);
+    assert.deepEqual(calls[2].params.inputConfig.configOptionValues, {
+      model: 'gemini-4-neon',
+      mode: 'auto',
+      thought_level: 'xhigh',
+    });
+  } finally {
+    f.close();
+  }
+
+  // Declared fastMode: true stays available even when observedModelConfigOptions omits fast-mode.
+  const codexCap = {
+    machineId: 'm1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    models: [
+      { id: 'gpt-5.3', name: 'GPT-5.3' },
+      { id: 'gpt-5.4', name: 'GPT-5.4' },
+    ],
+    modes: [],
+    reasoningEfforts: {},
+    fastModes: { 'gpt-5.3': false, 'gpt-5.4': true },
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'gpt-5.3',
+        options: [
+          { id: 'gpt-5.3', name: 'GPT-5.3' },
+          { id: 'gpt-5.4', name: 'GPT-5.4' },
+        ],
+      },
+      {
+        id: 'fast-mode',
+        name: 'Fast',
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      },
+    ],
+    observedModelConfigOptions: {
+      'gpt-5.4': [],
+    },
+    steer: true,
+  };
+  assert.equal(fastModeFor(codexCap, { modelId: 'gpt-5.3' }), undefined);
+  assert.deepEqual(fastModeFor(codexCap, { modelId: 'gpt-5.4' }), {
+    id: 'fast-mode',
+    enabled: false,
+  });
 });

@@ -112,4 +112,115 @@ final class CreationCapabilitiesTests: XCTestCase {
     XCTAssertNil(switched.configOptionValues?["model_selector"])
     XCTAssertEqual(CreateLogic.selectedModelId(capability, switched), "model-a")
   }
+
+  func testAntigravityLegacyModesAndConfigModePreferConfigOptionAndThoughtLevel() {
+    let modes = [
+      CapabilityChoice(id: "ask", name: "Ask"),
+      CapabilityChoice(id: "auto", name: "Auto"),
+      CapabilityChoice(id: "yolo", name: "YOLO"),
+    ]
+    let capability = Capability(
+      machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+      models: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+      modes: modes, legacyModes: modes,
+      reasoningEfforts: ["gemini-4-neon": ["low", "high", "xhigh"]],
+      reasoningEffortConfigId: "thought_level",
+      configOptions: [
+        ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-4-neon"),
+                     options: [CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+        ConfigOption(id: "interaction_mode", name: "Interaction", category: "mode", type: "select", currentValue: .string("code"),
+                     options: [CapabilityChoice(id: "code", name: "Code")]),
+        ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: modes),
+        ConfigOption(id: "thought_level", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                     options: [CapabilityChoice(id: "low", name: "Low"), CapabilityChoice(id: "high", name: "High"), CapabilityChoice(id: "xhigh", name: "XHigh")]),
+      ]
+    )
+
+    // Config-option-driven agent prefers configOptions.mode even when legacyModes is non-empty.
+    let roleChoice = ModelChoice(
+      modelId: "gemini-4-neon", modeId: "ask",
+      configOptionValues: ["mode": .string("yolo"), "thought_level": .string("xhigh")]
+    )
+    let permission = CreateLogic.permissionMode(capability, roleChoice)
+    XCTAssertEqual(permission?.configId, "mode")
+    XCTAssertEqual(permission?.value, "yolo")
+    XCTAssertEqual(CreateLogic.effortOptionId(capability, modelId: "gemini-4-neon"), "thought_level")
+    XCTAssertEqual(CreateLogic.selectedEffort(capability, roleChoice), "xhigh")
+
+    // Changing permission writes configOptionValues.mode and clears competing top-level modeId.
+    let edited = CreateLogic.withPermissionMode(capability, roleChoice, value: "auto")
+    XCTAssertEqual(edited.configOptionValues?["mode"], .string("auto"))
+    XCTAssertNil(edited.modeId)
+    XCTAssertEqual(CreateLogic.permissionMode(capability, edited)?.value, "auto")
+
+    // Applicable and remembered choices preserve thought_level effort and canonicalize mode option.
+    let applicable = CreateLogic.applicableChoice(roleChoice, capability: capability)
+    XCTAssertEqual(applicable.effort, "xhigh")
+    XCTAssertEqual(applicable.configOptionValues?["mode"], .string("yolo"))
+    XCTAssertNil(applicable.modeId)
+    let prefs = CreateLogic.withSelection(
+      nil, target: "chat",
+      selection: ProjectPrefs(modelId: "gemini-4-neon", effort: "xhigh", configOptionValues: ["mode": .string("auto")], machineId: "m1", agentKey: "m1:agy"),
+      chat: true
+    )
+    let remembered = CreateLogic.rememberedModelChoice(prefs, agentKey: "m1:agy", capability: capability, modelId: "gemini-4-neon")
+    XCTAssertEqual(remembered.effort, "xhigh")
+    XCTAssertEqual(remembered.configOptionValues?["mode"], .string("auto"))
+    XCTAssertNil(remembered.modeId)
+  }
+
+  func testDeclaredFastModePreservedAcrossObservedModelConfigOptionsSwitch() {
+    let capability = Capability(
+      machineId: "m1", agentConfigId: "codex", cliType: "builtin", agentType: "codex",
+      models: [CapabilityChoice(id: "gpt-5.3", name: "GPT-5.3"), CapabilityChoice(id: "gpt-5.4", name: "GPT-5.4")],
+      modes: [CapabilityChoice(id: "agent", name: "Agent")],
+      reasoningEfforts: ["gpt-5.3": ["low", "high"], "gpt-5.4": ["low", "high"]],
+      reasoningEffortConfigId: "reasoning_effort",
+      fastModes: ["gpt-5.3": false, "gpt-5.4": true],
+      configOptions: [
+        ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gpt-5.3"),
+                     options: [CapabilityChoice(id: "gpt-5.3", name: "GPT-5.3"), CapabilityChoice(id: "gpt-5.4", name: "GPT-5.4")]),
+        ConfigOption(id: "reasoning_effort", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                     options: [CapabilityChoice(id: "low", name: "Low"), CapabilityChoice(id: "high", name: "High")]),
+        ConfigOption(id: "fast-mode", name: "Fast", type: "boolean", currentValue: .bool(false), options: []),
+      ],
+      observedModelConfigOptions: [
+        "gpt-5.3": [
+          ConfigOption(id: "reasoning_effort", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                       options: [CapabilityChoice(id: "low", name: "Low"), CapabilityChoice(id: "high", name: "High")]),
+        ],
+        "gpt-5.4": [
+          ConfigOption(id: "reasoning_effort", name: "Reasoning", category: "thought_level", type: "select", currentValue: .string("high"),
+                       options: [CapabilityChoice(id: "low", name: "Low"), CapabilityChoice(id: "high", name: "High")]),
+        ],
+      ]
+    )
+
+    // Model declaring fastMode: false hides Fast.
+    XCTAssertNil(CreateLogic.fastMode(capability, ModelChoice(modelId: "gpt-5.3")))
+    XCTAssertFalse(CreateLogic.extraConfigOptions(capability, modelId: "gpt-5.3").contains { $0.id == "fast-mode" })
+
+    // Model declaring fastMode: true retains the Fast toggle even when omitted from observedModelConfigOptions.
+    let fastChoice = ModelChoice(modelId: "gpt-5.4")
+    XCTAssertEqual(CreateLogic.fastMode(capability, fastChoice)?.id, "fast-mode")
+    XCTAssertEqual(CreateLogic.fastMode(capability, fastChoice)?.enabled, false)
+    let enabled = CreateLogic.withFastMode(capability, fastChoice, enabled: true)
+    XCTAssertEqual(enabled.configOptionValues?["fast-mode"], .bool(true))
+    XCTAssertEqual(CreateLogic.fastMode(capability, enabled)?.enabled, true)
+    XCTAssertEqual(CreateLogic.applicableChoice(enabled, capability: capability).configOptionValues?["fast-mode"], .bool(true))
+
+    // Claude synthesizes `fast` when fastModes[model] == true and snapshot had no fast option.
+    let claude = Capability(
+      machineId: "m1", agentConfigId: "claude", cliType: "builtin", agentType: "claude",
+      models: [CapabilityChoice(id: "sonnet", name: "Sonnet"), CapabilityChoice(id: "opus", name: "Opus")],
+      fastModes: ["sonnet": false, "opus": true],
+      configOptions: [
+        ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("sonnet"),
+                     options: [CapabilityChoice(id: "sonnet", name: "Sonnet"), CapabilityChoice(id: "opus", name: "Opus")]),
+      ],
+      observedModelConfigOptions: ["opus": []]
+    )
+    XCTAssertNil(CreateLogic.fastMode(claude, ModelChoice(modelId: "sonnet")))
+    XCTAssertEqual(CreateLogic.fastMode(claude, ModelChoice(modelId: "opus"))?.id, "fast")
+  }
 }

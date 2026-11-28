@@ -55,25 +55,49 @@ enum SessionRoles {
   /// conversation's own (web applies pins through the composer's ordinary callbacks).
   static func choice(applying item: CreateRoleItem, to current: ModelChoice, capability: Capability?) -> ModelChoice {
     let modelKey = CreateLogic.modelOptionId(capability) ?? "model"
-    let pinned = CreateSessionForm.choice(
+    let preliminary = CreateSessionForm.choice(
       item.target.runConfig,
       effortId: capability?.reasoningEffortConfigId,
       modelOptionId: modelKey
     )
     let previousModel = CreateLogic.selectedModelId(capability, current, modelOptionId: modelKey)
+    let effortKey = CreateLogic.effortOptionId(capability, modelId: preliminary.modelId ?? previousModel)
+    let pinned = CreateSessionForm.choice(
+      item.target.runConfig,
+      effortId: effortKey,
+      modelOptionId: modelKey
+    )
     var next = current
     if let model = pinned.modelId, capability.map({ $0.models.contains { $0.id == model } }) ?? true {
       next.modelId = model
       next.configOptionValues?.removeValue(forKey: modelKey)
       if modelKey != "model" { next.configOptionValues?.removeValue(forKey: "model") }
-      if next.configOptionValues?.isEmpty == true { next.configOptionValues = nil }
-      if pinned.effort == nil, next.modelId != previousModel { next.effort = nil }
+      if pinned.effort == nil, next.modelId != previousModel {
+        next.effort = nil
+        for stale in [effortKey, "thought_level", "reasoning_effort", "effort"].compactMap({ $0 }) {
+          next.configOptionValues?.removeValue(forKey: stale)
+        }
+      }
     }
     if let mode = pinned.modeId, capability.map({ $0.modes.contains { $0.id == mode } }) ?? true { next.modeId = mode }
-    if let effort = pinned.effort { next.effort = effort }
+    if let effort = pinned.effort {
+      next.effort = effort
+      for stale in [effortKey, "thought_level", "reasoning_effort", "effort"].compactMap({ $0 }) {
+        next.configOptionValues?.removeValue(forKey: stale)
+      }
+    }
     if let options = pinned.configOptionValues, !options.isEmpty {
+      let configDriven = capability?.cliType == "registry" || capability?.cliType == "custom"
+      let permIds = CreateLogic.permissionOptionIds(capability)
+      if configDriven, options.keys.contains(where: { permIds.contains($0) }) {
+        next.modeId = nil
+        for stale in permIds where options[stale] == nil {
+          next.configOptionValues?.removeValue(forKey: stale)
+        }
+      }
       next.configOptionValues = (next.configOptionValues ?? [:]).merging(options) { _, pin in pin }
     }
+    if next.configOptionValues?.isEmpty == true { next.configOptionValues = nil }
     return next
   }
 

@@ -298,6 +298,30 @@ export function resolveModeOptionId(
   return undefined;
 }
 
+export function resolveEffortOptionId(
+  target?: RoleRunConfigTarget,
+  canonicalModelId?: string,
+  configOptionValues?: Record<string, unknown>,
+): string | undefined {
+  const effortConfigOptions = target?.capability
+    ? resolveConfigOptionsForModel(
+        target.capability.configOptions,
+        target.capability.observedModelConfigOptions,
+        canonicalModelId,
+      )
+    : target?.configOptions;
+  const option = effortConfigOptions?.find(
+    (item) =>
+      item.type === 'select' &&
+      (item.category === 'thought_level' || item.id === 'reasoning_effort'),
+  );
+  if (option?.id) return option.id;
+  for (const key of ['thought_level', 'reasoning_effort', 'effort']) {
+    if (typeof configOptionValues?.[key] === 'string') return key;
+  }
+  return undefined;
+}
+
 /**
  * Aligns with Lody `resolveCanonicalAgentRoleRunConfig`:
  * - `registry`/`custom` (config-option driven): `configOptionValues[id] ?? top-level`
