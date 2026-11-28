@@ -907,3 +907,209 @@ test('a guide whose target finishes during MCP selection uses ordinary dispatch'
     fixture.close();
   }
 });
+
+test('interrupt steer on a paused head queued message stages on a scratch replica and resyncs on unconfirmed append', async () => {
+  const seedPaused = (doc) => {
+    doc.getList('history').push({
+      id: 'active-reply',
+      role: 'assistant',
+      finished: false,
+      items: [],
+    });
+    const item = doc.getMovableList('mq').pushContainer(new LoroMap());
+    item.set('userTurnId', 'paused-1');
+    item.set('task', 'Resume carefully');
+    item.set('userId', 'u1');
+    item.set('timestamp', '2026-11-28T00:00:00.000Z');
+    item.set('paused', true);
+    const config = item.setContainer('acpSessionConfig', new LoroMap());
+    config.set('cliType', 'builtin');
+    config.set('agentType', 'codex');
+    doc.commit();
+  };
+
+  // Case 1: append fails before reaching hub — local replica never publishes queue-resend and resyncs to paused-1.
+  let fail = true;
+  const rejected = await openTestSession({
+    seedServer: seedPaused,
+    failAppend: () => fail,
+    onRpc: () => {
+      assert.fail('Failed append must never invoke session/cancel RPC');
+    },
+  });
+  try {
+    await assert.rejects(
+      rejected.runtime.controlTurn({
+        action: 'steer',
+        sessionId: 's1',
+        machineId: 'm1',
+        turnId: 'active-reply',
+        messageId: 'paused-1',
+        interrupt: true,
+      }),
+      /steer_unconfirmed/,
+    );
+    assert.equal(rejected.producers.length, 1);
+    assert.match(rejected.producers[0].producerId, /^[0-9a-f-]{36}$/);
+    await settled(
+      () =>
+        rejected.events.at(-1)?.status === 'live' &&
+        rejected.runtime.docSnapshot()?.mq?.[0]?.userTurnId === 'paused-1',
+    );
+    assert.ok(
+      rejected.events.every(
+        (event) =>
+          !event.entries?.some((entry) => entry.id === 'queue-resend:paused-1'),
+      ),
+      'Unconfirmed queue-resend ID must never be published',
+    );
+    assert.equal(rejected.server.toJSON().mq[0].userTurnId, 'paused-1');
+    assert.equal(rejected.server.toJSON().mq[0].paused, true);
+    assert.equal(rejected.runtime.docSnapshot().mq[0].userTurnId, 'paused-1');
+    assert.equal(rejected.runtime.docSnapshot().mq[0].paused, true);
+  } finally {
+    rejected.close();
+  }
+
+  // Case 2: hub received append but ACK was lost — resync reconciles local replica to hub's queue-resend ID.
+  const lostAck = await openTestSession({
+    seedServer: seedPaused,
+    loseAck: () => true,
+    onRpc: () => {
+      assert.fail('Lost append ACK must not proceed to session/cancel RPC');
+    },
+  });
+  try {
+    await assert.rejects(
+      lostAck.runtime.controlTurn({
+        action: 'steer',
+        sessionId: 's1',
+        machineId: 'm1',
+        turnId: 'active-reply',
+        messageId: 'paused-1',
+        interrupt: true,
+      }),
+      /steer_unconfirmed/,
+    );
+    await settled(
+      () =>
+        lostAck.events.at(-1)?.status === 'live' &&
+        lostAck.runtime.docSnapshot()?.mq?.[0]?.userTurnId ===
+          'queue-resend:paused-1',
+    );
+    assert.equal(
+      lostAck.server.toJSON().mq[0].userTurnId,
+      'queue-resend:paused-1',
+    );
+    assert.equal(lostAck.runtime.docSnapshot().mq[0].paused, undefined);
+  } finally {
+    lostAck.close();
+  }
+});
+
+test(
+  'LAN 410 gone resync preserves an expanded history window and safely clamps if compacted history is shorter',
+  { timeout: 8000 },
+  async (t) => {
+    const buildHistory = (count) => {
+      const doc = new LoroDoc();
+      const history = doc.getList('history');
+      for (let index = 0; index < count; index++) {
+        history.push({
+          id: `turn-${index}`,
+          role: 'user',
+          timestamp: '2026-11-28T00:00:00Z',
+          items: [{ type: 'text', text: `Message ${index}` }],
+        });
+      }
+      doc.commit();
+      return doc;
+    };
+
+    let currentDoc = buildHistory(18);
+    let generation = 0;
+    let triggerGone;
+    const events = [];
+    globalThis.__sessionClient = class {
+      async bootstrap() {
+        const offset = String(++generation * 10);
+        return {
+          ok: true,
+          result: {
+            snapshotOffset: offset,
+            snapshot: { body: currentDoc.export({ mode: 'snapshot' }) },
+            updates: [],
+            nextOffset: offset,
+            cursor: `cursor-${offset}`,
+            upToDate: true,
+          },
+        };
+      }
+      async readOnce(request) {
+        return new Promise((resolve, reject) => {
+          triggerGone = () => resolve({ ok: false, result: { code: 'gone' } });
+          request.signal.addEventListener(
+            'abort',
+            () => reject(request.signal.reason),
+            { once: true },
+          );
+        });
+      }
+      append() {
+        assert.fail('read recovery must never append');
+      }
+    };
+    const runtime = await loadRuntime();
+    t.after(() => {
+      runtime.stopSessions();
+      delete globalThis.__sessionClient;
+    });
+
+    await runtime.openSession(
+      'long-compacted',
+      'w1',
+      async () => ({ token: 'synthetic', gatewayBaseUrl: 'https://x.invalid' }),
+      (event) => {
+        if (event.session) events.push(JSON.parse(event.session));
+      },
+      async () => {
+        assert.fail('read recovery must never dispatch');
+      },
+    );
+    await settled(
+      () =>
+        events.at(-1)?.status === 'live' &&
+        events.at(-1)?.entries?.[0]?.id === 'turn-12',
+    );
+
+    // Load an older page so window expands to turn-6..turn-17.
+    await runtime.loadOlderSession('long-compacted');
+    await settled(() => events.at(-1)?.entries?.[0]?.id === 'turn-6');
+
+    // Trigger 410 gone with same 18-turn compacted history: window must stay at turn-6.
+    triggerGone();
+    await settled(
+      () =>
+        generation === 2 &&
+        events.at(-1)?.status === 'live' &&
+        events.at(-1)?.entries?.length === 12,
+    );
+    assert.equal(events.at(-1).entries[0].id, 'turn-6');
+    assert.equal(events.at(-1).historyHasMore, true);
+
+    // Trigger 410 gone when hub history was shortened to 4 turns: must clamp safely to turn-0..turn-3.
+    currentDoc = buildHistory(4);
+    triggerGone();
+    await settled(
+      () =>
+        generation === 3 &&
+        events.at(-1)?.status === 'live' &&
+        events.at(-1)?.entries?.length === 4,
+    );
+    assert.deepEqual(
+      events.at(-1).entries.map((entry) => entry.id),
+      ['turn-0', 'turn-1', 'turn-2', 'turn-3'],
+    );
+    assert.equal(events.at(-1).historyHasMore, false);
+  },
+);

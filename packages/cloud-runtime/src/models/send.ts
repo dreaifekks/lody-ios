@@ -30,6 +30,7 @@ export type Capability = {
   fastModes?: Record<string, boolean>;
   reasoningEffortConfigId?: string;
   configOptions?: ConfigOption[];
+  observedModelConfigOptions?: Record<string, ConfigOption[]>;
   steer: boolean;
 };
 

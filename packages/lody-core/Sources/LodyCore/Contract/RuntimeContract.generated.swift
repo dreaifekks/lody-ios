@@ -1951,8 +1951,9 @@ extension RuntimeContract {
     public var reasoningEfforts: [String: [String]]
     public var reasoningEffortConfigId: String?
     public var configOptions: [ConfigOption]?
+    public var observedModelConfigOptions: [String: [ConfigOption]]?
     public var steer: Bool
-    public init(machineId: String, agentConfigId: String? = nil, cliType: String, agentType: String, models: [CapabilityChoice], modes: [CapabilityChoice], legacyModes: [CapabilityChoice]? = nil, fastModes: [String: Bool]? = nil, reasoningEfforts: [String: [String]], reasoningEffortConfigId: String? = nil, configOptions: [ConfigOption]? = nil, steer: Bool) {
+    public init(machineId: String, agentConfigId: String? = nil, cliType: String, agentType: String, models: [CapabilityChoice], modes: [CapabilityChoice], legacyModes: [CapabilityChoice]? = nil, fastModes: [String: Bool]? = nil, reasoningEfforts: [String: [String]], reasoningEffortConfigId: String? = nil, configOptions: [ConfigOption]? = nil, observedModelConfigOptions: [String: [ConfigOption]]? = nil, steer: Bool) {
       self.machineId = machineId
       self.agentConfigId = agentConfigId
       self.cliType = cliType
@@ -1964,6 +1965,7 @@ extension RuntimeContract {
       self.reasoningEfforts = reasoningEfforts
       self.reasoningEffortConfigId = reasoningEffortConfigId
       self.configOptions = configOptions
+      self.observedModelConfigOptions = observedModelConfigOptions
       self.steer = steer
     }
     public init(from decoder: any Decoder) throws {
@@ -1979,6 +1981,7 @@ extension RuntimeContract {
       self.reasoningEfforts = try c.decode([String: [String]].self, forKey: Key("reasoningEfforts"))
       self.reasoningEffortConfigId = try c.decodeIfPresent(String.self, forKey: Key("reasoningEffortConfigId"))
       self.configOptions = try c.decodeIfPresent([ConfigOption].self, forKey: Key("configOptions"))
+      self.observedModelConfigOptions = try c.decodeIfPresent([String: [ConfigOption]].self, forKey: Key("observedModelConfigOptions"))
       self.steer = try c.decode(Bool.self, forKey: Key("steer"))
     }
     public func encode(to encoder: any Encoder) throws {
@@ -1994,6 +1997,7 @@ extension RuntimeContract {
       try c.encode(self.reasoningEfforts, forKey: Key("reasoningEfforts"))
       try c.encodeIfPresent(self.reasoningEffortConfigId, forKey: Key("reasoningEffortConfigId"))
       try c.encodeIfPresent(self.configOptions, forKey: Key("configOptions"))
+      try c.encodeIfPresent(self.observedModelConfigOptions, forKey: Key("observedModelConfigOptions"))
       try c.encode(self.steer, forKey: Key("steer"))
     }
   }

@@ -45,6 +45,8 @@ import { resolveTurnRole, type TurnRole } from './agent-roles';
 import {
   record,
   resolveCanonicalAgentRoleRunConfig,
+  resolveModeOptionId,
+  resolveModelOptionId,
   roleRunConfigApplied,
   type RoleRunConfigCapability,
   type RoleRunConfigTarget,
@@ -737,11 +739,16 @@ function loroWindowStart(state: SessionState, history: LoroList) {
     for (let i = history.length - 1; i >= 0; i--)
       if (entryField(history.get(i), 'id') === state.historyAnchor) return i;
   const latest = pageStart(history, history.length, HISTORY_PAGE_TURNS);
+  const resumed =
+    state.resumeHistoryStart !== undefined
+      ? Math.min(
+          Math.max(0, Math.trunc(state.resumeHistoryStart)),
+          history.length,
+        )
+      : undefined;
   const start =
-    state.ready &&
-    state.resumeHistoryStart !== undefined &&
-    state.resumeHistoryStart < latest
-      ? pageStart(history, state.resumeHistoryStart + 1, 1)
+    state.ready && resumed !== undefined && resumed < latest
+      ? pageStart(history, resumed + 1, 1)
       : latest;
   const anchor = entryField(history.get(start), 'id');
   // An empty or still-bootstrapping replica must not fix the window at 0.
@@ -1192,6 +1199,12 @@ const uncertain = new Set<string>();
 function resync(state: SessionState) {
   if (sessions.get(state.id) !== state) return;
   const foreground = active === state;
+  let resumeHistoryStart = state.resumeHistoryStart;
+  if (state.target?.backend === 'roost') {
+    resumeHistoryStart = state.roostWindow?.start ?? resumeHistoryStart;
+  } else if (state.historyAnchor !== undefined) {
+    resumeHistoryStart = loroWindowStart(state, state.doc.getList('history'));
+  }
   // The unacknowledged write must not be published as session history.
   state.ready = false;
   evict(state);
@@ -1204,7 +1217,7 @@ function resync(state: SessionState) {
     state.markDispatch,
     foreground,
     state.resolveTarget,
-    undefined,
+    resumeHistoryStart,
     state.target,
     state.client,
   );
@@ -2050,6 +2063,22 @@ export async function sendTurn(
     const roleTurn = configs.find(
       (config) => config?.agentRoleId !== undefined,
     );
+    const hasOwn = (object: Record<string, unknown> | undefined, key: string) =>
+      object !== undefined && Object.prototype.hasOwnProperty.call(object, key);
+    const cleanConfigOptions = (values: Record<string, unknown>) => {
+      const clean: Record<string, string | boolean> = {};
+      for (const [key, value] of Object.entries(values)) {
+        if (typeof value === 'string' || typeof value === 'boolean')
+          clean[key] = value;
+      }
+      return clean;
+    };
+    const roleTarget: RoleRunConfigTarget = {
+      cliType: args.cliType,
+      capability: args.roleCapability,
+    };
+    const isConfigOptionDriven =
+      args.cliType === 'registry' || args.cliType === 'custom';
     const configOptionValues = migrateLegacyAntigravityModeOption({
       ...(previous.configOptionValues &&
       typeof previous.configOptionValues === 'object' &&
@@ -2063,6 +2092,20 @@ export async function sendTurn(
       if (args.reasoningEffort === null) delete configOptionValues[id];
       else configOptionValues[id] = args.reasoningEffort;
     }
+    const modelOptionId = resolveModelOptionId(roleTarget, configOptionValues);
+    const modelOptionKey = modelOptionId ?? 'model';
+    if (
+      args.modelId !== undefined &&
+      !hasOwn(args.configOptionValues, modelOptionKey)
+    ) {
+      if (args.modelId === null) {
+        delete configOptionValues[modelOptionKey];
+      } else if (isConfigOptionDriven && modelOptionId) {
+        configOptionValues[modelOptionId] = args.modelId;
+      } else if (!isConfigOptionDriven) {
+        delete configOptionValues[modelOptionKey];
+      }
+    }
     // An explicit pick wins; otherwise the turn inherits what the session
     // already used, and an unset value leaves the machine on its default.
     const rawModeId = args.modeId ?? previous.modeId;
@@ -2072,13 +2115,32 @@ export async function sendTurn(
         : rawModeId;
     const modelId =
       args.modelId === null ? undefined : (args.modelId ?? previous.modelId);
+    const effectiveModelId = resolveCanonicalAgentRoleRunConfig(
+      {
+        modelId: typeof modelId === 'string' ? modelId : undefined,
+        configOptionValues: cleanConfigOptions(configOptionValues),
+      },
+      roleTarget,
+    ).canonicalModelId;
+    const modeOptionId = resolveModeOptionId(
+      roleTarget,
+      effectiveModelId,
+      configOptionValues,
+    );
+    const modeOptionKey = modeOptionId ?? 'mode';
+    if (
+      args.modeId !== undefined &&
+      !hasOwn(args.configOptionValues, modeOptionKey)
+    ) {
+      if (isConfigOptionDriven && modeOptionId && typeof modeId === 'string') {
+        configOptionValues[modeOptionId] = modeId;
+      } else if (!isConfigOptionDriven) {
+        delete configOptionValues[modeOptionKey];
+      }
+    }
     // A Role runs a turn only while every value it pins is what will run (web). Any turn
     // may pick one, but its prompt prefix only ever starts the conversation.
     let role: TurnRole | undefined;
-    const roleTarget: RoleRunConfigTarget = {
-      cliType: args.cliType,
-      capability: args.roleCapability,
-    };
     const started = (
       state.roostMetadata ??
       (configSnapshot.history as any[] | undefined) ??
@@ -2152,11 +2214,7 @@ export async function sendTurn(
     let dispatchConfigOptionValues: Record<string, unknown> | undefined =
       Object.keys(configOptionValues).length ? configOptionValues : undefined;
     if (role) {
-      const cleanOptions: Record<string, string | boolean> = {};
-      for (const [key, value] of Object.entries(configOptionValues)) {
-        if (typeof value === 'string' || typeof value === 'boolean')
-          cleanOptions[key] = value;
-      }
+      const cleanOptions = cleanConfigOptions(configOptionValues);
       const canonicalDispatch = resolveCanonicalAgentRoleRunConfig(
         {
           modelId: typeof modelId === 'string' ? modelId : undefined,
@@ -2234,25 +2292,48 @@ export async function sendTurn(
         typeof previous.modeId === 'string'
           ? migrateLegacyAntigravityModeId(previous.modeId)
           : previous.modeId;
-      const previousComparable: Record<string, unknown> = {
-        cliType: previous.cliType,
-        agentType: previous.agentType,
-        modelId: previous.modelId,
-        modeId: previousModeId,
-      };
+      const prevCanonical = resolveCanonicalAgentRoleRunConfig(
+        {
+          modelId:
+            typeof previous.modelId === 'string' ? previous.modelId : undefined,
+          modeId:
+            typeof previousModeId === 'string' ? previousModeId : undefined,
+          configOptionValues: cleanConfigOptions(previousOptions),
+        },
+        roleTarget,
+      );
+      const nextCanonical = resolveCanonicalAgentRoleRunConfig(
+        {
+          modelId:
+            typeof inputConfig.modelId === 'string'
+              ? inputConfig.modelId
+              : undefined,
+          modeId:
+            typeof inputConfig.modeId === 'string'
+              ? inputConfig.modeId
+              : undefined,
+          configOptionValues: cleanConfigOptions(
+            inputConfig.configOptionValues ?? {},
+          ),
+        },
+        roleTarget,
+      );
+      const prevOpts = prevCanonical.configOptionValues ?? {};
+      const nextOpts = nextCanonical.configOptionValues ?? {};
       const changed =
-        ['cliType', 'agentType', 'modelId', 'modeId'].some(
-          (key) =>
-            previousComparable[key] !== undefined &&
-            inputConfig[key as keyof typeof inputConfig] !==
-              previousComparable[key],
-        ) ||
+        (previous.cliType !== undefined &&
+          inputConfig.cliType !== previous.cliType) ||
+        (previous.agentType !== undefined &&
+          inputConfig.agentType !== previous.agentType) ||
+        (prevCanonical.canonicalModelId !== undefined &&
+          nextCanonical.canonicalModelId !== prevCanonical.canonicalModelId) ||
+        (prevCanonical.canonicalModeId !== undefined &&
+          nextCanonical.canonicalModeId !== prevCanonical.canonicalModeId) ||
         JSON.stringify(inputConfig.mcpServerIds) !==
           JSON.stringify(previous.mcpServerIds ?? []) ||
-        Object.keys(configOptionValues).length !==
-          Object.keys(previousOptions).length ||
-        Object.entries(configOptionValues).some(
-          ([key, value]) => previousOptions[key] !== value,
+        Object.keys(nextOpts).length !== Object.keys(prevOpts).length ||
+        Object.entries(nextOpts).some(
+          ([key, value]) => prevOpts[key] !== value,
         );
       if (changed) {
         // A changed run configuration no longer represents the frozen Role.
@@ -2659,10 +2740,12 @@ export async function controlTurn(
       if (args.interrupt && (index !== 0 || entry))
         throw new Error('message_not_first');
       state.steerReceipts ??= new Map();
-      state.steerReceipts.set(args.messageId, {
-        targetId: args.turnId,
-        state: 'confirming',
-      });
+      if (!args.interrupt) {
+        state.steerReceipts.set(args.messageId, {
+          targetId: args.turnId,
+          state: 'confirming',
+        });
+      }
       if (state.target?.backend === 'roost' && !args.interrupt) {
         if (
           !state.target.acceptsInput ||
@@ -2723,46 +2806,59 @@ export async function controlTurn(
       }
       const before = state.doc.version();
       if (args.interrupt) {
-        // Cancellation resumes the existing FIFO queue. Persist the exact edge
-        // before cancellation; do not move/replay the machine-owned queue.
-        const queued = queue.get(index);
-        if (!(queued instanceof LoroMap)) throw new Error('invalid_queue');
-        const queuedConfig = queued.get('acpSessionConfig');
-        if (!(queuedConfig instanceof LoroMap))
-          throw new Error('invalid_queue');
-        const paused = queued.get('paused') === true;
-        const steerMessageId = paused
-          ? `queue-resend:${args.messageId}`
-          : args.messageId;
-        trackedSteerId = steerMessageId;
-        if (paused) {
-          queued.delete('paused');
-          queued.set('userTurnId', steerMessageId);
-          state.steerReceipts.delete(args.messageId);
-          state.steerReceipts.set(steerMessageId, {
+        // Cancellation resumes the existing FIFO queue. Stage the exact edge
+        // on a scratch replica and import only after hub acknowledgement.
+        let steerMessageId = args.messageId;
+        let update: Uint8Array;
+        const staged = state.doc.fork();
+        try {
+          const stagedQueue = staged.getMovableList('mq');
+          const queued = stagedQueue.get(index);
+          if (!(queued instanceof LoroMap)) throw new Error('invalid_queue');
+          const queuedConfig = queued.get('acpSessionConfig');
+          if (!(queuedConfig instanceof LoroMap))
+            throw new Error('invalid_queue');
+          const paused = queued.get('paused') === true;
+          if (paused) {
+            steerMessageId = `queue-resend:${args.messageId}`;
+            queued.delete('paused');
+            queued.set('userTurnId', steerMessageId);
+          }
+          recordHumanInputReceipt(staged, steerMessageId, userId);
+          staged.getMap('lodySteerLinks').set(steerMessageId, {
             targetId: args.turnId,
-            state: 'confirming',
+            mode: 'interrupt',
           });
+          queuedConfig.delete('_lodyDeliveryKind');
+          queuedConfig.set('_lodySteerTarget', args.turnId);
+          queuedConfig.set('_lodySteerMode', 'interrupt');
+          staged.commit();
+          update = staged.export({ mode: 'update', from: before });
+        } finally {
+          staged.free();
         }
-        recordHumanInputReceipt(state.doc, steerMessageId, userId);
-        state.doc.getMap('lodySteerLinks').set(steerMessageId, {
-          targetId: args.turnId,
-          mode: 'interrupt',
-        });
-        queuedConfig.delete('_lodyDeliveryKind');
-        queuedConfig.set('_lodySteerTarget', args.turnId);
-        queuedConfig.set('_lodySteerMode', 'interrupt');
-        state.doc.commit();
-        scheduleEmit(state, state.status);
-        const uploaded = await state.client.append({
-          part: {
+        let appendUnconfirmed = true;
+        let uploaded;
+        try {
+          uploaded = await appendOnce(state.client, {
             contentType: 'application/octet-stream',
-            body: encodeFrame(
-              state.doc.export({ mode: 'update', from: before }),
-            ),
-          },
-        });
+            body: encodeFrame(update),
+          });
+          if (uploaded.ok) appendUnconfirmed = false;
+        } finally {
+          if (appendUnconfirmed) resync(state);
+        }
         if (!uploaded.ok) throw new Error('steer_unconfirmed');
+        if (sessions.get(state.id) !== state || !targetIsCurrent(state))
+          throw new Error('session_not_ready');
+        state.doc.import(update);
+        trackedSteerId = steerMessageId;
+        state.steerReceipts.delete(args.messageId);
+        state.steerReceipts.set(steerMessageId, {
+          targetId: args.turnId,
+          state: 'confirming',
+        });
+        scheduleEmit(state, state.status);
         const reply = await machineRpc(
           state.workspace,
           args.machineId,

@@ -37,7 +37,7 @@ enum CreateModelOptions {
   }
 
   static func modelTitle(_ capability: Capability, _ value: ModelChoice) -> String {
-    if let id = value.modelId, !id.isEmpty, id.lowercased() != "default" {
+    if let id = CreateLogic.selectedModelId(capability, value), id.lowercased() != "default" {
       return capability.models.first { $0.id == id }?.name ?? id
     }
     guard let id = CreateLogic.resolvedModelId(capability) else { return text("model.unavailable") }
@@ -51,10 +51,11 @@ enum CreateModelOptions {
   }
 
   static func summary(_ capability: Capability, _ value: ModelChoice) -> String {
-    let modelId = CreateLogic.resolvedModelId(capability, modelId: value.modelId)
+    let selectedModel = CreateLogic.selectedModelId(capability, value)
+    let modelId = CreateLogic.resolvedModelId(capability, modelId: selectedModel)
     let model = modelId.map { id in capability.models.first { $0.id == id }?.name ?? id } ?? text("model.unavailable")
     let mode = capability.modes.first { $0.id == value.modeId }
-    let extras = CreateLogic.extraConfigOptions(capability).compactMap { option -> String? in
+    let extras = CreateLogic.extraConfigOptions(capability, modelId: modelId).compactMap { option -> String? in
       switch value.configOptionValues?[option.id] {
       case .bool(let flag): "\(configTitle(option)): \(text(flag ? "model.config.on" : "model.config.off"))"
       case .string(let id): configValueTitle(option, id)
@@ -66,22 +67,25 @@ enum CreateModelOptions {
   }
 
   static func tabs(_ capability: Capability, _ value: ModelChoice) -> [(id: String, title: String)] {
-    let extras = CreateLogic.extraConfigOptions(capability)
+    let selectedModel = CreateLogic.selectedModelId(capability, value)
+    let extras = CreateLogic.extraConfigOptions(capability, modelId: selectedModel)
     var tabs = [("model", text("model.tab.model"))]
-    if !CreateLogic.effortsFor(capability, modelId: value.modelId).isEmpty { tabs.append(("effort", text("model.tab.effort"))) }
+    if !CreateLogic.effortsFor(capability, modelId: selectedModel).isEmpty { tabs.append(("effort", text("model.tab.effort"))) }
     if !capability.modes.isEmpty { tabs.append(("mode", text("model.tab.mode"))) }
     if extras.contains(where: isPermission) { tabs.append(("permission", text("model.tab.permission"))) }
     if extras.contains(where: { !isPermission($0) }) { tabs.append(("more", text("model.tab.more"))) }
     return tabs
   }
 
-  private static func visibleOptions(_ capability: Capability, tab: String) -> [ConfigOption] {
-    CreateLogic.extraConfigOptions(capability).filter { tab == "permission" ? isPermission($0) : !isPermission($0) }
+  private static func visibleOptions(_ capability: Capability, _ value: ModelChoice, tab: String) -> [ConfigOption] {
+    CreateLogic.extraConfigOptions(capability, modelId: CreateLogic.selectedModelId(capability, value)).filter {
+      tab == "permission" ? isPermission($0) : !isPermission($0)
+    }
   }
 
   static func sections(_ capability: Capability, _ value: ModelChoice, tab: String) -> [LodyListSection] {
     if tab == "permission" || tab == "more" {
-      return visibleOptions(capability, tab: tab).map { option in
+      return visibleOptions(capability, value, tab: tab).map { option in
         let selected = value.configOptionValues?[option.id]
         var rows: [LodyListRow] = [.item(
           configRowId(option.id, defaultId), text("model.useDefault"), image: selected == nil ? "checkmark" : "")]
@@ -122,7 +126,7 @@ enum CreateModelOptions {
   // Returns nil for a model pick: switching models restores that model's remembered choice.
   static func pressed(_ capability: Capability, _ value: ModelChoice, tab: String, id: String) -> ModelChoice? {
     if tab == "permission" || tab == "more" {
-      for option in visibleOptions(capability, tab: tab) {
+      for option in visibleOptions(capability, value, tab: tab) {
         if id == configRowId(option.id, defaultId) { return setConfig(value, id: option.id, to: nil) }
         if let item = option.options.first(where: { id == configRowId(option.id, $0.id) }) {
           return setConfig(value, id: option.id, to: .string(item.id))

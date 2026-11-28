@@ -299,4 +299,92 @@ final class SessionComposerModelTests: XCTestCase {
     }
     return result
   }
+
+  func testRegistryRoleReopenAndObservedPermissionOptionStayUnified() async {
+    let neonModes = [CapabilityChoice(id: "ask", name: "Ask"), CapabilityChoice(id: "yolo", name: "YOLO")]
+    let registryCapability = Capability(
+      machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+      models: [CapabilityChoice(id: "gemini-3", name: "Gemini 3"), CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+      modes: neonModes, legacyModes: [],
+      configOptions: [
+        ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-3"),
+                     options: [CapabilityChoice(id: "gemini-3", name: "Gemini 3"), CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+        ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: neonModes),
+      ],
+      observedModelConfigOptions: [
+        "gemini-4-neon": [
+          ConfigOption(id: "permission_mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: neonModes),
+        ],
+      ]
+    )
+    let agent = CreationAgent(id: "agy", name: "Antigravity", machineId: "m1", machineName: "Mini", cliType: "registry", agentType: "antigravity")
+    let agyRole = RuntimeContract.AgentRoleItem(
+      id: "agy-yolo", ownerUserId: "u1", visibility: .private, name: "Agy YOLO", description: "", promptPrefix: "Ship.",
+      emoji: "🚀", revision: 1, updatedAt: 1,
+      targets: [.init(
+        machineId: "m1", agentConfigId: "agy",
+        runConfig: .init(configOptionValues: ["model": .string("gemini-4-neon"), "permission_mode": .string("yolo")]),
+        machineName: "Mini", agentName: "Antigravity", state: .configured
+      )]
+    )
+    let registrySession = SessionItem(id: "s-reg", agentConfigId: "agy", machineId: "m1", cliType: "registry", agentType: "antigravity")
+    let model = SessionComposerModel(choice: nil, service: SessionComposerService(
+      options: { _, _ in CreationOptions(sessionId: "s-reg", agents: [agent], capabilities: [registryCapability]) },
+      tier: { _, _ in nil },
+      roles: { _ in [agyRole] }
+    ))
+    await settle(model) { model.load(workspaceId: "w1", projectId: nil, session: registrySession) }
+    // Wait for roles task to settle.
+    for _ in 0..<20 where model.roleItems.isEmpty { await Task.yield() }
+
+    // Reopen with model stored only in configOptionValues: Role stays active and permission panel shows YOLO.
+    model.hydrate(
+      pending: nil, ready: true,
+      snapshot: ModelChoice(configOptionValues: ["model": .string("gemini-4-neon"), "permission_mode": .string("yolo")]),
+      role: .some("agy-yolo")
+    )
+    XCTAssertEqual(model.activeRole?.role.id, "agy-yolo")
+    XCTAssertEqual(model.sendRole, .string("agy-yolo"))
+    XCTAssertEqual(model.sendChoice["modelId"], .string("gemini-4-neon"))
+    XCTAssertEqual(model.runConfig.first { $0.id == "permission" }?.title, "YOLO")
+
+    // Changing permission in the panel writes `permission_mode` = `ask` and detaches the Role cleanly.
+    model.pick("permission", "ask")
+    XCTAssertEqual(model.runConfig.first { $0.id == "permission" }?.title, "Ask")
+    XCTAssertNil(model.activeRole)
+    XCTAssertEqual(model.sendRole, .null)
+    if case .object(let sentOptions)? = model.sendChoice["configOptionValues"] {
+      XCTAssertEqual(sentOptions["permission_mode"], .string("ask"))
+      XCTAssertNil(sentOptions["model"])
+    } else {
+      XCTFail("Expected configOptionValues in sendChoice")
+    }
+  }
+
+  func testHiddenActiveMaintenanceTurnRemainsStoppableInSessionControl() throws {
+    let envelope = try XCTUnwrap(SessionEnvelope.prepare(#"""
+    {"v":1,"revision":5,"status":"live","activeTurnId":"a-compact","usage":{"context":null,"isContextCompacting":true,"quotaEligible":false,"quota":null},"entries":[
+      {"id":"u1","role":"user","status":"handled","finished":true,"items":[]},
+      {"id":"a1","role":"assistant","finished":true,"items":[]}
+    ]}
+    """#))
+    XCTAssertEqual(envelope.transcript.unfinishedTurnId, "a-compact")
+    var capturedPayload: String?
+    let control = SessionControl { payload in
+      capturedPayload = payload
+      return #"{"state":"stopped"}"#
+    }
+    let state = control.state(session: session, transcript: envelope.transcript, live: true, overflow: false, steerable: false)
+    XCTAssertTrue(state.running)
+    XCTAssertTrue(state.canStop)
+    control.act("stop", session: session, transcript: envelope.transcript, live: true, overflow: false, steerable: false)
+    let expectation = expectation(description: "stop dispatched")
+    Task { @MainActor in
+      for _ in 0..<20 where capturedPayload == nil { await Task.yield() }
+      expectation.fulfill()
+    }
+    wait(for: [expectation], timeout: 1)
+    let sent = try XCTUnwrap(capturedPayload)
+    XCTAssertTrue(sent.contains(#""turnId":"a-compact""#), "Expected active maintenance turnId in stop payload: \(sent)")
+  }
 }

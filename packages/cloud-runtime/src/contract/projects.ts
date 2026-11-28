@@ -57,6 +57,9 @@ export const Capability = z
     reasoningEfforts: z.record(z.string(), z.array(z.string())),
     reasoningEffortConfigId: z.string().optional(),
     configOptions: z.array(ConfigOption).optional(),
+    observedModelConfigOptions: z
+      .record(z.string(), z.array(ConfigOption))
+      .optional(),
     steer: z.boolean(),
   })
   .meta({ id: 'Capability' });

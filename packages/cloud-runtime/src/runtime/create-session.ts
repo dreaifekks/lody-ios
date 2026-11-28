@@ -369,6 +369,9 @@ export function creationOptions(
           modes: modeOption?.options ?? choices(value.modes, 'id'),
           legacyModes: choices(value.modes, 'id'),
           configOptions,
+          ...(Object.keys(recorded).length
+            ? { observedModelConfigOptions: recorded }
+            : {}),
           ...(Object.keys(fastModes).length ? { fastModes } : {}),
           reasoningEfforts: {
             ...recordedEfforts,

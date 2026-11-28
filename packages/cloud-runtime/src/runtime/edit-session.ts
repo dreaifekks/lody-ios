@@ -147,7 +147,6 @@ export function validAttachmentBlocks(
 }
 
 const SESSION_ROLLOVER_TURN_PREFIX = 'session-rollover:';
-const BOARD_MAINTENANCE_TURN_PREFIX = 'board-maintenance:';
 
 function isCompletedSessionRolloverDivider(
   entry: RecordValue | undefined,
@@ -198,14 +197,6 @@ function isNonBoundaryRolloverRenewAssistant(
   );
 }
 
-function isBoardMaintenanceAssistant(entry: RecordValue | undefined): boolean {
-  return (
-    entry?.role === 'assistant' &&
-    typeof entry.userTurnId === 'string' &&
-    entry.userTurnId.startsWith(BOARD_MAINTENANCE_TURN_PREFIX)
-  );
-}
-
 export function editableUserTurn(
   history: RecordValue[],
   meta: RecordValue,
@@ -239,8 +230,7 @@ export function editableUserTurn(
     if (isCompletedSessionRolloverDivider(entry)) return;
     if (
       isHiddenRolloverSealAssistant(entry) ||
-      isNonBoundaryRolloverRenewAssistant(entry) ||
-      isBoardMaintenanceAssistant(entry)
+      isNonBoundaryRolloverRenewAssistant(entry)
     )
       continue;
     if (entry.role === 'user') return;

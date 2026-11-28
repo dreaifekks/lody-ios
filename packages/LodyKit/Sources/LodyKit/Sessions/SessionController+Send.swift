@@ -346,7 +346,7 @@ extension SessionController {
 
   private func sessionUsage(_ session: SessionItem, feed: SessionFeedState) -> [String: Any]? {
     var usage = feed.usageJSON.flatMap { CreateJSON.decode(ChatSessionUsage.self, $0) } ?? ChatSessionUsage()
-    let model = composerModel.active.modelId
+    let model = CreateLogic.selectedModelId(composerModel.capability, composerModel.active)
     let catalog = RemoteSettingsContext.current().agentUsage[session.machineId]
     if catalog != nil || (model != nil && model != usage.modelId) { usage.quota = nil }
     if let quota = SessionUsageSelection.quota(catalog, configId: session.agentConfigId, provider: session.agentType, model: model) {

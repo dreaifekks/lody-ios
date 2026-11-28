@@ -108,9 +108,10 @@ public struct Capability: Codable, Equatable, Sendable {
   public var fastModes: [String: Bool]?
   public var reasoningEffortConfigId: String?
   public var configOptions: [ConfigOption]?
+  public var observedModelConfigOptions: [String: [ConfigOption]]?
   public var steer: Bool?
 
-  public init(machineId: String, agentConfigId: String? = nil, cliType: String, agentType: String, models: [CapabilityChoice] = [], modes: [CapabilityChoice] = [], legacyModes: [CapabilityChoice]? = nil, reasoningEfforts: [String: [String]] = [:], reasoningEffortConfigId: String? = nil, fastModes: [String: Bool]? = nil, configOptions: [ConfigOption]? = nil, steer: Bool? = nil) {
+  public init(machineId: String, agentConfigId: String? = nil, cliType: String, agentType: String, models: [CapabilityChoice] = [], modes: [CapabilityChoice] = [], legacyModes: [CapabilityChoice]? = nil, reasoningEfforts: [String: [String]] = [:], reasoningEffortConfigId: String? = nil, fastModes: [String: Bool]? = nil, configOptions: [ConfigOption]? = nil, observedModelConfigOptions: [String: [ConfigOption]]? = nil, steer: Bool? = nil) {
     self.machineId = machineId
     self.agentConfigId = agentConfigId
     self.cliType = cliType
@@ -122,6 +123,7 @@ public struct Capability: Codable, Equatable, Sendable {
     self.fastModes = fastModes
     self.reasoningEffortConfigId = reasoningEffortConfigId
     self.configOptions = configOptions
+    self.observedModelConfigOptions = observedModelConfigOptions
     self.steer = steer
   }
 }

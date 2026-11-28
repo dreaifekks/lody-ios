@@ -104,4 +104,42 @@ do {
   check(CreateLogic.planMode(capability, ModelChoice()) == nil, "no plan selector, no switch")
 }
 
+// Registry Role switching clears stale model config option and reopen stays active when model sits in configOptionValues.
+do {
+  let neonModes = [CapabilityChoice(id: "ask", name: "Ask"), CapabilityChoice(id: "yolo", name: "YOLO")]
+  let registryCap = Capability(
+    machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+    models: [CapabilityChoice(id: "gemini-3", name: "Gemini 3"), CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+    modes: neonModes, legacyModes: [],
+    configOptions: [
+      ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-3"),
+                   options: [CapabilityChoice(id: "gemini-3", name: "Gemini 3"), CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+      ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: neonModes),
+    ],
+    observedModelConfigOptions: [
+      "gemini-4-neon": [
+        ConfigOption(id: "permission_mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: neonModes),
+      ],
+    ]
+  )
+  let agyRole = role(
+    "agy-yolo", "Agy YOLO", config: "agy",
+    pins: .init(configOptionValues: ["model": .string("gemini-4-neon"), "permission_mode": .string("yolo")])
+  )
+  let items = SessionRoles.items(roles: [agyRole], machineId: "m1", agentConfigId: "agy", online: ["agy"])
+  let previous = ModelChoice(configOptionValues: ["model": .string("gemini-3"), "mode": .string("ask")])
+  let switched = SessionRoles.choice(applying: items[0], to: previous, capability: registryCap)
+  check(switched.modelId == "gemini-4-neon", "switching to registry Role sets target model")
+  check(switched.configOptionValues?["model"] == nil, "switching to registry Role drops stale model config option")
+  check(switched.configOptionValues?["permission_mode"] == .string("yolo"), "switching to registry Role sets target model permission option")
+  check(CreateLogic.permissionMode(registryCap, switched)?.value == "yolo", "permission mode reflects target model option")
+  check(SessionRoles.active(items, picked: "agy-yolo", durable: nil, choice: switched, effortId: nil, modelOptionId: "model", cliType: "registry")?.role.id == "agy-yolo",
+        "switched registry Role is active")
+  let reopened = ModelChoice(configOptionValues: ["model": .string("gemini-4-neon"), "permission_mode": .string("yolo")])
+  let reopenedActive = SessionRoles.active(items, picked: nil, durable: "agy-yolo", choice: reopened, effortId: nil, modelOptionId: "model", cliType: "registry")
+  check(reopenedActive?.role.id == "agy-yolo", "reopened registry Role stays active when model lives in configOptionValues")
+  check(SessionRoles.send(loaded: true, active: reopenedActive, picked: nil, durable: "agy-yolo") == .role("agy-yolo"),
+        "reopened registry Role sends its role id instead of clearing it")
+}
+
 print("session-roles ok")

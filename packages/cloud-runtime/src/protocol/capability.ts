@@ -159,8 +159,30 @@ export function permissionModeFor(
   capability: Capability | undefined,
   choice: ModelChoice,
 ) {
+  const modelOption = capability?.configOptions?.find(isModelSelectorOption);
+  const rawOptionModel = modelOption
+    ? choice.configOptionValues?.[modelOption.id]
+    : undefined;
+  const optionModel =
+    typeof rawOptionModel === 'string' && rawOptionModel.trim()
+      ? rawOptionModel.trim()
+      : undefined;
+  const topModel =
+    typeof choice.modelId === 'string' && choice.modelId.trim()
+      ? choice.modelId.trim()
+      : undefined;
+  const isConfigOptionDriven =
+    capability?.cliType === 'registry' || capability?.cliType === 'custom';
+  const targetModelId = isConfigOptionDriven
+    ? (optionModel ?? topModel)
+    : (topModel ?? optionModel);
+  const resolvedOptions = resolveConfigOptionsForModel(
+    capability?.configOptions,
+    capability?.observedModelConfigOptions,
+    targetModelId,
+  );
   const selectors =
-    capability?.configOptions?.filter((item) => item.type === 'select') ?? [];
+    resolvedOptions?.filter((item) => item.type === 'select') ?? [];
   let option = selectors.find(
     (item) => item.id === 'permission_mode' || item.category === '_permission',
   );

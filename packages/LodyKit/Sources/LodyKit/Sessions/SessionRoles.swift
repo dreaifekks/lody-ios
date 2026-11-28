@@ -40,25 +40,34 @@ enum SessionRoles {
   /// The Role the composer IS: the one picked here (`.some(nil)` is an explicit None), else the
   /// one the latest turn ran as, while it can run and every value it pins is what will run.
   static func active(
-    _ items: [CreateRoleItem], picked: String??, durable: String??, choice: ModelChoice, effortId: String?, modelOptionId: String? = nil
+    _ items: [CreateRoleItem], picked: String??, durable: String??, choice: ModelChoice,
+    effortId: String?, modelOptionId: String? = nil, cliType: String? = nil
   ) -> CreateRoleItem? {
     let id: String? = picked ?? durable ?? nil
     guard let id, let item = items.first(where: { $0.role.id == id }), item.unavailable == nil else { return nil }
-    return CreateSessionForm.applied(item.target.runConfig, to: choice, effortId: effortId, modelOptionId: modelOptionId) ? item : nil
+    return CreateSessionForm.applied(
+      item.target.runConfig, to: choice, effortId: effortId,
+      modelOptionId: modelOptionId, cliType: cliType
+    ) ? item : nil
   }
 
   /// Picking a Role sets the values it pins that this agent offers; everything else stays the
   /// conversation's own (web applies pins through the composer's ordinary callbacks).
   static func choice(applying item: CreateRoleItem, to current: ModelChoice, capability: Capability?) -> ModelChoice {
+    let modelKey = CreateLogic.modelOptionId(capability) ?? "model"
     let pinned = CreateSessionForm.choice(
       item.target.runConfig,
       effortId: capability?.reasoningEffortConfigId,
-      modelOptionId: CreateSessionForm.modelOptionId(for: capability)
+      modelOptionId: modelKey
     )
+    let previousModel = CreateLogic.selectedModelId(capability, current, modelOptionId: modelKey)
     var next = current
     if let model = pinned.modelId, capability.map({ $0.models.contains { $0.id == model } }) ?? true {
       next.modelId = model
-      if pinned.effort == nil, next.modelId != current.modelId { next.effort = nil }
+      next.configOptionValues?.removeValue(forKey: modelKey)
+      if modelKey != "model" { next.configOptionValues?.removeValue(forKey: "model") }
+      if next.configOptionValues?.isEmpty == true { next.configOptionValues = nil }
+      if pinned.effort == nil, next.modelId != previousModel { next.effort = nil }
     }
     if let mode = pinned.modeId, capability.map({ $0.modes.contains { $0.id == mode } }) ?? true { next.modeId = mode }
     if let effort = pinned.effort { next.effort = effort }

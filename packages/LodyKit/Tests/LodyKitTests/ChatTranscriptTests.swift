@@ -140,4 +140,16 @@ final class ChatTranscriptTests: XCTestCase {
     let meta = try XCTUnwrap(kinds.firstIndex(of: "meta"))
     XCTAssertLessThan(header, meta)
   }
+
+  func testBoardFoldRolloverDividerIncludesNodeAndFoldMergeDetails() throws {
+    let json = """
+    [{"id":"m","role":"system","status":"done","finished":true,"items":[
+      {"itemId":"fold","type":"system_notice","name":"board_context_maintenance",
+       "meta":{"kind":"fold_rollover","status":"done","trigger":"manual","usedBefore":150000,"usedAfter":18000,"nodeId":"seg-3","foldedCount":3,"foldId":"fold-1"}}]}]
+    """
+    let row = try XCTUnwrap(try transcript(json).rows().first { $0.kind == "noticeDivider" })
+    XCTAssertTrue(row.text.contains("seg-3"), "Expected nodeId in divider: \(row.text)")
+    XCTAssertTrue(row.text.contains("3"), "Expected foldedCount in divider: \(row.text)")
+    XCTAssertTrue(row.text.contains("fold-1"), "Expected foldId in divider: \(row.text)")
+  }
 }

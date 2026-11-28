@@ -1327,6 +1327,14 @@
           "type": "array",
           "items": { "$ref": "ConfigOption" }
         },
+        "observedModelConfigOptions": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "ConfigOption" }
+          }
+        },
         "steer": { "type": "boolean" }
       },
       "required": [

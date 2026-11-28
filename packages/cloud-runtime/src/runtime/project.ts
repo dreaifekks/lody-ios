@@ -275,6 +275,8 @@ export type Envelope = {
     /** The Role the latest turn ran as; null after an explicit None (web). */
     agentRoleId?: string | null;
   };
+  /** Active unfinished assistant turn ID from full history (including hidden maintenance turns). */
+  activeTurnId?: string;
   entries: EntrySummary[];
 };
 
@@ -1405,17 +1407,47 @@ function project(
     input?.configOptionValues && typeof input.configOptionValues === 'object'
       ? input.configOptionValues
       : {};
-  // Restore agent-specific permission selectors as well as Fast. Effort has
-  // its own composer field, so a model change can clear it independently.
+  // Restore agent-specific permission selectors as well as Fast. Effort and
+  // the standard model option have their own composer fields so changes stay atomic.
   const composerValues = Object.fromEntries(
     Object.entries(
       readTurnMetadata({ inputConfig: input }).inputConfig
         ?.configOptionValues ?? {},
-    ).filter(([id]) => id !== 'effort' && id !== 'reasoning_effort'),
+    ).filter(
+      ([id]) => id !== 'effort' && id !== 'reasoning_effort' && id !== 'model',
+    ),
   );
   const effort = [options.reasoning_effort, options.effort].find(
     (value) => typeof value === 'string',
   );
+  const rawModelOption =
+    typeof options.model === 'string' && options.model.trim()
+      ? options.model.trim()
+      : undefined;
+  const rawTopModel =
+    typeof input?.modelId === 'string' && input.modelId.trim()
+      ? input.modelId.trim()
+      : undefined;
+  const isConfigOptionDriven =
+    input?.cliType === 'registry' || input?.cliType === 'custom';
+  const composerModelId = isConfigOptionDriven
+    ? (rawModelOption ?? rawTopModel)
+    : (rawTopModel ?? rawModelOption);
+
+  let activeTurnId: string | undefined;
+  for (let index = raw.length - 1; index >= 0; index--) {
+    const entry = raw[index];
+    if (!entry || entry.role !== 'assistant') continue;
+    if (
+      entry.finished !== true &&
+      typeof entry.endedAt !== 'number' &&
+      typeof entry.id === 'string' &&
+      entry.id
+    ) {
+      activeTurnId = entry.id;
+    }
+    break;
+  }
 
   const visibleRaw = raw.filter(
     (entry) => !isHiddenInternalAssistantEntry(entry),
@@ -1475,19 +1507,18 @@ function project(
     status,
     reason,
     revision,
-    usage: projectSessionUsage(visibleRaw),
+    usage: projectSessionUsage(raw),
     billableTurnCount: billableTurnCount({ history: raw, mq: queued }),
     awaitingUserSince:
       typeof session?.awaitingUserSince === 'number'
         ? session.awaitingUserSince
         : undefined,
     preview: previewSummary(doc),
+    ...(activeTurnId ? { activeTurnId } : {}),
     ...(input
       ? {
           composer: {
-            ...(typeof input.modelId === 'string'
-              ? { modelId: input.modelId }
-              : {}),
+            ...(composerModelId ? { modelId: composerModelId } : {}),
             ...(typeof input.modeId === 'string'
               ? { modeId: migrateLegacyAntigravityModeId(input.modeId) }
               : {}),

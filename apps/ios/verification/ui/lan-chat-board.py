@@ -7,7 +7,7 @@ expected = {
     'results:batch': '2 task results\nLayout check · Completed\nWire check · Failed',
     'results:single': '1 task results · delivery uncertain\nAgent reply · Waiting for you',
     'maintenance:compact': 'Context compaction · Completed',
-    'maintenance:fold': 'Fold rollover · Completed',
+    'maintenance:fold': 'Fold rollover · Completed · 150K → 18K · seg-3 · folded 3 → fold-1',
     'maintenance:limit': 'Autonomous chain reached its limit. Send a message to continue.',
     'rollover:done': 'Switched to node #2 · 180K → 12.5K',
     'proposal:role': 'Update Role: iosDev\nDescription: Review native chat\nDefault instruction: Use UIKit.\nSaved',

@@ -245,6 +245,59 @@ export type CanonicalRoleRunConfig = {
   modelOptionId: string | undefined;
 };
 
+export function resolveModelOptionId(
+  target?: RoleRunConfigTarget,
+  configOptionValues?: Record<string, unknown>,
+): string | undefined {
+  const isConfigOptionDriven =
+    target?.cliType === 'registry' || target?.cliType === 'custom';
+  const rawConfigOptions =
+    target?.capability?.configOptions ?? target?.configOptions;
+  if ((rawConfigOptions?.length ?? 0) > 0) {
+    return rawConfigOptions?.find(
+      (option) => option.category === 'model' && option.type === 'select',
+    )?.id;
+  }
+  if ((target?.capability?.models?.length ?? 0) > 0) {
+    return 'model';
+  }
+  if (isConfigOptionDriven && typeof configOptionValues?.model === 'string') {
+    return 'model';
+  }
+  return undefined;
+}
+
+export function resolveModeOptionId(
+  target?: RoleRunConfigTarget,
+  canonicalModelId?: string,
+  configOptionValues?: Record<string, unknown>,
+): string | undefined {
+  const isConfigOptionDriven =
+    target?.cliType === 'registry' || target?.cliType === 'custom';
+  const modeConfigOptions = target?.capability
+    ? resolveConfigOptionsForModel(
+        target.capability.configOptions,
+        target.capability.observedModelConfigOptions,
+        canonicalModelId,
+      )
+    : target?.configOptions;
+  if ((modeConfigOptions?.length ?? 0) > 0) {
+    return modeConfigOptions?.find(
+      (option) =>
+        option.category === 'mode' &&
+        option.type === 'select' &&
+        option.id !== 'interaction_mode',
+    )?.id;
+  }
+  if ((target?.capability?.modes?.length ?? 0) > 0) {
+    return 'mode';
+  }
+  if (isConfigOptionDriven && typeof configOptionValues?.mode === 'string') {
+    return 'mode';
+  }
+  return undefined;
+}
+
 /**
  * Aligns with Lody `resolveCanonicalAgentRoleRunConfig`:
  * - `registry`/`custom` (config-option driven): `configOptionValues[id] ?? top-level`
@@ -259,23 +312,10 @@ export function resolveCanonicalAgentRoleRunConfig(
   const normalized = roleRunConfig(runConfig);
   const isConfigOptionDriven =
     target?.cliType === 'registry' || target?.cliType === 'custom';
-  const rawConfigOptions =
-    target?.capability?.configOptions ?? target?.configOptions;
-  const hasRawConfigOptions = (rawConfigOptions?.length ?? 0) > 0;
-
-  let modelOptionId: string | undefined;
-  if (hasRawConfigOptions) {
-    modelOptionId = rawConfigOptions?.find(
-      (option) => option.category === 'model' && option.type === 'select',
-    )?.id;
-  } else if ((target?.capability?.models?.length ?? 0) > 0) {
-    modelOptionId = 'model';
-  } else if (
-    isConfigOptionDriven &&
-    typeof normalized.configOptionValues?.model === 'string'
-  ) {
-    modelOptionId = 'model';
-  }
+  const modelOptionId = resolveModelOptionId(
+    target,
+    normalized.configOptionValues,
+  );
 
   const modelLookupKey = modelOptionId ?? 'model';
   const rawModelFromConfig = normalized.configOptionValues?.[modelLookupKey];
@@ -287,31 +327,11 @@ export function resolveCanonicalAgentRoleRunConfig(
     ? (modelFromConfig ?? normalized.modelId)
     : (normalized.modelId ?? modelFromConfig);
 
-  const modeConfigOptions = target?.capability
-    ? resolveConfigOptionsForModel(
-        target.capability.configOptions,
-        target.capability.observedModelConfigOptions,
-        canonicalModelId,
-      )
-    : target?.configOptions;
-  const hasModeConfigOptions = (modeConfigOptions?.length ?? 0) > 0;
-
-  let modeOptionId: string | undefined;
-  if (hasModeConfigOptions) {
-    modeOptionId = modeConfigOptions?.find(
-      (option) =>
-        option.category === 'mode' &&
-        option.type === 'select' &&
-        option.id !== 'interaction_mode',
-    )?.id;
-  } else if ((target?.capability?.modes?.length ?? 0) > 0) {
-    modeOptionId = 'mode';
-  } else if (
-    isConfigOptionDriven &&
-    typeof normalized.configOptionValues?.mode === 'string'
-  ) {
-    modeOptionId = 'mode';
-  }
+  const modeOptionId = resolveModeOptionId(
+    target,
+    canonicalModelId,
+    normalized.configOptionValues,
+  );
 
   const modeLookupKey = modeOptionId ?? 'mode';
   const rawModeFromConfig = normalized.configOptionValues?.[modeLookupKey];

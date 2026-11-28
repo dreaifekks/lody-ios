@@ -231,7 +231,8 @@ final class SessionComposerModel {
   var activeRole: CreateRoleItem? {
     SessionRoles.active(roleItems, picked: pickedRole, durable: durableRole, choice: active,
                         effortId: capability?.reasoningEffortConfigId,
-                        modelOptionId: CreateSessionForm.modelOptionId(for: capability))
+                        modelOptionId: CreateLogic.modelOptionId(capability),
+                        cliType: agentKind.cliType)
   }
 
   /// Picking a Role applies the values it pins; None clears only its name (web).
@@ -280,14 +281,15 @@ final class SessionComposerModel {
       id: "agent", glyph: Self.agentGlyph(agentKind.cliType, agentKind.agentType),
       title: displayAgentName ?? text("create.row.selectAgent"), placeholder: displayAgentName == nil))
     guard let capability else { return rows }
+    let selectedModel = CreateLogic.selectedModelId(capability, value)
     if !capability.models.isEmpty {
-      let current = capability.models.first { $0.id == value.modelId }
+      let current = capability.models.first { $0.id == selectedModel }
       rows.append(CreatePicker(
         id: "model", glyph: .symbol("cpu"), title: CreateModelOptions.modelTitle(capability, value), placeholder: current == nil,
-        options: capability.models.map { CreateOption(id: $0.id, title: $0.name, selected: $0.id == value.modelId) },
+        options: capability.models.map { CreateOption(id: $0.id, title: $0.name, selected: $0.id == selectedModel) },
         searchPlaceholder: text("create.context.searchModels")))
     }
-    let efforts = CreateLogic.effortsFor(capability, modelId: value.modelId)
+    let efforts = CreateLogic.effortsFor(capability, modelId: selectedModel)
     if !efforts.isEmpty {
       rows.append(CreatePicker(
         id: "effort", glyph: .symbol("brain"), title: CreateModelOptions.effortTitle(capability, value), placeholder: value.effort == nil,
@@ -313,7 +315,7 @@ final class SessionComposerModel {
     switch row {
     case "role": selectRole(option == CreateSessionContext.roleNoneOption ? nil : option)
     case "model": change(["modelId": option, "effort": ""])
-    case "effort": change(["modelId": active.modelId ?? "", "effort": option])
+    case "effort": change(["modelId": CreateLogic.selectedModelId(capability, active) ?? "", "effort": option])
     case "permission": change(["permissionId": option])
     case "fast": change(["fast": option == CreateSessionContext.toggleOn])
     case "plan":
@@ -367,16 +369,17 @@ final class SessionComposerModel {
 
   var optionsJSON: String {
     let value = active
+    let selectedModel = CreateLogic.selectedModelId(capability, value)
     let permission = CreateLogic.permissionMode(capability, value)
     var options: [String: Any] = [
       "permissionId": permission?.value ?? "",
       "permissions": (permission?.options ?? []).map { ["id": $0.id, "title": $0.name, "description": $0.description ?? ""] },
-      "modelId": value.modelId ?? "",
+      "modelId": selectedModel ?? "",
       "effort": value.effort ?? "",
-      "displayModelId": CreateLogic.resolvedModelId(capability, modelId: value.modelId) ?? "",
+      "displayModelId": CreateLogic.resolvedModelId(capability, modelId: selectedModel) ?? "",
       "displayEffort": CreateLogic.resolvedEffort(capability, value) ?? "",
       "models": (capability?.models ?? []).map { ["id": $0.id, "title": $0.name] },
-      "efforts": CreateLogic.effortsFor(capability, modelId: value.modelId).map { ["id": $0, "title": $0] },
+      "efforts": CreateLogic.effortsFor(capability, modelId: selectedModel).map { ["id": $0, "title": $0] },
     ]
     options["fast"] = CreateLogic.fastMode(capability, value)?.enabled
     options["agentAsset"] = agentAsset
@@ -396,19 +399,27 @@ final class SessionComposerModel {
 
   var sendChoice: [String: OutboxValue] {
     let value = active
+    let selectedModel = CreateLogic.selectedModelId(capability, value)
     var result: [String: OutboxValue] = [:]
     let explicit = capability != nil
-    for (key, field) in [("modelId", value.modelId), ("effort", value.effort)] {
+    for (key, field) in [("modelId", selectedModel), ("effort", value.effort)] {
       if let field { result[key] = .string(field) } else if explicit { result[key] = .null }
     }
     if let mode = value.modeId { result["modeId"] = .string(mode) }
-    if let values = value.configOptionValues {
-      result["configOptionValues"] = .object(values.mapValues { config in
-        switch config {
-        case .string(let text): .string(text)
-        case .bool(let flag): .bool(flag)
-        }
-      })
+    if var values = value.configOptionValues {
+      if explicit {
+        let modelKey = CreateLogic.modelOptionId(capability) ?? "model"
+        values.removeValue(forKey: modelKey)
+        if modelKey != "model" { values.removeValue(forKey: "model") }
+      }
+      if !values.isEmpty {
+        result["configOptionValues"] = .object(values.mapValues { config in
+          switch config {
+          case .string(let text): .string(text)
+          case .bool(let flag): .bool(flag)
+          }
+        })
+      }
     }
     if let config = capability?.reasoningEffortConfigId { result["reasoningEffortConfigId"] = .string(config) }
     return result

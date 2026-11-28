@@ -9,6 +9,10 @@ import {
   resolveCanonicalAgentRoleRunConfig,
   roleRunConfigApplied,
 } from '../../../../packages/cloud-runtime/src/protocol/agent-roles.ts';
+import {
+  permissionModeFor,
+  withPermissionMode,
+} from '../../../../packages/cloud-runtime/src/protocol/capability.ts';
 
 async function loadRoleRuntime() {
   const { outputFiles } = await build({
@@ -16,7 +20,7 @@ async function loadRoleRuntime() {
       contents: `
         export { roleSnapshot } from './packages/cloud-runtime/src/runtime/role-settings.ts';
         export { bindTurnRole } from './packages/cloud-runtime/src/runtime/agent-roles.ts';
-        export { readRoleTargetCapability } from './packages/cloud-runtime/src/runtime/create-session.ts';
+        export { creationOptions, readRoleTargetCapability } from './packages/cloud-runtime/src/runtime/create-session.ts';
       `,
       resolveDir: process.cwd(),
       loader: 'ts',
@@ -142,6 +146,8 @@ test('projectSession hides session-rollover and board-maintenance assistant entr
     full.entries.map((entry) => entry.id),
     projected.entries.map((entry) => entry.id),
   );
+  assert.equal(projected.activeTurnId, 'a-fold');
+  assert.equal(full.activeTurnId, 'a-fold');
   const rollover = projected.entries.find(
     (entry) => entry.id === 'session-rollover:run-1',
   );
@@ -173,6 +179,89 @@ test('projectSession hides session-rollover and board-maintenance assistant entr
     foldedCount: 3,
     foldId: 'fold-1',
   });
+});
+
+test('hidden active maintenance turns remain stoppable and preserve context compaction usage', async () => {
+  const { projectSession, projectSessionFull } = await loadProject();
+  const cancels = [];
+  const f = await openTestSession({
+    onRpc(request) {
+      cancels.push(request);
+      return { result: { success: true } };
+    },
+  });
+  try {
+    appendEntry(f.server, {
+      id: 'u1',
+      role: 'user',
+      status: 'handled',
+      finished: true,
+      items: [{ type: 'text', text: 'Work' }],
+    });
+    appendEntry(f.server, {
+      id: 'a1',
+      role: 'assistant',
+      userTurnId: 'u1',
+      status: 'completed',
+      finished: true,
+      items: [{ type: 'text', text: 'Done' }],
+    });
+    appendEntry(f.server, {
+      id: 'a-compact',
+      role: 'assistant',
+      userTurnId: 'board-maintenance:m2:compact',
+      status: 'in_progress',
+      finished: false,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'compact-1',
+          activityKind: 'context_compaction',
+          status: 'in_progress',
+        },
+      ],
+    });
+    await f.pushUpdate();
+
+    const projected = projectSession(f.server, 'live');
+    const full = projectSessionFull(f.server, 'live');
+    assert.deepEqual(
+      projected.entries.map((entry) => entry.id),
+      ['u1', 'a1'],
+      'Hidden maintenance reply must not enter visible transcript entries',
+    );
+    assert.equal(projected.activeTurnId, 'a-compact');
+    assert.equal(full.activeTurnId, 'a-compact');
+    assert.equal(projected.usage.isContextCompacting, true);
+    assert.equal(full.usage.isContextCompacting, true);
+
+    const stopped = await f.runtime.controlTurn({
+      action: 'stop',
+      sessionId: 's1',
+      machineId: 'm1',
+      turnId: projected.activeTurnId,
+    });
+    assert.equal(stopped.state, 'stopped');
+    assert.equal(cancels[0].method, 'session/cancel');
+    assert.equal(cancels[0].params.turnId, 'a-compact');
+
+    const compactEntry = f.server.getList('history').get(2);
+    compactEntry.set('finished', true);
+    compactEntry.set('items', [
+      {
+        type: 'tool_call',
+        toolCallId: 'compact-1',
+        activityKind: 'context_compaction',
+        status: 'completed',
+      },
+    ]);
+    f.server.commit();
+    const after = projectSession(f.server, 'live');
+    assert.equal(after.activeTurnId, undefined);
+    assert.equal(after.usage.isContextCompacting, false);
+  } finally {
+    f.close();
+  }
 });
 
 test('editableUserTurn enforces linear rollover hard boundaries and skips hidden internal replies', () => {
@@ -244,14 +333,13 @@ test('editableUserTurn enforces linear rollover hard boundaries and skips hidden
     undefined,
   );
 
-  // Non-completed divider does not block editing; hidden :seal / board replies are skipped.
+  // Non-completed divider does not block editing; hidden :seal is skipped.
   assert.equal(
     editableUserTurn(
       [
         { id: 'u1', role: 'user', status: 'handled' },
         { id: 'a1', role: 'assistant', finished: true, acpTurnId: 'old-1' },
         sealAssistant,
-        boardAssistant,
         sealingDivider,
         { id: 'u2', role: 'user', status: 'handled' },
       ],
@@ -259,6 +347,41 @@ test('editableUserTurn enforces linear rollover hard boundaries and skips hidden
       cap,
     )?.id,
     'u2',
+  );
+
+  // Unfinished board-maintenance assistant blocks editing (matches daemon resolveEditableTail).
+  assert.equal(
+    editableUserTurn(
+      [
+        { id: 'u1', role: 'user', status: 'handled' },
+        { id: 'a1', role: 'assistant', finished: true, acpTurnId: 'old-1' },
+        boardAssistant,
+        { id: 'u2', role: 'user', status: 'handled' },
+      ],
+      meta,
+      cap,
+    ),
+    undefined,
+  );
+
+  // Finished board-maintenance assistant without acpTurnId also blocks editing.
+  assert.equal(
+    editableUserTurn(
+      [
+        { id: 'u1', role: 'user', status: 'handled' },
+        { id: 'a1', role: 'assistant', finished: true, acpTurnId: 'old-1' },
+        {
+          id: 'a-board-done',
+          role: 'assistant',
+          userTurnId: 'board-maintenance:m1:fold',
+          finished: true,
+        },
+        { id: 'u2', role: 'user', status: 'handled' },
+      ],
+      meta,
+      cap,
+    ),
+    undefined,
   );
 
   // First new-node user turn is editable when preceded by a finished :renew with acpTurnId.
@@ -444,9 +567,13 @@ test('resolveCanonicalAgentRoleRunConfig aligns registry/custom vs builtin prece
   );
 });
 
-test('roleSnapshot, bindTurnRole, and sendTurn dispatch canonical config options for registry Roles', async () => {
-  const { roleSnapshot, bindTurnRole, readRoleTargetCapability } =
-    await loadRoleRuntime();
+test('roleSnapshot, bindTurnRole, creationOptions, and sendTurn preserve registry Roles across model switch and reopen', async () => {
+  const {
+    roleSnapshot,
+    bindTurnRole,
+    creationOptions,
+    readRoleTargetCapability,
+  } = await loadRoleRuntime();
   const meta = new Flock(`meta-${crypto.randomUUID()}`);
   meta.set(['m', 'machine-m1', 'name'], 'Mini');
   meta.commit();
@@ -547,6 +674,26 @@ test('roleSnapshot, bindTurnRole, and sendTurn dispatch canonical config options
   workspace.set(['agentRole', 'agy-yolo'], storedRole);
   workspace.commit();
 
+  const options = creationOptions(undefined, meta, new Map([['m1', machine]]));
+  const uiCapability = options.capabilities[0];
+  assert.ok(uiCapability.observedModelConfigOptions?.['gemini-4-neon']);
+  const neonPermission = permissionModeFor(uiCapability, {
+    modelId: 'gemini-4-neon',
+    configOptionValues: { mode: 'ask', permission_mode: 'yolo' },
+  });
+  assert.equal(neonPermission?.configId, 'permission_mode');
+  assert.equal(neonPermission?.value, 'yolo');
+  const toggledToAsk = withPermissionMode(
+    uiCapability,
+    {
+      modelId: 'gemini-4-neon',
+      configOptionValues: { mode: 'ask', permission_mode: 'yolo' },
+    },
+    'ask',
+  );
+  assert.equal(toggledToAsk.configOptionValues?.permission_mode, 'ask');
+  assert.equal(permissionModeFor(uiCapability, toggledToAsk)?.value, 'ask');
+
   const capability = readRoleTargetCapability(machine, 'agy');
   const snapshot = roleSnapshot(
     workspace,
@@ -583,7 +730,32 @@ test('roleSnapshot, bindTurnRole, and sendTurn dispatch canonical config options
       return { result: { accepted: true } };
     },
   });
+  const finishTurn = async (id) => {
+    appendEntry(f.server, {
+      id,
+      role: 'assistant',
+      finished: true,
+      items: [],
+    });
+    await f.pushUpdate();
+  };
   try {
+    // Turn 1 ran with Model A (`gemini-3`) in configOptionValues (registry representation).
+    appendEntry(f.server, {
+      id: 'u-prev',
+      role: 'user',
+      status: 'handled',
+      finished: true,
+      inputConfig: {
+        cliType: 'registry',
+        agentType: 'antigravity',
+        configOptionValues: { model: 'gemini-3', mode: 'ask' },
+      },
+      items: [{ type: 'text', text: 'Previous turn' }],
+    });
+    await finishTurn('a-prev');
+
+    // Turn 2 switches to Registry Role pinning Model B (`gemini-4-neon`) via top-level modelId.
     const sent = await f.runtime.sendTurn({
       sessionId: 's1',
       machineId: 'm1',
@@ -602,10 +774,57 @@ test('roleSnapshot, bindTurnRole, and sendTurn dispatch canonical config options
     assert.equal(dispatched.agentRoleId, 'agy-yolo');
     assert.equal(dispatched.modelId, undefined);
     assert.equal(dispatched.modeId, undefined);
-    assert.deepEqual(dispatched.configOptionValues, {
-      model: 'gemini-4-neon',
-      permission_mode: 'yolo',
+    assert.equal(dispatched.configOptionValues.model, 'gemini-4-neon');
+    assert.equal(dispatched.configOptionValues.permission_mode, 'yolo');
+
+    // Reopen projection lifts canonical model from configOptionValues so Swift preserves the Role.
+    await finishTurn('a-role');
+    const reopened = f.runtime.projectSession(f.server, 'live');
+    assert.equal(reopened.composer.modelId, 'gemini-4-neon');
+    assert.equal(reopened.composer.agentRoleId, 'agy-yolo');
+    assert.equal(reopened.composer.configOptionValues.permission_mode, 'yolo');
+    assert.equal('model' in reopened.composer.configOptionValues, false);
+
+    // Next turn using reopened composer state retains the Role when inheriting or explicit.
+    const followUp = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity',
+      text: 'Follow-up after reopen',
+      agentConfigId: 'agy',
+      roleCapability: capability,
+      modelId: reopened.composer.modelId,
+      configOptionValues: reopened.composer.configOptionValues,
     });
+    assert.equal(followUp.state, 'accepted');
+    assert.equal(calls[1].params.inputConfig.agentRoleId, 'agy-yolo');
+    assert.equal(
+      calls[1].params.inputConfig.configOptionValues.model,
+      'gemini-4-neon',
+    );
+
+    // Explicitly switching model away detaches the inherited Role.
+    await finishTurn('a-follow');
+    const drifted = await f.runtime.sendTurn({
+      sessionId: 's1',
+      machineId: 'm1',
+      userId: 'u1',
+      cliType: 'registry',
+      agentType: 'antigravity',
+      text: 'Switch back to Gemini 3',
+      agentConfigId: 'agy',
+      roleCapability: capability,
+      modelId: 'gemini-3',
+      configOptionValues: { mode: 'ask' },
+    });
+    assert.equal(drifted.state, 'accepted');
+    assert.equal(calls[2].params.inputConfig.agentRoleId, null);
+    assert.equal(
+      calls[2].params.inputConfig.configOptionValues.model,
+      'gemini-3',
+    );
   } finally {
     f.close();
   }

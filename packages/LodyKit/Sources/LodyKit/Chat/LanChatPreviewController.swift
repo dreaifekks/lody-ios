@@ -42,7 +42,9 @@ final class LanChatPreviewController: UIViewController {
         ["title": "Agent reply", "status": "waiting_user"]]]]],
     ["id": "maintenance", "role": "system", "status": "completed", "finished": true, "items": [
       ["itemId": "compact", "type": "system_notice", "name": "board_context_maintenance", "meta": ["kind": "compact", "status": "done", "trigger": "manual"]],
-      ["itemId": "fold", "type": "system_notice", "name": "board_context_maintenance", "meta": ["kind": "fold_rollover", "status": "done", "trigger": "manual"]],
+      ["itemId": "fold", "type": "system_notice", "name": "board_context_maintenance", "meta": [
+        "kind": "fold_rollover", "status": "done", "trigger": "manual",
+        "usedBefore": 150000, "usedAfter": 18000, "nodeId": "seg-3", "foldedCount": 3, "foldId": "fold-1"]],
       ["itemId": "limit", "type": "system_notice", "name": "board_chain_limit"]]],
     ["id": "rollover", "role": "system", "status": "completed", "finished": true, "items": [
       ["itemId": "done", "type": "system_notice", "name": "session_context_rollover", "meta": [

@@ -66,7 +66,7 @@ struct SessionEnvelope: Sendable {
       envelope.composerJSON = String(decoding: data, as: UTF8.self)
     }
     guard let entries = object["entries"] as? [[String: Any]] else { return envelope }
-    envelope.transcript = SessionTranscriptFacts(entries: entries)
+    envelope.transcript = SessionTranscriptFacts(entries: entries, activeTurnId: object["activeTurnId"] as? String)
     let ids = Set(entries.compactMap { $0["id"] as? String })
     let pending = (object["pendingRoostInputs"] as? [[String: Any]] ?? []).filter {
       guard let id = $0["id"] as? String else { return false }
@@ -143,7 +143,7 @@ struct SessionTranscriptFacts: Equatable, Sendable {
 
   init() {}
 
-  init(entries: [[String: Any]]) {
+  init(entries: [[String: Any]], activeTurnId: String? = nil) {
     do { permission = try SessionPermission.first(in: entries) }
     catch { permissionError = error.localizedDescription }
     proposedPlan = Self.latestProposedPlan(entries)
@@ -187,6 +187,9 @@ struct SessionTranscriptFacts: Equatable, Sendable {
       default:
         break
       }
+    }
+    if let activeTurnId, !activeTurnId.isEmpty {
+      unfinishedTurnId = activeTurnId
     }
   }
 

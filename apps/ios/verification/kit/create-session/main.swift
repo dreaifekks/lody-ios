@@ -444,3 +444,40 @@ do {
   check(CreateLogic.permissionTier(for: "yolo") == .full, "agy yolo maps to full tier")
   check(CreateLogic.permissionTier(for: "auto") == .auto && CreateLogic.permissionTier(for: "auto_review") == .auto, "auto and auto_review map to auto tier")
 }
+
+// Registry Role matches both top-level modelId and configOptionValues model on reopen,
+// and observedModelConfigOptions drives permission display and edits for the selected model.
+do {
+  let neonModes = [CapabilityChoice(id: "ask", name: "Ask"), CapabilityChoice(id: "yolo", name: "YOLO")]
+  let registryCap = Capability(
+    machineId: "m1", agentConfigId: "agy", cliType: "registry", agentType: "antigravity",
+    models: [CapabilityChoice(id: "gemini-3", name: "Gemini 3"), CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")],
+    modes: neonModes, legacyModes: [],
+    configOptions: [
+      ConfigOption(id: "model", name: "Model", category: "model", type: "select", currentValue: .string("gemini-3"),
+                   options: [CapabilityChoice(id: "gemini-3", name: "Gemini 3"), CapabilityChoice(id: "gemini-4-neon", name: "Gemini 4 Neon")]),
+      ConfigOption(id: "mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: neonModes),
+    ],
+    observedModelConfigOptions: [
+      "gemini-4-neon": [
+        ConfigOption(id: "permission_mode", name: "Permission", category: "mode", type: "select", currentValue: .string("ask"), options: neonModes),
+      ],
+    ]
+  )
+  let pinned = RuntimeContract.AgentRoleItemTargetsItemRunConfig(
+    configOptionValues: ["model": .string("gemini-4-neon"), "permission_mode": .string("yolo")]
+  )
+  let reopenedConfigOnly = ModelChoice(configOptionValues: ["model": .string("gemini-4-neon"), "permission_mode": .string("yolo")])
+  check(CreateSessionForm.applied(pinned, to: reopenedConfigOnly, effortId: nil, modelOptionId: "model", cliType: "registry"),
+        "registry Role stays active when reopened model sits in configOptionValues")
+  let reopenedTopLevel = ModelChoice(modelId: "gemini-4-neon", configOptionValues: ["mode": .string("ask"), "permission_mode": .string("yolo")])
+  check(CreateSessionForm.applied(pinned, to: reopenedTopLevel, effortId: nil, modelOptionId: "model", cliType: "registry"),
+        "registry Role stays active when model sits in top-level modelId")
+  check(CreateLogic.permissionMode(registryCap, reopenedTopLevel)?.configId == "permission_mode"
+          && CreateLogic.permissionMode(registryCap, reopenedTopLevel)?.value == "yolo",
+        "permission panel reads target model's observed permission_mode instead of snapshot mode")
+  let updated = CreateLogic.withPermissionMode(registryCap, reopenedTopLevel, value: "ask")
+  check(updated.configOptionValues?["permission_mode"] == .string("ask")
+          && !CreateSessionForm.applied(pinned, to: updated, effortId: nil, modelOptionId: "model", cliType: "registry"),
+        "editing permission writes target model's permission_mode and detaches Role cleanly")
+}

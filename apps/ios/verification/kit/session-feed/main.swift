@@ -90,6 +90,14 @@ final class LocalStore: @unchecked Sendable {
     try await Task.sleep(for: .milliseconds(50))
     precondition(fixture.unwatched == 1 && fixture.reconnects == 1 && !feed.watching)
     precondition(!feed.state.entriesJSON.contains("after-close"))
+    let maintenance = SessionEnvelope.prepare(#"""
+    {"v":1,"revision":9,"status":"live","activeTurnId":"a-fold","usage":{"context":null,"isContextCompacting":true,"quotaEligible":false,"quota":null},"entries":[
+      {"id":"u1","role":"user","status":"handled","finished":true,"items":[]},
+      {"id":"a1","role":"assistant","finished":true,"items":[]}
+    ]}
+    """#)
+    precondition(maintenance?.transcript.unfinishedTurnId == "a-fold",
+                 "activeTurnId preserves unfinishedTurnId while a hidden maintenance reply runs")
     print("PASS: cache before live, one subscription, generation/revision ordering, reconnect and cancellation")
   }
 }

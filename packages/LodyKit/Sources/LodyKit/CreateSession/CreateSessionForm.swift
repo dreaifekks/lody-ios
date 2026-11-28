@@ -370,7 +370,7 @@ extension CreateSessionForm {
   }
 
   static func modelOptionId(for capability: Capability?) -> String? {
-    capability?.configOptions?.first(where: { $0.category == "model" && $0.type == "select" })?.id
+    CreateLogic.modelOptionId(capability)
   }
 
   /// The Role the composer IS, not merely the last picked (web `isComposerAgentRoleApplied`):
@@ -382,7 +382,8 @@ extension CreateSessionForm {
     return Self.applied(
       item.target.runConfig, to: current.choice,
       effortId: current.capability?.reasoningEffortConfigId,
-      modelOptionId: Self.modelOptionId(for: current.capability)
+      modelOptionId: Self.modelOptionId(for: current.capability),
+      cliType: agent.cliType
     ) ? item : nil
   }
 
@@ -432,20 +433,32 @@ extension CreateSessionForm {
     _ pinned: RuntimeContract.AgentRoleItemTargetsItemRunConfig?,
     to choice: ModelChoice,
     effortId: String?,
-    modelOptionId: String? = nil
+    modelOptionId: String? = nil,
+    cliType: String? = nil
   ) -> Bool {
     guard let pinned else { return true }
-    if let mode = CreateLogic.normalizedModeId(pinned.modeId), CreateLogic.normalizedModeId(choice.modeId) != mode { return false }
-    if let model = pinned.modelId, choice.modelId != model { return false }
     let effortKey = effortId ?? "reasoning_effort"
     let modelKey = modelOptionId ?? "model"
+    let optionModel: String?
+    if case .string(let text)? = choice.configOptionValues?[modelKey] {
+      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      optionModel = trimmed.isEmpty ? nil : trimmed
+    } else {
+      optionModel = nil
+    }
+    let topModel = choice.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalizedTop = topModel.flatMap { $0.isEmpty ? nil : $0 }
+    let isConfigOptionDriven = cliType == "registry" || cliType == "custom"
+    let effectiveModelId = isConfigOptionDriven ? (optionModel ?? normalizedTop) : (normalizedTop ?? optionModel)
+    if let mode = CreateLogic.normalizedModeId(pinned.modeId), CreateLogic.normalizedModeId(choice.modeId) != mode { return false }
+    if let model = pinned.modelId, effectiveModelId != model { return false }
     for (key, rawValue) in pinned.configOptionValues ?? [:] {
       let value: RuntimeContract.JSONValue = key == "mode" && rawValue == .string("auto_review") ? .string("auto") : rawValue
       let selected: RuntimeContract.JSONValue?
       if key == effortKey {
         selected = choice.effort.map { .string($0) }
       } else if key == modelKey {
-        selected = choice.modelId.map { .string($0) }
+        selected = effectiveModelId.map { .string($0) }
       } else {
         switch CreateLogic.normalizedConfigValue(choice.configOptionValues?[key], optionId: key) {
         case .string(let text): selected = .string(text)

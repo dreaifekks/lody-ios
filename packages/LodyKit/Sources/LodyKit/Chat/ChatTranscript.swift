@@ -1104,12 +1104,23 @@ struct ChatTranscript {
           let statusKey = item.meta?.status.flatMap { allowedStatuses.contains($0) ? $0 : nil } ?? "running"
           let kind = String(localized: String.LocalizationValue("native.chat.board.kind." + kindKey), bundle: .lody)
           let status = String(localized: String.LocalizationValue("native.chat.board.status." + statusKey), bundle: .lody)
-          var text = String.localizedStringWithFormat(String(localized: "native.chat.board.maintenance", bundle: .lody), kind, status)
-          if statusKey == "done",
-             let tokens = Self.compactTokenRange(before: item.meta?.usedBefore, after: item.meta?.usedAfter) {
-            text += " · " + tokens
+          var parts = [String.localizedStringWithFormat(String(localized: "native.chat.board.maintenance", bundle: .lody), kind, status)]
+          if statusKey == "done" {
+            if let tokens = Self.compactTokenRange(before: item.meta?.usedBefore, after: item.meta?.usedAfter) {
+              parts.append(tokens)
+            }
+            if kindKey == "fold_rollover" {
+              if let nodeId = item.meta?.nodeId?.trimmingCharacters(in: .whitespacesAndNewlines), !nodeId.isEmpty {
+                parts.append(nodeId)
+              }
+              if let foldedCount = item.meta?.foldedCount,
+                 let foldId = item.meta?.foldId?.trimmingCharacters(in: .whitespacesAndNewlines), !foldId.isEmpty {
+                parts.append(String.localizedStringWithFormat(
+                  String(localized: "native.chat.board.foldedMerge", bundle: .lody), foldedCount, foldId))
+              }
+            }
           }
-          row.text = text
+          row.text = parts.joined(separator: " · ")
         case "system_notice" where item.name == "session_context_rollover":
           if item.isSilentNotice { continue }
           guard let text = Self.rolloverDivider(item.meta) else { continue }
