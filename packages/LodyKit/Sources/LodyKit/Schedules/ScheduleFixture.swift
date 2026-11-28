@@ -118,6 +118,9 @@ final class ScheduleFixture {
         try await self.gate("command")
         return try self.apply(params)
       },
+      sessionLiveStatus: { _, sessionId, _ in
+        RuntimeContract.SessionLiveStatusResult(sessionId: sessionId, state: .idle, source: .rpc)
+      },
       options: { [unowned self] _ in
         try await self.gate("options")
         return Self.options

@@ -1,5 +1,6 @@
 import Foundation
 import LodyCore
+import UIKit
 
 typealias ScheduleItem = RuntimeContract.ScheduleItem
 typealias ScheduleRule = RuntimeContract.ScheduleRule
@@ -48,6 +49,7 @@ struct ScheduleService {
   var list: (_ workspaceId: String) async throws -> RuntimeContract.SchedulesResult
   var detail: (_ workspaceId: String, _ scheduleId: String) async throws -> RuntimeContract.ScheduleDetail
   var command: (_ params: RuntimeContract.ScheduleCommandParams) async throws -> RuntimeContract.ScheduleCommandResult
+  var sessionLiveStatus: (_ workspaceId: String, _ sessionId: String, _ machineId: String) async throws -> RuntimeContract.SessionLiveStatusResult
   var options: (_ workspaceId: String) async throws -> CreationOptions
   var cachedList: (_ userId: String, _ workspaceId: String) async -> RuntimeContract.SchedulesResult? = { _, _ in nil }
   var persistList: (_ userId: String, _ workspaceId: String, _ result: RuntimeContract.SchedulesResult, _ generation: Int) -> Void = { _, _, _, _ in }
@@ -76,6 +78,11 @@ struct ScheduleService {
           var scoped = params
           scoped.workspaceId = workspace
           return scoped
+        }
+      },
+      sessionLiveStatus: { workspaceId, sessionId, machineId in
+        try await ScheduleService.runtime(workspaceId).workspaceCall(RuntimeContract.Calls.SessionLiveStatus.self) { workspace, _ in
+          RuntimeContract.SessionLiveStatusParams(workspaceId: workspace, sessionId: sessionId, machineId: machineId)
         }
       },
       // A schedule runs later, so an offline computer is still a target (as on Web); the new-chat
@@ -140,5 +147,88 @@ enum ScheduleFailure {
       return String(localized: String.LocalizationValue(write ? "schedules.saveError" : "schedules.loadError"), bundle: .lody)
     }
     return String(localized: String.LocalizationValue("schedules.error." + code), bundle: .lody)
+  }
+}
+
+/// Pre-run check for manual "Run now" on schedules that target an existing or owned chat.
+@MainActor
+enum ScheduleRunPrecheck {
+  enum Decision: Equatable {
+    case runImmediately
+    case confirmBusy(chatTitle: String)
+    case confirmUnknown(chatTitle: String)
+  }
+
+  /// Bound chat id when a manual run targets one existing chat, or `nil` when it creates a new chat.
+  static func boundSessionId(for item: ScheduleItem) -> String? {
+    switch item.destination {
+    case .existingSession:
+      return item.destinationSessionId
+    case .ownSession:
+      return item.destinationSessionId ?? item.lastSessionId
+    case .newSession:
+      return nil
+    }
+  }
+
+  static func chatTitle(for sessionId: String, in catalog: SessionCatalog) -> String {
+    if let raw = catalog.session(sessionId)?.title {
+      let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { return trimmed }
+    }
+    return ScheduleFormat.text("destination.untitledChat")
+  }
+
+  static func evaluate(
+    item: ScheduleItem,
+    workspaceId: String,
+    catalog: SessionCatalog,
+    service: ScheduleService
+  ) async -> Decision {
+    guard let sessionId = boundSessionId(for: item), !sessionId.isEmpty else {
+      return .runImmediately
+    }
+    let title = chatTitle(for: sessionId, in: catalog)
+    do {
+      let status = try await service.sessionLiveStatus(workspaceId, sessionId, item.machineId)
+      switch status.state {
+      case .idle:
+        return .runImmediately
+      case .busy:
+        return .confirmBusy(chatTitle: title)
+      case .unknown:
+        return .confirmUnknown(chatTitle: title)
+      }
+    } catch {
+      return .confirmUnknown(chatTitle: title)
+    }
+  }
+
+  static func confirmationAlert(
+    item: ScheduleItem,
+    decision: Decision,
+    detail: Bool,
+    onConfirm: @escaping () -> Void
+  ) -> UIAlertController? {
+    let title: String
+    let message: String
+    switch decision {
+    case .runImmediately:
+      return nil
+    case .confirmBusy(let chatTitle):
+      title = String(format: ScheduleFormat.text("runNowBusyTitle"), chatTitle)
+      let helpKey = detail ? "runNowBusyDetailHelp" : "runNowBusyHelp"
+      message = String(format: ScheduleFormat.text(helpKey), item.title)
+    case .confirmUnknown(let chatTitle):
+      title = String(format: ScheduleFormat.text("runNowStatusUnknownTitle"), chatTitle)
+      let helpKey = detail ? "runNowStatusUnknownDetailHelp" : "runNowStatusUnknownHelp"
+      message = String(format: ScheduleFormat.text(helpKey), item.title)
+    }
+    let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: ScheduleFormat.text("cancel"), style: .cancel))
+    alert.addAction(UIAlertAction(title: ScheduleFormat.text("runNowConfirm"), style: .default) { _ in
+      onConfirm()
+    })
+    return alert
   }
 }

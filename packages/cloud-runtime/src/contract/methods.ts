@@ -45,6 +45,8 @@ import {
   ScheduleDetailParams,
   SchedulesParams,
   SchedulesResult,
+  SessionLiveStatusParams,
+  SessionLiveStatusResult,
 } from './schedules.ts';
 import {
   OpenSessionParams,
@@ -257,6 +259,11 @@ export const runtimeCalls = {
     params: ScheduleCommandParams,
     result: ScheduleCommandResult,
     timeoutMs: 70_000,
+  },
+  sessionLiveStatus: {
+    params: SessionLiveStatusParams,
+    result: SessionLiveStatusResult,
+    timeoutMs: 15_000,
   },
   localProjects: {
     params: LocalProjectsParams,

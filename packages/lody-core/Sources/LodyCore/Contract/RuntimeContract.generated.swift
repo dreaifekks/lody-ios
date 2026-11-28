@@ -3,7 +3,7 @@ import Foundation
 
 extension RuntimeContract {
   public static let version = 1
-  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","conversationShareMessages","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","inspectProposal","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
+  public static let runtimeMethods: [String] = ["agentProviderAuth","agentProviderDetail","agentProviderOperation","agentProviderProbe","agentProviders","agentRoles","androidEmulatorControl","archiveSession","checkTurnQuota","closeSession","controlTurn","conversationMarkdown","conversationShareMessages","createSession","createTab","creationOptions","decideProposal","deleteSession","editSession","ensureSession","fileDiff","forgetPendingInput","forkSession","hello","inspectProposal","iosSimulatorControl","itemDetail","listDir","loadOlderSession","localProjects","markSessionRead","mentionCatalog","openSession","ping","pinSession","probeSchema","projectGroups","promptShortcuts","readFile","releaseReserve","remoteSettings","renameSession","respondPermission","restoreSessions","retryPendingInput","scheduleCommand","scheduleDetail","schedules","sendTurn","sessionLiveStatus","sessionPreview","sessionSharing","sessionWorkspacePath","setActive","setSessionOwner","setTabClosed","snoozePresets","start","statusViewCommand","turnDiff","workspaceChanges"]
 
   public struct AgentProviderAuthParamsStart: Codable, Sendable, Equatable {
     public var workspaceId: String
@@ -7592,6 +7592,86 @@ extension RuntimeContract {
     }
   }
 
+  public struct SessionLiveStatusParams: Codable, Sendable, Equatable {
+    public var workspaceId: String
+    public var sessionId: String
+    public var machineId: String?
+    public init(workspaceId: String, sessionId: String, machineId: String? = nil) {
+      self.workspaceId = workspaceId
+      self.sessionId = sessionId
+      self.machineId = machineId
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.workspaceId = try c.decode(String.self, forKey: Key("workspaceId"))
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.machineId = try c.decodeIfPresent(String.self, forKey: Key("machineId"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.workspaceId, forKey: Key("workspaceId"))
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encodeIfPresent(self.machineId, forKey: Key("machineId"))
+    }
+  }
+
+  public enum SessionLiveStatusResultState: String, Codable, Sendable, Equatable, CaseIterable {
+    case idle = "idle"
+    case busy = "busy"
+    case unknown = "unknown"
+  }
+
+  public enum SessionLiveStatusResultDetail: String, Codable, Sendable, Equatable, CaseIterable {
+    case running = "running"
+    case initializing = "initializing"
+    case waiting = "waiting"
+  }
+
+  public enum SessionLiveStatusResultSource: String, Codable, Sendable, Equatable, CaseIterable {
+    case presence = "presence"
+    case pointer = "pointer"
+    case rpc = "rpc"
+    case none = "none"
+  }
+
+  public enum SessionLiveStatusResultReason: String, Codable, Sendable, Equatable, CaseIterable {
+    case machineOffline = "machine_offline"
+    case presenceUnsynced = "presence_unsynced"
+    case rpcFailed = "rpc_failed"
+    case sessionNotFound = "session_not_found"
+  }
+
+  public struct SessionLiveStatusResult: Codable, Sendable, Equatable {
+    public var sessionId: String
+    public var state: SessionLiveStatusResultState
+    public var detail: SessionLiveStatusResultDetail?
+    public var source: SessionLiveStatusResultSource?
+    public var reason: SessionLiveStatusResultReason?
+    public init(sessionId: String, state: SessionLiveStatusResultState, detail: SessionLiveStatusResultDetail? = nil, source: SessionLiveStatusResultSource? = nil, reason: SessionLiveStatusResultReason? = nil) {
+      self.sessionId = sessionId
+      self.state = state
+      self.detail = detail
+      self.source = source
+      self.reason = reason
+    }
+    public init(from decoder: any Decoder) throws {
+      let c = try decoder.container(keyedBy: Key.self)
+      self.sessionId = try c.decode(String.self, forKey: Key("sessionId"))
+      self.state = try c.decode(SessionLiveStatusResultState.self, forKey: Key("state"))
+      self.detail = try c.decodeIfPresent(SessionLiveStatusResultDetail.self, forKey: Key("detail"))
+      self.source = try c.decodeIfPresent(SessionLiveStatusResultSource.self, forKey: Key("source"))
+      self.reason = try c.decodeIfPresent(SessionLiveStatusResultReason.self, forKey: Key("reason"))
+    }
+    public func encode(to encoder: any Encoder) throws {
+      var c = encoder.container(keyedBy: Key.self)
+      try c.encode(self.sessionId, forKey: Key("sessionId"))
+      try c.encode(self.state, forKey: Key("state"))
+      try c.encodeIfPresent(self.detail, forKey: Key("detail"))
+      try c.encodeIfPresent(self.source, forKey: Key("source"))
+      try c.encodeIfPresent(self.reason, forKey: Key("reason"))
+    }
+  }
+
   public enum SessionPreviewParamsAction: String, Codable, Sendable, Equatable, CaseIterable {
     case create = "create"
     case status = "status"
@@ -9861,6 +9941,16 @@ extension RuntimeContract {
         return nil
       }
     }
+    public enum SessionLiveStatus: RuntimeCall {
+      public typealias Params = RuntimeContract.SessionLiveStatusParams
+      public typealias Result = RuntimeContract.SessionLiveStatusResult
+      public static let method = "sessionLiveStatus"
+      public static let timeout: Double = 15
+      public static func result(_ value: RuntimeContract.CallResult) -> Result? {
+        if case .sessionLiveStatus(let result) = value { return result }
+        return nil
+      }
+    }
     public enum SessionPreview: RuntimeCall {
       public typealias Params = RuntimeContract.SessionPreviewParams
       public typealias Result = RuntimeContract.SessionPreviewResult
@@ -10044,6 +10134,7 @@ extension RuntimeContract {
     case scheduleDetail(RuntimeContract.ScheduleDetail)
     case schedules(RuntimeContract.SchedulesResult)
     case sendTurn(RuntimeContract.SendTurnResult)
+    case sessionLiveStatus(RuntimeContract.SessionLiveStatusResult)
     case sessionPreview(RuntimeContract.SessionPreviewResult)
     case sessionSharing(RuntimeContract.SessionSharingResult)
     case sessionWorkspacePath(RuntimeContract.SessionWorkspacePathResult)
@@ -10167,6 +10258,7 @@ extension RuntimeContract {
         case "scheduleDetail": message = .result(id: id, .scheduleDetail(try c.decode(RuntimeContract.ScheduleDetail.self, forKey: Key("payload"))))
         case "schedules": message = .result(id: id, .schedules(try c.decode(RuntimeContract.SchedulesResult.self, forKey: Key("payload"))))
         case "sendTurn": message = .result(id: id, .sendTurn(try c.decode(RuntimeContract.SendTurnResult.self, forKey: Key("payload"))))
+        case "sessionLiveStatus": message = .result(id: id, .sessionLiveStatus(try c.decode(RuntimeContract.SessionLiveStatusResult.self, forKey: Key("payload"))))
         case "sessionPreview": message = .result(id: id, .sessionPreview(try c.decode(RuntimeContract.SessionPreviewResult.self, forKey: Key("payload"))))
         case "sessionSharing": message = .result(id: id, .sessionSharing(try c.decode(RuntimeContract.SessionSharingResult.self, forKey: Key("payload"))))
         case "sessionWorkspacePath": message = .result(id: id, .sessionWorkspacePath(try c.decode(RuntimeContract.SessionWorkspacePathResult.self, forKey: Key("payload"))))

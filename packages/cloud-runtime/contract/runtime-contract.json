@@ -242,6 +242,11 @@
       "result": "SendTurnResult",
       "timeoutMs": 45000
     },
+    "sessionLiveStatus": {
+      "params": "SessionLiveStatusParams",
+      "result": "SessionLiveStatusResult",
+      "timeoutMs": 15000
+    },
     "sessionPreview": {
       "params": "SessionPreviewParams",
       "result": "SessionPreviewResult",
@@ -3782,6 +3787,40 @@
         "backgroundWork": { "$ref": "SessionBackgroundWork" }
       },
       "required": ["sessionId", "session", "synced"]
+    },
+    "SessionLiveStatusParams": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "machineId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["workspaceId", "sessionId"]
+    },
+    "SessionLiveStatusResult": {
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "state": { "type": "string", "enum": ["idle", "busy", "unknown"] },
+        "detail": {
+          "type": "string",
+          "enum": ["running", "initializing", "waiting"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["presence", "pointer", "rpc", "none"]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "machine_offline",
+            "presence_unsynced",
+            "rpc_failed",
+            "session_not_found"
+          ]
+        }
+      },
+      "required": ["sessionId", "state"]
     },
     "SessionPreviewParams": {
       "type": "object",

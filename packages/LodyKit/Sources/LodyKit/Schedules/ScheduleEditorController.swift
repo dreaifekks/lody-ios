@@ -424,7 +424,7 @@ final class ScheduleEditorController: LodyFormController {
     var actions: [ScheduleHeroView.Action] = []
     if item.isOwner, !item.scheduledMessage {
       actions.append(.init(id: "schedule-run", title: text("runNow"), symbol: "play.fill", enabled: supported && !busy) { [weak self] in
-        self?.command(.run)
+        self?.requestRun()
       })
       if item.rule.kind != .manual {
         let resume = !item.enabled
@@ -852,6 +852,42 @@ final class ScheduleEditorController: LodyFormController {
     alert.addAction(UIAlertAction(title: text("cancel"), style: .cancel))
     alert.addAction(UIAlertAction(title: text("delete"), style: .destructive) { [weak self] _ in self?.command(.delete) })
     present(alert, animated: true)
+  }
+
+  private func requestRun() {
+    guard cache.valid, !cache.pending.contains(scheduleId), let item, item.isOwner, !item.scheduledMessage, supported, !busy else { return }
+    guard ScheduleRunPrecheck.boundSessionId(for: item) != nil else {
+      command(.run)
+      return
+    }
+    cache.pending.insert(scheduleId)
+    busy = true
+    failure = ""
+    render()
+    let hasUnsavedEdits = !readOnly && !chatBound && draftRevision > 0
+    Task { [weak self, service = service, cache = cache, workspaceId = workspaceId, catalog = catalog, scheduleId = scheduleId] in
+      let decision = await ScheduleRunPrecheck.evaluate(
+        item: item, workspaceId: workspaceId, catalog: catalog, service: service
+      )
+      guard cache.valid else { return }
+      cache.pending.remove(scheduleId)
+      guard let self else { return }
+      self.busy = false
+      switch decision {
+      case .runImmediately:
+        self.command(.run)
+      case .confirmBusy, .confirmUnknown:
+        self.render()
+        guard self.presentedViewController == nil,
+              let alert = ScheduleRunPrecheck.confirmationAlert(
+                item: item,
+                decision: decision,
+                detail: hasUnsavedEdits,
+                onConfirm: { [weak self] in self?.command(.run) }
+              ) else { return }
+        self.present(alert, animated: true)
+      }
+    }
   }
 
   /// Pause, resume, run and delete act on the stored schedule at once, each with a fresh key.

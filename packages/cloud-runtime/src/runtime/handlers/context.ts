@@ -21,6 +21,9 @@ export type RuntimeState = {
   workspaceReadOnly: boolean;
   metaReplica: MetaReplica | undefined;
   presence: MachinePresence;
+  getLiveSessionPresence?: (
+    sessionId: string,
+  ) => 'running' | 'initializing' | 'waiting' | undefined;
   knownProjects: Pick<Project, 'id' | 'repoFullName'>[];
   readonly machineReplicas: Map<string, Flock>;
   readonly catalogs: Map<string, Catalog>;

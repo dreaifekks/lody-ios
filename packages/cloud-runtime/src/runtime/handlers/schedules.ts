@@ -11,6 +11,7 @@ import {
   applyScheduleRecurrence,
   describeScheduleState,
   deviceTimeZone,
+  scheduleOwnSessionId,
   triggerToRecurrence,
   type ScheduleDestination,
   type ScheduleDocument,
@@ -20,13 +21,21 @@ import {
   type ScheduleRuntimeRow,
   type ScheduleTrigger,
 } from '../../protocol/schedules.ts';
+import { machineState } from '../../models/machines.ts';
 import { creationOptions, machineMeta } from '../create-session';
+import { sessionActionMeta } from '../fork-session';
+import { machineRpc } from '../machine-rpc';
 import {
   scheduleRepository,
   scheduleStreams,
   type ScheduleDraftInput,
 } from '../schedules';
-import type { RuntimeContext } from './context.ts';
+import { serverClock } from '../server-clock.ts';
+import {
+  SESSION_LIVE_STATUS_TIMEOUT_MS,
+  inspectBoundSessionLiveStatus,
+} from '../session-live-status.ts';
+import { scopedWorkspaceGrant, type RuntimeContext } from './context.ts';
 
 type Rule = z.infer<typeof ScheduleRule>;
 type Item = z.infer<typeof ScheduleItem>;
@@ -221,11 +230,43 @@ export function registerSchedules(ctx: RuntimeContext) {
     return text(value?.name) || undefined;
   };
 
+  const sessionMetaOf = (meta: Flock, sessionId: string) => {
+    const roomId = `session-${sessionId}`;
+    return sessionActionMeta(
+      meta.get(['m', roomId]),
+      meta.scan({ prefix: ['m', roomId] }),
+      meta.get(['e', roomId]),
+    );
+  };
+
+  const resolveDestinationSessionId = async (
+    meta: Flock,
+    row: ScheduleRegistryRow,
+    runtime: ScheduleRuntimeRow | undefined,
+  ): Promise<string | undefined> => {
+    if (row.destination.kind === 'existing_session')
+      return row.destination.sessionId;
+    if (row.destination.kind === 'own_session') {
+      const ownId = await scheduleOwnSessionId(
+        row.scheduleId,
+        row.destination.epoch,
+      );
+      if (
+        sessionMetaOf(meta, ownId) !== undefined ||
+        state.getLiveSessionPresence?.(ownId) !== undefined ||
+        runtime?.lastDispatch?.sessionId === ownId
+      )
+        return ownId;
+    }
+    return undefined;
+  };
+
   const item = (
     meta: Flock,
     row: ScheduleRegistryRow,
     runtime: ScheduleRuntimeRow | undefined,
     agentList: ReturnType<typeof agents>,
+    destinationSessionId: string | undefined,
   ): Item => {
     const host = machine(meta, row.machineId);
     const agent = agentList.find(
@@ -251,9 +292,7 @@ export function registerSchedules(ctx: RuntimeContext) {
       scheduledMessage: row.scheduledMessage === true,
       rule: ruleOf(row.trigger),
       destination: row.destination.kind,
-      ...(row.destination.kind === 'existing_session'
-        ? { destinationSessionId: row.destination.sessionId }
-        : {}),
+      ...(destinationSessionId ? { destinationSessionId } : {}),
       ...(row.projectKind ? { projectKind: row.projectKind } : {}),
       ...(row.projectKey ? { projectKey: row.projectKey } : {}),
       ...(() => {
@@ -302,10 +341,20 @@ export function registerSchedules(ctx: RuntimeContext) {
       if (host.timeZone) machineTimeZones[id] = host.timeZone;
       if (host.owner && host.owner === state.userId) ownedMachineIds.push(id);
     }
+    const items = await Promise.all(
+      rows.map(async (row) => {
+        const runtime = runtimeFor(runtimes, row);
+        const destinationSessionId = await resolveDestinationSessionId(
+          meta,
+          row,
+          runtime,
+        );
+        return item(meta, row, runtime, agentList, destinationSessionId);
+      }),
+    );
+    check();
     return {
-      items: rows
-        .map((row) => item(meta, row, runtimeFor(runtimes, row), agentList))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+      items: items.sort((a, b) => b.updatedAt - a.updatedAt),
       deviceTimeZone: deviceTimeZone(),
       machineTimeZones,
       ownedMachineIds: ownedMachineIds.sort(),
@@ -324,7 +373,14 @@ export function registerSchedules(ctx: RuntimeContext) {
     if (!row) throw new Error('schedule_not_found');
     const read = await streams.read(row.scheduleId);
     check();
-    const base = item(meta, row, runtimeFor(runtimes, row), agents(meta));
+    const runtime = runtimeFor(runtimes, row);
+    const destinationSessionId = await resolveDestinationSessionId(
+      meta,
+      row,
+      runtime,
+    );
+    check();
+    const base = item(meta, row, runtime, agents(meta), destinationSessionId);
     if (read.message) return { item: base, prompt: read.text };
     if (!read.document) throw new Error('schedule_not_found');
     const { definition, prompt } = read.document;
@@ -453,6 +509,57 @@ export function registerSchedules(ctx: RuntimeContext) {
         break;
     }
     return { scheduleId };
+  });
+
+  channel.handle('sessionLiveStatus', async (args) => {
+    const { workspace, meta, check } = scope(args.workspaceId);
+    const userId = state.userId;
+    const grant = scopedWorkspaceGrant(ctx, workspace, userId);
+    const initialMeta = sessionMetaOf(meta, args.sessionId);
+    const metaMachineId = text(initialMeta?.machineId).trim();
+    const fallbackMachineId = args.machineId?.trim() ?? '';
+    const targetMachineId = metaMachineId || fallbackMachineId || undefined;
+    const checkScope = () => {
+      if (state.workspace !== workspace || state.userId !== userId)
+        throw new Error('workspace_changed');
+    };
+    const result = await inspectBoundSessionLiveStatus({
+      sessionId: args.sessionId,
+      machineId: targetMachineId,
+      getSnapshot: () => {
+        checkScope();
+        const liveMeta =
+          state.metaReplica && !state.unhealthy.has('meta')
+            ? sessionMetaOf(state.metaReplica.flock, args.sessionId)
+            : undefined;
+        return {
+          presenceDetail: state.getLiveSessionPresence?.(args.sessionId),
+          machineState: targetMachineId
+            ? machineState(state.presence, targetMachineId)
+            : 'unknown',
+          sessionMeta: liveMeta,
+          nowMs: serverClock.now(),
+        };
+      },
+      requestDaemonLiveStatus: targetMachineId
+        ? async () => {
+            const reply = await machineRpc(
+              workspace,
+              targetMachineId,
+              'session/live-status',
+              { sessionId: args.sessionId },
+              grant,
+              AbortSignal.timeout(SESSION_LIVE_STATUS_TIMEOUT_MS),
+              undefined,
+              SESSION_LIVE_STATUS_TIMEOUT_MS,
+            );
+            return reply.result;
+          }
+        : undefined,
+    });
+    check();
+    checkScope();
+    return result;
   });
 }
 

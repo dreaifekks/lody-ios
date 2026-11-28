@@ -516,8 +516,12 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     return symbols[action] ?? "circle"
   }
 
-  /// Delete always confirms; everything else runs at once.
+  /// Delete always confirms; manual run checks any bound chat first; pause/resume run at once.
   private func request(_ action: ScheduleAction, _ item: ScheduleItem) {
+    if action == .run {
+      requestRun(item)
+      return
+    }
     guard action == .delete else { return perform(action, item) }
     let alert = UIAlertController(
       title: String(format: ScheduleFormat.text("deleteTitle"), item.title),
@@ -528,6 +532,34 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       self?.perform(.delete, item)
     })
     present(alert, animated: true)
+  }
+
+  private func requestRun(_ item: ScheduleItem) {
+    guard ScheduleRunPrecheck.boundSessionId(for: item) != nil else {
+      perform(.run, item)
+      return
+    }
+    let workspaceId = source.state.workspaceId
+    guard !workspaceId.isEmpty, actions(item).contains(.run), cache.pending.insert(item.scheduleId).inserted else { return }
+    let owner = cache
+    let catalog = source.state.catalog
+    Task { [weak self, service] in
+      let decision = await ScheduleRunPrecheck.evaluate(
+        item: item, workspaceId: workspaceId, catalog: catalog, service: service
+      )
+      guard let self, self.cache === owner, owner.valid, self.source.state.workspaceId == workspaceId else { return }
+      self.cache.pending.remove(item.scheduleId)
+      switch decision {
+      case .runImmediately:
+        self.perform(.run, item)
+      case .confirmBusy, .confirmUnknown:
+        guard self.presentedViewController == nil,
+              let alert = ScheduleRunPrecheck.confirmationAlert(item: item, decision: decision, detail: false, onConfirm: { [weak self] in
+                self?.perform(.run, item)
+              }) else { return }
+        self.present(alert, animated: true)
+      }
+    }
   }
 
   private func perform(_ action: ScheduleAction, _ item: ScheduleItem) {

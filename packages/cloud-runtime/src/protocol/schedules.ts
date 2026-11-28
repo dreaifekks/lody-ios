@@ -265,6 +265,25 @@ async function digest(value: unknown): Promise<string> {
     .join('');
 }
 
+/**
+ * The chat this schedule owns for `own_session`. Matches `scheduleOwnSessionId`
+ * in `@lody/shared` (RFC 9562 UUIDv8 with domain-separated SHA-256 payload).
+ */
+export async function scheduleOwnSessionId(
+  scheduleId: string,
+  epoch: number,
+): Promise<string> {
+  const bytes = (
+    await digest(['lody.schedule.v1', 'own-session', scheduleId, epoch])
+  )
+    .slice(0, 32)
+    .split('');
+  bytes[12] = '8';
+  bytes[16] = ((parseInt(bytes[16]!, 16) & 3) | 8).toString(16);
+  const hex = bytes.join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function validateSchedulePrompt(prompt: string): void {
   if (
     !prompt.trim() ||

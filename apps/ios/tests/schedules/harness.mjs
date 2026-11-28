@@ -14,7 +14,9 @@ export async function loadSchedules({ proposals = false } = {}) {
     stdin: {
       contents: `
         export * from './src/runtime/schedules.ts';
-        export { draftInput, ruleOf, scheduleMachine, triggerOf } from './src/runtime/handlers/schedules.ts';
+        export { draftInput, registerSchedules, ruleOf, scheduleMachine, triggerOf } from './src/runtime/handlers/schedules.ts';
+        export { activeSessionStatuses } from './src/runtime/machine-presence.ts';
+        export * from './src/runtime/session-live-status.ts';
         export * from './src/protocol/schedules.ts';
         export * from './src/protocol/proposals.ts';
         ${proposals ? "export { registerProposals, scheduleEditProposalActivityId } from './src/runtime/handlers/proposals.ts';" : ''}
@@ -39,13 +41,39 @@ export async function loadSchedules({ proposals = false } = {}) {
               ? { path: 'session', namespace: 'test' }
               : undefined,
           );
+          b.onResolve({ filter: /^\.\.\/machine-rpc$/ }, (args) =>
+            args.importer.endsWith('handlers/schedules.ts')
+              ? { path: 'machine-rpc', namespace: 'test' }
+              : undefined,
+          );
           b.onResolve({ filter: /^loro-crdt(\/base64)?$/ }, () => ({
             path: pathToFileURL(require.resolve('loro-crdt/base64')).href,
             external: true,
           }));
+          b.onResolve({ filter: /^@loro-dev\/streams-crdt\/loro$/ }, () => ({
+            path: 'streams-crdt-mock',
+            namespace: 'test',
+          }));
           b.onResolve({ filter: /^@loro-dev\/streams-client$/ }, () => ({
             path: 'mock',
             namespace: 'test',
+          }));
+          b.onLoad(
+            { filter: /^streams-crdt-mock$/, namespace: 'test' },
+            () => ({
+              contents: `
+              export const EphemeralStoreAdaptor = () => ({});
+              export class EphemeralStreamCrdt {}
+            `,
+            }),
+          );
+          b.onLoad({ filter: /^machine-rpc$/, namespace: 'test' }, () => ({
+            contents: `
+              export async function machineRpc(...args) {
+                if (!globalThis.__machineRpc) throw new Error('unexpected_machine_rpc');
+                return globalThis.__machineRpc(...args);
+              }
+            `,
           }));
           b.onLoad({ filter: /^session$/, namespace: 'test' }, () => ({
             contents: `

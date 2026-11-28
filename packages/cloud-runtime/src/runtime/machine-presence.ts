@@ -9,6 +9,11 @@ import type { CreationOptions } from '../models/send.ts';
 // Official Lody presence protocol: durable machine metadata is not liveness.
 export const machinePresenceTTL = 90_000;
 
+export type SessionPresenceDetail = 'running' | 'initializing' | 'waiting';
+export type SessionPresenceReader = (
+  sessionId: string,
+) => SessionPresenceDetail | undefined;
+
 export function availableCreationOptions(
   options: CreationOptions,
   presence: MachinePresence,
@@ -55,6 +60,48 @@ export function onlineMachines(
   return [...ids].sort();
 }
 
+function sessionPresenceDetail(
+  status: unknown,
+): SessionPresenceDetail | undefined {
+  if (!status || typeof status !== 'object') return undefined;
+  const type = (status as Record<string, unknown>).type;
+  if (type === 'running') return 'running';
+  if (type === 'initializing') return 'initializing';
+  if (type === 'requestPermission') return 'waiting';
+  return undefined;
+}
+
+export function activeSessionStatuses(
+  states: Record<string, unknown>,
+  now: number,
+): Map<string, SessionPresenceDetail> {
+  const latest = new Map<
+    string,
+    { detail: SessionPresenceDetail; updatedAt: number }
+  >();
+  for (const value of Object.values(states)) {
+    if (!value || typeof value !== 'object') continue;
+    const state = value as Record<string, unknown>;
+    if (
+      state.kind !== 'session' ||
+      typeof state.sessionId !== 'string' ||
+      !state.sessionId ||
+      typeof state.updatedAt !== 'number' ||
+      !Number.isFinite(state.updatedAt)
+    )
+      continue;
+    if (now - state.updatedAt >= machinePresenceTTL) continue;
+    const detail = sessionPresenceDetail(state.status);
+    if (!detail) continue;
+    const prev = latest.get(state.sessionId);
+    if (!prev || state.updatedAt >= prev.updatedAt)
+      latest.set(state.sessionId, { detail, updatedAt: state.updatedAt });
+  }
+  const result = new Map<string, SessionPresenceDetail>();
+  for (const [sessionId, entry] of latest) result.set(sessionId, entry.detail);
+  return result;
+}
+
 type Grant = {
   token: string;
   gatewayBaseUrl: string;
@@ -75,6 +122,7 @@ export function watchMachinePresence(
   workspace: string,
   getGrant: () => Promise<Grant>,
   publish: (value: MachinePresence) => void,
+  onSessionReader?: (reader: SessionPresenceReader | undefined) => void,
 ) {
   let stopped = false;
   let generation = 0;
@@ -87,7 +135,10 @@ export function watchMachinePresence(
     last = next;
     publish(value);
   };
-  const unknown = () => emit({ state: 'unknown', onlineMachineIds: [] });
+  const unknown = () => {
+    onSessionReader?.(undefined);
+    emit({ state: 'unknown', onlineMachineIds: [] });
+  };
   const start = async () => {
     const version = ++generation;
     close();
@@ -103,6 +154,12 @@ export function watchMachinePresence(
       });
       let joined = false;
       let disconnectedAt = Date.now();
+      const readSessionStatus: SessionPresenceReader = (sessionId) => {
+        if (stopped || version !== generation || !joined) return undefined;
+        return activeSessionStatuses(store.getAllStates(), Date.now()).get(
+          sessionId,
+        );
+      };
       const emitSnapshot = () => {
         if (!stopped && version === generation && joined)
           emit({
@@ -118,6 +175,7 @@ export function watchMachinePresence(
       close = () => {
         clearInterval(tick);
         detach();
+        onSessionReader?.(undefined);
         // Close transport before destroying its WASM store.
         void room
           .close()
@@ -130,6 +188,7 @@ export function watchMachinePresence(
           if (joined && status !== 'joined') disconnectedAt = Date.now();
           joined = status === 'joined';
           if (joined) {
+            onSessionReader?.(readSessionStatus);
             emitSnapshot();
           } else {
             unknown();

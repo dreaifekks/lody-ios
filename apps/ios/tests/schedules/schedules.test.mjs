@@ -9,6 +9,12 @@ const {
   scheduleStreams,
   scheduleRepository,
   scheduleDefinitionFingerprint,
+  scheduleOwnSessionId,
+  activeSessionStatuses,
+  inspectBoundSessionLiveStatus,
+  hasPendingUserTurnActivation,
+  hasFreshPendingUserTurnActivation,
+  registerSchedules,
   draftInput,
   ruleOf,
   scheduleMachine,
@@ -401,4 +407,387 @@ test('a scheduled message is shown but never rewritten from mobile', async () =>
   );
   await repository.remove('msg', OWNER, 3000);
   assert.deepEqual((await streams.list()).rows, []);
+});
+
+test('scheduleOwnSessionId derives a deterministic RFC 9562 UUIDv8 per schedule and epoch', async () => {
+  const first = await scheduleOwnSessionId('sched-1', 0);
+  const again = await scheduleOwnSessionId('sched-1', 0);
+  const nextEpoch = await scheduleOwnSessionId('sched-1', 1);
+  assert.equal(first, again);
+  assert.notEqual(first, nextEpoch);
+  assert.match(
+    first,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+});
+
+test('activeSessionStatuses projects fresh session presence and ignores stale or non-session rows', () => {
+  const now = 1_000_000;
+  const result = activeSessionStatuses(
+    {
+      m1: {
+        kind: 'machine',
+        machineId: 'm1',
+        instanceId: 'i1',
+        updatedAt: now,
+      },
+      s1: {
+        kind: 'session',
+        sessionId: 'sess-run',
+        status: { type: 'running' },
+        updatedAt: now - 1_000,
+      },
+      s2: {
+        kind: 'session',
+        sessionId: 'sess-wait',
+        status: { type: 'requestPermission' },
+        updatedAt: now - 2_000,
+      },
+      s3Old: {
+        kind: 'session',
+        sessionId: 'sess-init',
+        status: { type: 'running' },
+        updatedAt: now - 10_000,
+      },
+      s3New: {
+        kind: 'session',
+        sessionId: 'sess-init',
+        status: { type: 'initializing' },
+        updatedAt: now - 500,
+      },
+      sStale: {
+        kind: 'session',
+        sessionId: 'sess-stale',
+        status: { type: 'running' },
+        updatedAt: now - 95_000,
+      },
+    },
+    now,
+  );
+  assert.equal(result.get('sess-run'), 'running');
+  assert.equal(result.get('sess-wait'), 'waiting');
+  assert.equal(result.get('sess-init'), 'initializing');
+  assert.equal(result.has('sess-stale'), false);
+});
+
+test('inspectBoundSessionLiveStatus handles busy, idle, race, offline and RPC failure deterministically', async () => {
+  const now = 500_000;
+  let rpcCalls = 0;
+
+  // 1. Live presence busy short-circuits without calling RPC.
+  const presenceBusy = await inspectBoundSessionLiveStatus({
+    sessionId: 's1',
+    machineId: 'm1',
+    getSnapshot: () => ({
+      presenceDetail: 'running',
+      machineState: 'online',
+      sessionMeta: undefined,
+      nowMs: now,
+    }),
+    requestDaemonLiveStatus: async () => {
+      rpcCalls += 1;
+      return { success: true, sessionId: 's1', state: 'idle' };
+    },
+  });
+  assert.deepEqual(presenceBusy, {
+    sessionId: 's1',
+    state: 'busy',
+    detail: 'running',
+    source: 'presence',
+  });
+  assert.equal(rpcCalls, 0);
+
+  // 2. Fresh pending dispatch pointer counts as busy; stale (>30s) or settled does not.
+  assert.equal(
+    hasPendingUserTurnActivation({
+      latestUserMsgId: 't2',
+      lastHandledUserMsgId: 't1',
+    }),
+    true,
+  );
+  assert.equal(
+    hasFreshPendingUserTurnActivation(
+      {
+        latestUserMsgId: 't2',
+        lastHandledUserMsgId: 't1',
+        lastMessageAt: now - 5_000,
+      },
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    hasFreshPendingUserTurnActivation(
+      {
+        latestUserMsgId: 't2',
+        lastHandledUserMsgId: 't1',
+        lastMessageAt: now - 45_000,
+      },
+      now,
+    ),
+    false,
+  );
+  assert.equal(
+    hasFreshPendingUserTurnActivation(
+      {
+        latestUserMsgId: 't2',
+        lastHandledUserMsgId: 't1',
+        settledActivationUserMsgId: 't2',
+        lastMessageAt: now - 1_000,
+      },
+      now,
+    ),
+    false,
+  );
+
+  // 3. Authoritative RPC idle and busy states.
+  const rpcIdle = await inspectBoundSessionLiveStatus({
+    sessionId: 's1',
+    machineId: 'm1',
+    getSnapshot: () => ({
+      presenceDetail: undefined,
+      machineState: 'online',
+      sessionMeta: undefined,
+      nowMs: now,
+    }),
+    requestDaemonLiveStatus: async () => ({
+      success: true,
+      sessionId: 's1',
+      state: 'idle',
+    }),
+  });
+  assert.deepEqual(rpcIdle, { sessionId: 's1', state: 'idle', source: 'rpc' });
+
+  const rpcBusy = await inspectBoundSessionLiveStatus({
+    sessionId: 's1',
+    machineId: 'm1',
+    getSnapshot: () => ({
+      presenceDetail: undefined,
+      machineState: 'online',
+      sessionMeta: undefined,
+      nowMs: now,
+    }),
+    requestDaemonLiveStatus: async () => ({
+      success: true,
+      sessionId: 's1',
+      state: 'waiting',
+    }),
+  });
+  assert.deepEqual(rpcBusy, {
+    sessionId: 's1',
+    state: 'busy',
+    detail: 'waiting',
+    source: 'rpc',
+  });
+
+  // 4. Check-to-dispatch race: session becomes busy in presence while RPC returns idle.
+  let reads = 0;
+  const raceResult = await inspectBoundSessionLiveStatus({
+    sessionId: 's1',
+    machineId: 'm1',
+    getSnapshot: () => {
+      reads += 1;
+      return {
+        presenceDetail: reads > 1 ? 'running' : undefined,
+        machineState: 'online',
+        sessionMeta: undefined,
+        nowMs: now,
+      };
+    },
+    requestDaemonLiveStatus: async () => ({
+      success: true,
+      sessionId: 's1',
+      state: 'idle',
+    }),
+  });
+  assert.deepEqual(raceResult, {
+    sessionId: 's1',
+    state: 'busy',
+    detail: 'running',
+    source: 'presence',
+  });
+
+  // 5. Offline machine returns unknown without RPC.
+  const offline = await inspectBoundSessionLiveStatus({
+    sessionId: 's1',
+    machineId: 'm1',
+    getSnapshot: () => ({
+      presenceDetail: undefined,
+      machineState: 'offline',
+      sessionMeta: undefined,
+      nowMs: now,
+    }),
+    requestDaemonLiveStatus: async () => {
+      throw new Error('should not be called');
+    },
+  });
+  assert.deepEqual(offline, {
+    sessionId: 's1',
+    state: 'unknown',
+    source: 'none',
+    reason: 'machine_offline',
+  });
+
+  // 6. RPC failure or error response returns unknown.
+  const failed = await inspectBoundSessionLiveStatus({
+    sessionId: 's1',
+    machineId: 'm1',
+    getSnapshot: () => ({
+      presenceDetail: undefined,
+      machineState: 'online',
+      sessionMeta: undefined,
+      nowMs: now,
+    }),
+    requestDaemonLiveStatus: async () => {
+      throw new Error('timeout');
+    },
+  });
+  assert.deepEqual(failed, {
+    sessionId: 's1',
+    state: 'unknown',
+    source: 'none',
+    reason: 'rpc_failed',
+  });
+});
+
+test('registerSchedules projects bound session ids and fences sessionLiveStatus by workspace', async () => {
+  const { repository } = fresh();
+  await create(repository, 'new-sched', draft({ destination: 'new_session' }));
+  await create(
+    repository,
+    'own-uncreated',
+    draft({ destination: 'own_session' }),
+  );
+  await create(
+    repository,
+    'own-created',
+    draft({ destination: 'own_session' }),
+  );
+  await repository.save({
+    scheduleId: 'existing-sched',
+    draft: {
+      ...draftInput(draft(), undefined, 'UTC', 1000),
+      destination: { kind: 'existing_session', sessionId: 'sess-existing' },
+      project: undefined,
+    },
+    actorId: OWNER,
+    now: 1000,
+    activationId: 'act-1',
+    activityId: 'existing-created',
+    create: true,
+  });
+
+  const ownCreatedSessionId = await scheduleOwnSessionId('own-created', 0);
+  const meta = new Flock('meta');
+  meta.set(['e', 'machine-m1'], true);
+  meta.set(['m', 'machine-m1'], {
+    name: 'Studio',
+    ownerUserId: OWNER,
+    protocolCapabilities: { schedules: 2 },
+  });
+  meta.set(['e', `session-${ownCreatedSessionId}`], true);
+  meta.set(['m', `session-${ownCreatedSessionId}`], {
+    id: ownCreatedSessionId,
+    machineId: 'm1',
+  });
+  meta.set(['e', 'session-sess-existing'], true);
+  meta.set(['m', 'session-sess-existing'], {
+    id: 'sess-existing',
+    machineId: 'm1',
+  });
+
+  const handlers = new Map();
+  const state = {
+    workspace: WS,
+    userId: OWNER,
+    workspaceReadOnly: false,
+    metaReplica: { flock: meta, client: {} },
+    presence: { state: 'live', onlineMachineIds: ['m1'] },
+    getLiveSessionPresence: () => undefined,
+    knownProjects: [],
+    machineReplicas: new Map(),
+    catalogs: new Map([
+      ['meta', { projects: [], sessions: [], machineIds: ['m1'] }],
+    ]),
+    unhealthy: new Set(),
+    workspaceReplica: undefined,
+    pinSections: { sections: [], loaded: false },
+  };
+  registerSchedules({
+    channel: {
+      handle(method, fn) {
+        handlers.set(method, fn);
+      },
+    },
+    state,
+    getGrant: grant,
+  });
+
+  const listResult = await handlers.get('schedules')({ workspaceId: WS });
+  const byId = new Map(
+    listResult.items.map((entry) => [entry.scheduleId, entry]),
+  );
+  assert.equal(byId.get('new-sched').destinationSessionId, undefined);
+  assert.equal(byId.get('own-uncreated').destinationSessionId, undefined);
+  assert.equal(
+    byId.get('own-created').destinationSessionId,
+    ownCreatedSessionId,
+  );
+  assert.equal(
+    byId.get('existing-sched').destinationSessionId,
+    'sess-existing',
+  );
+
+  // Querying live status calls daemon session/live-status RPC and returns authoritative state.
+  let seenRpc = null;
+  globalThis.__machineRpc = async (workspaceId, machineId, method, params) => {
+    seenRpc = { workspaceId, machineId, method, params };
+    return {
+      result: { success: true, sessionId: params.sessionId, state: 'running' },
+    };
+  };
+  const live = await handlers.get('sessionLiveStatus')({
+    workspaceId: WS,
+    sessionId: 'sess-existing',
+    machineId: 'm1',
+  });
+  assert.deepEqual(seenRpc, {
+    workspaceId: WS,
+    machineId: 'm1',
+    method: 'session/live-status',
+    params: { sessionId: 'sess-existing' },
+  });
+  assert.deepEqual(live, {
+    sessionId: 'sess-existing',
+    state: 'busy',
+    detail: 'running',
+    source: 'rpc',
+  });
+
+  // Workspace mismatch fails closed before any RPC.
+  await assert.rejects(
+    handlers.get('sessionLiveStatus')({
+      workspaceId: 'other-ws',
+      sessionId: 'sess-existing',
+      machineId: 'm1',
+    }),
+    /metadata_not_ready/,
+  );
+
+  // Workspace change while RPC is in flight fails closed.
+  globalThis.__machineRpc = async () => {
+    state.workspace = 'w2';
+    return {
+      result: { success: true, sessionId: 'sess-existing', state: 'idle' },
+    };
+  };
+  await assert.rejects(
+    handlers.get('sessionLiveStatus')({
+      workspaceId: WS,
+      sessionId: 'sess-existing',
+      machineId: 'm1',
+    }),
+    /workspace_changed/,
+  );
+  delete globalThis.__machineRpc;
 });

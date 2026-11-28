@@ -170,3 +170,28 @@ export const ScheduleCommandParams = z
 export const ScheduleCommandResult = z
   .object({ scheduleId: z.string() })
   .meta({ id: 'ScheduleCommandResult' });
+
+export const SessionLiveStatusParams = z
+  .object({
+    workspaceId: z.string().min(1),
+    sessionId: z.string().min(1),
+    machineId: z.string().min(1).optional(),
+  })
+  .meta({ id: 'SessionLiveStatusParams' });
+
+export const SessionLiveStatusResult = z
+  .object({
+    sessionId: z.string().min(1),
+    state: z.enum(['idle', 'busy', 'unknown']),
+    detail: z.enum(['running', 'initializing', 'waiting']).optional(),
+    source: z.enum(['presence', 'pointer', 'rpc', 'none']).optional(),
+    reason: z
+      .enum([
+        'machine_offline',
+        'presence_unsynced',
+        'rpc_failed',
+        'session_not_found',
+      ])
+      .optional(),
+  })
+  .meta({ id: 'SessionLiveStatusResult' });
