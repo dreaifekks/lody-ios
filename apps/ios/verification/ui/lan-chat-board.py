@@ -7,7 +7,9 @@ expected = {
     'results:batch': '2 task results\nLayout check · Completed\nWire check · Failed',
     'results:single': '1 task results · delivery uncertain\nAgent reply · Waiting for you',
     'maintenance:compact': 'Context compaction · Completed',
+    'maintenance:fold': 'Fold rollover · Completed',
     'maintenance:limit': 'Autonomous chain reached its limit. Send a message to continue.',
+    'rollover:done': 'Switched to node #2 · 180K → 12.5K',
     'proposal:role': 'Update Role: iosDev\nDescription: Review native chat\nDefault instruction: Use UIKit.\nSaved',
 }
 for identifier, text in expected.items():
@@ -15,5 +17,6 @@ for identifier, text in expected.items():
     assert row['AXLabel'] == text, row
     assert row['type'] != 'Button', row
 assert not any((item.get('AXUniqueId') or '').startswith('idle:') for item in ui.state())
+assert not any((item.get('AXUniqueId') or '').startswith('rolloverSilent:') for item in ui.state())
 ui.capture('board-events')
-print('PASS: completion batch/single, maintenance divider, chain limit, read-only Role proposal; interrupted idle maintenance hidden')
+print('PASS: completion batch/single, maintenance/fold/rollover dividers, chain limit, read-only Role proposal; silent notices hidden')

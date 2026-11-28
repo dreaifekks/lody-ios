@@ -59,6 +59,53 @@ export const validConfigValue = (option: ConfigOption, value: unknown) =>
     : typeof value === 'string' &&
       option.options.some((item) => item.id === value);
 
+const isModelSelectorOption = (
+  option: Pick<ConfigOption, 'category' | 'type'>,
+) => option.category === 'model' && option.type === 'select';
+
+/**
+ * Aligns with Lody `resolveAcpConfigOptionsForModel`: keeps the snapshot's
+ * model selector and order while substituting the target model's observed
+ * option list when recorded.
+ */
+export function resolveConfigOptionsForModel<
+  T extends Pick<ConfigOption, 'id' | 'category' | 'type'> & {
+    currentValue?: string | boolean;
+  },
+>(
+  snapshot: readonly T[] | undefined,
+  observedByModel: Readonly<Record<string, readonly T[]>> | undefined,
+  modelId: string | null | undefined,
+): readonly T[] | undefined {
+  const currentModel = snapshot?.find(isModelSelectorOption)?.currentValue;
+  const snapshotModelId =
+    typeof currentModel === 'string' && currentModel.length > 0
+      ? currentModel
+      : undefined;
+  if (!modelId || modelId === snapshotModelId) return snapshot;
+  const observed = observedByModel?.[modelId];
+  if (!observed) return snapshot;
+  const observedById = new Map(observed.map((option) => [option.id, option]));
+  const composed: T[] = [];
+  const used = new Set<string>();
+  for (const option of snapshot ?? []) {
+    if (isModelSelectorOption(option)) {
+      composed.push(option);
+      continue;
+    }
+    const replacement = observedById.get(option.id);
+    if (replacement) {
+      composed.push(replacement);
+      used.add(option.id);
+    }
+  }
+  for (const option of observed) {
+    if (!used.has(option.id) && !isModelSelectorOption(option))
+      composed.push(option);
+  }
+  return composed;
+}
+
 export function effortsFor(capability?: Capability, modelId?: string) {
   const model =
     modelId ??

@@ -369,13 +369,21 @@ extension CreateSessionForm {
     }
   }
 
+  static func modelOptionId(for capability: Capability?) -> String? {
+    capability?.configOptions?.first(where: { $0.category == "model" && $0.type == "select" })?.id
+  }
+
   /// The Role the composer IS, not merely the last picked (web `isComposerAgentRoleApplied`):
   /// its agent and every value it pins are still what will run.
   var activeRole: CreateRoleItem? {
     guard !current.roleId.isEmpty, let item = roleItems.first(where: { $0.role.id == current.roleId }),
           item.unavailable == nil, let agent = current.agent,
           agent.id == item.target.agentConfigId, agent.machineId == item.target.machineId else { return nil }
-    return Self.applied(item.target.runConfig, to: current.choice, effortId: current.capability?.reasoningEffortConfigId) ? item : nil
+    return Self.applied(
+      item.target.runConfig, to: current.choice,
+      effortId: current.capability?.reasoningEffortConfigId,
+      modelOptionId: Self.modelOptionId(for: current.capability)
+    ) ? item : nil
   }
 
   /// Picking a Role sets exactly what it says: its agent, then the values it pins. None clears
@@ -386,38 +394,58 @@ extension CreateSessionForm {
           let agent = current.agents.first(where: { $0.id == item.target.agentConfigId }) else { return }
     current.agentKey = agent.key
     let capability = CreateLogic.capabilityFor(current.options, agent)
-    updateChoice(Self.choice(item.target.runConfig, effortId: capability?.reasoningEffortConfigId))
+    updateChoice(Self.choice(
+      item.target.runConfig,
+      effortId: capability?.reasoningEffortConfigId,
+      modelOptionId: Self.modelOptionId(for: capability)
+    ))
     current.roleId = id
   }
 
-  /// A target's pins as the composer's choice; the reasoning option becomes `effort`.
-  static func choice(_ pinned: RuntimeContract.AgentRoleItemTargetsItemRunConfig?, effortId: String?) -> ModelChoice {
+  /// A target's pins as the composer's choice; the reasoning option becomes `effort` and the
+  /// model option becomes `modelId` (registry/custom Roles carry model inside configOptionValues).
+  static func choice(
+    _ pinned: RuntimeContract.AgentRoleItemTargetsItemRunConfig?,
+    effortId: String?,
+    modelOptionId: String? = nil
+  ) -> ModelChoice {
     let effortKey = effortId ?? "reasoning_effort"
+    let modelKey = modelOptionId ?? "model"
+    var modelId = pinned?.modelId
     var effort: String?
     var options: [String: ConfigValue] = [:]
     for (key, value) in pinned?.configOptionValues ?? [:] {
       switch value {
       case .string(let text) where key == effortKey: effort = text
+      case .string(let text) where key == modelKey: if modelId == nil { modelId = text }
       case .string(let text): options[key] = CreateLogic.normalizedConfigValue(.string(text), optionId: key)
       case .bool(let flag): options[key] = .bool(flag)
       default: continue
       }
     }
-    return ModelChoice(modelId: pinned?.modelId, effort: effort, modeId: CreateLogic.normalizedModeId(pinned?.modeId), configOptionValues: options.isEmpty ? nil : options)
+    return ModelChoice(modelId: modelId, effort: effort, modeId: CreateLogic.normalizedModeId(pinned?.modeId), configOptionValues: options.isEmpty ? nil : options)
   }
 
   /// Runtime `roleRunConfigApplied` on the composer's choice: unpinned values are the agent's
   /// own, and independent Plan toggles keep the Role.
-  static func applied(_ pinned: RuntimeContract.AgentRoleItemTargetsItemRunConfig?, to choice: ModelChoice, effortId: String?) -> Bool {
+  static func applied(
+    _ pinned: RuntimeContract.AgentRoleItemTargetsItemRunConfig?,
+    to choice: ModelChoice,
+    effortId: String?,
+    modelOptionId: String? = nil
+  ) -> Bool {
     guard let pinned else { return true }
     if let mode = CreateLogic.normalizedModeId(pinned.modeId), CreateLogic.normalizedModeId(choice.modeId) != mode { return false }
     if let model = pinned.modelId, choice.modelId != model { return false }
     let effortKey = effortId ?? "reasoning_effort"
+    let modelKey = modelOptionId ?? "model"
     for (key, rawValue) in pinned.configOptionValues ?? [:] {
       let value: RuntimeContract.JSONValue = key == "mode" && rawValue == .string("auto_review") ? .string("auto") : rawValue
       let selected: RuntimeContract.JSONValue?
       if key == effortKey {
         selected = choice.effort.map { .string($0) }
+      } else if key == modelKey {
+        selected = choice.modelId.map { .string($0) }
       } else {
         switch CreateLogic.normalizedConfigValue(choice.configOptionValues?[key], optionId: key) {
         case .string(let text): selected = .string(text)

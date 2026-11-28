@@ -3,7 +3,9 @@
 import {
   migrateLegacyAntigravityModeId,
   migrateLegacyAntigravityModeOption,
+  resolveConfigOptionsForModel,
 } from './capability.ts';
+import type { ConfigOption } from '../models/send.ts';
 
 type RecordValue = Record<string, unknown>;
 export const record = (value: unknown): value is RecordValue =>
@@ -204,6 +206,180 @@ export function roleRunConfig(value: unknown): RoleRunConfig {
   };
 }
 
+export type RoleRunConfigOption = Pick<
+  ConfigOption,
+  'id' | 'category' | 'type'
+> & {
+  currentValue?: string | boolean;
+};
+
+export type RoleRunConfigCapability = {
+  configOptions?: readonly RoleRunConfigOption[];
+  modes?: readonly unknown[];
+  models?: readonly unknown[];
+  observedModelConfigOptions?: Readonly<
+    Record<string, readonly RoleRunConfigOption[]>
+  >;
+};
+
+export type RoleRunConfigTarget = {
+  cliType?: string | null;
+  capability?: RoleRunConfigCapability;
+  configOptions?: readonly RoleRunConfigOption[];
+};
+
+export type CanonicalRoleRunConfig = {
+  /** Projected top-level modeId for dispatch/preferences (omitted when configOption-driven). */
+  modeId: string | undefined;
+  /** Projected top-level modelId for dispatch/preferences (omitted when configOption-driven). */
+  modelId: string | undefined;
+  /** Projected configOptionValues with canonical mode/model bridged or aligned. */
+  configOptionValues: Record<string, string | boolean> | undefined;
+  /** Canonical pinned mode regardless of representation. */
+  canonicalModeId: string | undefined;
+  /** Canonical pinned model regardless of representation. */
+  canonicalModelId: string | undefined;
+  /** Active mode configOption id (resolved for the target model), when any. */
+  modeOptionId: string | undefined;
+  /** Active model configOption id, when any. */
+  modelOptionId: string | undefined;
+};
+
+/**
+ * Aligns with Lody `resolveCanonicalAgentRoleRunConfig`:
+ * - `registry`/`custom` (config-option driven): `configOptionValues[id] ?? top-level`
+ * - `builtin` (dedicated fields): `top-level ?? configOptionValues['mode'/'model']`
+ * Model resolves first so `observedModelConfigOptions` for the target model
+ * determines the active mode option id (excluding `interaction_mode`).
+ */
+export function resolveCanonicalAgentRoleRunConfig(
+  runConfig: Pick<RoleRunConfig, 'modeId' | 'modelId' | 'configOptionValues'>,
+  target?: RoleRunConfigTarget,
+): CanonicalRoleRunConfig {
+  const normalized = roleRunConfig(runConfig);
+  const isConfigOptionDriven =
+    target?.cliType === 'registry' || target?.cliType === 'custom';
+  const rawConfigOptions =
+    target?.capability?.configOptions ?? target?.configOptions;
+  const hasRawConfigOptions = (rawConfigOptions?.length ?? 0) > 0;
+
+  let modelOptionId: string | undefined;
+  if (hasRawConfigOptions) {
+    modelOptionId = rawConfigOptions?.find(
+      (option) => option.category === 'model' && option.type === 'select',
+    )?.id;
+  } else if ((target?.capability?.models?.length ?? 0) > 0) {
+    modelOptionId = 'model';
+  } else if (
+    isConfigOptionDriven &&
+    typeof normalized.configOptionValues?.model === 'string'
+  ) {
+    modelOptionId = 'model';
+  }
+
+  const modelLookupKey = modelOptionId ?? 'model';
+  const rawModelFromConfig = normalized.configOptionValues?.[modelLookupKey];
+  const modelFromConfig =
+    typeof rawModelFromConfig === 'string' && rawModelFromConfig.trim()
+      ? rawModelFromConfig.trim()
+      : undefined;
+  const canonicalModelId = isConfigOptionDriven
+    ? (modelFromConfig ?? normalized.modelId)
+    : (normalized.modelId ?? modelFromConfig);
+
+  const modeConfigOptions = target?.capability
+    ? resolveConfigOptionsForModel(
+        target.capability.configOptions,
+        target.capability.observedModelConfigOptions,
+        canonicalModelId,
+      )
+    : target?.configOptions;
+  const hasModeConfigOptions = (modeConfigOptions?.length ?? 0) > 0;
+
+  let modeOptionId: string | undefined;
+  if (hasModeConfigOptions) {
+    modeOptionId = modeConfigOptions?.find(
+      (option) =>
+        option.category === 'mode' &&
+        option.type === 'select' &&
+        option.id !== 'interaction_mode',
+    )?.id;
+  } else if ((target?.capability?.modes?.length ?? 0) > 0) {
+    modeOptionId = 'mode';
+  } else if (
+    isConfigOptionDriven &&
+    typeof normalized.configOptionValues?.mode === 'string'
+  ) {
+    modeOptionId = 'mode';
+  }
+
+  const modeLookupKey = modeOptionId ?? 'mode';
+  const rawModeFromConfig = normalized.configOptionValues?.[modeLookupKey];
+  const modeFromConfig =
+    typeof rawModeFromConfig === 'string' && rawModeFromConfig.trim()
+      ? migrateLegacyAntigravityModeId(rawModeFromConfig.trim())
+      : undefined;
+  const canonicalModeId = isConfigOptionDriven
+    ? (modeFromConfig ?? normalized.modeId)
+    : (normalized.modeId ?? modeFromConfig);
+
+  if (isConfigOptionDriven) {
+    const bridged: Record<string, string | boolean> =
+      normalized.configOptionValues ? { ...normalized.configOptionValues } : {};
+    if (
+      modelOptionId &&
+      canonicalModelId !== undefined &&
+      bridged[modelOptionId] === undefined
+    ) {
+      bridged[modelOptionId] = canonicalModelId;
+    }
+    if (
+      modeOptionId &&
+      canonicalModeId !== undefined &&
+      bridged[modeOptionId] === undefined
+    ) {
+      bridged[modeOptionId] = canonicalModeId;
+    }
+    return {
+      modeId: modeOptionId ? undefined : canonicalModeId,
+      modelId: modelOptionId ? undefined : canonicalModelId,
+      configOptionValues: Object.keys(bridged).length > 0 ? bridged : undefined,
+      canonicalModeId,
+      canonicalModelId,
+      modeOptionId,
+      modelOptionId,
+    };
+  }
+
+  const nextConfig = normalized.configOptionValues
+    ? { ...normalized.configOptionValues }
+    : undefined;
+  if (nextConfig && target?.cliType === 'builtin') {
+    if (
+      typeof nextConfig[modeLookupKey] === 'string' &&
+      canonicalModeId !== undefined
+    ) {
+      delete nextConfig[modeLookupKey];
+    }
+    if (
+      typeof nextConfig[modelLookupKey] === 'string' &&
+      canonicalModelId !== undefined
+    ) {
+      delete nextConfig[modelLookupKey];
+    }
+  }
+  return {
+    modeId: canonicalModeId,
+    modelId: canonicalModelId,
+    configOptionValues:
+      nextConfig && Object.keys(nextConfig).length > 0 ? nextConfig : undefined,
+    canonicalModeId,
+    canonicalModelId,
+    modeOptionId,
+    modelOptionId,
+  };
+}
+
 /**
  * Web `isAgentRoleRunConfigApplied`: every value the Role PINS is what will run.
  * Unpinned values are the agent's own; independent Plan toggles (`plan_mode`, a
@@ -216,7 +392,74 @@ export function roleRunConfigApplied(
     modeId?: string | null;
     configOptionValues?: Record<string, unknown>;
   },
+  target?: RoleRunConfigTarget,
 ): boolean {
+  const plan = (value: unknown) => value === 'plan' || value === 'default';
+  if (target) {
+    const canonicalPinned = resolveCanonicalAgentRoleRunConfig(pinned, target);
+    const selectedConfig: Record<string, string | boolean> = {};
+    if (record(selection.configOptionValues)) {
+      for (const [key, value] of Object.entries(selection.configOptionValues)) {
+        if (typeof value === 'string' || typeof value === 'boolean')
+          selectedConfig[key] = value;
+      }
+    }
+    const canonicalSelected = resolveCanonicalAgentRoleRunConfig(
+      {
+        modelId:
+          typeof selection.modelId === 'string' ? selection.modelId : undefined,
+        modeId:
+          typeof selection.modeId === 'string' ? selection.modeId : undefined,
+        configOptionValues: Object.keys(selectedConfig).length
+          ? selectedConfig
+          : undefined,
+      },
+      target,
+    );
+    if (
+      canonicalPinned.canonicalModeId &&
+      canonicalSelected.canonicalModeId !== canonicalPinned.canonicalModeId
+    )
+      return false;
+    if (
+      canonicalPinned.canonicalModelId &&
+      canonicalSelected.canonicalModelId !== canonicalPinned.canonicalModelId
+    )
+      return false;
+    const checkedModeKey =
+      canonicalPinned.modeOptionId ??
+      (target.cliType === 'builtin' ? 'mode' : undefined);
+    const checkedModelKey =
+      canonicalPinned.modelOptionId ??
+      (target.cliType === 'builtin' ? 'model' : undefined);
+    for (const [key, value] of Object.entries(
+      canonicalPinned.configOptionValues ?? {},
+    )) {
+      if (
+        key === checkedModeKey &&
+        (typeof value === 'string' ||
+          canonicalPinned.canonicalModeId !== undefined)
+      )
+        continue;
+      if (
+        key === checkedModelKey &&
+        (typeof value === 'string' ||
+          canonicalPinned.canonicalModelId !== undefined)
+      )
+        continue;
+      const selected = canonicalSelected.configOptionValues?.[key];
+      if (
+        key === 'plan_mode' &&
+        typeof value === 'boolean' &&
+        typeof selected === 'boolean'
+      )
+        continue;
+      if (key === 'collaboration_mode' && plan(value) && plan(selected))
+        continue;
+      if (selected !== value) return false;
+    }
+    return true;
+  }
   const pinnedMode = pinned.modeId
     ? migrateLegacyAntigravityModeId(pinned.modeId)
     : undefined;
@@ -226,7 +469,6 @@ export function roleRunConfigApplied(
       : selection.modeId;
   if (pinnedMode && selectedMode !== pinnedMode) return false;
   if (pinned.modelId && selection.modelId !== pinned.modelId) return false;
-  const plan = (value: unknown) => value === 'plan' || value === 'default';
   const pinnedOptions = pinned.configOptionValues
     ? migrateLegacyAntigravityModeOption(pinned.configOptionValues)
     : {};

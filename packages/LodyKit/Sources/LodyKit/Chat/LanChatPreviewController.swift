@@ -42,7 +42,14 @@ final class LanChatPreviewController: UIViewController {
         ["title": "Agent reply", "status": "waiting_user"]]]]],
     ["id": "maintenance", "role": "system", "status": "completed", "finished": true, "items": [
       ["itemId": "compact", "type": "system_notice", "name": "board_context_maintenance", "meta": ["kind": "compact", "status": "done", "trigger": "manual"]],
+      ["itemId": "fold", "type": "system_notice", "name": "board_context_maintenance", "meta": ["kind": "fold_rollover", "status": "done", "trigger": "manual"]],
       ["itemId": "limit", "type": "system_notice", "name": "board_chain_limit"]]],
+    ["id": "rollover", "role": "system", "status": "completed", "finished": true, "items": [
+      ["itemId": "done", "type": "system_notice", "name": "session_context_rollover", "meta": [
+        "kind": "linear_rollover", "trigger": "manual", "status": "done", "generation": 2, "usedBefore": 180000, "usedAfter": 12500]]]],
+    ["id": "rolloverSilent", "role": "system", "status": "completed", "finished": true, "items": [
+      ["itemId": "hidden", "type": "system_notice", "name": "session_context_rollover", "meta": [
+        "kind": "linear_rollover", "trigger": "auto", "status": "interrupted", "generation": 3]]]],
     ["id": "proposal", "role": "system", "status": "completed", "finished": true, "items": [
       ["itemId": "role", "type": "system_notice", "name": "agent_role_proposal", "meta": [
         "command": ["action": "update", "patch": ["description": "Review native chat", "promptPrefix": "Use UIKit."]],

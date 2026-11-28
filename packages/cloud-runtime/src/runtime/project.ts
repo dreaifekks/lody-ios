@@ -63,6 +63,12 @@ export type SystemNoticeMeta = {
   trigger?: string;
   status?: string;
   kind?: string;
+  generation?: number;
+  nodeId?: string;
+  usedBefore?: number;
+  usedAfter?: number;
+  foldedCount?: number;
+  foldId?: string;
   command?: {
     action: string;
     name?: string;
@@ -80,6 +86,23 @@ export type SystemNoticeMeta = {
   /** `resume_from_external_chat_history`: the imported history was cut to fit. */
   truncated?: boolean;
 };
+
+const SESSION_ROLLOVER_TURN_PREFIX = 'session-rollover:';
+const BOARD_MAINTENANCE_TURN_PREFIX = 'board-maintenance:';
+
+/**
+ * Internal maintenance/rollover assistant replies (`:seal`, `:renew`, `:fold`,
+ * `:memory`, `:compact`, `:handoff`) stay out of the visible chat transcript
+ * and execution/unread state; their paired system divider represents the run.
+ */
+export function isHiddenInternalAssistantEntry(entry: any): boolean {
+  return (
+    entry?.role === 'assistant' &&
+    typeof entry.userTurnId === 'string' &&
+    (entry.userTurnId.startsWith(SESSION_ROLLOVER_TURN_PREFIX) ||
+      entry.userTurnId.startsWith(BOARD_MAINTENANCE_TURN_PREFIX))
+  );
+}
 type RoleProposalFields = {
   name?: string;
   description?: string;
@@ -623,11 +646,40 @@ function summarizeItem(
       if (value !== undefined) noticeMeta[field] = value;
     }
     if (raw.meta?.truncated === true) noticeMeta.truncated = true;
+    const finiteNumber = (field: string) =>
+      typeof raw.meta?.[field] === 'number' && Number.isFinite(raw.meta[field])
+        ? (raw.meta[field] as number)
+        : undefined;
     if (name === 'board_context_maintenance') {
+      const usedBefore = finiteNumber('usedBefore');
+      const usedAfter = finiteNumber('usedAfter');
+      const nodeId = string('nodeId');
+      const foldedCount = finiteNumber('foldedCount');
+      const foldId = string('foldId');
       Object.assign(noticeMeta, {
-        trigger: raw.meta?.trigger,
-        status: raw.meta?.status,
-        kind: raw.meta?.kind,
+        trigger: string('trigger'),
+        status: string('status'),
+        kind: string('kind'),
+        ...(usedBefore !== undefined ? { usedBefore } : {}),
+        ...(usedAfter !== undefined ? { usedAfter } : {}),
+        ...(nodeId !== undefined ? { nodeId } : {}),
+        ...(foldedCount !== undefined ? { foldedCount } : {}),
+        ...(foldId !== undefined ? { foldId } : {}),
+      });
+    }
+    if (name === 'session_context_rollover') {
+      const generation = finiteNumber('generation');
+      const nodeId = string('nodeId');
+      const usedBefore = finiteNumber('usedBefore');
+      const usedAfter = finiteNumber('usedAfter');
+      Object.assign(noticeMeta, {
+        kind: string('kind'),
+        trigger: string('trigger'),
+        status: string('status'),
+        ...(generation !== undefined ? { generation } : {}),
+        ...(nodeId !== undefined ? { nodeId } : {}),
+        ...(usedBefore !== undefined ? { usedBefore } : {}),
+        ...(usedAfter !== undefined ? { usedAfter } : {}),
       });
     }
     if (name === 'agent_role_proposal' && raw.meta?.command) {
@@ -1365,24 +1417,31 @@ function project(
     (value) => typeof value === 'string',
   );
 
+  const visibleRaw = raw.filter(
+    (entry) => !isHiddenInternalAssistantEntry(entry),
+  );
+  const visibleSummarized = summarized.filter(
+    (entry) => !isHiddenInternalAssistantEntry(entry),
+  );
+
   // A daemon history-sync timeout can place a concurrent reply before its input.
   // Use its explicit causal link; never sort streamed turns by arrival time.
   const userIds = new Set(
-    summarized.filter((e) => e.role === 'user').map((e) => e.id),
+    visibleSummarized.filter((e) => e.role === 'user').map((e) => e.id),
   );
   // Inputs before the window are still landed: they must not reappear as queued.
   const landedUserIds = new Set(userIds);
   for (const entry of raw.slice(0, start))
     if (entry?.role === 'user' && typeof entry.id === 'string')
       landedUserIds.add(entry.id);
-  const replies = new Map<string, typeof summarized>();
-  for (const entry of summarized)
+  const replies = new Map<string, typeof visibleSummarized>();
+  for (const entry of visibleSummarized)
     if (entry.role === 'assistant' && userIds.has(entry.userTurnId!)) {
       const group = replies.get(entry.userTurnId!) ?? [];
       group.push(entry);
       replies.set(entry.userTurnId!, group);
     }
-  const ordered = summarized.flatMap((entry) =>
+  const ordered = visibleSummarized.flatMap((entry) =>
     entry.role === 'assistant' && userIds.has(entry.userTurnId!)
       ? []
       : [
@@ -1393,7 +1452,7 @@ function project(
 
   const execution = executionProjection(
     [
-      ...raw,
+      ...visibleRaw,
       ...queued
         .filter((item) => !landedUserIds.has(item.userTurnId))
         .map((item) => ({
@@ -1416,7 +1475,7 @@ function project(
     status,
     reason,
     revision,
-    usage: projectSessionUsage(raw),
+    usage: projectSessionUsage(visibleRaw),
     billableTurnCount: billableTurnCount({ history: raw, mq: queued }),
     awaitingUserSince:
       typeof session?.awaitingUserSince === 'number'

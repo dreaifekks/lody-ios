@@ -146,6 +146,66 @@ export function validAttachmentBlocks(
   return blocks.length <= limit && imageCount <= 8 && fileCount <= 8;
 }
 
+const SESSION_ROLLOVER_TURN_PREFIX = 'session-rollover:';
+const BOARD_MAINTENANCE_TURN_PREFIX = 'board-maintenance:';
+
+function isCompletedSessionRolloverDivider(
+  entry: RecordValue | undefined,
+): boolean {
+  if (
+    !entry ||
+    entry.role !== 'system' ||
+    typeof entry.id !== 'string' ||
+    !entry.id.startsWith(SESSION_ROLLOVER_TURN_PREFIX)
+  )
+    return false;
+  if (Array.isArray(entry.items)) {
+    const notice = entry.items.find(
+      (item: RecordValue) =>
+        item?.type === 'system_notice' &&
+        item.name === 'session_context_rollover',
+    );
+    if (notice) return notice.meta?.status === 'done';
+  }
+  return entry.finished === true;
+}
+
+function isHiddenRolloverSealAssistant(
+  entry: RecordValue | undefined,
+): boolean {
+  return (
+    entry?.role === 'assistant' &&
+    typeof entry.userTurnId === 'string' &&
+    entry.userTurnId.startsWith(SESSION_ROLLOVER_TURN_PREFIX) &&
+    entry.userTurnId.endsWith(':seal')
+  );
+}
+
+function isNonBoundaryRolloverRenewAssistant(
+  entry: RecordValue | undefined,
+): boolean {
+  if (
+    entry?.role !== 'assistant' ||
+    typeof entry.userTurnId !== 'string' ||
+    !entry.userTurnId.startsWith(SESSION_ROLLOVER_TURN_PREFIX) ||
+    !entry.userTurnId.endsWith(':renew')
+  )
+    return false;
+  return (
+    entry.finished !== true ||
+    typeof entry.acpTurnId !== 'string' ||
+    !entry.acpTurnId
+  );
+}
+
+function isBoardMaintenanceAssistant(entry: RecordValue | undefined): boolean {
+  return (
+    entry?.role === 'assistant' &&
+    typeof entry.userTurnId === 'string' &&
+    entry.userTurnId.startsWith(BOARD_MAINTENANCE_TURN_PREFIX)
+  );
+}
+
 export function editableUserTurn(
   history: RecordValue[],
   meta: RecordValue,
@@ -170,8 +230,19 @@ export function editableUserTurn(
     turn.inputConfig?._lodyDeliveryKind === 'steer'
   )
     return;
+  for (let after = index + 1; after < history.length; after++) {
+    if (isCompletedSessionRolloverDivider(history[after])) return;
+  }
   for (let previous = index - 1; previous >= 0; previous--) {
     const entry = history[previous];
+    if (!entry) continue;
+    if (isCompletedSessionRolloverDivider(entry)) return;
+    if (
+      isHiddenRolloverSealAssistant(entry) ||
+      isNonBoundaryRolloverRenewAssistant(entry) ||
+      isBoardMaintenanceAssistant(entry)
+    )
+      continue;
     if (entry.role === 'user') return;
     if (entry.role !== 'assistant') continue;
     if (

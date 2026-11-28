@@ -298,6 +298,12 @@ struct ChatItem: Decodable {
     var trigger: String? = nil
     var status: String? = nil
     var kind: String? = nil
+    var generation: Int? = nil
+    var nodeId: String? = nil
+    var usedBefore: Double? = nil
+    var usedAfter: Double? = nil
+    var foldedCount: Int? = nil
+    var foldId: String? = nil
     var command: ProposalCommand? = nil
     var before: ProposalFields? = nil
     var outcome: String? = nil
@@ -321,7 +327,18 @@ struct ChatItem: Decodable {
   var proposal: ChatProposal? = nil
   var isOrchestration: Bool {
     type == "operation_completion_batch" || type == "operation_completion"
-      || (type == "system_notice" && ["board_context_maintenance", "board_chain_limit", "agent_role_proposal"].contains(name ?? ""))
+      || (type == "system_notice" && ["board_context_maintenance", "board_chain_limit", "agent_role_proposal", "session_context_rollover"].contains(name ?? ""))
+  }
+  /// Matches Lody `isSilentBoardMaintenance` and `isSilentSessionRollover`.
+  var isSilentNotice: Bool {
+    guard type == "system_notice" else { return false }
+    if name == "board_context_maintenance" {
+      return meta?.trigger == "idle" && meta?.status == "interrupted"
+    }
+    if name == "session_context_rollover" {
+      return (meta?.trigger == "auto" || meta?.trigger == "recovery") && meta?.status == "interrupted"
+    }
+    return false
   }
   var isChatFailure: Bool { type == "system_notice" && name == "chat_failed" }
   /// Web system rows (notices and worktree scripts) stand on their own; they never fold into work.
@@ -734,6 +751,40 @@ struct ChatTranscript {
     }.groupedSubagents()
   }
 
+  private static func compactTokenRange(before: Double?, after: Double?) -> String? {
+    guard let before, let after, before.isFinite, after.isFinite, before >= 0, after >= 0 else { return nil }
+    let style = FloatingPointFormatStyle<Double>.number.notation(.compactName).precision(.fractionLength(0...1))
+    return "\(before.formatted(style)) → \(after.formatted(style))"
+  }
+
+  private static func rolloverDivider(_ meta: ChatItem.NoticeMeta?) -> String? {
+    guard let meta, let status = meta.status else { return nil }
+    let gen = max(1, meta.generation ?? 1)
+    switch status {
+    case "sealing":
+      return String(localized: "native.chat.rollover.sealing", bundle: .lody)
+    case "sealed":
+      return String.localizedStringWithFormat(
+        String(localized: "native.chat.rollover.sealed", bundle: .lody), gen)
+    case "switching":
+      return String.localizedStringWithFormat(
+        String(localized: "native.chat.rollover.switching", bundle: .lody), gen)
+    case "done":
+      if let tokens = compactTokenRange(before: meta.usedBefore, after: meta.usedAfter) {
+        return String.localizedStringWithFormat(
+          String(localized: "native.chat.rollover.doneTokens", bundle: .lody), gen, tokens)
+      }
+      return String.localizedStringWithFormat(
+        String(localized: "native.chat.rollover.done", bundle: .lody), gen)
+    case "failed":
+      return String(localized: "native.chat.rollover.failed", bundle: .lody)
+    case "interrupted":
+      return String(localized: "native.chat.rollover.interrupted", bundle: .lody)
+    default:
+      return nil
+    }
+  }
+
   private static func roleProposal(_ meta: ChatItem.NoticeMeta?) -> String {
     guard let command = meta?.command else { return String(localized: "native.chat.board.roleProposal", bundle: .lody) }
     let fields = command.patch ?? ChatItem.ProposalFields(name: command.name, description: command.description, promptPrefix: command.promptPrefix)
@@ -785,7 +836,7 @@ struct ChatTranscript {
     entries.enumerated().flatMap { entryIndex, source -> [ChatRow] in
       var entry = source
       if entry.role == "system", !entry.items.isEmpty,
-         entry.items.allSatisfy({ $0.type == "system_notice" && $0.name == "board_context_maintenance" && $0.meta?.trigger == "idle" && $0.meta?.status == "interrupted" }) { return [] }
+         entry.items.allSatisfy(\.isSilentNotice) { return [] }
       // Older cached projections omitted notice names; these placeholders are not part of the conversation.
       entry.items.removeAll { $0.hidesFromTranscript || ($0.type == "system_notice" && $0.name == nil) }
       let processOnly = !processEntryID.isEmpty
@@ -1045,10 +1096,25 @@ struct ChatTranscript {
           if !members.isEmpty { row.text += "\n" + members.joined(separator: "\n") }
           row.symbol = "checklist"
         case "system_notice" where item.name == "board_context_maintenance":
+          if item.isSilentNotice { continue }
           row.kind = "noticeDivider"
-          let kind = String(localized: String.LocalizationValue("native.chat.board.kind." + (item.meta?.kind ?? "compact")), bundle: .lody)
-          let status = String(localized: String.LocalizationValue("native.chat.board.status." + (item.meta?.status ?? "running")), bundle: .lody)
-          row.text = String.localizedStringWithFormat(String(localized: "native.chat.board.maintenance", bundle: .lody), kind, status)
+          let allowedKinds = ["compact", "new_conversation", "fold_rollover"]
+          let allowedStatuses = ["requested", "running", "done", "unsupported", "failed", "interrupted"]
+          let kindKey = item.meta?.kind.flatMap { allowedKinds.contains($0) ? $0 : nil } ?? "compact"
+          let statusKey = item.meta?.status.flatMap { allowedStatuses.contains($0) ? $0 : nil } ?? "running"
+          let kind = String(localized: String.LocalizationValue("native.chat.board.kind." + kindKey), bundle: .lody)
+          let status = String(localized: String.LocalizationValue("native.chat.board.status." + statusKey), bundle: .lody)
+          var text = String.localizedStringWithFormat(String(localized: "native.chat.board.maintenance", bundle: .lody), kind, status)
+          if statusKey == "done",
+             let tokens = Self.compactTokenRange(before: item.meta?.usedBefore, after: item.meta?.usedAfter) {
+            text += " · " + tokens
+          }
+          row.text = text
+        case "system_notice" where item.name == "session_context_rollover":
+          if item.isSilentNotice { continue }
+          guard let text = Self.rolloverDivider(item.meta) else { continue }
+          row.kind = "noticeDivider"
+          row.text = text
         case "system_notice" where item.name == "board_chain_limit":
           row.kind = "noticeDivider"
           row.text = String(localized: "native.chat.board.chainLimit", bundle: .lody)

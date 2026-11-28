@@ -8,6 +8,7 @@ import {
   readRole,
   readableRole,
   record,
+  resolveCanonicalAgentRoleRunConfig,
   roleRunConfig,
   sensitiveRoleOption,
   type StoredRole,
@@ -29,7 +30,7 @@ import {
   type ScheduleDocument,
   type ScheduleProjectRef,
 } from '../../protocol/schedules.ts';
-import { creationOptions } from '../create-session';
+import { creationOptions, readRoleTargetCapability } from '../create-session';
 import { sessionActionMeta } from '../fork-session';
 import { roleSettings } from '../role-settings';
 import { scheduleRepository, scheduleStreams } from '../schedules';
@@ -340,8 +341,23 @@ export function registerProposals(ctx: RuntimeContext) {
       configOptionValues?: Record<string, unknown>;
       memory?: { providerId: string; memoryId: string };
     };
-    if (roleTarget) run = roleRunConfig(roleTarget.runConfig);
-    else if (text(session.agentConfigId) === agent.id) {
+    if (roleTarget) {
+      const normalized = roleRunConfig(roleTarget.runConfig);
+      const canonical = resolveCanonicalAgentRoleRunConfig(normalized, {
+        cliType: agent.cliType,
+        capability: readRoleTargetCapability(
+          state.machineReplicas?.get(agent.machineId),
+          agent.id,
+          agent,
+        ),
+      });
+      run = {
+        modeId: canonical.modeId,
+        modelId: canonical.modelId,
+        configOptionValues: canonical.configOptionValues,
+        memory: normalized.memory,
+      };
+    } else if (text(session.agentConfigId) === agent.id) {
       const latestMode = text(latest.modeId);
       run = {
         modeId: latestMode

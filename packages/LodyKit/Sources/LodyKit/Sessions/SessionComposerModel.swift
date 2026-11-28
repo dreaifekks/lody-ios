@@ -230,7 +230,8 @@ final class SessionComposerModel {
 
   var activeRole: CreateRoleItem? {
     SessionRoles.active(roleItems, picked: pickedRole, durable: durableRole, choice: active,
-                        effortId: capability?.reasoningEffortConfigId)
+                        effortId: capability?.reasoningEffortConfigId,
+                        modelOptionId: CreateSessionForm.modelOptionId(for: capability))
   }
 
   /// Picking a Role applies the values it pins; None clears only its name (web).

@@ -5,8 +5,10 @@ import {
   DEFAULT_ROLE_EMOJI,
   readRole,
   readableRole,
+  resolveCanonicalAgentRoleRunConfig,
   roleRunConfig,
   type RoleRunConfig,
+  type RoleRunConfigTarget,
 } from '../protocol/agent-roles';
 import type { MachinePresence } from '../models/machines';
 
@@ -138,6 +140,7 @@ export async function resolveTurnRole(
     userId: string;
     machineId: string;
     agentConfigId: string;
+    target?: RoleRunConfigTarget;
   },
   getGrant: Parameters<typeof openSettings>[1],
   signal: AbortSignal,
@@ -158,6 +161,7 @@ export function bindTurnRole(
     userId: string;
     machineId: string;
     agentConfigId: string;
+    target?: RoleRunConfigTarget;
   },
 ): TurnRole {
   const role = readRole(row, args.roleId);
@@ -168,12 +172,30 @@ export function bindTurnRole(
   );
   if (!target || target.agentConfigId !== args.agentConfigId)
     throw new Error('role_unavailable');
+  const normalized = roleRunConfig(target.runConfig);
+  let runConfig: RoleRunConfig = normalized;
+  if (args.target) {
+    const canonical = resolveCanonicalAgentRoleRunConfig(
+      normalized,
+      args.target,
+    );
+    runConfig = {
+      ...(canonical.modelId !== undefined
+        ? { modelId: canonical.modelId }
+        : {}),
+      ...(canonical.modeId !== undefined ? { modeId: canonical.modeId } : {}),
+      ...(canonical.configOptionValues
+        ? { configOptionValues: canonical.configOptionValues }
+        : {}),
+      ...(normalized.memory ? { memory: normalized.memory } : {}),
+    };
+  }
   return {
     id: role.id,
     revision: role.revision,
     name: role.name,
     emoji: role.emoji ?? DEFAULT_ROLE_EMOJI,
     promptPrefix: role.promptPrefix ?? '',
-    runConfig: roleRunConfig(target.runConfig),
+    runConfig,
   };
 }

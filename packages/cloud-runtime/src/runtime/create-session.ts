@@ -15,6 +15,7 @@ import {
   type WorkspaceProject,
 } from '../protocol/project-groups.ts';
 import { isThoughtLevel, validConfigValue } from '../protocol/capability';
+import type { RoleRunConfigCapability } from '../protocol/agent-roles';
 import { encodeFrame } from '../frames';
 import type { CreateSessionResult } from '../contract/methods.ts';
 import { appendOnce, clientFor } from './session';
@@ -668,4 +669,42 @@ function groupRun(group: WorkspaceProject, machineId: string, flock: Flock) {
   if (preferLocal && !supports(meta, 'projectRepositoryMembers'))
     throw new Error('multi_repo_unsupported');
   return run;
+}
+
+/**
+ * Capability view used by canonical Agent Role resolution: reads the agent's
+ * capability row plus per-model `acpModelConfigOptions` from the machine Flock.
+ */
+export function readRoleTargetCapability(
+  flock: Pick<Flock, 'get' | 'scan'> | undefined,
+  agentConfigId: string | undefined,
+  fallback?: { cliType?: string; agentType?: string },
+): RoleRunConfigCapability | undefined {
+  if (!flock) return undefined;
+  let raw: unknown;
+  if (agentConfigId) raw = flock.get(['acpCapability', agentConfigId]);
+  if (
+    (!raw || typeof raw !== 'object' || Array.isArray(raw)) &&
+    fallback?.cliType &&
+    fallback?.agentType
+  ) {
+    raw = flock.get(['acpCapability', fallback.cliType, fallback.agentType]);
+  }
+  const observed = agentConfigId
+    ? recordedModelOptions(flock, agentConfigId)
+    : {};
+  const hasObserved = Object.keys(observed).length > 0;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return hasObserved ? { observedModelConfigOptions: observed } : undefined;
+  }
+  const value = raw as Record<string, unknown>;
+  const configOptions = projectConfigOptions(value.configOptions);
+  const models = choices(value.models, 'modelId');
+  const modes = choices(value.modes, 'id');
+  return {
+    ...(configOptions.length ? { configOptions } : {}),
+    ...(models.length ? { models } : {}),
+    ...(modes.length ? { modes } : {}),
+    ...(hasObserved ? { observedModelConfigOptions: observed } : {}),
+  };
 }

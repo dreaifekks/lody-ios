@@ -42,7 +42,13 @@ import {
 } from './upstream-roost.js';
 import { retrySessionRead, wakeSessionReads } from './session-read';
 import { resolveTurnRole, type TurnRole } from './agent-roles';
-import { record, roleRunConfigApplied } from '../protocol/agent-roles';
+import {
+  record,
+  resolveCanonicalAgentRoleRunConfig,
+  roleRunConfigApplied,
+  type RoleRunConfigCapability,
+  type RoleRunConfigTarget,
+} from '../protocol/agent-roles';
 import {
   migrateLegacyAntigravityModeId,
   migrateLegacyAntigravityModeOption,
@@ -1917,6 +1923,8 @@ export async function sendTurn(
     agentRoleId?: string | null;
     /** The session's own Agent Config, from trusted state (meta / the creator), never the wire. */
     agentConfigId?: string;
+    /** Probed capability (plus observed per-model config options) for canonical Role resolution. */
+    roleCapability?: RoleRunConfigCapability;
     billingEntitlement?: BillingEntitlement | null;
   },
   expand: (
@@ -2067,6 +2075,10 @@ export async function sendTurn(
     // A Role runs a turn only while every value it pins is what will run (web). Any turn
     // may pick one, but its prompt prefix only ever starts the conversation.
     let role: TurnRole | undefined;
+    const roleTarget: RoleRunConfigTarget = {
+      cliType: args.cliType,
+      capability: args.roleCapability,
+    };
     const started = (
       state.roostMetadata ??
       (configSnapshot.history as any[] | undefined) ??
@@ -2086,18 +2098,23 @@ export async function sendTurn(
           userId: args.userId!,
           machineId: args.machineId,
           agentConfigId: args.agentConfigId,
+          target: roleTarget,
         },
         () => sessionGrant(state),
         AbortSignal.any([state.controller.signal, AbortSignal.timeout(30000)]),
       );
       if (sessions.get(state.id) !== state || !sessionControlsReady(state))
         throw new Error('session_not_ready');
-      const applied = roleRunConfigApplied(role.runConfig, {
-        modelId:
-          args.modelId === null ? null : (args.modelId ?? previous.modelId),
-        modeId,
-        configOptionValues,
-      });
+      const applied = roleRunConfigApplied(
+        role.runConfig,
+        {
+          modelId:
+            args.modelId === null ? null : (args.modelId ?? previous.modelId),
+          modeId,
+          configOptionValues,
+        },
+        roleTarget,
+      );
       if (!applied) throw new Error('role_changed');
     }
     let inheritedRole: {
@@ -2130,6 +2147,30 @@ export async function sendTurn(
       !sessionControlsReady(state)
     )
       throw new Error('session_not_ready');
+    let dispatchModeId = modeId;
+    let dispatchModelId = modelId;
+    let dispatchConfigOptionValues: Record<string, unknown> | undefined =
+      Object.keys(configOptionValues).length ? configOptionValues : undefined;
+    if (role) {
+      const cleanOptions: Record<string, string | boolean> = {};
+      for (const [key, value] of Object.entries(configOptionValues)) {
+        if (typeof value === 'string' || typeof value === 'boolean')
+          cleanOptions[key] = value;
+      }
+      const canonicalDispatch = resolveCanonicalAgentRoleRunConfig(
+        {
+          modelId: typeof modelId === 'string' ? modelId : undefined,
+          modeId: typeof modeId === 'string' ? modeId : undefined,
+          configOptionValues: Object.keys(cleanOptions).length
+            ? cleanOptions
+            : undefined,
+        },
+        roleTarget,
+      );
+      dispatchModeId = canonicalDispatch.modeId;
+      dispatchModelId = canonicalDispatch.modelId;
+      dispatchConfigOptionValues = canonicalDispatch.configOptionValues;
+    }
     const inputConfig = {
       cliType: args.cliType,
       agentType: args.agentType,
@@ -2144,11 +2185,9 @@ export async function sendTurn(
           : []),
         ...attachments,
       ],
-      modeId,
-      modelId,
-      configOptionValues: Object.keys(configOptionValues).length
-        ? configOptionValues
-        : undefined,
+      modeId: dispatchModeId,
+      modelId: dispatchModelId,
+      configOptionValues: dispatchConfigOptionValues,
       // The machine restarts the agent when a turn names another memory than
       // the one it runs with, so the binding travels with the turn. It is the
       // Role instance's, and a turn recorded as None names none, as in Lody.

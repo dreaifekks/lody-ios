@@ -669,17 +669,39 @@ test('fork v1 instances retain every machine and same-machine identity through d
 
 test('Role runConfig migrates legacy Antigravity auto_review to auto', async () => {
   const c = catalog();
-  c.put('agy-role', {
+  c.machines.get('m1').set(['agentConfig', 'agy'], {
+    id: 'agy',
+    machineId: 'm1',
+    name: 'Antigravity',
+    cliType: 'registry',
+    agentType: 'antigravity',
+  });
+  c.machines.get('m1').commit();
+  c.put('builtin-role', {
     runConfig: {
       modelId: 'gemini-3.8-flash',
       modeId: 'auto_review',
       configOptionValues: { mode: 'auto_review', thought_level: 'high' },
     },
   });
-  const listed = (await c.list()).roles.find((role) => role.id === 'agy-role');
-  assert.deepEqual(listed.targets[0].runConfig, {
+  c.put('agy-role', {
+    agentConfigId: 'agy',
+    runConfig: {
+      modelId: 'gemini-3.8-flash',
+      modeId: 'auto_review',
+      configOptionValues: { mode: 'auto_review', thought_level: 'high' },
+    },
+  });
+  const roles = (await c.list()).roles;
+  const builtin = roles.find((role) => role.id === 'builtin-role');
+  assert.deepEqual(builtin.targets[0].runConfig, {
     modelId: 'gemini-3.8-flash',
     modeId: 'auto',
+    configOptionValues: { thought_level: 'high' },
+  });
+  const registry = roles.find((role) => role.id === 'agy-role');
+  assert.deepEqual(registry.targets[0].runConfig, {
+    modelId: 'gemini-3.8-flash',
     configOptionValues: { mode: 'auto', thought_level: 'high' },
   });
 });

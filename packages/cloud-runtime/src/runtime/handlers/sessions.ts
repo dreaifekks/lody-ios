@@ -22,6 +22,7 @@ import {
   createSession,
   forgetCreation,
   machineMeta,
+  readRoleTargetCapability,
 } from '../create-session';
 import { planCommand } from '../status-view.ts';
 import { readWorkspaceProjects } from '../project-groups';
@@ -604,15 +605,22 @@ export function registerSessions(
       flock.get(['e', room]),
     );
     if (!meta) return { state: 'not_sent', reason: 'session_not_ready' };
+    const agentConfigId =
+      typeof meta?.agentConfigId === 'string' ? meta.agentConfigId : undefined;
+    const roleCapability = agentConfigId
+      ? readRoleTargetCapability(
+          state.machineReplicas?.get(wire.machineId),
+          agentConfigId,
+          { cliType: wire.cliType, agentType: wire.agentType },
+        )
+      : undefined;
     const args = {
       ...wire,
       modelId: cleared(wire.modelId),
       reasoningEffort: cleared(wire.reasoningEffort),
       agentRoleId: cleared(wire.agentRoleId),
-      agentConfigId:
-        typeof meta?.agentConfigId === 'string'
-          ? meta.agentConfigId
-          : undefined,
+      agentConfigId,
+      roleCapability,
     };
     const sourceWorkspace = state.workspace;
     const source = {

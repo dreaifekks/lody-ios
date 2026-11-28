@@ -3,7 +3,6 @@ import type {
   AgentRoleItem,
   AgentRoleRequest,
   AgentRoleSnapshot,
-  RoleAgent,
 } from '../models/agent-roles';
 import {
   DEFAULT_ROLE_EMOJI,
@@ -11,12 +10,14 @@ import {
   roleEmoji,
   readableRole,
   record,
+  resolveCanonicalAgentRoleRunConfig,
   roleRunConfig,
   roleSlug,
+  type RoleRunConfig,
 } from '../protocol/agent-roles';
 import { encodeFrame } from '../frames';
 import { forgetSettings, openSettings } from './settings';
-import { creationOptions } from './create-session';
+import { creationOptions, readRoleTargetCapability } from './create-session';
 import { clientFor } from './session';
 
 export type RoleWorkspaceOptions = {
@@ -35,7 +36,7 @@ export function roleSnapshot(
   meta: Flock,
   machines: Map<string, Flock>,
 ): AgentRoleSnapshot {
-  const agents: RoleAgent[] = creationOptions(undefined, meta, machines).agents;
+  const agents = creationOptions(undefined, meta, machines).agents;
   const roles: AgentRoleItem[] = [];
   for (const row of flock.scan()) {
     if (row.key.length !== 2 || row.key[0] !== 'agentRole') continue;
@@ -61,7 +62,34 @@ export function roleSnapshot(
         if (!machines.has(target.machineId)) state = 'machineUnavailable';
         else if (!agent) state = 'agentUnavailable';
         // Memory stays out of the listing; the runtime applies it when the Role runs.
-        const { memory: _memory, ...pinned } = roleRunConfig(target.runConfig);
+        const rawPinned = roleRunConfig(target.runConfig);
+        const canonical = agent
+          ? resolveCanonicalAgentRoleRunConfig(rawPinned, {
+              cliType: agent.cliType,
+              capability: readRoleTargetCapability(
+                machines.get(target.machineId),
+                target.agentConfigId,
+                agent,
+              ),
+            })
+          : undefined;
+        let pinned: Omit<RoleRunConfig, 'memory'>;
+        if (canonical) {
+          pinned = {
+            ...(canonical.modelId !== undefined
+              ? { modelId: canonical.modelId }
+              : {}),
+            ...(canonical.modeId !== undefined
+              ? { modeId: canonical.modeId }
+              : {}),
+            ...(canonical.configOptionValues
+              ? { configOptionValues: canonical.configOptionValues }
+              : {}),
+          };
+        } else {
+          const { memory: _memory, ...rest } = rawPinned;
+          pinned = rest;
+        }
         return {
           ...(target.id ? { id: target.id } : {}),
           machineId: target.machineId,
