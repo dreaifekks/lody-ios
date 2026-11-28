@@ -110,7 +110,6 @@ final class InboxChrome {
     updateSync(model.connection)
     workspace.setAccountEmail(model.accountEmail)
     workspace.setItems(menuItems(model))
-    padBar.canCreate = model.selected?.resolvedMode == .plaintext
     layout()
     let left = [workspaceItem ?? UIBarButtonItem(customView: workspaceSlot)]
     let filter = filterItem ?? UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"), menu: nil)

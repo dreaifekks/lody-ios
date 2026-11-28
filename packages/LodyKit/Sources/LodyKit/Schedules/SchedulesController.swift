@@ -49,6 +49,7 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   private var clock: Timer?
   /// A schedule to open in its editor once the first live list names it (a proposal card's Open).
   var opening: String?
+  private weak var activeNewSchedulePage: LodyPageController?
 
   init(source: SessionSource = .live, service: ScheduleService = .live) {
     self.source = source
@@ -423,11 +424,24 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
   /// list, or in a sheet over it when Schedules fills the regular-width detail column.
   func newSchedule() {
     let state = source.state
-    guard state.workspace != nil, !state.workspaceId.isEmpty else {
+    guard let workspace = state.workspace, !state.userId.isEmpty else {
       LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: .neutral)
       return
     }
-    open(nil)
+    switch workspace.resolvedMode {
+    case .plaintext:
+      if let existing = activeNewSchedulePage, !existing.closed,
+         !existing.isBeingDismissed, existing.navigationController?.isBeingDismissed != true,
+         !existing.isMovingFromParent {
+        return
+      }
+      open(nil)
+    case .e2ee:
+      LodyToastOverlay.shared.show(message: String(localized: "workspace.e2ee.unsupported", bundle: .lody), kind: .error)
+    case .unknown:
+      if source === SessionSource.live { Task { await AuthSession.shared.refreshWorkspaceModes() } }
+      LodyToastOverlay.shared.show(message: String(localized: "workspace.mode.unknown", bundle: .lody), kind: .neutral)
+    }
   }
 
   private func open(_ item: ScheduleItem?) {
@@ -445,7 +459,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
     let title = item?.title ?? ScheduleFormat.text("new")
     guard inDetailColumn else {
       editor.openChat = { [weak self] item in self?.openChat(item) }
-      LodyShell.shared.pushNative(editor, title: title, from: self)
+      let page = LodyShell.shared.pushNative(editor, title: title, from: self)
+      if item == nil { activeNewSchedulePage = page }
       return
     }
     // The chat replaces Schedules in the detail column, so the sheet closes first.
@@ -454,7 +469,8 @@ final class SchedulesController: UIViewController, UICollectionViewDelegate {
       self?.openChat(item)
     }
     let height = min(860, (view.window?.bounds.height ?? 900) - 80)
-    LodyShell.shared.presentNative(editor, title: title, size: CGSize(width: 720, height: height))
+    let page = LodyShell.shared.presentNative(editor, title: title, size: CGSize(width: 720, height: height))
+    if item == nil { activeNewSchedulePage = page }
   }
 
   /// Owner-only commands; resume and run also need a computer whose CLI runs schedules.

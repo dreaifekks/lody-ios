@@ -3,6 +3,8 @@ import UIKit
 
 @MainActor
 enum SessionNavigation {
+  private static weak var activeCreatePage: LodyPageController?
+
   static func receive(_ json: String) throws {
     let fields = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
     try handle(fields["kind"] as! String, fields)
@@ -32,6 +34,11 @@ enum SessionNavigation {
       LodyShell.shared.presentNative(content, title: String(localized: "share.title", bundle: .lody), grabber: true)
     case "create":
       guard state.workspace?.resolvedMode == .plaintext else { throw WorkspaceContentError.blocked }
+      if fields["draft"] == nil, let existing = activeCreatePage, !existing.closed,
+         !existing.isBeingDismissed, existing.navigationController?.isBeingDismissed != true,
+         !existing.isMovingFromParent {
+        return existing
+      }
       var params = CreateSessionHostParams()
       params.userId = state.userId; params.workspaceId = state.workspaceId
       // Most recently active first: the new-session project menu offers the first five.
@@ -68,11 +75,14 @@ enum SessionNavigation {
       }
       if params.pushed == true,
         let page = LodyShell.shared.pushRootNative(content, title: String(localized: "create.title", bundle: .lody), headerShown: false) {
+        activeCreatePage = page
         return page
       }
       if !regular, let label = fields["zoomSourceLabel"] as? String { LodySheetZoom.prepare(sourceLabel: label) }
-      return LodyShell.shared.presentNative(content, title: String(localized: "create.title", bundle: .lody),
+      let page = LodyShell.shared.presentNative(content, title: String(localized: "create.title", bundle: .lody),
         detents: regular ? [1] : [0.62, 1], grabber: !regular, headerShown: false)
+      activeCreatePage = page
+      return page
     default: preconditionFailure("Unknown session navigation: \(action)")
     }
     return nil

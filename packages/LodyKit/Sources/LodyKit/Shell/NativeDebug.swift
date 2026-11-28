@@ -51,6 +51,10 @@ enum NativeDebug {
       ScheduleFixture.shared.control(String(scenario.dropFirst("schedule-fixture-".count)))
       return
     }
+    if scenario.hasPrefix("home-fixture-state-") {
+      NativeHomeFixture.setVerificationState(String(scenario.dropFirst("home-fixture-state-".count)))
+      return
+    }
     if scenario.hasPrefix("toast-") {
       guard LodyUIVerify.enabled, let presenter = LodyShell.shared.presenter else { return }
       LodyToastOverlay.shared.dismiss()
@@ -296,6 +300,8 @@ enum NativeHomeFixture {
   private static var selected = "ui-home"
   private static var rejectedDelete = false
   private static var syncPreview = false
+  private static var connectedPreview = true
+  private static var extraWorkspaces: [[String: Any]] = []
 
   static func prepare() throws {
     let url = Bundle.main.url(forResource: "DebugHome", withExtension: "json")!
@@ -348,6 +354,8 @@ enum NativeHomeFixture {
     }
     selected = "ui-home"; rejectedDelete = false
     syncPreview = LodyUIVerify.has("--ui-verify-home-syncing")
+    connectedPreview = true
+    extraWorkspaces = []
     if LodyUIVerify.has("--ui-verify-home-sync-cycle") {
       Task {
         try? await Task.sleep(for: .seconds(3))
@@ -444,12 +452,44 @@ enum NativeHomeFixture {
     return result
   }
 
+  static func setVerificationState(_ mode: String) {
+    guard LodyUIVerify.enabled, active else { return }
+    switch mode {
+    case "syncing":
+      extraWorkspaces = []
+      selected = "ui-home"
+      syncPreview = true
+      connectedPreview = false
+      presence = ["state": "live", "onlineMachineIds": []]
+    case "unknown":
+      extraWorkspaces = [["id": "ui-unknown-mode", "name": "Unconfirmed Workspace"]]
+      selected = "ui-unknown-mode"
+      syncPreview = true
+      connectedPreview = false
+      presence = ["state": "unknown", "onlineMachineIds": []]
+    case "e2ee":
+      extraWorkspaces = [["id": "ui-e2ee-mode", "name": "Encrypted Workspace", "contentMode": "e2ee"]]
+      selected = "ui-e2ee-mode"
+      syncPreview = false
+      connectedPreview = false
+      presence = ["state": "unknown", "onlineMachineIds": []]
+    default:
+      extraWorkspaces = []
+      selected = "ui-home"
+      syncPreview = false
+      connectedPreview = true
+      presence = ["state": "live", "onlineMachineIds": ["ui", "mini"]]
+    }
+    publish()
+  }
+
   private static func publish() {
     let catalogs = ["ui-home": catalog, "ui-states": statesCatalog]
     let empty: [String: Any] = ["projects": [], "sessions": [], "machineIds": []]
-    let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": "preview@example.test"], "workspaces": workspaces],
+    let payload: [String: Any] = ["account": ["user": ["id": "ui-home", "name": "UI Preview", "email": "preview@example.test"], "workspaces": workspaces + extraWorkspaces],
       "workspaceId": selected, "catalog": catalogs[selected] ?? empty,
       "loading": syncPreview,
+      "connected": connectedPreview,
       "presence": ["workspaceId": selected, "presence": presence]]
     let json = String(decoding: try! JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
     SettingsPreview.set(json)

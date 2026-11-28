@@ -90,6 +90,7 @@ final class AuthSession {
     if let modeRefresh { await modeRefresh.value; return }
     guard let account, let credential else { return }
     let identity = attempt, generation = LocalStore.shared.generation
+    let beforeModes = account.workspaces.map { api.modePins.mode($0.id) }
     let task = Task { [self] in
       guard let rows = try? await api.workspaceModes(token: credential, workspaces: account.workspaces),
         active(identity), self.credential == credential, var current = self.account, current.user.id == account.user.id else { return }
@@ -100,7 +101,8 @@ final class AuthSession {
         return next
       }
       self.account = current
-      publish()
+      let afterModes = current.workspaces.map { api.modePins.mode($0.id) }
+      publish(force: afterModes != beforeModes)
       await save(current, generation: generation)
     }
     modeRefresh = task
@@ -304,7 +306,7 @@ final class AuthSession {
     LodyToastOverlay.shared.show(message: String(localized: String.LocalizationValue(key), bundle: .lody), kind: .error)
   }
 
-  private func publish() {
+  private func publish(force: Bool = false) {
     if localReady && (!busy || account == nil) {
       PushNotifications.shared.identify(account?.user.id, credential: credential)
     }
@@ -317,7 +319,8 @@ final class AuthSession {
       error: error,
       verificationSent: verificationSent
     )
-    guard Self.published.set(snapshot.json) else { return }
+    let changed = Self.published.set(snapshot.json)
+    guard changed || force else { return }
     NotificationCenter.default.post(name: .lodyAuthDidChange, object: nil)
   }
 

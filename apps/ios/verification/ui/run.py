@@ -36,8 +36,8 @@ CORE_SUITES = {name for name in SUITES if name.startswith('core')}
 PHONE_CASES = [case for batch in BATCHES.values() for case in batch]
 PAD_CASES = ['devices-pad', 'session-delete-pad', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'session-search-pad', 'wide-panel', 'pad-layout']
 STATUS_CASES = ('home-status', 'home-status-drag')
-CASES = PHONE_CASES + PAD_CASES + list(STATUS_CASES) + ['toast', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'create-composer-resize']
-HOME_CASES = {'home-grouping-crash', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general', *STATUS_CASES}
+CASES = PHONE_CASES + PAD_CASES + list(STATUS_CASES) + ['toast', 'home-create', 'session-delete', 'session-search', 'devices', 'workspace-general', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'create-composer-resize']
+HOME_CASES = {'home-grouping-crash', 'home-create', 'schedules', 'home-states', 'session-search', 'session-search-pad', 'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-settings', 'home-workspace', 'licenses', 'navigation', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'session-delete', 'session-delete-pad', 'devices', 'devices-pad', 'workspace-general', *STATUS_CASES}
 PREVIEW = {
     'toast': 'session-preview-live',
     'message-quote': 'session-preview-quote',
@@ -455,7 +455,7 @@ try:
                         launch.append('--ui-verify-session-tabs')
                     if case in {'session-search', 'session-search-pad'}:
                         launch.append('--ui-verify-search')
-                    if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
+                    if case in {'morph', 'sheet-zoom-project', 'mentions-production', 'mentions-room', 'home', 'home-create', 'home-settings', 'home-workspace', 'ipad', 'ipad-create', 'ipad-chrome', 'ipad-sidebar'}:
                         launch.append('--ui-verify-mentions')
                     if mode[2] or (case.startswith('attachment-camera-') and args.camera_access == 'fixture'):
                         sim('privacy', args.udid, 'reset', 'photos', 'ai.lody.mobile')
@@ -543,7 +543,7 @@ try:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case == 'file-selection':
                     script = Path(__file__).with_name('file-selection.py')
-                if case in {'home-settings', 'home-workspace', 'ipad-create', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'create-composer-resize', 'dictation'}:
+                if case in {'home-create', 'home-settings', 'home-workspace', 'ipad-create', 'morph', 'sheet-zoom-project', 'native-collection', 'ipad-chrome', 'ipad-sidebar', 'wide-panel', 'pad-layout', 'composer-relay', 'outbox', 'navigation-toolbar', 'scroll-edge', 'scroll-edge-pages', 'scroll-edge-diff', 'reply-haptics', 'free-turn-notice', 'create-parity', 'create-composer-resize', 'dictation'}:
                     script = Path(__file__).with_name(f'{case}.py')
                 if case in ['session-tree', 'session-tree-pad']:
                     script = Path(__file__).with_name('session-tree.py')

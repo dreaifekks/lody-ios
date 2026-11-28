@@ -14,7 +14,6 @@ final class InboxPadBar: UIView {
   var openSettings: (() -> Void)?
   var openDebug: (() -> Void)?
   var create: (() -> Void)?
-  var canCreate = false { didSet { createButton.isEnabled = canCreate } }
   /// The page this bar belongs to: its tab reads as selected and the create action follows it.
   var destination: HomeTab = .chats { didSet { if destination != oldValue { apply() } } }
   private let tabsGlass = UIVisualEffectView(effect: LodyGlass.effect())

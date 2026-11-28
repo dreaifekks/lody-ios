@@ -28,13 +28,6 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
   var onSelect: (HomeTab) -> Void = { _ in }
   var onCreate: () -> Void = {}
   var onDebug: () -> Void = {}
-  var canCreate = false {
-    didSet {
-      guard canCreate != oldValue else { return }
-      floatingCreate?.isEnabled = canCreate
-      if #available(iOS 27.0, *) { tab(forIdentifier: Self.createID)?.isEnabled = canCreate }
-    }
-  }
   private static let createID = "home-new-session"
   /// On systems without prominent tabs the create action floats above the tab bar's trailing edge instead of taking a tab.
   private lazy var floatingCreate: UIButton? = Self.makeFloatingCreate()
@@ -49,7 +42,6 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     configuration.cornerStyle = .capsule
     let button = UIButton(configuration: configuration)
     button.accessibilityIdentifier = createID
-    button.isEnabled = false
     button.layer.shadowColor = UIColor.black.cgColor
     button.layer.shadowOpacity = 0.18
     button.layer.shadowRadius = 8
@@ -68,8 +60,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     tabBar.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:))))
     if let floatingCreate {
       floatingCreate.addAction(UIAction { [weak self] _ in
-        guard let self, self.canCreate else { return }
-        self.onCreate()
+        self?.onCreate()
       }, for: .primaryActionTriggered)
       floatingCreate.translatesAutoresizingMaskIntoConstraints = false
       view.addSubview(floatingCreate)
@@ -137,7 +128,6 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
     }
     tabs = built
     if #available(iOS 27.0, *) {
-      tab(forIdentifier: Self.createID)?.isEnabled = canCreate
       prominentTabIdentifier = Self.createID
     }
   }
@@ -162,7 +152,7 @@ final class HomeTabsController: UITabBarController, UITabBarControllerDelegate {
 
   @available(iOS 18.0, *)
   func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-    if tab.identifier == Self.createID { if canCreate { onCreate() }; return false }
+    if tab.identifier == Self.createID { onCreate(); return false }
     return true
   }
 

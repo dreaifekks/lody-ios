@@ -456,10 +456,18 @@ final class InboxController: UIViewController {
 
   func newSession() {
     let state = source.state
-    guard state.workspace?.resolvedMode == .plaintext else {
+    guard let workspace = state.workspace, !state.userId.isEmpty else {
       LodyToastOverlay.shared.show(message: String(localized: "tabs.toast.signInFirst", bundle: .lody), kind: .neutral)
       return
     }
-    SessionActions.create(["workspaceId": state.workspaceId, "zoomSourceLabel": String(localized: "tabs.newSession", bundle: .lody)])
+    switch workspace.resolvedMode {
+    case .plaintext:
+      SessionActions.create(["workspaceId": state.workspaceId, "zoomSourceLabel": String(localized: "tabs.newSession", bundle: .lody)])
+    case .e2ee:
+      LodyToastOverlay.shared.show(message: String(localized: "workspace.e2ee.unsupported", bundle: .lody), kind: .error)
+    case .unknown:
+      if source === SessionSource.live { Task { await AuthSession.shared.refreshWorkspaceModes() } }
+      LodyToastOverlay.shared.show(message: String(localized: "workspace.mode.unknown", bundle: .lody), kind: .neutral)
+    }
   }
 }
