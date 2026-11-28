@@ -34,7 +34,7 @@ Read before changing the conversation page: the transcript and its turns, header
 
 - Conversation avatars prefer workspace member identities over the login snapshot, including the signed-in sender and local turns. `LodyListPhoto` caches public avatar bytes through `PhotoDiskCache` in Caches/avatars-v1 (16 MiB / 128 files, URL-hashed keys); disk IO stays off the main thread. Cached photos render immediately; entries older than one day refresh in the background and remain visible on failure.
 
-- The conversation More menu follows web `SessionHeaderMenu` (`SessionController+More`): Rename and Change owner (multi-member workspaces; writes only `SessionMeta.userId`, never sharing) are hidden for archived chats; Copy offers base branch (only when it differs from the current branch), path, Markdown, URL and deeplink. Path and Markdown come from runtime ports of web `session-workspace-path` and `conversation-markdown`; keep them in step with web.
+- The conversation More menu follows web `SessionHeaderMenu` (`SessionController+More`): Rename and Change owner (multi-member workspaces; writes only `SessionMeta.userId`, never sharing) are hidden for archived chats; Copy offers base branch (only when it differs from the current branch), path, Markdown, URL and deeplink; Conversation status groups the row's Later / Settle / Move to Focus actions into a submenu placed directly above Archive. Path and Markdown come from runtime ports of web `session-workspace-path` and `conversation-markdown`; keep them in step with web.
 
 - The conversation header has no PR button or historical PR menu. PR navigation stays in the context capsule above the composer.
 

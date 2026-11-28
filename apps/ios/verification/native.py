@@ -41,6 +41,7 @@ checks = {
     'chat-snapshot-reentrancy': [],
     'home-create': [],
     'session-composer': [],
+    'session-more-menu': [],
     'lexical-swift': [],
     'scroll-edges': ['Chrome/LodyScrollEdges.swift', 'LodyTint.swift', 'Chrome/LodyEdgeFade.swift'],
     'glass-transition': [],
@@ -190,11 +191,12 @@ with tempfile.TemporaryDirectory(prefix='lody-native-verify-') as output:
         return lexical_dir
 
     for name, files in checks.items():
-        if name in ['chat-snapshot-reentrancy', 'home-create', 'session-composer']:
+        if name in ['chat-snapshot-reentrancy', 'home-create', 'session-composer', 'session-more-menu']:
             suite = {
                 'chat-snapshot-reentrancy': 'ChatSnapshotReentrancyTests',
                 'home-create': 'HomeCreateButtonTests',
                 'session-composer': 'SessionComposerModelTests',
+                'session-more-menu': 'SessionMoreMenuTests',
             }[name]
             subprocess.run(['xcodebuild', 'test', '-scheme', 'LodyKit', '-destination', f'id={args.udid}',
                 '-derivedDataPath', str(root / '.artifacts/native-lody-kit'), '-collect-test-diagnostics', 'never',
